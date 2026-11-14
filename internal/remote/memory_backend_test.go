@@ -1795,7 +1795,7 @@ func TestMemoryBackend_SummaryContextAndCost(t *testing.T) {
 		t.Errorf("threads.get summary 缺少本轮费用，得到 %v", got.LastTurnCostUSD)
 	}
 
-	// CLI 既没上报单次请求大小也没上报窗口上限：回退「输入 + 输出」与静态模型表。
+	// CLI 既没上报单次请求大小也没上报窗口上限：回退「输入 + 输出」与模型目录/静态表的上限。
 	backend.mu.Lock()
 	td.summary.Provider = "claude"
 	td.summary.Model = strPtr("claude-sonnet-4-5")
@@ -1805,7 +1805,7 @@ func TestMemoryBackend_SummaryContextAndCost(t *testing.T) {
 	if fallback.ContextUsedTokens != 1250 {
 		t.Errorf("expected fallback contextUsedTokens 1250 (input+output), got %d", fallback.ContextUsedTokens)
 	}
-	if want := int64(fallbackContextLimit("claude", "claude-sonnet-4-5")); fallback.ContextWindow != want {
+	if want := int64(modelContextLimit("claude", "claude-sonnet-4-5")); fallback.ContextWindow != want {
 		t.Errorf("expected fallback contextWindow %d, got %d", want, fallback.ContextWindow)
 	}
 }

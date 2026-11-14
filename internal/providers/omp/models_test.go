@@ -4,7 +4,7 @@ import "testing"
 
 func TestParseModels(t *testing.T) {
 	raw := []byte(`{"models":[
-		{"id":"gpt-5","name":"GPT-5","provider":"openai","thinking":["low","medium","high"]},
+		{"id":"gpt-5","name":"GPT-5","provider":"openai","thinking":["low","medium","high"],"contextWindow":1050000},
 		{"id":"claude-x","name":"Claude X","provider":"anthropic","thinking":["high","max"]},
 		{"id":"plain","provider":"anthropic"},
 		{"id":"","provider":"openai"}
@@ -31,6 +31,12 @@ func TestParseModels(t *testing.T) {
 	}
 	if gpt.DefaultEffort != "medium" || len(gpt.Efforts) != 3 {
 		t.Fatalf("gpt-5 efforts wrong: %+v", gpt)
+	}
+	if gpt.ContextWindow != 1050000 {
+		t.Fatalf("gpt-5 context window wrong: %+v", gpt)
+	}
+	if claude.ContextWindow != 0 {
+		t.Fatalf("模型没报窗口时应为 0: %+v", claude)
 	}
 	if claude.DefaultEffort != "high" {
 		t.Fatalf("model without medium should default to its first effort: %+v", claude)

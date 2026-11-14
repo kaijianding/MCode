@@ -335,6 +335,10 @@ func fetchOmpModelsWithBinary(ctx context.Context, binary string) ([]wire.Provid
 		if m.DefaultEffort != "" {
 			row.DefaultEffort = stringPtr(m.DefaultEffort)
 		}
+		// omp 目录自带真实上下文窗口（如 1M），带进目录后静态兜底表不再覆盖它。
+		if m.ContextWindow > 0 {
+			row.ContextLimit = m.ContextWindow
+		}
 		out = append(out, row)
 	}
 	startuptrace.Mark("providers: omp models ready")

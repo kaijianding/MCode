@@ -86,7 +86,7 @@ func TestRefreshUsesConfiguredCLIBinary(t *testing.T) {
 		t.Skip("测试用 CLI 为 shell 脚本")
 	}
 	binary := filepath.Join(t.TempDir(), "custom-omp")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s' '{\"models\":[{\"id\":\"new\",\"provider\":\"test\"}]}'\n"), 0o755); err != nil {
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s' '{\"models\":[{\"id\":\"new\",\"provider\":\"test\",\"contextWindow\":1000000}]}'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h := omp.New(omp.Options{Binary: binary})
@@ -95,9 +95,14 @@ func TestRefreshUsesConfiguredCLIBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, model := range models {
-		if model.ID == "test/new" {
-			return
+		if model.ID != "test/new" {
+			continue
 		}
+		// CLI 报的真实窗口要进目录，否则静态兜底表会把 1M 模型压成 128K。
+		if model.ContextLimit != 1_000_000 {
+			t.Fatalf("目录里的上下文上限 = %d，想要 CLI 上报的 1000000", model.ContextLimit)
+		}
+		return
 	}
 	t.Fatalf("未从配置的 CLI 读取目录: %+v", models)
 }

@@ -20,6 +20,9 @@ omp CLI（oh-my-pi，可执行文件 `omp`，Pi 的分支）的 harness 适配�
 - 计划模式（`turn.InteractionMode == "plan"`）把只读规则追加进 `--append-system-prompt`。
 - 额度：`omp usage --json --no-extensions` 的 `reports[].limits[]` 归一化为
   `credits.Window`；断网时的 last-good 报告超过 6 小时即丢弃。
+- 模型目录：`omp models --json --no-extensions` 的 `contextWindow` 解析为
+  `omp.Model.ContextWindow`，随目录行进 `wire.ProviderModel.ContextLimit`，
+  会话窗口上限直接用 CLI 报的真实值（1M 模型不再被静态兜底表压成 128K）。
 
 ## 实现落点
 

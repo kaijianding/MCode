@@ -409,3 +409,20 @@ func TestFallbackContextLimitMcode(t *testing.T) {
 		t.Fatalf("具体模型关键字应优先，got %d", got)
 	}
 }
+
+// omp 这类 CLI 会在目录里报真实窗口（1M），静态兜底表不得再把它压回关键字表的值。
+func TestContextLimitPrefersCatalogWindow(t *testing.T) {
+	catalog := []wire.ProviderModel{
+		{ID: "dewuopenai/deepseek-v4.1-flash", ContextLimit: 1_000_000},
+		{ID: "vendor/no-window"},
+	}
+	if got := contextLimitFor(catalog, "omp", "dewuopenai/deepseek-v4.1-flash"); got != 1_000_000 {
+		t.Fatalf("目录窗口应优先于静态表，got %d", got)
+	}
+	if got := contextLimitFor(catalog, "omp", "vendor/no-window"); got != providerContextLimits["omp"] {
+		t.Fatalf("目录行没报窗口时应回退静态表，got %d", got)
+	}
+	if got := contextLimitFor(catalog, "omp", "missing/model"); got != providerContextLimits["omp"] {
+		t.Fatalf("目录里没有该模型时应回退静态表，got %d", got)
+	}
+}
