@@ -40,7 +40,7 @@ func TestMotionTimelineMessageEnter(t *testing.T) {
 	}
 }
 
-func TestMotionTimelineSkeletonAndShimmer(t *testing.T) {
+func TestMotionTimelineSkeletonAndRunningMark(t *testing.T) {
 	options := ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}}
 	t.Run("skeleton", func(t *testing.T) {
 		setAppReduceMotion(t, true)
@@ -66,31 +66,44 @@ func TestMotionTimelineSkeletonAndShimmer(t *testing.T) {
 			t.Fatal("切换减少动效后骨架屏仍持续请求帧")
 		}
 	})
-	t.Run("shimmer", func(t *testing.T) {
+	t.Run("running mark", func(t *testing.T) {
 		setAppReduceMotion(t, true)
 		view := func(c *ui.Context) {
-			renderShimmerTitle(c, "shimmer", "扫光", true, func() ui.Element {
+			renderRunningTitle(c, "running", "运行中", true, func() ui.Element {
 				return ui.Text(c, "标题")
 			})
 		}
 		tester := ui.NewTesterWith(view, 200, 100, options)
 		tester.Frame()
-		if _, ok := tester.Find("扫光"); ok || tester.FramePending() {
-			t.Fatal("减少动效时扫光仍存在或请求帧")
+		if _, ok := tester.Find("运行中"); ok || tester.FramePending() {
+			t.Fatal("减少动效时不应出现运行中高亮或请求帧")
 		}
 		appReduceMotion.Store(false)
 		normal := ui.NewTester(view, 200, 100)
 		normal.Frame()
-		normal.Advance(50 * time.Millisecond)
-		if _, ok := normal.Find("扫光"); !ok || !normal.FramePending() {
-			t.Fatal("正常模式下扫光应运行")
+		if _, ok := normal.Find("运行中"); !ok {
+			t.Fatal("正常模式下应显示运行中高亮")
+		}
+		if bytes.Equal(tester.Image().Pix, normal.Image().Pix) {
+			t.Fatal("运行中高亮应画出可见底色")
+		}
+		// 静态高亮：不注册逐帧循环，也不留下帧请求。旧的扫光实现用 AnimationFrameRate，
+		// 内容一变就退化成每帧重建整棵视图，运行态实测 17% 以上。
+		if normal.FramePending() {
+			t.Fatal("运行中高亮不应请求新帧")
+		}
+		before := append([]byte(nil), normal.Image().Pix...)
+		normal.Advance(200 * time.Millisecond)
+		normal.Frame()
+		if !bytes.Equal(before, normal.Image().Pix) {
+			t.Fatal("运行中高亮不应随时间变化")
 		}
 		appReduceMotion.Store(true)
 		normal.SetPreferences(ui.Preferences{ReduceMotion: true})
 		normal.Frame()
 		normal.Advance(50 * time.Millisecond)
-		if _, ok := normal.Find("扫光"); ok || normal.FramePending() {
-			t.Fatal("切换减少动效后扫光仍存在或持续请求帧")
+		if _, ok := normal.Find("运行中"); ok || normal.FramePending() {
+			t.Fatal("切换减少动效后运行中高亮仍存在或持续请求帧")
 		}
 	})
 }

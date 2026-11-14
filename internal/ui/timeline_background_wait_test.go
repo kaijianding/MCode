@@ -41,7 +41,7 @@ func TestShouldShowBackgroundWait(t *testing.T) {
 }
 
 // TestRenderBackgroundWaitBar 验证 Tester 渲染：空闲且有一个后台任务时出现可点击的等待条，
-// 显示任务数、最早任务名与扫光，不再重复续跑提示（该提示只在输入区浮层里）；
+// 显示任务数、最早任务名与运行中高亮，不再重复续跑提示（该提示只在输入区浮层里）；
 // 任务清空后等待条整行不渲染。
 func TestRenderBackgroundWaitBar(t *testing.T) {
 	s := backgroundWaitTestState(backgroundTasksTestBackground("bg1"))
@@ -61,8 +61,8 @@ func TestRenderBackgroundWaitBar(t *testing.T) {
 	if !tt.HasText("npm run build") {
 		t.Fatalf("等待条应显示最早任务名，当前文本 %v", tt.Texts())
 	}
-	if _, ok := tt.Find(backgroundWaitShimmerLabel); !ok {
-		t.Fatalf("等待条应渲染扫光条，当前文本 %v", tt.Texts())
+	if _, ok := tt.Find(backgroundWaitRunningLabel); !ok {
+		t.Fatalf("等待条应渲染运行中高亮，当前文本 %v", tt.Texts())
 	}
 	if tt.HasText("完成后 AI 会自动继续") {
 		t.Fatalf("等待条不应再重复续跑提示，当前文本 %v", tt.Texts())

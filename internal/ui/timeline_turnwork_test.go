@@ -582,16 +582,16 @@ func TestTurnWorkLastAnswers(t *testing.T) {
 	}
 }
 
-// TestTimelineRows_ToolChipShimmer 验证动词扫光只在工具运行时出现：
-// 运行中的胶囊画出扫光条，完成后同一个胶囊不再画（高光由 ui.Keyframes 驱动，不再用 c.After 轮询重建整个时间线）。
-func TestTimelineRows_ToolChipShimmer(t *testing.T) {
+// TestTimelineRows_ToolChipRunningMark 验证运行中高亮只在工具运行时出现：
+// 运行中的胶囊画出高亮，完成后同一个胶囊不再画（高亮是静态装饰，不再用 c.After 轮询重建整个时间线）。
+func TestTimelineRows_ToolChipRunningMark(t *testing.T) {
 	running := []Message{
 		{ID: "u1", Role: "user", Text: "看一下这个文件", TurnIndex: 1, IsFinal: true},
 		{ID: "t1", Role: "tool", Text: `Read {"file_path":"/workspace/main.go"}`, TurnIndex: 1, ToolStatus: "running"},
 	}
 	runningTT := newTimelineTester(t, running, "正在读取")
-	if _, ok := runningTT.Find(toolShimmerBandLabel); !ok {
-		t.Fatalf("运行中的工具胶囊应渲染扫光条，当前文本 %v", runningTT.Texts())
+	if _, ok := runningTT.Find(toolRunningLabel); !ok {
+		t.Fatalf("运行中的工具胶囊应渲染运行中高亮，当前文本 %v", runningTT.Texts())
 	}
 
 	done := []Message{
@@ -599,7 +599,7 @@ func TestTimelineRows_ToolChipShimmer(t *testing.T) {
 		{ID: "t1", Role: "tool", Text: `Read {"file_path":"/workspace/main.go"}`, TurnIndex: 1, ToolStatus: "completed"},
 	}
 	doneTT := newTimelineTester(t, done, "已读取")
-	if _, ok := doneTT.Find(toolShimmerBandLabel); ok {
-		t.Fatalf("完成后不应再渲染扫光条，当前文本 %v", doneTT.Texts())
+	if _, ok := doneTT.Find(toolRunningLabel); ok {
+		t.Fatalf("完成后不应再渲染运行中高亮，当前文本 %v", doneTT.Texts())
 	}
 }

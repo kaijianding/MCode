@@ -1042,12 +1042,11 @@ func ensureChatMarkdown(c *ui.Context, s *chatState) {
 		}
 	}
 
-	if reduceMotion(c) {
-		if s.mdOpts.Reveal == nil || s.mdOpts.Reveal.Unit != markdown.AtOnce {
-			s.mdOpts.Reveal = &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}
-		}
-	} else if s.mdOpts.Reveal == nil || s.mdOpts.Reveal.Unit != markdown.ByCharacter {
-		s.mdOpts.Reveal = &markdown.Reveal{Unit: markdown.ByCharacter, CatchUp: 250 * time.Millisecond}
+	// 流式正文整段落地，不做逐字揭示：mygo 的 Stream 在揭示或淡入期间每帧
+	// 请求下一帧（ui/markdown/view.go 的 c.AnimationFrame），而每帧都要重建
+	// 整棵视图，一条长回复能把 CPU 钉在 20% 以上。文字随 chunk 到达显示。
+	if s.mdOpts.Reveal == nil || s.mdOpts.Reveal.Unit != markdown.AtOnce {
+		s.mdOpts.Reveal = &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}
 	}
 	if s.mdStaticOpts.Reveal == nil {
 		s.mdStaticOpts.Reveal = &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}

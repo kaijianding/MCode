@@ -117,8 +117,8 @@ func TestBeeTimelineReasoningNotReplayedAfterViewRecreated(t *testing.T) {
 	}
 }
 
-// TestBeeTimelineRevealStillAnimatesNewText 验证新到达的正文仍然逐字揭示。
-func TestBeeTimelineRevealStillAnimatesNewText(t *testing.T) {
+// TestBeeTimelineNewTextShowsAtOnce 验证新到达的正文随增量整段显示。
+func TestBeeTimelineNewTextShowsAtOnce(t *testing.T) {
 	base := "子代理已经写好的一段正文" + strings.Repeat("，继续写下去", 20)
 	fresh := "子代理又写出来的一段新正文" + strings.Repeat("，还在写", 20)
 	s := newBeeRevealState(base)
@@ -138,11 +138,7 @@ func TestBeeTimelineRevealStillAnimatesNewText(t *testing.T) {
 	s.messagesRev++
 	s.mu.Unlock()
 	tt.Frame()
-	if tt.HasText(fresh) {
-		t.Fatalf("新到达的正文应逐字揭示，不应整段蹦出，实际看到：%v", tt.Texts())
-	}
-	tt.Advance(3 * time.Second)
 	if !tt.HasText(fresh) {
-		t.Fatalf("逐字揭示完成后应能看到完整正文，实际看到：%v", tt.Texts())
+		t.Fatalf("新到达的正文应整段显示，实际看到：%v", tt.Texts())
 	}
 }

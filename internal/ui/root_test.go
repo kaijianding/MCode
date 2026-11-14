@@ -179,8 +179,8 @@ func TestRootOnUpdateAssistantMessage(t *testing.T) {
 	})
 }
 
-// 场景 7：流式接收中文文本时按字符逐步展示（非整段一次性出现）
-func TestRootStreamingChineseRevealsPartially(t *testing.T) {
+// 场景 7：流式接收中文文本时随增量整段显示，不做逐字揭示
+func TestRootStreamingChineseShowsAtOnce(t *testing.T) {
 	fake := NewFakeClient()
 	tt := ui.NewTester(Root(fake), 1000, 700)
 
@@ -214,17 +214,8 @@ func TestRootStreamingChineseRevealsPartially(t *testing.T) {
 
 	tt.Advance(100 * time.Millisecond)
 
-	if !tt.HasText("秋天") {
-		t.Fatalf("expected prefix '秋天' to be visible at 100ms, current texts: %q", tt.Texts())
-	}
-	if tt.HasText(chineseText) {
-		t.Fatalf("expected text to reveal partially at 100ms, but full text is already visible: %q", tt.Texts())
-	}
-
-	tt.Advance(500 * time.Millisecond)
-
 	if !tt.HasText(chineseText) {
-		t.Fatalf("expected full text %q to be visible after advance, current texts: %q", chineseText, tt.Texts())
+		t.Fatalf("%q 到达后应整段显示，当前文本：%q", chineseText, tt.Texts())
 	}
 }
 

@@ -191,7 +191,7 @@ const (
 	// 收进一行组头（用时 Xs），展开后才显示里面的条目。
 	timelineItemTurnWork
 	// timelineItemBackgroundWait 是时间线末尾的等待条：回合已结束但仍有后台任务在跑时出现，
-	// 用一行扫光文字提示会话还在等它们，点击打开输入区胶囊上已有的后台任务浮层。
+	// 用一行提示文字告诉会话还在等它们，点击打开输入区胶囊上已有的后台任务浮层。
 	timelineItemBackgroundWait
 	// 总管会话里每个回合开头的日期时间分隔行。
 	timelineItemTurnTime
@@ -265,8 +265,8 @@ type timelineGroupSegment struct {
 // 同一回合反复重建时 ID 不变，展开状态与展开动画都能延续。
 const turnWorkFoldPrefix = "turnwork-"
 
-// turnHeaderShimmerLabel 是运行中回合组头扫光条的 a11y Label，用来在测试里确认页面上只有一处运行中扫光。
-const turnHeaderShimmerLabel = "运行中的回合头扫光"
+// turnHeaderRunningMarkLabel 是运行中回合组头高亮的 a11y Label，用来在测试里确认页面上只有一处运行中高亮。
+const turnHeaderRunningMarkLabel = "运行中的回合头高亮"
 
 // timelineTurnWorkFold 描述一个回合里可以收进折叠项的那一段：foldStart 之前（用户消息）保持可见，
 // [foldStart, answerIdx) 收进折叠项，answerIdx 起是最终答复及其后的条目。
@@ -456,11 +456,8 @@ const (
 	toolMarkerAlert
 )
 
-// toolVerbShimmerWidth 是动词扫光条自身的宽度（DIP）。
-const toolVerbShimmerWidth float32 = 24
-
-// toolShimmerBandLabel 是扫光条的无障碍名，仅用于测试与调试定位这条装饰层。
-const toolShimmerBandLabel = "运行中的工具扫光"
+// toolRunningLabel 是运行中高亮的无障碍名，仅用于测试与调试定位这层装饰。
+const toolRunningLabel = "运行中的工具高亮"
 
 const foldRunThreshold = 300
 

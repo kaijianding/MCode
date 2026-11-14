@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// backgroundTasksShimmerLabel 是后台任务浮层扫光条的无障碍名，供测试与调试定位这条装饰层。
-	backgroundTasksShimmerLabel = "后台任务卡片扫光"
+	// backgroundTasksRunningLabel 是后台任务浮层运行中高亮的无障碍名，供测试与调试定位这层装饰。
+	backgroundTasksRunningLabel = "后台任务卡片运行中"
 	// backgroundTasksTooltipSuffix 是后台任务胶囊 Tooltip 里的口径说明，讲清楚它统计哪些内容。
 	backgroundTasksTooltipSuffix = "列出 provider 托管的后台任务、回合结束后仍在运行的命令与运行中的子智能体"
 	// backgroundTasksMaxRows 是浮层最多列出的条目数：再多会撑高浮层，其余用一行「还有 N 个」概括。
@@ -21,8 +21,8 @@ const (
 	backgroundTaskLogMaxLines = 8
 	// backgroundTaskLogLineHeight 是日志文字的行高倍数。
 	backgroundTaskLogLineHeight = 1.4
-	// backgroundWaitShimmerLabel 是时间线等待条扫光的无障碍名，供测试与调试定位这条装饰层。
-	backgroundWaitShimmerLabel = "等待后台任务扫光"
+	// backgroundWaitRunningLabel 是时间线等待条运行中高亮的无障碍名，供测试与调试定位这层装饰。
+	backgroundWaitRunningLabel = "等待后台任务运行中"
 )
 
 // backgroundTasksItem 是后台任务浮层当前要展示的内容：provider 托管、仍在运行的工具任务，
@@ -222,7 +222,7 @@ func shouldShowBackgroundWait(running bool, data backgroundTasksItem) bool {
 	return !running && !data.empty()
 }
 
-// renderBackgroundWaitBar 渲染时间线末尾的等待后台任务条：一行扫光文字（时钟、任务数、
+// renderBackgroundWaitBar 渲染时间线末尾的等待后台任务条：一行提示文字（时钟、任务数、
 // 最早任务名与实时计时）。
 // 整行可点，点击打开输入区胶囊上已有的后台任务浮层，不新建浮层状态。没有后台项时
 // 返回空元素；有开始时间时每秒请求重绘，让计时逐秒走动。
@@ -266,7 +266,7 @@ func renderBackgroundWaitBar(c *ui.Context, s *chatState, key string) ui.Element
 			s.invalidate()
 		}
 		btn.Children(func() {
-			renderShimmerTitle(c, key+"/shimmer", backgroundWaitShimmerLabel, true, func() ui.Element {
+			renderRunningTitle(c, key+"/running", backgroundWaitRunningLabel, true, func() ui.Element {
 				return ui.Row(c.Key(key + "/line")).Gap(Space2).AlignItems(ui.Center).Children(func() {
 					// 时钟图标与后台工具胶囊保持同一套语义：还在等它跑完。
 					ui.Icon(c, IconClock()).Size(11, 11).TextColor(ThemeAccent(c))
@@ -306,9 +306,9 @@ func renderBackgroundTasksPanel(c *ui.Context, s *chatState, key string, data ba
 				AlignItems(ui.Center).
 				Justify(ui.Start).
 				Children(func() {
-					// 浮层存在就说明至少有一项在跑，状态点与标题扫光常驻；减少动效时只显示静态标题。
+					// 浮层存在就说明至少有一项在跑，状态点与标题高亮常驻；减少动效时只显示静态标题。
 					ui.Box(c.Key(key+"/dot")).Size(6, 6).Radius(RadiusXS).Background(ThemeAccent(c))
-					renderShimmerTitle(c, key+"/shimmer", backgroundTasksShimmerLabel, true, func() ui.Element {
+					renderRunningTitle(c, key+"/running", backgroundTasksRunningLabel, true, func() ui.Element {
 						return ui.Text(c, "后台任务").FontSize(scaledFont(TypeFootnote)).FontWeight(600).TextColor(ThemePrimaryText(c))
 					})
 					ui.Row(c.Key(key+"/count")).
@@ -600,7 +600,7 @@ func renderBackgroundBeeRow(c *ui.Context, s *chatState, key string, index int, 
 		})
 		if duration := formatSwarmShortDuration(h.StartedAt, nil); duration != "" {
 			// 按秒请求下一帧，让子智能体时长与后台任务一样每秒刷新：
-			// 减少动效时没有扫光也不会停住（做法同 timeline_rows.go 中 toolBackgroundRunDuration 的 c.After(time.Second)）。
+			// 减少动效时没有高亮也不会停住（做法同 timeline_rows.go 中 toolBackgroundRunDuration 的 c.After(time.Second)）。
 			c.After(time.Second)
 			ui.Text(c, duration).FontSize(scaledFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).SingleLine()
 		}
@@ -614,37 +614,19 @@ func backgroundTasksBeeLabel(name string) string {
 	return "打开子智能体 " + name + " 的浮窗"
 }
 
-// renderShimmerTitle 在标题上扫过一道浅色高光，提示内容仍在运行。running 为假或用户要求减少动效时
-// 直接调用 fn，不注册循环；运行中才由框架逐帧推进这一个元素，不轮询、不重建整条时间线。
-// key 与 bandLabel 由调用方给出：前者保证同页多个微光元素互不冲突，后者供测试定位扫光条。
-func renderShimmerTitle(c *ui.Context, key, bandLabel string, running bool, fn func() ui.Element) ui.Element {
-	if !running || reduceMotion(c) {
-		return fn()
-	}
+// renderRunningTitle 给运行中的行铺一层静态高亮，提示这一行还在进行。running 为假或用户要求减少
+// 动效时直接调用 fn。这里刻意不做逐帧动画：mygo 的浅绘制要求 text generation 不变，而运行中每
+// 秒都在改「用时 Xs」，generation 一抖，之后的每个重绘请求都退回整棵重建（实测一条扫光把运行态
+// 推到 17% 以上）。进行中的信号交给计时文字与点阵图标。
+// 高亮画在行自身而不是叠一层覆盖元素：浅绘制只重画变化的部分，覆盖层不在其中，会被下层恢复时擦掉。
+// key 与 markLabel 由调用方给出：前者保证同页多个高亮互不冲突，后者供测试定位这层装饰。
+func renderRunningTitle(c *ui.Context, key, markLabel string, running bool, fn func() ui.Element) ui.Element {
 	row := ui.Row(c.Key(key)).Clip()
+	if running && !reduceMotion(c) {
+		row.Label(markLabel).Background(ThemeAccent(c).Alpha(0.09)).Radius(RadiusXS)
+	}
 	row.Children(func() {
-		title := fn()
-		width := title.LayoutBounds().W
-		if width <= 0 {
-			return
-		}
-		// 一个 motionSweep 周期从左走到右；只在运行中出现。
-		k := motionLoop(c, title, key+"/shimmer-pos", motionSweep, ui.Linear)
-		x := k*(width+2*toolVerbShimmerWidth) - toolVerbShimmerWidth
-		// 三段渐变：中间是扫光，两头透明，扫过时像一道高光从文字上滑过。
-		tint := ThemeAccent(c).Alpha(0.22)
-		ui.Box(c.Key(key + "/shimmer-band")).
-			Label(bandLabel).
-			Absolute().
-			Top(0).
-			Left(x).
-			Width(toolVerbShimmerWidth).
-			Height(toolChipHeight).
-			LinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-				{Color: tint.Alpha(0), At: 0},
-				{Color: tint, At: 0.5},
-				{Color: tint.Alpha(0), At: 1},
-			}})
+		fn()
 	})
 	return row
 }

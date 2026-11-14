@@ -217,9 +217,9 @@ func TestTimelineTurnHeader_TooltipKeepsDetails(t *testing.T) {
 	}
 }
 
-// TestTimelineTurnHeader_RunningTurnYieldsShimmerToTool 验证运行态回合头只数秒：
-// 本回合有工具胶囊在扫光时头不扫光，避免同一屏出现两处同步高光。
-func TestTimelineTurnHeader_RunningTurnYieldsShimmerToTool(t *testing.T) {
+// TestTimelineTurnHeader_RunningTurnYieldsMarkToTool 验证运行态回合头只数秒：
+// 本回合有工具胶囊在运行时头不铺高亮，避免同一屏出现两处高亮。
+func TestTimelineTurnHeader_RunningTurnYieldsMarkToTool(t *testing.T) {
 	start := time.Now().Add(-16 * time.Second)
 	msgs := []Message{
 		{ID: "u1", Role: "user", Text: "跑一下构建", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)},
@@ -240,16 +240,16 @@ func TestTimelineTurnHeader_RunningTurnYieldsShimmerToTool(t *testing.T) {
 	if !matched {
 		t.Fatalf("运行态头应显示整秒计时: %v", tt.Texts())
 	}
-	if _, ok := tt.Find(turnHeaderShimmerLabel); ok {
-		t.Fatalf("本回合已有工具在扫光，回合头不应再扫光: %v", tt.Texts())
+	if _, ok := tt.Find(turnHeaderRunningMarkLabel); ok {
+		t.Fatalf("本回合已有工具在运行，回合头不应再铺高亮: %v", tt.Texts())
 	}
-	if _, ok := tt.Find(toolShimmerBandLabel); !ok {
-		t.Fatalf("运行中的工具胶囊应保留扫光: %v", tt.Texts())
+	if _, ok := tt.Find(toolRunningLabel); !ok {
+		t.Fatalf("运行中的工具胶囊应保留高亮: %v", tt.Texts())
 	}
 }
 
-// TestTimelineTurnHeader_RunningTurnShimmersWithoutTool 验证没有工具在跑时运行态头自己扫光。
-func TestTimelineTurnHeader_RunningTurnShimmersWithoutTool(t *testing.T) {
+// TestTimelineTurnHeader_RunningMarkWithoutTool 验证没有工具在跑时运行态头自己铺高亮。
+func TestTimelineTurnHeader_RunningMarkWithoutTool(t *testing.T) {
 	start := time.Now().Add(-5 * time.Second)
 	msgs := []Message{
 		{ID: "u1", Role: "user", Text: "想一想", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)},
@@ -257,8 +257,8 @@ func TestTimelineTurnHeader_RunningTurnShimmersWithoutTool(t *testing.T) {
 	}
 	tt := newTurnHeaderRunningTester(t, msgs, "已处理")
 
-	if _, ok := tt.Find(turnHeaderShimmerLabel); !ok {
-		t.Fatalf("没有工具在跑时运行态头应扫光: %v", tt.Texts())
+	if _, ok := tt.Find(turnHeaderRunningMarkLabel); !ok {
+		t.Fatalf("没有工具在跑时运行态头应铺高亮: %v", tt.Texts())
 	}
 }
 

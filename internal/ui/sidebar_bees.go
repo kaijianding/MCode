@@ -735,7 +735,7 @@ func renderSidebarBeeBadge(c *ui.Context, keyPrefix string, status string) {
 
 	switch status {
 	case swarmStatusRunning:
-		// 运行中：深色底与描边，内部点阵扫光动画（自绘，200ms 一帧，不用 ui.Spinner）
+		// 运行中：深色底与描边，内部点阵动画（自绘，200ms 一帧，不用 ui.Spinner）
 		box.Background(ThemeSurface(c)).
 			Children(func() {
 				renderRunningGlyph(c, badgeKey+"-run", badgeSize-1, ThemeAccent(c))

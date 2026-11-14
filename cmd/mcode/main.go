@@ -218,6 +218,7 @@ func main() {
 		log.Printf("数据目录迁移失败，继续使用 %s: %v", *dataFlag, migrationErr)
 	}
 	startPprofFromEnv()
+	startPprofFromSignal()
 
 	autoOpen, err := mcodeui.PrepareOnboarding(*dataFlag)
 	if err != nil {

@@ -97,8 +97,8 @@ func TestSwarmLeadReduceMotionAndHistory(t *testing.T) {
 	appReduceMotion.Store(false)
 	tt.SetPreferences(ui.Preferences{TextScale: 1})
 	tt.Frame()
-	if s.mdOpts.Reveal.Unit != markdown.ByCharacter {
-		t.Fatal("恢复动效后应恢复逐字揭示")
+	if s.mdOpts.Reveal.Unit != markdown.AtOnce {
+		t.Fatal("动效开关不应恢复逐字揭示：揭示期间每帧都要重建整棵视图")
 	}
 
 	visible = false

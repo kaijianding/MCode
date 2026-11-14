@@ -99,8 +99,8 @@ func turnWorkHeaderTooltip(s *chatState, item timelineItem, counts toolGroupCoun
 	return strings.Join(parts, "\n")
 }
 
-// runningTurnHasRunningTool 判断运行中的回合里是否还有工具胶囊在扫光：
-// 有的话组头不再扫光，只数秒，避免同一屏出现两处同步高光。
+// runningTurnHasRunningTool 判断运行中的回合里是否还有工具胶囊在运行：
+// 有的话组头不再铺高亮，只数秒，避免同一屏出现两处高亮。
 // 中途正文之后的工具留在头外，所以按整轮消息判断，而不只看头里收起的那一段。
 func runningTurnHasRunningTool(s *chatState, item timelineItem) bool {
 	if s != nil {
@@ -226,8 +226,8 @@ func renderTurnWorkItem(c *ui.Context, s *chatState, item timelineItem, usage To
 					ui.Icon(c, IconAlertTriangle()).Size(11, 11).Label("工具执行失败").TextColor(ThemeDanger(c))
 				}
 				if running {
-					// 运行中的头只扫一道光；本回合已有工具胶囊在扫光时让位，避免同一屏两处同步高光。
-					renderShimmerTitle(c, item.id+"/turn-header-shimmer", turnHeaderShimmerLabel,
+					// 运行中的头铺一层静态高亮；本回合已有工具胶囊在运行时让位，避免同一屏两处高亮。
+					renderRunningTitle(c, item.id+"/turn-header-running", turnHeaderRunningMarkLabel,
 						!runningTurnHasRunningTool(s, item), func() ui.Element {
 							return ui.Text(c, headerText).FontSize(scaledFont(TypeBody)).TextColor(textColor).SingleLine()
 						})

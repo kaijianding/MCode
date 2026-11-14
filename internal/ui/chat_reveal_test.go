@@ -1,6 +1,11 @@
 package mcodeui
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // TestTakeStreamReveal_ExistingMessageShowsAtOnce 验证打开会话时已存在的正文
 // 不会走逐字揭示：重新打开一个正在运行的会话，历史回答应立刻完整显示。
@@ -54,5 +59,22 @@ func TestTakeStreamReveal_EmptyIDStreams(t *testing.T) {
 	s := &chatState{}
 	if !s.takeStreamReveal(Message{Role: "assistant", Text: "无 ID"}) {
 		t.Fatal("缺少消息 ID 时应保持流式渲染")
+	}
+}
+
+// TestLiveMarkdownDoesNotAskFrames 锁住流式正文的代价：mygo 的 markdown.Stream
+// 在逐字揭示或淡入期间每帧请求下一帧，而每帧都要重建整棵视图，一条长回复能把
+// CPU 钉在 20% 以上。正文按 chunk 整段落地后，流式期间不应再请求额外帧。
+func TestLiveMarkdownDoesNotAskFrames(t *testing.T) {
+	s := newLeadRevealState()
+	tt := ui.NewTester(func(c *ui.Context) { renderChat(c, s) }, 900, 700)
+	setLeadRevealText(s, "第一段正文在这里\n\n第二段正文也在这里")
+	tt.Frame()
+	for i := 0; i < 3; i++ {
+		tt.Advance(120 * time.Millisecond)
+		tt.Frame()
+	}
+	if tt.FramePending() {
+		t.Fatal("流式正文不应请求下一帧：揭示期间每帧都会重建整棵视图")
 	}
 }

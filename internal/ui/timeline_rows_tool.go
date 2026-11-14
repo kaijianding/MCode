@@ -581,11 +581,10 @@ func renderToolChipCategoryMark(c *ui.Context, category toolCategory, isCommand 
 	ui.Icon(c, icon).Size(11, 11).TextColor(ThemeSecondaryText(c))
 }
 
-// renderToolChipTitle 渲染工具胶囊的标题：运行中时在标题上扫一道高光。扫光动画与常量
-// 统一交给 renderShimmerTitle，与后台任务卡、运行中的回合头共用同一套实现；
-// 离开 running / background 状态后高光消失。
+// renderToolChipTitle 渲染工具胶囊的标题：运行中时给标题铺一层静态高亮。高亮实现统一交给
+// renderRunningTitle，与后台任务卡、运行中的回合头共用；离开 running / background 状态后高亮消失。
 func renderToolChipTitle(c *ui.Context, m Message, fn func() ui.Element) {
-	renderShimmerTitle(c, "tool-shimmer-"+m.ID, toolShimmerBandLabel, isToolRunning(m) || isToolBackground(m), fn)
+	renderRunningTitle(c, "tool-running-"+m.ID, toolRunningLabel, isToolRunning(m) || isToolBackground(m), fn)
 }
 
 // renderToolChip 渲染一个动作胶囊：状态字形、类别标记、短标题、diff 统计与耗时，点击展开或收起这个工具的详情。

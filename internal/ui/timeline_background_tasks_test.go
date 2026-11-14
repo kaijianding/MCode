@@ -471,7 +471,7 @@ func TestBackgroundTasksLead(t *testing.T) {
 }
 
 // TestRenderBackgroundTasksPanelCard 验证 Tester 渲染：浮层面板始终展开，
-// 直接列出后台任务、命令与 bee，并有续跑提示与扫光；没有后台项时面板不渲染。
+// 直接列出后台任务、命令与 bee，并有续跑提示与运行中高亮；没有后台项时面板不渲染。
 func TestRenderBackgroundTasksPanelCard(t *testing.T) {
 	s := newChatState(NewFakeClient())
 	s.selectedThreadID = "t1"
@@ -498,8 +498,8 @@ func TestRenderBackgroundTasksPanelCard(t *testing.T) {
 	if !tt.HasText("后台任务") || !tt.HasText("3 个运行中") {
 		t.Fatalf("表头应显示标题与计数胶囊，当前文本 %v", tt.Texts())
 	}
-	if _, ok := tt.Find(backgroundTasksShimmerLabel); !ok {
-		t.Fatalf("有项在跑时应渲染扫光条，当前文本 %v", tt.Texts())
+	if _, ok := tt.Find(backgroundTasksRunningLabel); !ok {
+		t.Fatalf("有项在跑时应渲染运行中高亮，当前文本 %v", tt.Texts())
 	}
 	// 面板体始终展开：不点任何东西就能看到条目、实时时长与续跑提示。
 	if !tt.HasText("npm run build") {
@@ -534,8 +534,8 @@ func TestRenderBackgroundTasksPanelCard(t *testing.T) {
 	if empty.HasText("后台") {
 		t.Fatalf("没有后台项时不应渲染，当前文本 %v", empty.Texts())
 	}
-	if _, ok := empty.Find(backgroundTasksShimmerLabel); ok {
-		t.Fatalf("没有后台项时不应渲染扫光条")
+	if _, ok := empty.Find(backgroundTasksRunningLabel); ok {
+		t.Fatalf("没有后台项时不应渲染运行中高亮")
 	}
 }
 
@@ -650,7 +650,7 @@ func TestRenderBackgroundTasksPanelBeeAlignedLeft(t *testing.T) {
 	}
 }
 
-// TestRenderBackgroundTasksPanelReduceMotion 验证减少动效时不注册扫光动画，只显示静态标题。
+// TestRenderBackgroundTasksPanelReduceMotion 验证减少动效时不显示运行中高亮，只显示静态标题。
 func TestRenderBackgroundTasksPanelReduceMotion(t *testing.T) {
 	setAppReduceMotion(t, true)
 	s := newChatState(NewFakeClient())
@@ -668,13 +668,13 @@ func TestRenderBackgroundTasksPanelReduceMotion(t *testing.T) {
 	if !tt.HasText("后台任务 · 1 个运行中") {
 		t.Fatalf("减少动效时标题仍应显示，当前文本 %v", tt.Texts())
 	}
-	if _, ok := tt.Find(backgroundTasksShimmerLabel); ok {
-		t.Fatalf("减少动效时不应渲染扫光条")
+	if _, ok := tt.Find(backgroundTasksRunningLabel); ok {
+		t.Fatalf("减少动效时不应渲染运行中高亮")
 	}
 }
 
 // TestRenderBackgroundTasksPanelBeeShowsElapsed 验证 bee 行右侧显示运行时长：
-// 90 秒前启动的 bee 渲染成「1m 30s」这类文本，减少动效时也能看到，不依赖扫光。
+// 90 秒前启动的 bee 渲染成「1m 30s」这类文本，减少动效时也能看到，不依赖高亮。
 func TestRenderBackgroundTasksPanelBeeShowsElapsed(t *testing.T) {
 	s := newChatState(NewFakeClient())
 	s.selectedThreadID = "t1"

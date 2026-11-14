@@ -101,6 +101,14 @@ type Client struct {
 	dataDir     string
 	secrets     config.SecretStore
 	httpClient  *http.Client
+	// cfgMu 保护配置快照：界面每帧都读配置（总管昵称、头像、主题），不能每帧读盘并解析
+	// 整个 config.json。cfgMod/cfgSize 沿用 syncGitSubmodulesConfig 的失效判断：设置页
+	// 直接改写 config.json 不通知 app，只能靠文件状态发现；notifyConfigChanged 另主动清空。
+	cfgMu   sync.Mutex
+	cfgMod  time.Time
+	cfgSize int64
+	cfgSnap config.Config
+	cfgOK   bool
 	// mcp 是运行时重建 Provider harness 时复用的 MCP 注入配置。
 	mcp providerMCP
 
@@ -201,11 +209,22 @@ func (c *Client) loadConfig() (config.Config, bool) {
 	if dir == "" {
 		return config.Config{}, false
 	}
+	var mod time.Time
+	var size int64
+	if st, err := os.Stat(config.ConfigPath(dir)); err == nil {
+		mod, size = st.ModTime(), st.Size()
+	}
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	if c.cfgOK && mod.Equal(c.cfgMod) && size == c.cfgSize {
+		return c.cfgSnap, true
+	}
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return config.Config{}, false
 	}
 	config.ApplyEnv(&cfg, os.LookupEnv)
+	c.cfgSnap, c.cfgMod, c.cfgSize, c.cfgOK = cfg, mod, size, true
 	return cfg, true
 }
 
@@ -583,6 +602,9 @@ const goalOwnerSteward = "steward"
 
 // notifyConfigChanged 通知所有配置订阅者：配置文件已被改写（远程设置、档位写入等）。
 func (c *Client) notifyConfigChanged() {
+	c.cfgMu.Lock()
+	c.cfgOK = false
+	c.cfgMu.Unlock()
 	c.ReloadCommandShell()
 	c.kanbanMu.Lock()
 	watchers := make([]func(), 0, len(c.configWatchers))
