@@ -715,7 +715,7 @@ func TestParser_ResultErrorOrder(t *testing.T) {
 	if events[0].Type != harness.EventUsage || events[0].Usage == nil {
 		t.Fatalf("first event should be usage, got %+v", events[0])
 	}
-	if events[0].Usage.InputTokens != 100 || events[0].Usage.OutputTokens != 50 || events[0].Usage.CachedTokens != 20 {
+	if events[0].Usage.InputTokens != 120 || events[0].Usage.OutputTokens != 50 || events[0].Usage.CachedTokens != 20 {
 		t.Errorf("usage tokens mismatch: %+v", events[0].Usage)
 	}
 

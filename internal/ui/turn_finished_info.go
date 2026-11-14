@@ -398,14 +398,18 @@ func formatTurnFinishedTooltip(info turnFinishedInfo) string {
 	return strings.Join(lines, "\n")
 }
 
-// turnCacheHitRate 返回缓存命中率文本，口径与会话统计浮层一致（缓存 / (输入 + 缓存)）；
-// 没有缓存或总量为 0 时返回空字符串。
+// turnCacheHitRate 返回缓存命中率文本：缓存 / 输入。Input 已包含缓存读写
+// （各 provider 适配器统一并入），所以提示词总量就是 Input，不能再加一次缓存；
+// 没有缓存或输入为 0 时返回空字符串，旧数据缓存大于输入时按 100% 封顶。
 func turnCacheHitRate(u TokenUsage) string {
-	total := u.Input + u.Cached
-	if total <= 0 || u.Cached <= 0 {
+	if u.Input <= 0 || u.Cached <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%.1f%%", float64(u.Cached)*100/float64(total))
+	ratio := float64(u.Cached) * 100 / float64(u.Input)
+	if ratio > 100 {
+		ratio = 100
+	}
+	return fmt.Sprintf("%.1f%%", ratio)
 }
 
 // formatTurnCost 把单回合估算费用格式化成「≈ $0.01」：不足 1 美分时保留 4 位小数，
