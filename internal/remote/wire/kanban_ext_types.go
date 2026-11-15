@@ -16,3 +16,13 @@ type KanbanRescueTaskParams struct {
 	ExpectedRevision int    `json:"expectedRevision"`
 	ActionID         string `json:"actionID"`
 }
+
+// KanbanUpdateTaskParams 对应 kanban.updateTask 的请求参数。
+// title 与 notes 至少提供一个；title 不可为空白，notes 可清空。
+type KanbanUpdateTaskParams struct {
+	TaskID           string  `json:"taskID"`
+	Title            *string `json:"title,omitempty"`
+	Notes            *string `json:"notes,omitempty"`
+	ExpectedRevision int     `json:"expectedRevision"`
+	ActionID         string  `json:"actionID"`
+}

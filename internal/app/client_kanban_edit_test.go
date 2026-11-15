@@ -21,3 +21,10 @@ func TestClientDeleteTaskWithoutKanbanService(t *testing.T) {
 		t.Fatalf("NudgeTask err = %v, want 看板服务不可用", err)
 	}
 }
+
+func TestClientUpdateTaskWithoutKanbanService(t *testing.T) {
+	client := &Client{}
+	if _, err := client.UpdateTask(context.Background(), "task-1", nil, nil, 1); err == nil || !strings.Contains(err.Error(), "看板服务不可用") {
+		t.Fatalf("UpdateTask err = %v, want 看板服务不可用", err)
+	}
+}

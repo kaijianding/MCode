@@ -11,7 +11,8 @@ import (
 	"mcode/internal/store"
 )
 
-// 本文件把桌面端看板卡片的「删除」与「救援」开放给远程客户端：
+// 本文件把桌面端看板卡片的「编辑」、「删除」与「救援」开放给远程客户端：
+//   - kanban.updateTask：更新任务标题与备注；
 //   - kanban.deleteTask：删除一条任务（运行中的任务由服务侧拒绝，与桌面端一致）；
 //   - kanban.rescueTask：执行救援菜单里的动作（中断并重置为待办、提醒 Agent）。
 //
@@ -19,9 +20,10 @@ import (
 // 服务侧见 internal/kanban/service_edit.go 的 DeleteTask 与 service_rescue.go 的 RescueTask。
 // 幂等（actionID 重放）与修订号冲突的处理方式与内置看板方法一致，见 kanban_methods.go。
 
-// kanbanExtService 是看板删除与救援需要的服务能力，由 *kanban.Service 实现。
+// kanbanExtService 是看板编辑、删除与救援需要的服务能力，由 *kanban.Service 实现。
 // 单独成接口而不是扩进 KanbanService：远程扩展不要求所有看板实现都支持救援。
 type kanbanExtService interface {
+	UpdateTask(ctx context.Context, in kanban.UpdateTaskInput) (store.Task, error)
 	// DeleteTask 按修订号删除任务；任务仍有执行中会话时返回 kanban.ErrInvalidTransition。
 	DeleteTask(ctx context.Context, taskID string, expectedRevision int) error
 	// RescueTask 按动作救援任务，返回更新后的任务。
@@ -29,6 +31,7 @@ type kanbanExtService interface {
 }
 
 func init() {
+	RegisterMethod("kanban.updateTask", handleKanbanUpdateTask)
 	RegisterMethod("kanban.deleteTask", handleKanbanDeleteTask)
 	RegisterMethod("kanban.rescueTask", handleKanbanRescueTask)
 }
@@ -172,4 +175,67 @@ func kanbanExtError(err error) error {
 		return &ExtError{Code: wire.ErrCodeOperationRejected, Message: err.Error()}
 	}
 	return err
+}
+
+// handleKanbanUpdateTask 更新标题或备注并广播看板变化。
+func handleKanbanUpdateTask(ctx context.Context, d *Dispatcher, c Conn, params json.RawMessage) (any, error) {
+	var p wire.KanbanUpdateTaskParams
+	if err := decodeExtParams(params, &p); err != nil {
+		return nil, err
+	}
+	if !isValidUUID(p.TaskID) {
+		return nil, ExtInvalidParams("Invalid params: 'taskID' must be a valid UUID")
+	}
+	if p.Title == nil && p.Notes == nil {
+		return nil, ExtInvalidParams("Invalid params: 'title' or 'notes' is required")
+	}
+	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
+		return nil, ExtInvalidParams("Invalid params: 'title' must not be blank")
+	}
+	if p.ExpectedRevision < 0 {
+		return nil, ExtInvalidParams("Invalid params: 'expectedRevision' must be non-negative")
+	}
+	if !isValidUUID(p.ActionID) {
+		return nil, ExtInvalidParams("Invalid params: 'actionID' must be a valid UUID")
+	}
+
+	if d.kanbanActions != nil {
+		if prev, ok := d.kanbanActions.get(p.ActionID); ok {
+			return wire.KanbanTaskMutationResult{
+				ActionID: prev.ActionID,
+				TaskID:   prev.TaskID,
+				GoalID:   prev.GoalID,
+				Revision: prev.Revision,
+			}, nil
+		}
+	}
+
+	svc, svcErr := kanbanExtServiceFrom(d)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	task, err := svc.UpdateTask(ctx, kanban.UpdateTaskInput{TaskID: p.TaskID, Title: p.Title, Notes: p.Notes, ExpectedRevision: p.ExpectedRevision})
+	if err != nil {
+		return nil, kanbanExtError(err)
+	}
+
+	taskID := task.ID
+	rev := task.Revision
+	if d.kanbanActions != nil {
+		d.kanbanActions.record(wire.ActionStatusResult{
+			ActionID: p.ActionID,
+			State:    wire.ActionStateAccepted,
+			TaskID:   &taskID,
+			GoalID:   task.GoalID,
+			Revision: &rev,
+		})
+	}
+	d.NotifyKanbanChanged()
+
+	return wire.KanbanTaskMutationResult{
+		ActionID: p.ActionID,
+		TaskID:   &taskID,
+		GoalID:   task.GoalID,
+		Revision: &rev,
+	}, nil
 }

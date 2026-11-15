@@ -38,6 +38,15 @@ func (c *kanbanBatchTestClient) DeleteTask(_ context.Context, id string, _ int) 
 func (c *kanbanBatchTestClient) NudgeTask(_ context.Context, id string, revision int) (KanbanTask, error) {
 	return KanbanTask{ID: id, Revision: revision}, nil
 }
+func (c *kanbanBatchTestClient) UpdateTask(_ context.Context, id string, title, notes *string, revision int) (KanbanTask, error) {
+	return KanbanTask{ID: id, Title: derefTaskEdit(title), Notes: derefTaskEdit(notes), Revision: revision + 1}, nil
+}
+func derefTaskEdit(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
 func batchTestTask(id, status string) KanbanTask {
 	return KanbanTask{ID: id, Title: "任务" + id, Status: status, CanMove: true, Revision: 1}
 }

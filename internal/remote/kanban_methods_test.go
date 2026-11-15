@@ -617,7 +617,7 @@ func TestKanbanMethods_NormalAndConflictAndIdempotency(t *testing.T) {
 		methodMap[m] = true
 	}
 	expectedMethods := []string{
-		"kanban.createTask", "kanban.moveTask", "kanban.startTask", "kanban.reviewTask",
+		"kanban.createTask", "kanban.updateTask", "kanban.moveTask", "kanban.startTask", "kanban.reviewTask",
 		"kanban.getDiff", "goals.create", "goals.start", "goals.pause",
 		"goals.cancel", "goals.replan", "goals.retryTask", "goals.skipTask",
 	}

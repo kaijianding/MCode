@@ -84,6 +84,13 @@ type kanbanState struct {
 	detailGoalID            string
 	detailMoreOpen          bool
 	detailDeleteOpen        bool
+	detailEditField         string
+	detailEditTaskID        string
+	detailEditTitle         string
+	detailEditNotes         string
+	detailEditOrigTitle     string
+	detailEditOrigNotes     string
+	detailEditHadFocus      bool
 	// overview 为 true 时内容区显示「全部项目」概览。
 	overview bool
 	// searchText 按标题与备注过滤任务，看板与列表视图共用。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -24,6 +25,9 @@ type extKanbanService struct {
 	deleteRevs  []int
 	rescueCalls []extRescueCall
 	rescued     store.Task
+	updateErr   error
+	updated     store.Task
+	updateCalls []kanban.UpdateTaskInput
 }
 
 type extRescueCall struct {
@@ -42,6 +46,19 @@ func (s *extKanbanService) DeleteTask(ctx context.Context, taskID string, expect
 	s.deletedIDs = append(s.deletedIDs, taskID)
 	s.deleteRevs = append(s.deleteRevs, expectedRevision)
 	return s.deleteErr
+}
+
+func (s *extKanbanService) UpdateTask(ctx context.Context, in kanban.UpdateTaskInput) (store.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updateCalls = append(s.updateCalls, in)
+	if s.updateErr != nil {
+		return store.Task{}, s.updateErr
+	}
+	if s.updated.ID != "" {
+		return s.updated, nil
+	}
+	return store.Task{ID: in.TaskID, Revision: 3}, nil
 }
 
 func (s *extKanbanService) RescueTask(ctx context.Context, taskID string, action kanban.RescueAction, expectedRevision int) (store.Task, error) {
@@ -308,9 +325,34 @@ func TestKanbanExtMethods_Implemented(t *testing.T) {
 	for _, name := range ImplementedMethods() {
 		methods[name] = true
 	}
-	for _, name := range []string{"kanban.deleteTask", "kanban.rescueTask"} {
+	for _, name := range []string{"kanban.updateTask", "kanban.deleteTask", "kanban.rescueTask"} {
 		if !methods[name] {
 			t.Fatalf("%s 应出现在 capabilities 的方法清单里", name)
 		}
+	}
+}
+
+func TestKanbanUpdateTask_SuccessValidationConflictReplay(t *testing.T) {
+	svc := newExtKanbanService()
+	svc.updated = store.Task{ID: "55555555-5555-5555-5555-555555555555", Revision: 3}
+	d, conn := newKanbanExtTestDispatcher(t, svc)
+	id, action := svc.updated.ID, "66666666-6666-6666-6666-666666666666"
+	req := fmt.Sprintf(`{"jsonrpc":"2.0","method":"kanban.updateTask","params":{"taskID":%q,"title":"new","expectedRevision":2,"actionID":%q},"id":1}`, id, action)
+	got := kanbanExtDecodeMutation(t, callExtension(t, d, conn, req))
+	if got.Revision == nil || *got.Revision != 3 || len(svc.updateCalls) != 1 || svc.updateCalls[0].ExpectedRevision != 2 {
+		t.Fatalf("更新结果/参数错误: %+v %+v", got, svc.updateCalls)
+	}
+	callExtension(t, d, conn, req)
+	if len(svc.updateCalls) != 1 {
+		t.Fatalf("重放再次调用服务: %d", len(svc.updateCalls))
+	}
+	bad := fmt.Sprintf(`{"jsonrpc":"2.0","method":"kanban.updateTask","params":{"taskID":%q,"title":"  ","expectedRevision":2,"actionID":"77777777-7777-7777-7777-777777777777"},"id":2}`, id)
+	if resp := callExtension(t, d, conn, bad); resp.Error == nil || resp.Error.Code != wire.InvalidParams {
+		t.Fatalf("空标题未拒绝: %+v", resp.Error)
+	}
+	svc.updateErr = store.ErrRevisionConflict
+	conflict := strings.Replace(req, "66666666-6666-6666-6666-666666666666", "88888888-8888-8888-8888-888888888888", 1)
+	if resp := callExtension(t, d, conn, conflict); resp.Error == nil || resp.Error.Code != wire.ErrCodeVersionConflict {
+		t.Fatalf("冲突码错误: %+v", resp.Error)
 	}
 }

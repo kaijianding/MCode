@@ -140,7 +140,38 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 			ui.Text(c, "任务已不存在").TextColor(ThemeSecondaryText(c))
 			return
 		}
-		ui.Text(c, task.Title).Padding(0, Space5).FontSize(uiFont(TypeTitle)).FontWeight(600).TextColor(ThemePrimaryText(c))
+		if ks.detailEditField == "title" && ks.detailEditTaskID == task.ID {
+			in := ui.TextInput(c.Key("kanban-detail-title-edit"), &ks.detailEditTitle).Label("任务标题").FillWidth().AutoFocus()
+			in.OnTextKey(func(k ui.TextKey) bool {
+				if k.Key == ui.KeyEscape {
+					ks.detailEditField = ""
+					s.invalidate()
+					return true
+				}
+				if k.Key == ui.KeyEnter && k.Mods == 0 {
+					ks.detailEditTitle = k.Text()
+					s.commitKanbanDetailEdit(*task, "title")
+					return true
+				}
+				return false
+			})
+			focused := in.Focused()
+			if focused && !ks.detailEditHadFocus {
+				in.SetTextSelection(0, len([]rune(ks.detailEditTitle)))
+				ks.detailEditHadFocus = true
+			} else if focused {
+				ks.detailEditHadFocus = true
+			} else if ks.detailEditHadFocus {
+				s.commitKanbanDetailEdit(*task, "title")
+			}
+		} else {
+			title := ui.Text(c.Key("kanban-detail-title"), task.Title).Padding(0, Space5).FontSize(uiFont(TypeTitle)).FontWeight(600).TextColor(ThemePrimaryText(c)).Focusable()
+			if title.Clicked() && s.kanbanEditAvailable() {
+				ks.detailEditField, ks.detailEditTaskID = "title", task.ID
+				ks.detailEditTitle, ks.detailEditOrigTitle = task.Title, task.Title
+				ks.detailEditHadFocus = false
+			}
+		}
 		if ks.detailDeleteOpen {
 			ui.DialogBase(c.Key("kanban-detail-delete-dialog"), &ks.detailDeleteOpen, func(backdrop, panel ui.Element) {
 				backdrop.Absolute().Left(0).Top(0).Right(0).Bottom(0).Center().Background(ui.Color{}.Alpha(ScrimOpacity))
@@ -240,7 +271,35 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 						}
 					}
 				default:
-					for _, section := range []struct{ title, text string }{{"结果", task.ResultSummary}, {"需求", task.Notes}, {"验收标准", task.AcceptanceCriteria}, {"评审反馈", task.ReviewFeedback}, {"评审总结", task.ReviewSummary}, {"失败原因", task.LastFailureReason}, {"等待条件", task.WaitKind}, {"唤醒时间", task.WakeAt}} {
+					if ks.detailEditField == "notes" && ks.detailEditTaskID == task.ID {
+						in := ui.TextArea(c.Key("kanban-detail-notes-edit"), &ks.detailEditNotes).Label("任务备注").Lines(3, 8).FillWidth().AutoFocus()
+						in.OnTextKey(func(k ui.TextKey) bool {
+							if k.Key == ui.KeyEscape {
+								ks.detailEditField = ""
+								s.invalidate()
+								return true
+							}
+							if k.Key == ui.KeyEnter && k.Mods == ui.Cmd {
+								s.commitKanbanDetailEdit(*task, "notes")
+								return true
+							}
+							return false
+						})
+						focused := in.Focused()
+						if focused {
+							ks.detailEditHadFocus = true
+						} else if ks.detailEditHadFocus {
+							s.commitKanbanDetailEdit(*task, "notes")
+						}
+					} else {
+						notes := ui.Text(c.Key("kanban-detail-notes"), "需求: "+task.Notes).Focusable()
+						if notes.Clicked() && s.kanbanEditAvailable() {
+							ks.detailEditField, ks.detailEditTaskID = "notes", task.ID
+							ks.detailEditNotes, ks.detailEditOrigNotes = task.Notes, task.Notes
+							ks.detailEditHadFocus = false
+						}
+					}
+					for _, section := range []struct{ title, text string }{{"结果", task.ResultSummary}, {"验收标准", task.AcceptanceCriteria}, {"评审反馈", task.ReviewFeedback}, {"评审总结", task.ReviewSummary}, {"失败原因", task.LastFailureReason}, {"等待条件", task.WaitKind}, {"唤醒时间", task.WakeAt}} {
 						if section.text != "" {
 							ui.Text(c, section.title+": "+section.text).TextColor(ThemePrimaryText(c))
 						}

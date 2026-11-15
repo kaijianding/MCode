@@ -1117,6 +1117,9 @@
       "$ref": "#/$defs/KanbanDeleteTaskRequest"
     },
     {
+      "$ref": "#/$defs/KanbanUpdateTaskRequest"
+    },
+    {
       "$ref": "#/$defs/KanbanRescueTaskRequest"
     },
     {
@@ -11236,6 +11239,9 @@
             "$ref": "#/$defs/KanbanDeleteTaskRequest"
           },
           {
+            "$ref": "#/$defs/KanbanUpdateTaskRequest"
+          },
+          {
             "$ref": "#/$defs/KanbanRescueTaskRequest"
           },
           {
@@ -17226,6 +17232,76 @@
         "required": [
           "jsonrpc",
           "result",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "KanbanUpdateTaskParams": {
+        "type": "object",
+        "description": "kanban.updateTask 参数：就地更新任务标题与备注。title 与 notes 至少提供一个，title 不可为空白，notes 可清空。expectedRevision 非负，0 表示不校验；修订号冲突 -32009，不存在 -32002，拒绝 -32000，不支持 -32601。同一个 actionID 重放返回首次 KanbanTaskMutationResult，不重复更新或广播。",
+        "properties": {
+          "taskID": {
+            "$ref": "#/$defs/UUID"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actionID": {
+            "$ref": "#/$defs/UUID"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskID",
+          "expectedRevision",
+          "actionID"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "notes"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "KanbanUpdateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "method": {
+            "const": "kanban.updateTask"
+          },
+          "params": {
+            "$ref": "#/$defs/KanbanUpdateTaskParams"
+          },
+          "id": {
+            "$ref": "#/$defs/JSONRPCId"
+          }
+        },
+        "required": [
+          "jsonrpc",
+          "method",
+          "params",
           "id"
         ],
         "additionalProperties": false

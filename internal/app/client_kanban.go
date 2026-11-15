@@ -82,6 +82,24 @@ func (c *Client) MoveTask(ctx context.Context, taskID, status string, revision i
 	return KanbanTaskToUI(task, kanban.Derived{}), nil
 }
 
+// UpdateTask 按修订号更新任务标题与备注，返回持久化后的任务。
+func (c *Client) UpdateTask(ctx context.Context, taskID string, title, notes *string, revision int) (mcodeui.KanbanTask, error) {
+	c.kanbanMu.Lock()
+	k := c.kanban
+	c.kanbanMu.Unlock()
+	if k == nil {
+		return mcodeui.KanbanTask{}, wrapConflictErr(errors.New("看板服务不可用"))
+	}
+	if title == nil && notes == nil || title != nil && strings.TrimSpace(*title) == "" {
+		return mcodeui.KanbanTask{}, wrapConflictErr(kanban.ErrInvalidTransition)
+	}
+	task, err := k.UpdateTask(ctx, kanban.UpdateTaskInput{TaskID: taskID, Title: title, Notes: notes, ExpectedRevision: revision})
+	if err != nil {
+		return mcodeui.KanbanTask{}, wrapConflictErr(err)
+	}
+	return KanbanTaskToUI(task, kanban.Derived{}), nil
+}
+
 // DeleteTask 按修订号删除任务。
 func (c *Client) DeleteTask(ctx context.Context, taskID string, revision int) error {
 	c.kanbanMu.Lock()

@@ -334,6 +334,42 @@ func (s *chatState) submitQuickAdd() {
 type kanbanTaskEditClient interface {
 	DeleteTask(ctx context.Context, taskID string, revision int) error
 	NudgeTask(ctx context.Context, taskID string, revision int) (KanbanTask, error)
+	UpdateTask(ctx context.Context, taskID string, title, notes *string, revision int) (KanbanTask, error)
+}
+
+func (s *chatState) updateKanbanTask(task KanbanTask, title, notes *string) {
+	client, ok := s.kanbanEditClient()
+	ks := getKanbanState(s)
+	if !ok || ks == nil || !beginKanbanTask(ks, task.ID) {
+		return
+	}
+	go func() {
+		defer func() { endKanbanTask(ks, task.ID); s.invalidate() }()
+		updated, err := client.UpdateTask(context.Background(), task.ID, title, notes, task.Revision)
+		if err != nil {
+			s.setToast("更新任务失败：" + err.Error())
+			return
+		}
+		s.updateWorkspace(func() {
+			kanbanMu.Lock()
+			for i := range ks.board.Tasks {
+				if ks.board.Tasks[i].ID == task.ID {
+					updated.Column = ks.board.Tasks[i].Column
+					updated.Blocked = ks.board.Tasks[i].Blocked
+					updated.CanStart = ks.board.Tasks[i].CanStart
+					updated.CanMove = ks.board.Tasks[i].CanMove
+					updated.CanReview = ks.board.Tasks[i].CanReview
+					updated.CanApprove = ks.board.Tasks[i].CanApprove
+					updated.AttentionFlags = ks.board.Tasks[i].AttentionFlags
+					ks.board.Tasks[i] = updated
+					break
+				}
+			}
+			ks.detailEditField = ""
+			ks.detailEditTaskID = ""
+			kanbanMu.Unlock()
+		})
+	}()
 }
 
 // kanbanEditClient 返回实现了看板编辑接口的客户端；旧客户端或测试替身返回 false。
@@ -343,6 +379,41 @@ func (s *chatState) kanbanEditClient() (kanbanTaskEditClient, bool) {
 	}
 	c, ok := s.client.(kanbanTaskEditClient)
 	return c, ok
+}
+
+func (s *chatState) kanbanEditAvailable() bool {
+	_, ok := s.kanbanEditClient()
+	return ok
+}
+
+func (s *chatState) commitKanbanDetailEdit(task KanbanTask, field string) {
+	ks := getKanbanState(s)
+	if ks == nil || ks.detailEditTaskID != task.ID || ks.detailEditField != field {
+		return
+	}
+	var title, notes *string
+	if field == "title" {
+		value := strings.TrimSpace(ks.detailEditTitle)
+		if value == "" {
+			s.setToast("标题不可为空")
+			return
+		}
+		if value == ks.detailEditOrigTitle {
+			ks.detailEditField = ""
+			s.invalidate()
+			return
+		}
+		title = &value
+	} else {
+		if ks.detailEditNotes == ks.detailEditOrigNotes {
+			ks.detailEditField = ""
+			s.invalidate()
+			return
+		}
+		value := ks.detailEditNotes
+		notes = &value
+	}
+	s.updateKanbanTask(task, title, notes)
 }
 
 // nudgeTaskAgent 请求后端给任务会话追加一条继续推进的提醒；Client 不支持时只给出提示。

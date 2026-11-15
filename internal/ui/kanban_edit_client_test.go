@@ -5,12 +5,15 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // kanbanEditCall 记录看板编辑接口测试替身收到的一次调用。
 type kanbanEditCall struct {
-	TaskID   string
-	Revision int
+	TaskID       string
+	Revision     int
+	Title, Notes *string
 }
 
 // kanbanEditFakeClient 在 FakeClient 之上补上看板编辑接口，记录调用参数并可按需返回错误。
@@ -22,10 +25,91 @@ type kanbanEditFakeClient struct {
 	nudgeCalls  []kanbanEditCall
 	deleteErr   error
 	nudgeErr    error
+	updateErr   error
+	updateCalls []kanbanEditCall
+}
+
+func (f *kanbanEditFakeClient) UpdateTask(ctx context.Context, taskID string, title, notes *string, revision int) (KanbanTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateCalls = append(f.updateCalls, kanbanEditCall{TaskID: taskID, Revision: revision, Title: title, Notes: notes})
+	if f.updateErr != nil {
+		return KanbanTask{}, f.updateErr
+	}
+	f.FakeClient.mu.Lock()
+	defer f.FakeClient.mu.Unlock()
+	for i := range f.FakeClient.kanbanBoard.Tasks {
+		task := &f.FakeClient.kanbanBoard.Tasks[i]
+		if task.ID != taskID {
+			continue
+		}
+		if title != nil {
+			task.Title = *title
+		}
+		if notes != nil {
+			task.Notes = *notes
+		}
+		task.Revision++
+		return *task, nil
+	}
+	return KanbanTask{}, errors.New("任务不存在")
 }
 
 func newKanbanEditFakeClient() *kanbanEditFakeClient {
 	return &kanbanEditFakeClient{FakeClient: NewFakeClient()}
+}
+
+func TestKanbanDetailTitleEditUpdatesClientAndBoard(t *testing.T) {
+	fake := newKanbanEditFakeClient()
+	task := KanbanTask{ID: "task-edit", ProjectID: "p1", Title: "原标题", Notes: "备注", Revision: 4, Status: "todo", Column: "todo"}
+	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{task}})
+	tt, s := newKanbanDetailEditorTester(fake, task)
+	if err := tt.Click(task.Title); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, func() bool { _, ok := tt.Find("任务标题"); return ok })
+	tt.Type("新标题")
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool { return len(fake.updateCalls) == 1 })
+	s.applyWorkspaceUpdates()
+	tt.Frame()
+	if !tt.HasText("新标题") {
+		t.Fatalf("本地看板标题未更新: %v", tt.Texts())
+	}
+	if fake.updateCalls[0].Title == nil || *fake.updateCalls[0].Title != "新标题" {
+		t.Fatalf("UpdateTask 参数错误: %+v", fake.updateCalls[0])
+	}
+}
+
+func TestKanbanDetailTitleEditEscapeAndUnchangedDoNotCall(t *testing.T) {
+	fake := newKanbanEditFakeClient()
+	task := KanbanTask{ID: "task-edit-escape", ProjectID: "p1", Title: "保持标题", Revision: 1, Status: "todo", Column: "todo"}
+	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{task}})
+	tt, _ := newKanbanDetailEditorTester(fake, task)
+	tt.Click(task.Title)
+	waitFor(t, tt, func() bool { _, ok := tt.Find("任务标题"); return ok })
+	tt.Type("丢弃")
+	tt.Key(0, ui.KeyEscape)
+	waitFor(t, tt, func() bool { return tt.HasText(task.Title) })
+	if len(fake.updateCalls) != 0 {
+		t.Fatalf("Esc 不应调用 UpdateTask: %+v", fake.updateCalls)
+	}
+	tt.Click(task.Title)
+	waitFor(t, tt, func() bool { _, ok := tt.Find("任务标题"); return ok })
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if len(fake.updateCalls) != 0 {
+		t.Fatalf("未修改不应调用 UpdateTask: %+v", fake.updateCalls)
+	}
+}
+
+func newKanbanDetailEditorTester(fake *kanbanEditFakeClient, task KanbanTask) (*ui.Tester, *chatState) {
+	s := newChatState(fake)
+	ks := getKanbanState(s)
+	ks.board.Tasks = []KanbanTask{task}
+	ks.detailTaskID, ks.detailRevision = task.ID, task.Revision
+	tt := ui.NewTester(func(c *ui.Context) { renderTaskDetailContent(c, s, ks) }, 900, 700)
+	return tt, s
 }
 
 // DeleteTask 记录删除调用；deleteErr 非空时原样返回。
