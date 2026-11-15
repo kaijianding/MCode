@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -32,6 +33,12 @@ func TestMain(m *testing.M) {
 
 // runFakeACP 实现模拟的 ACP CLI 子进程。
 func runFakeACP(mode string) {
+	if logPath := os.Getenv("MCODE_TEST_FAKE_ACP_ARGS_LOG"); logPath != "" {
+		// 探测用例靠这条记录断言启动参数与环境变量确实传到了子进程。
+		record := "argv=" + strings.Join(os.Args, " ") + "\n" +
+			"marker=" + os.Getenv("MCODE_TEST_FAKE_ACP_ENV_MARKER") + "\n"
+		_ = os.WriteFile(logPath, []byte(record), 0o600)
+	}
 	reader := bufio.NewReader(os.Stdin)
 
 	readMsg := func() (map[string]any, error) {
@@ -51,6 +58,9 @@ func runFakeACP(mode string) {
 		data = append(data, '\n')
 		_, _ = os.Stdout.Write(data)
 	}
+
+	// loadAttempts drives the load_fail_once mode: only the first session/load fails.
+	loadAttempts := 0
 
 	for {
 		msg, err := readMsg()
@@ -76,15 +86,65 @@ func runFakeACP(mode string) {
 			})
 
 		case "session/new":
+			result := map[string]any{
+				"sessionId": "fake-session-001",
+			}
+			if mode == "load_fail" || mode == "load_fail_once" {
+				// A distinct ID lets the tests see that a new session was created.
+				result["sessionId"] = "fake-session-new"
+			}
+			if mode == "catalog" {
+				result["configOptions"] = []any{map[string]any{
+					"id":           "model",
+					"name":         "Model",
+					"category":     "model",
+					"type":         "select",
+					"currentValue": "vendor/probed-model",
+					"options": []any{
+						map[string]any{"value": "vendor/probed-model", "name": "probed-model"},
+					},
+				}}
+			}
 			writeMsg(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      id,
-				"result": map[string]any{
-					"sessionId": "fake-session-001",
-				},
+				"result":  result,
 			})
 
 		case "session/load":
+			fail := mode == "load_fail"
+			if mode == "load_fail_once" {
+				loadAttempts++
+				fail = loadAttempts == 1
+			}
+			if fail {
+				writeMsg(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error": map[string]any{
+						"code":    -32603,
+						"message": "invalid rpi ready frame: EOF while parsing a value at line 1 column 0",
+					},
+				})
+				continue
+			}
+			if mode == "load_replay" {
+				updates := []map[string]any{
+					{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "REPLAYED-HISTORY"}},
+					{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"text": "REPLAYED-THOUGHT"}},
+					{"sessionUpdate": "tool_call", "toolCallId": "replay-call", "name": "bash"},
+					{"sessionUpdate": "tool_call_update", "toolCallId": "replay-call", "status": "completed", "output": "replayed"},
+					{"sessionUpdate": "tool_call_update", "path": "replayed.txt"},
+					{"sessionUpdate": "usage_update", "used": 50, "size": 1000},
+				}
+				for _, update := range updates {
+					writeMsg(map[string]any{
+						"jsonrpc": "2.0",
+						"method":  "session/update",
+						"params":  map[string]any{"update": update},
+					})
+				}
+			}
 			loaded := "fake-session-001"
 			if params, ok := msg["params"].(map[string]any); ok {
 				if sid, ok := params["sessionId"].(string); ok && sid != "" {
@@ -115,6 +175,40 @@ func runFakeACP(mode string) {
 			}
 
 			// 1. 发送 text chunk 通知
+			if strings.Contains(mode, "usage") {
+				writeMsg(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"update": map[string]any{
+							"sessionUpdate": "usage_update",
+							"used":          100,
+							"size":          1000,
+						},
+					},
+				})
+				writeMsg(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"update": map[string]any{
+							"sessionUpdate": "usage_update",
+							"used":          200,
+							"size":          1000,
+							"_meta": map[string]any{
+								"inputTokens":       120,
+								"cachedReadTokens":  80,
+								"cachedWriteTokens": 10,
+								"outputTokens":      40,
+							},
+							"cost": map[string]any{
+								"amount":   0.02,
+								"currency": "USD",
+							},
+						},
+					},
+				})
+			}
 			writeMsg(map[string]any{
 				"jsonrpc": "2.0",
 				"method":  "session/update",
@@ -353,6 +447,146 @@ func TestACPHarnessRun(t *testing.T) {
 	}
 }
 
+// TestACPHarnessUsageUpdateMapsContextAndMeta 验证 usage_update 的 used/size 映射到上下文口径，
+// 输入/输出/缓存 token 只从 _meta 约定键读取，并且同轮多帧时后帧沿用前帧字段。
+func TestACPHarnessUsageUpdateMapsContextAndMeta(t *testing.T) {
+	events, err := runFakeTurn(t, "usage", harness.Turn{
+		WorkDir: t.TempDir(),
+		Mode:    harness.ModeSupervised,
+	})
+	if err != nil {
+		t.Fatalf("Harness.Run failed: %v", err)
+	}
+
+	var last *harness.Usage
+	for _, e := range events {
+		if e.Type == harness.EventUsage && e.Usage != nil {
+			last = e.Usage
+		}
+	}
+	if last == nil {
+		t.Fatal("missing EventUsage")
+	}
+	if last.ContextTokens != 200 {
+		t.Errorf("ContextTokens = %d, want 200", last.ContextTokens)
+	}
+	if last.ContextWindow != 1000 {
+		t.Errorf("ContextWindow = %d, want 1000", last.ContextWindow)
+	}
+	if last.InputTokens != 120 {
+		t.Errorf("InputTokens = %d, want 120", last.InputTokens)
+	}
+	if last.CachedTokens != 90 {
+		t.Errorf("CachedTokens = %d, want 90", last.CachedTokens)
+	}
+	if last.OutputTokens != 40 {
+		t.Errorf("OutputTokens = %d, want 40", last.OutputTokens)
+	}
+	if last.CostUSD != 0.02 {
+		t.Errorf("CostUSD = %v, want 0.02", last.CostUSD)
+	}
+	if last.InputTokens == last.ContextTokens {
+		t.Errorf("InputTokens must not mirror used: both are %d", last.InputTokens)
+	}
+}
+
+func TestACPHarnessIgnoresLoadReplayUpdates(t *testing.T) {
+	const sessionID = "fake-session-001"
+	events, err := runFakeTurn(t, "load_replay", harness.Turn{
+		WorkDir:   t.TempDir(),
+		Mode:      harness.ModeSupervised,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("Harness.Run failed: %v", err)
+	}
+
+	hasPromptText := false
+	hasUsage := false
+	hasSession := false
+	for _, e := range events {
+		switch e.Type {
+		case harness.EventText:
+			if strings.Contains(e.Text, "REPLAYED-HISTORY") {
+				t.Error("load replay text reached harness")
+			}
+			if strings.Contains(e.Text, "Hello from fake ACP!") {
+				hasPromptText = true
+			}
+		case harness.EventReasoning:
+			if strings.Contains(e.Text, "REPLAYED-THOUGHT") {
+				t.Error("load replay thought reached harness")
+			}
+		case harness.EventToolStart, harness.EventToolEnd:
+			if e.ToolID == "replay-call" {
+				t.Error("load replay tool event reached harness")
+			}
+		case harness.EventFileChange:
+			if strings.Contains(e.Path, "replayed.txt") {
+				t.Error("load replay file change reached harness")
+			}
+		case harness.EventUsage:
+			if e.Usage != nil && e.Usage.ContextWindow == 1000 {
+				hasUsage = true
+			}
+		case harness.EventSession:
+			if e.SessionID == sessionID {
+				hasSession = true
+			}
+		}
+	}
+	if !hasPromptText {
+		t.Error("missing prompt EventText after load replay")
+	}
+	if !hasUsage {
+		t.Error("missing replay-period EventUsage with ContextWindow=1000")
+	}
+	if !hasSession {
+		t.Errorf("missing EventSession for %q", sessionID)
+	}
+}
+
+func TestUsageFromUpdate(t *testing.T) {
+	if got := usageFromUpdate(acpUsageUpdate{}, harness.Usage{}); !reflect.DeepEqual(got, harness.Usage{}) {
+		t.Errorf("empty update = %#v, want zero usage", got)
+	}
+
+	nonUSD := usageFromUpdate(acpUsageUpdate{
+		Cost: &acpUsageCost{Amount: 1.5, Currency: "EUR"},
+	}, harness.Usage{})
+	if nonUSD.CostUSD != 0 {
+		t.Errorf("CostUSD = %v for non-USD cost, want 0", nonUSD.CostUSD)
+	}
+
+	windowOnly := usageFromUpdate(acpUsageUpdate{Size: 1000}, harness.Usage{})
+	if windowOnly.ContextTokens != 0 || windowOnly.ContextWindow != 1000 {
+		t.Errorf("used=0/size=1000 => ContextTokens=%d ContextWindow=%d, want 0/1000",
+			windowOnly.ContextTokens, windowOnly.ContextWindow)
+	}
+
+	prev := harness.Usage{OutputTokens: 40, InputTokens: 120, ContextWindow: 1000}
+	kept := usageFromUpdate(acpUsageUpdate{Used: 300}, prev)
+	if kept.OutputTokens != 40 || kept.InputTokens != 120 || kept.ContextWindow != 1000 {
+		t.Errorf("fields absent from frame must survive: %#v", kept)
+	}
+	if kept.ContextTokens != 300 {
+		t.Errorf("ContextTokens = %d, want 300", kept.ContextTokens)
+	}
+
+	// cachedTokens 存在时优先于读写合计；字符串写法与 k/M 后缀共用同一套解析。
+	stringForm := usageFromUpdate(acpUsageUpdate{Meta: map[string]any{
+		"cachedTokens":     "1.5k",
+		"cachedReadTokens": 10,
+		"outputTokens":     "40 tokens",
+	}}, harness.Usage{})
+	if stringForm.CachedTokens != 1500 {
+		t.Errorf("CachedTokens = %d, want 1500", stringForm.CachedTokens)
+	}
+	if stringForm.OutputTokens != 40 {
+		t.Errorf("OutputTokens = %d, want 40", stringForm.OutputTokens)
+	}
+}
+
 func TestACPHarnessCancellation(t *testing.T) {
 	fakeBin := os.Args[0]
 
@@ -520,6 +754,53 @@ func TestACPHarnessResumeUnsupported(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot resume") {
 		t.Fatalf("expected 'cannot resume' error, got: %v", err)
+	}
+}
+
+// shortenSessionLoadRetry 把 session/load 的重试间隔压到最小，避免用例变慢。
+func shortenSessionLoadRetry(t *testing.T) {
+	t.Helper()
+	prev := sessionLoadRetryDelay
+	sessionLoadRetryDelay = 10 * time.Millisecond
+	t.Cleanup(func() { sessionLoadRetryDelay = prev })
+}
+
+// TestACPHarnessFallsBackToNewSessionWhenLoadFails 验证 session/load 持续失败时回退新建会话，
+// 而不是让整轮失败。
+func TestACPHarnessFallsBackToNewSessionWhenLoadFails(t *testing.T) {
+	shortenSessionLoadRetry(t)
+	turn := harness.Turn{
+		ID:        "turn-1",
+		Prompt:    "hello acp",
+		WorkDir:   t.TempDir(),
+		Mode:      harness.ModeSupervised,
+		SessionID: "fake-session-001",
+	}
+	events, err := runFakeTurn(t, "load_fail", turn)
+	if err != nil {
+		t.Fatalf("run failed although a fallback session could be created: %v", err)
+	}
+	if got := sessionIDOf(t, events); got != "fake-session-new" {
+		t.Fatalf("expected fallback session %q, got %q", "fake-session-new", got)
+	}
+}
+
+// TestACPHarnessRetriesLoadBeforeFallback 验证 session/load 首次失败后重试成功，不新建会话。
+func TestACPHarnessRetriesLoadBeforeFallback(t *testing.T) {
+	shortenSessionLoadRetry(t)
+	turn := harness.Turn{
+		ID:        "turn-1",
+		Prompt:    "hello acp",
+		WorkDir:   t.TempDir(),
+		Mode:      harness.ModeSupervised,
+		SessionID: "fake-session-001",
+	}
+	events, err := runFakeTurn(t, "load_fail_once", turn)
+	if err != nil {
+		t.Fatalf("run failed although the retried session/load succeeded: %v", err)
+	}
+	if got := sessionIDOf(t, events); got != "fake-session-001" {
+		t.Fatalf("expected resumed session %q, got %q", "fake-session-001", got)
 	}
 }
 

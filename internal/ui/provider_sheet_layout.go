@@ -36,6 +36,11 @@ func renderProviderSheetBody(c *ui.Context, st *SettingsState) {
 	var lib *modelsLibraryView
 	if kind == "cli" {
 		lib = modelsPageLibrary(c, st)
+		// 自定义 ACP provider 的目录只有显式刷新才会探测：第一次进面板时补一次自动探测，
+		// 模型列表不用手动点「刷新」也能出现；触发是异步的，渲染路径不阻塞。
+		if shouldAutoProbeCatalog(st, lib, id) {
+			st.refreshModels()
+		}
 	}
 	defs := providerSheetSections(st, kind, id, lib)
 	if len(defs) == 0 {
@@ -119,6 +124,45 @@ func renderProviderSheetBody(c *ui.Context, st *SettingsState) {
 			})
 			reportSettingsSheetContentHeight("provider", content.Bounds().H)
 		})
+}
+
+// shouldAutoProbeCatalog 判断是否该为 id 触发一次自动目录探测，并在返回 true 时把该 id
+// 记为已探测（同一 provider 每进程只自动探测一次）。
+//
+// 目录平时只在用户显式刷新时探测，配置里的自定义 ACP provider 因此一进面板就是空目录；
+// 这里补一次探测。已探测标记不随页面重载清空：探测后目录仍为空（harness 不实现 ProbeModels
+// 或探测失败）时若清空，每次重新加载供应商行都会再探一遍，等于每帧重试的外部命令调用；
+// 用户仍可手动刷新，重启进程后会重新自动探测一次。
+func shouldAutoProbeCatalog(st *SettingsState, lib *modelsLibraryView, id string) bool {
+	if lib == nil || id == "" {
+		return false
+	}
+	info, ok := providerModelsFor(lib, id)
+	if !ok || !info.Available || !catalogProbeNeeded(info.Models) {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.chat == nil || st.chat.client == nil || st.modelsRefreshing || st.modelsRefreshDone || st.catalogProbed[id] {
+		return false
+	}
+	if st.catalogProbed == nil {
+		st.catalogProbed = make(map[string]bool)
+	}
+	st.catalogProbed[id] = true
+	return true
+}
+
+// catalogProbeNeeded 判断模型列表是否只有占位内容：空列表，或后端给的唯一一条
+// ID 为 "default" 的占位行（尚未探测到真实模型）。
+func catalogProbeNeeded(models []ModelInfo) bool {
+	switch len(models) {
+	case 0:
+		return true
+	case 1:
+		return strings.TrimSpace(models[0].ID) == "default"
+	}
+	return false
 }
 
 // consumeProviderSheetJumpRow 取走面板内的一次性跳转行（读到即清空），空串表示没有待跳转的行。

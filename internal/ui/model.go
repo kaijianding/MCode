@@ -513,10 +513,13 @@ type chatState struct {
 	sending     bool
 	sentDraft   *string
 
-	providers            []ProviderInfo
-	catalogRequestSeq    uint64
-	catalogAppliedSeq    uint64
-	catalogRefreshing    bool
+	providers         []ProviderInfo
+	catalogRequestSeq uint64
+	catalogAppliedSeq uint64
+	catalogRefreshing bool
+	// catalogStartupProbed records that the startup snapshot's placeholder catalog was
+	// probed once; the probe is never retried in this process (see settleProviderCatalog).
+	catalogStartupProbed bool
 	newThreadProvider    string
 	creatingThread       bool // 创建请求进行中，防止重复点击；受 s.mu 保护
 	provisionalWorktrees map[string]bool
@@ -795,6 +798,16 @@ var providerAvailabilityRecheckDelay = 2 * time.Second
 
 // refreshProviders 只在用户主动操作时强制刷新，重复点击不会启动多个刷新。
 func (s *chatState) refreshProviders() {
+	s.refreshProvidersWithToast(true)
+}
+
+// refreshProvidersQuiet probes the catalog exactly like refreshProviders but stays silent on
+// failure: a background startup probe must not raise a "refresh failed" toast.
+func (s *chatState) refreshProvidersQuiet() {
+	s.refreshProvidersWithToast(false)
+}
+
+func (s *chatState) refreshProvidersWithToast(toastOnError bool) {
 	s.mu.Lock()
 	if s.closed || s.catalogRefreshing {
 		s.mu.Unlock()
@@ -815,7 +828,7 @@ func (s *chatState) refreshProviders() {
 		ctx, cancel := context.WithTimeout(context.Background(), modelsRefreshTimeout)
 		defer cancel()
 		providers, err := s.client.RefreshProviders(ctx)
-		if err != nil {
+		if err != nil && toastOnError {
 			s.setToast("刷新模型目录失败: " + err.Error())
 		}
 		if err == nil || providers != nil {
@@ -883,6 +896,26 @@ func catalogPending(providers []ProviderInfo) bool {
 		}
 	}
 	return false
+}
+
+// settleProviderCatalog handles the startup snapshot's placeholder catalog. A placeholder
+// catalog has no other producer, so reading the cache can never fill it: probe once, then
+// let refreshProviderCatalogUntilReady keep reading the cache. The probe runs at most once
+// per process (same rationale as shouldAutoProbeCatalog) so a harness without ProbeModels
+// is not re-probed on every startup-path entry.
+func (s *chatState) settleProviderCatalog(providers []ProviderInfo) {
+	if !catalogPending(providers) {
+		return
+	}
+	s.mu.Lock()
+	probed := s.catalogStartupProbed
+	s.catalogStartupProbed = true
+	s.mu.Unlock()
+	if !probed {
+		// The probe sets catalogRefreshing, so the cache reads below skip instead of racing it.
+		s.refreshProvidersQuiet()
+	}
+	s.refreshProviderCatalogUntilReady(providers)
 }
 
 // refreshProviderCatalogUntilReady 在后台按 providerCatalogRetryDelays 补拉供应商列表，
@@ -1018,9 +1051,7 @@ func (s *chatState) loadProjects() {
 				s.mu.Unlock()
 
 				// CLI 目录还在后台拉取时快照里只有占位行，后台补拉后再刷新模型列表。
-				if catalogPending(providers) {
-					s.refreshProviderCatalogUntilReady(providers)
-				}
+				s.settleProviderCatalog(providers)
 				// provider 的可用性（例如钥匙串密钥探测）可能在首次拉取之后才确定，
 				// UI 不会自动重拉，这里隔一会儿补拉一次纠正。
 				go func() {
@@ -3832,12 +3863,13 @@ func (s *chatState) modelPreference(pin ModelPin) ModelPreference {
 	return s.modelPrefCache[pin.Key()]
 }
 
-// effortBackendAllowed 判断推理强度能否写进会话：后端只接受这份白名单里的档位，
-// 模型目录里还存在 off/minimal 等档位，直接下发会被判为参数非法。
-// UI 层不 import internal/remote，因此在这里用本地集合复刻同一份白名单；空串表示跟随模型默认，总是允许。
+// effortBackendAllowed checks whether an effort can be written to a session. The
+// backend accepts directory-native off/minimal/none/extra-high tokens as-is.
+// UI keeps this local copy because it cannot import internal/remote; empty means
+// follow the model default and is always allowed.
 func effortBackendAllowed(effort string) bool {
 	switch effort {
-	case "", "low", "medium", "high", "xhigh", "max":
+	case "", "low", "medium", "high", "xhigh", "max", "off", "none", "minimal", "extra-high", "extra_high", "adaptive":
 		return true
 	}
 	return false

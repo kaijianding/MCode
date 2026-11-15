@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -636,6 +637,14 @@ func (p *Proxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 		result, rpcErr, err := p.hub.Forward(r.Context(), serverID, req.Method, req.Params)
 		if err != nil {
+			// 单个上游不可用不该让 Agent 的会话建立失败：rpi 把工具发现失败当成
+			// session/new 的致命错误，整轮会话都起不来。工具调用仍会明确报错，
+			// 授权与启动状态由设置页独立探测展示。
+			if req.Method == "tools/list" {
+				log.Printf("mcp proxy: %s tools/list 失败，返回空工具列表: %v", upstreamName, err)
+				writeRPCResponse(w, req.ID, map[string]any{"tools": []any{}}, nil)
+				return
+			}
 			if errors.Is(err, ErrUpstreamUnauthorized) {
 				writeRPCError(w, req.ID, -32001, "upstream unauthorized: re-authentication required")
 				return

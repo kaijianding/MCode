@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"mcode/internal/harness"
 	"mcode/internal/providers/acp"
 	"mcode/internal/providers/omp"
 	"mcode/internal/remote/wire"
@@ -176,7 +177,7 @@ func (h *refreshACPTestHarness) ProbeModels(context.Context) ([]acp.ProbedModel,
 }
 
 func TestRefreshProviderModelsProbesACPCatalog(t *testing.T) {
-	catalog := otherACPCatalogs["cursor"]
+	catalog := acpCatalog("cursor")
 	catalog.mu.Lock()
 	previousModels, previousFetched, previousFailed, previousGen, previousFetchGen, previousFetching := catalog.models, catalog.fetchedAt, catalog.failedAt, catalog.gen, catalog.fetchGen, catalog.fetching
 	catalog.mu.Unlock()
@@ -203,4 +204,133 @@ func TestRefreshProviderModelsProbesACPCatalog(t *testing.T) {
 		}
 	}
 	t.Fatal("ACP 探测到的模型没有出现在供应商目录里")
+}
+
+// customACPTestHarness 是同时带 ACP 探测与可选 CLI 路径的 fake harness：
+// 用来验证任意 id 的 ACP provider 都能拿到自己的目录，且专门目录的 provider 不被抢走。
+type customACPTestHarness struct {
+	customMetaHarness
+	models []acp.ProbedModel
+	binary string
+	calls  atomic.Int32
+}
+
+func (h *customACPTestHarness) ProbeModels(context.Context) ([]acp.ProbedModel, error) {
+	h.calls.Add(1)
+	return h.models, nil
+}
+
+func (h *customACPTestHarness) CatalogBinary() string { return h.binary }
+
+func TestRefreshProviderModelsProbesCustomACPCatalog(t *testing.T) {
+	const kind = "maki"
+	t.Cleanup(func() { acpCatalogs.Delete(kind) })
+	h := &customACPTestHarness{
+		customMetaHarness: customMetaHarness{kind: kind},
+		models: []acp.ProbedModel{
+			{ID: "maki-fast", Name: "Maki Fast"},
+			{ID: "maki-pro", Name: "Maki Pro", Current: true, Efforts: []string{"low", "medium", "high"}, DefaultEffort: "high", ContextTokens: 1000000},
+		},
+	}
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.RegisterHarness(h)
+	if rows := ProviderModels(kind); len(rows) != 1 || rows[0].ID != placeholderModelID {
+		t.Fatalf("探测前的目录应为占位行: %+v", rows)
+	}
+	if err := backend.RefreshProviderModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.calls.Load() != 1 {
+		t.Fatalf("探测次数 = %d，想要 1", h.calls.Load())
+	}
+	snapshot := acpCatalogSnapshot(kind)
+	if len(snapshot) != 2 || snapshot[0].ID != "maki-fast" || snapshot[1].ID != "maki-pro" || !snapshot[1].IsDefault {
+		t.Fatalf("自定义 ACP 目录错误: %+v", snapshot)
+	}
+	if len(snapshot[0].Efforts) != 0 || snapshot[0].DefaultEffort != nil {
+		t.Fatalf("没有档位的模型不该带档位: %+v", snapshot[0])
+	}
+	if len(snapshot[1].Efforts) != 3 || snapshot[1].Efforts[2] != "high" || snapshot[1].DefaultEffort == nil || *snapshot[1].DefaultEffort != "high" {
+		t.Fatalf("探测行档位丢失: %+v", snapshot[1])
+	}
+	if snapshot[0].ContextLimit != 0 || snapshot[1].ContextLimit != 1000000 {
+		t.Fatalf("探测行上下文窗口丢失: %+v", snapshot)
+	}
+	rows := ProviderModels(kind)
+	if len(rows) != 2 || rows[0].ID != "maki-fast" || rows[1].ID != "maki-pro" {
+		t.Fatalf("ProviderModels 未读到自定义 ACP 目录: %+v", rows)
+	}
+	result, err := backend.ListProviders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range result.Providers {
+		if p.ID != kind {
+			continue
+		}
+		if len(p.Models) != 2 || p.Models[0].ID != "maki-fast" || p.Models[1].ID != "maki-pro" || !p.Models[1].IsDefault {
+			t.Fatalf("供应商目录错误: %+v", p.Models)
+		}
+		return
+	}
+	t.Fatalf("供应商列表里没有 %s", kind)
+}
+
+func TestRefreshProviderModelsKeepsDedicatedCatalogs(t *testing.T) {
+	// cline/droid 的目录各有来源，即使 harness 实现了 ProbeModels 也不能改走 ACP 目录。
+	for _, kind := range []string{"cline", "droid"} {
+		t.Cleanup(func() { acpCatalogs.Delete(kind) })
+	}
+	missing := filepath.Join(t.TempDir(), "missing-cli")
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	harnesses := map[string]*customACPTestHarness{}
+	for _, kind := range []string{"cline", "droid"} {
+		h := &customACPTestHarness{
+			customMetaHarness: customMetaHarness{kind: harness.Kind(kind)},
+			models:            []acp.ProbedModel{{ID: "agent-model", Name: "Agent Model", Current: true}},
+			binary:            missing,
+		}
+		harnesses[kind] = h
+		backend.RegisterHarness(h)
+	}
+	_ = backend.RefreshProviderModels(context.Background())
+	for kind, h := range harnesses {
+		if h.calls.Load() != 0 {
+			t.Fatalf("%s 不应走 ACP 探测，探测次数 = %d", kind, h.calls.Load())
+		}
+		if rows := acpCatalogSnapshot(kind); rows != nil {
+			t.Fatalf("%s 不应写入 ACP 目录: %+v", kind, rows)
+		}
+	}
+	for _, m := range ProviderModels("cline") {
+		if m.ID == "agent-model" {
+			t.Fatal("cline 目录被 ACP 探测结果顶掉了")
+		}
+	}
+}
+
+func TestRefreshProviderModelsFallsBackToRefreshModels(t *testing.T) {
+	const kind = "plain-no-probe"
+	t.Cleanup(func() { acpCatalogs.Delete(kind) })
+	h := &refreshTestHarness{customMetaHarness: customMetaHarness{kind: kind}, available: true}
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.RegisterHarness(h)
+	if err := backend.RefreshProviderModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.calls.Load() != 1 {
+		t.Fatalf("RefreshModels 调用次数 = %d，想要 1", h.calls.Load())
+	}
+	if rows := acpCatalogSnapshot(kind); rows != nil {
+		t.Fatalf("无探测能力的 provider 不应创建 ACP 目录: %+v", rows)
+	}
 }

@@ -234,9 +234,21 @@ func providerBinPlaceholder(v ProviderVersionInfo) string {
 	return "留空则从 PATH 查找"
 }
 
-// isCLIProviderID 判断 ID 是否为 CLI harness（ProviderSetting.Kind == "cli"）。
-func isCLIProviderID(id string) bool {
+// isCLIProviderID 判断 ID 是否为 CLI harness（ProviderSetting.Kind == "cli"）：
+// 先查静态名单（供应商行尚未加载时也有答案），再查运行期从 ProviderSettings 拿到的 CLI ID，
+// 配置里的自定义 ACP provider（例如 maki）只出现在后者里。
+func isCLIProviderID(st *SettingsState, id string) bool {
 	for _, cliID := range cliProviderIDs {
+		if cliID == id {
+			return true
+		}
+	}
+	if st == nil {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for _, cliID := range st.providerRows.cliIDs {
 		if cliID == id {
 			return true
 		}
@@ -710,7 +722,7 @@ func groupProviderIDs(ids []string, inputs map[string]providerGroupInput) (enabl
 // providerRowSwitchState 返回某行启用开关是否存在、当前是否启用：claude/codex 读固定配置，
 // CLI harness 读 ProviderSettings.Enabled；其余 Provider（例如 agy）没有启用开关。
 func providerRowSwitchState(st *SettingsState, id string) (hasSwitch bool, enabled bool) {
-	if id != "claude" && id != "codex" && !isCLIProviderID(id) {
+	if id != "claude" && id != "codex" && !isCLIProviderID(st, id) {
 		return false, false
 	}
 	st.mu.Lock()
@@ -1778,7 +1790,7 @@ func cliProviderSheetSections(st *SettingsState, id string, lib *modelsLibraryVi
 			Render: func(c *ui.Context, st *SettingsState) {
 				renderSettingsSection(c, "sec-provider-account", "", func() {
 					renderProviderAccountTab(c, st, id, view, locked)
-					if isCLIProviderID(id) {
+					if isCLIProviderID(st, id) {
 						renderProviderCLIExpanded(c, st, id, true, locked)
 					}
 				})
@@ -1903,7 +1915,7 @@ func providerHasTrayQuotaSwitch(id string) bool {
 // providerHasAccountTab 判断「账号与额度」页签是否有内容：原生 Provider 始终有账号区或说明行；
 // CLI harness 只有额度、余额或菜单栏额度开关之一时才显示。
 func providerHasAccountTab(st *SettingsState, id string, view providerDetailState) bool {
-	if !isCLIProviderID(id) {
+	if !isCLIProviderID(st, id) {
 		return true
 	}
 	if providerHasTrayQuotaSwitch(id) || len(view.quota) > 0 || view.quotaErr != "" {
@@ -2050,7 +2062,7 @@ func renderProviderAccountTab(c *ui.Context, st *SettingsState, id string, view 
 			renderUsageStatusLine(c, usageStatusForData(view.quotaErr, false, time.Time{}, time.Now()), 11)
 		})
 	}
-	if !isCLIProviderID(id) {
+	if !isCLIProviderID(st, id) {
 		// (a) 限额面板
 		renderProviderQuotaPanel(c, st, id, view.quota, view.quotaErr, view.loading)
 		// (c) 多账号区
@@ -2068,7 +2080,7 @@ func renderProviderAdvancedTab(c *ui.Context, st *SettingsState, id string, view
 		renderAgyRowAdvancedSections(c, st)
 		return
 	}
-	if isCLIProviderID(id) {
+	if isCLIProviderID(st, id) {
 		// CLI harness 的路径、版本与认证方式。
 		renderProviderCLIExpanded(c, st, id, false, locked)
 		return

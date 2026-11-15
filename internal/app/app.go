@@ -2097,6 +2097,8 @@ func registerExtraProviders(backend *remote.MemoryBackend, cfg config.Config, da
 		opts := acp.Options{
 			Agent:       a,
 			Binary:      bin,
+			Args:        pCfg.Args,
+			Env:         pCfg.EnvList(),
 			BuiltinMCP:  mcpInjection.Builtin,
 			ExternalMCP: mcpInjection.External,
 		}
@@ -2114,6 +2116,39 @@ func registerExtraProviders(backend *remote.MemoryBackend, cfg config.Config, da
 			}
 		}
 		backend.RegisterHarness(acp.New(opts))
+	}
+
+	// ACP agents outside the built-in list are declared by config; register them in
+	// sorted id order so startup stays deterministic.
+	builtin := make(map[string]struct{}, len(acp.Agents()))
+	for _, a := range acp.Agents() {
+		builtin[string(a)] = struct{}{}
+	}
+	customIDs := make([]string, 0, len(cfg.Providers.ACP))
+	for id := range cfg.Providers.ACP {
+		if _, ok := builtin[id]; !ok {
+			customIDs = append(customIDs, id)
+		}
+	}
+	sort.Strings(customIDs)
+	for _, id := range customIDs {
+		pc := cfg.Providers.ACP[id]
+		if !pc.Enabled {
+			continue
+		}
+		bin := pc.Bin
+		if bin == "" {
+			bin = acp.DefaultBinary(acp.Agent(id))
+		}
+		backend.RegisterHarness(acp.New(acp.Options{
+			Agent:       acp.Agent(id),
+			Binary:      bin,
+			Args:        pc.Args,
+			Env:         pc.EnvList(),
+			BuiltinMCP:  mcpInjection.Builtin,
+			ExternalMCP: mcpInjection.External,
+		}))
+		harness.RegisterCLICatalogProvider(id)
 	}
 
 	if h, ok := buildProviderHarness(cfg, secrets, "openai", mcpInjection); ok {

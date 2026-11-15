@@ -1096,6 +1096,35 @@ func TestMemoryBackend_TurnIndexSemanticConsecutiveTurns(t *testing.T) {
 	}
 }
 
+func TestIsValidEffort(t *testing.T) {
+	for _, tc := range []struct {
+		effort string
+		want   bool
+	}{
+		{effort: "", want: true},
+		{effort: "low", want: true},
+		{effort: "medium", want: true},
+		{effort: "high", want: true},
+		{effort: "xhigh", want: true},
+		{effort: "max", want: true},
+		{effort: "off", want: true},
+		{effort: "none", want: true},
+		{effort: "minimal", want: true},
+		{effort: "extra-high", want: true},
+		{effort: "extra_high", want: true},
+		{effort: "adaptive", want: true},
+		{effort: "turbo", want: false},
+		{effort: "HIGH", want: false},
+		{effort: "min", want: false},
+	} {
+		t.Run(tc.effort, func(t *testing.T) {
+			if got := isValidEffort(tc.effort); got != tc.want {
+				t.Fatalf("isValidEffort(%q) = %v, want %v", tc.effort, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMemoryBackend_UpdateThreadRunningOptions(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -1106,6 +1135,7 @@ func TestMemoryBackend_UpdateThreadRunningOptions(t *testing.T) {
 		invalid  bool
 	}{
 		{name: "effort", effort: "high"},
+		{name: "native minimal effort", effort: "minimal"},
 		{name: "invalid effort", effort: "invalid", invalid: true},
 		{name: "model", model: DefaultModel("codex")},
 		{name: "provider", provider: "claude", invalid: true},

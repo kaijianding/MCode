@@ -101,6 +101,47 @@ func TestLaunchArgsMatrix(t *testing.T) {
 	}
 }
 
+func TestAgentLaunchArgsCustomArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    Agent
+		opts     Options
+		mode     harness.PermissionMode
+		expected []string
+	}{
+		{
+			name:     "自定义 Args 整组替换默认值",
+			agent:    Agent("myagent"),
+			opts:     Options{Args: []string{"exec", "--output-format", "acp"}},
+			mode:     harness.ModeAuto,
+			expected: []string{"exec", "--output-format", "acp"},
+		},
+		{
+			name:     "Args 为空回落到 LaunchArgs",
+			agent:    AgentDroid,
+			opts:     Options{},
+			mode:     harness.ModeAuto,
+			expected: LaunchArgs(AgentDroid, harness.ModeAuto),
+		},
+	}
+
+	for _, tc := range tests {
+		got := agentLaunchArgs(tc.agent, tc.opts, tc.mode)
+		if !reflect.DeepEqual(got, tc.expected) {
+			t.Errorf("%s: agentLaunchArgs = %v, expected %v", tc.name, got, tc.expected)
+		}
+	}
+}
+
+func TestAgentLaunchArgsReturnsCopy(t *testing.T) {
+	opts := Options{Args: []string{"exec", "acp"}}
+	got := agentLaunchArgs(Agent("myagent"), opts, harness.ModeAuto)
+	got[0] = "mutated"
+	if opts.Args[0] != "exec" {
+		t.Fatalf("agentLaunchArgs must not alias opts.Args, got %v", opts.Args)
+	}
+}
+
 func TestAgentCapabilities(t *testing.T) {
 	tests := []struct {
 		agent Agent

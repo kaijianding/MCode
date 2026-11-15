@@ -1576,10 +1576,11 @@ type ThreadComposerPrefs struct {
 	Persona string
 }
 
-// isValidEffort 校验 effort 取值，空串表示供应商默认。
+// isValidEffort validates session preference tokens. Empty means provider default;
+// directory-native tokens are stored as-is and are not normalized at this layer.
 func isValidEffort(effort string) bool {
 	switch effort {
-	case "", "low", "medium", "high", "xhigh", "max":
+	case "", "low", "medium", "high", "xhigh", "max", "off", "none", "minimal", "extra-high", "extra_high", "adaptive":
 		return true
 	}
 	return false

@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -307,21 +308,50 @@ func main() {
 	}
 
 	if settings.Provider == "claude" || settings.Provider == "codex" {
+		builtinACP := make(map[string]struct{}, len(acp.Agents()))
 		for _, a := range acp.Agents() {
-			if pCfg, ok := settings.ACP[string(a)]; ok && !pCfg.Enabled {
+			pCfg, ok := settings.ACP[string(a)]
+			if ok && !pCfg.Enabled {
 				continue
 			}
-			bin := ""
-			if pCfg, ok := settings.ACP[string(a)]; ok {
-				bin = pCfg.Bin
-			}
+			bin := pCfg.Bin
 			if bin == "" {
 				bin = acp.DefaultBinary(a)
 			}
 			backend.RegisterHarness(acp.New(acp.Options{
 				Agent:  a,
 				Binary: bin,
+				Args:   pCfg.Args,
+				Env:    pCfg.EnvList(),
 			}))
+			builtinACP[string(a)] = struct{}{}
+		}
+
+		// ACP agents outside the built-in list are declared by config; register them in
+		// sorted id order so startup stays deterministic.
+		customACPIDs := make([]string, 0, len(settings.ACP))
+		for id := range settings.ACP {
+			if _, ok := builtinACP[id]; !ok {
+				customACPIDs = append(customACPIDs, id)
+			}
+		}
+		sort.Strings(customACPIDs)
+		for _, id := range customACPIDs {
+			pc := settings.ACP[id]
+			if !pc.Enabled {
+				continue
+			}
+			bin := pc.Bin
+			if bin == "" {
+				bin = acp.DefaultBinary(acp.Agent(id))
+			}
+			backend.RegisterHarness(acp.New(acp.Options{
+				Agent:  acp.Agent(id),
+				Binary: bin,
+				Args:   pc.Args,
+				Env:    pc.EnvList(),
+			}))
+			harness.RegisterCLICatalogProvider(id)
 		}
 
 		for _, err := range config.MigrateLegacySecrets(config.LegacySecretRefs(nil)) {

@@ -8,7 +8,7 @@
 |---|---|
 | `server.go`、`registry.go` | 内置服务和工具注册表（`Registry.Register`） |
 | `tools_*.go` | 按域拆分的工具实现：看板、自动化、项目文档、记忆、编排 |
-| `proxy.go` | 按会话路由；`filterDisabledTools` 应用工具策略；工具过多时折叠成 `call_tool` |
+| `proxy.go` | 按会话路由；`filterDisabledTools` 应用工具策略；工具过多时折叠成 `call_tool`；`tools/list` 遇到上游不可用（启动失败、401）时返回空工具列表并写日志，避免 Agent 因单个上游故障拒绝建立会话（rpi 会报 `external tool discovery failed`），`tools/call` 仍如实报错 |
 | `hub.go` | 上游连接和空闲回收 |
 | `oauth.go` | 上游 OAuth，令牌存 keyring（服务名 `mcode.mcp-oauth`） |
 | `session.go` | `SessionRouter.Endpoints`、`UntrustedServerNames` |

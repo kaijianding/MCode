@@ -546,6 +546,11 @@ func enrichMagpieRows(provider string, rows, base []wire.ProviderModel) []wire.P
 }
 
 func nativeProviderModels(provider string) []wire.ProviderModel {
+	// ACP provider（内置 cursor/opencode/grok/devin 与配置里注册的自定义 id）的目录来自
+	// 探测：有快照就用快照，没有则落到下面的占位行分支。
+	if cached := acpCatalogSnapshot(provider); len(cached) > 0 {
+		return cached
+	}
 	var src []wire.ProviderModel
 	switch provider {
 	case "claude":
@@ -625,11 +630,6 @@ func nativeProviderModels(provider string) []wire.ProviderModel {
 	case "pi", "omp", "copilot", "droid":
 		// 账号可用的模型目录由 CLI 在后台读取；读到之前保持占位行。
 		if cached := cliCatalogModels(provider); len(cached) > 0 {
-			return cached
-		}
-		return []wire.ProviderModel{placeholderModel()}
-	case "cursor", "opencode", "grok", "devin":
-		if cached := otherACPCatalogs[provider].snapshot(); len(cached) > 0 {
 			return cached
 		}
 		return []wire.ProviderModel{placeholderModel()}

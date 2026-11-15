@@ -2847,6 +2847,105 @@ func TestProviderConfig_PiTuningJSONRoundtrip(t *testing.T) {
 	}
 }
 
+// ACP Agent 启动参数经保存与重新加载后保留；未配置时序列化不含 args 键。
+func TestProviderConfig_ACPArgsRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Defaults()
+	cfg.Providers.ACP = map[string]ProviderConfig{
+		"myagent": {
+			Enabled: true,
+			Bin:     "/opt/myagent",
+			Args:    []string{"exec", "--output-format", "acp"},
+		},
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	agent, ok := got.Providers.ACP["myagent"]
+	if !ok {
+		t.Fatalf("ACP agent myagent lost after reload: %+v", got.Providers.ACP)
+	}
+	if !agent.Enabled || agent.Bin != "/opt/myagent" {
+		t.Errorf("Enabled/Bin mismatch: got %+v", agent)
+	}
+	if want := []string{"exec", "--output-format", "acp"}; !reflect.DeepEqual(agent.Args, want) {
+		t.Errorf("Args mismatch: got %v, want %v", agent.Args, want)
+	}
+
+	empty, err := json.Marshal(ProviderConfig{})
+	if err != nil {
+		t.Fatalf("json.Marshal empty failed: %v", err)
+	}
+	if strings.Contains(string(empty), "args") {
+		t.Errorf("未设置 Args 时应被省略，got: %s", empty)
+	}
+}
+
+// ACP Agent 的 env 经解析、保存与重新加载后保留；未配置时序列化不含 env 键。
+func TestProviderConfig_ACPEnvRoundtrip(t *testing.T) {
+	raw := `{"providers":{"acp":{"myagent":{"enabled":true,"bin":"/x","env":{"RPI_ACP_NO_AUTO_REGISTER_ZED":"1"}}}}}`
+	var dirCfg Config
+	if err := json.Unmarshal([]byte(raw), &dirCfg); err != nil {
+		t.Fatalf("json.Unmarshal raw failed: %v", err)
+	}
+	if got := dirCfg.Providers.ACP["myagent"].Env["RPI_ACP_NO_AUTO_REGISTER_ZED"]; got != "1" {
+		t.Errorf("raw env mismatch: got %q, want %q", got, "1")
+	}
+
+	dir := t.TempDir()
+	cfg := Defaults()
+	cfg.Providers.ACP = map[string]ProviderConfig{
+		"myagent": {
+			Enabled: true,
+			Bin:     "/x",
+			Args:    []string{"--acp"},
+			Env:     map[string]string{"RPI_ACP_NO_AUTO_REGISTER_ZED": "1"},
+		},
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	agent, ok := got.Providers.ACP["myagent"]
+	if !ok {
+		t.Fatalf("ACP agent myagent lost after reload: %+v", got.Providers.ACP)
+	}
+	if want := map[string]string{"RPI_ACP_NO_AUTO_REGISTER_ZED": "1"}; !reflect.DeepEqual(agent.Env, want) {
+		t.Errorf("Env mismatch: got %v, want %v", agent.Env, want)
+	}
+
+	data, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"env":{"RPI_ACP_NO_AUTO_REGISTER_ZED":"1"}`) {
+		t.Errorf("序列化结果应包含 env 键，got: %s", data)
+	}
+	empty, err := json.Marshal(ProviderConfig{})
+	if err != nil {
+		t.Fatalf("json.Marshal empty failed: %v", err)
+	}
+	if strings.Contains(string(empty), "env") {
+		t.Errorf("未设置 Env 时应被省略，got: %s", empty)
+	}
+
+	// EnvList 转换成可追加到子进程环境的 "KEY=VALUE"，多个键按 key 排序。
+	multi := ProviderConfig{Env: map[string]string{"B": "2", "A": "1"}}
+	if want := []string{"A=1", "B=2"}; !reflect.DeepEqual(multi.EnvList(), want) {
+		t.Errorf("EnvList mismatch: got %v, want %v", multi.EnvList(), want)
+	}
+	if got := (ProviderConfig{}).EnvList(); got != nil {
+		t.Errorf("空 Env 的 EnvList 应为 nil，got: %v", got)
+	}
+}
+
 // 32. StalledAlertEnabled / StalledAlertAfter：nil 与 0 走默认值，负数阈值回退默认 10 分钟。
 func TestGeneralStalledAlertSettings(t *testing.T) {
 	bTrue := true

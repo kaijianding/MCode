@@ -303,11 +303,13 @@ func TestProxy_UpstreamUnauthorized(t *testing.T) {
 		_ = proxy.Close()
 	})
 
-	// 转发时遇到上游 401，代理应返回 JSON-RPC -32001 错误，并提示需要重新授权
+	// 工具发现失败会退化为空列表（否则 rpi 这类 Agent 连会话都建不起来），
+	// 所以这里用工具调用来验证 401 仍然明确上报。
 	callReq := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      100,
-		"method":  "tools/list",
+		"method":  "tools/call",
+		"params":  map[string]any{"name": "x", "arguments": map[string]any{}},
 	}
 	code, resp := postProxy(t, proxy.Handler(), "/mcp/unauth-srv", proxy.Token(), callReq)
 	if code != http.StatusOK {
@@ -325,6 +327,72 @@ func TestProxy_UpstreamUnauthorized(t *testing.T) {
 	msg, _ := errObj["message"].(string)
 	if !strings.Contains(msg, "re-authentication required") {
 		t.Errorf("expected message to indicate re-authentication required, got %q", msg)
+	}
+
+	// tools/list 走到同一个不可用上游时必须退化为空列表：rpi 把发现失败当成
+	// session/new 的致命错误，返回错误会让它的整轮会话起不来。
+	code, resp = postProxy(t, proxy.Handler(), "/mcp/unauth-srv", proxy.Token(), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      101,
+		"method":  "tools/list",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("tools/list 应返回 HTTP 200，got %d", code)
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list 应返回 result，got %v", resp)
+	}
+	tools, ok := result["tools"].([]any)
+	if !ok || len(tools) != 0 {
+		t.Fatalf("tools/list 应退化为空列表，got %v", result)
+	}
+}
+
+func TestProxy_ToolsListEmptyWhenUpstreamMissing(t *testing.T) {
+	hub := NewHub(nil)
+	t.Cleanup(func() { _ = hub.Close() })
+	hub.SetUpstreams([]UpstreamSpec{{
+		ID:        "missing-cli",
+		Name:      "graft",
+		Transport: "stdio",
+		Command:   "mcode-missing-binary-xyz",
+	}})
+	proxy := NewProxy(hub)
+	t.Cleanup(func() { _ = proxy.Close() })
+
+	code, resp := postProxy(t, proxy.Handler(), "/mcp/missing-cli", proxy.Token(), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/list",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", code)
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result with empty tools, got %v", resp)
+	}
+	if tools, ok := result["tools"].([]any); !ok || len(tools) != 0 {
+		t.Fatalf("expected empty tools, got %v", result)
+	}
+
+	// 工具调用仍然把启动失败如实报出来。
+	code, resp = postProxy(t, proxy.Handler(), "/mcp/missing-cli", proxy.Token(), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params":  map[string]any{"name": "x", "arguments": map[string]any{}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 for tools/call, got %d", code)
+	}
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/call 应返回错误，got %v", resp)
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "mcode-missing-binary-xyz") {
+		t.Fatalf("错误信息应说明启动失败，got %q", msg)
 	}
 }
 

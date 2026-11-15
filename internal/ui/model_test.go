@@ -10,6 +10,35 @@ import (
 	"mcode/internal/testenv"
 )
 
+func TestEffortBackendAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		effort string
+		want   bool
+	}{
+		{effort: "", want: true},
+		{effort: "low", want: true},
+		{effort: "medium", want: true},
+		{effort: "high", want: true},
+		{effort: "xhigh", want: true},
+		{effort: "max", want: true},
+		{effort: "off", want: true},
+		{effort: "none", want: true},
+		{effort: "minimal", want: true},
+		{effort: "extra-high", want: true},
+		{effort: "extra_high", want: true},
+		{effort: "adaptive", want: true},
+		{effort: "turbo", want: false},
+		{effort: "HIGH", want: false},
+		{effort: "min", want: false},
+	} {
+		t.Run(tc.effort, func(t *testing.T) {
+			if got := effortBackendAllowed(tc.effort); got != tc.want {
+				t.Fatalf("effortBackendAllowed(%q) = %v, want %v", tc.effort, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpsertMessages(t *testing.T) {
 	initial := []Message{
 		{ID: "m1", Role: "user", Text: "Hello", TurnIndex: 1},

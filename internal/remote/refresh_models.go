@@ -75,11 +75,13 @@ func (b *MemoryBackend) RefreshProviderModels(ctx context.Context) error {
 					return fetchDroidModelsWithBinary(ctx, binary)
 				})
 			}
-		case "cursor", "opencode", "grok", "devin":
+		default:
+			// 任何自称 ACP probe 能力的 harness（内置 cursor/opencode/grok/devin 与配置里
+			// 注册的自定义 ACP provider）共用按 id 惰性创建的目录，不再按 id 枚举。
 			if probe, ok := h.(interface {
 				ProbeModels(context.Context) ([]acp.ProbedModel, error)
 			}); ok {
-				catalog := otherACPCatalogs[id]
+				catalog := acpCatalog(id)
 				refresh = func(ctx context.Context) error {
 					return catalog.reload(ctx, func(ctx context.Context) ([]wire.ProviderModel, error) {
 						models, err := probe.ProbeModels(ctx)
@@ -92,15 +94,17 @@ func (b *MemoryBackend) RefreshProviderModels(ctx context.Context) error {
 							if name == "" {
 								name = m.ID
 							}
-							rows = append(rows, wire.ProviderModel{ID: m.ID, Name: name, Detail: optionalString(m.Description), IsDefault: m.Current})
+							row := wire.ProviderModel{ID: m.ID, Name: name, Detail: optionalString(m.Description), Efforts: m.Efforts, IsDefault: m.Current, ContextLimit: m.ContextTokens}
+							if m.DefaultEffort != "" {
+								row.DefaultEffort = stringPtr(m.DefaultEffort)
+							}
+							rows = append(rows, row)
 						}
 						startuptrace.Mark("providers: " + id + " models ready")
 						return withDefaultRow(rows), nil
 					})
 				}
-			}
-		default:
-			if r, ok := h.(interface{ RefreshModels(context.Context) error }); ok {
+			} else if r, ok := h.(interface{ RefreshModels(context.Context) error }); ok {
 				refresh = r.RefreshModels
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"mcode/internal/apisource"
@@ -52,8 +53,12 @@ func providerSettingSpecByID(id string) (providerSettingSpec, bool) {
 	return providerSettingSpec{}, false
 }
 
-// providerSettingIsACP 判断该 Provider 是否由 ACP 循环注册（见 acp.Agents）。
-func providerSettingIsACP(id string) bool {
+// providerSettingIsACP 判断该 Provider 是否按 ACP Agent 处理：
+// 内置枚举（见 acp.Agents）或 providers.acp 里存在的任意 id。
+func providerSettingIsACP(cfg config.Config, id string) bool {
+	if _, ok := cfg.Providers.ACP[id]; ok {
+		return true
+	}
 	for _, a := range acp.Agents() {
 		if string(a) == id {
 			return true
@@ -97,6 +102,18 @@ func hasProviderSecret(secrets config.SecretStore, account string) bool {
 	return err == nil && strings.TrimSpace(val) != ""
 }
 
+// fillACPProviderSetting 用 providers.acp 里的一条配置填充设置项。
+// 缺省时视为启用，与 registerExtraProviders 的注册逻辑一致。
+func fillACPProviderSetting(s *mcodeui.ProviderSetting, cfg config.Config, secrets config.SecretStore) {
+	pc, ok := cfg.Providers.ACP[s.ID]
+	s.Enabled = !ok || pc.Enabled
+	s.Bin = pc.Bin
+	if s.ID == "droid" {
+		s.Auth = pc.Auth
+		s.HasAPIKey = hasProviderSecret(secrets, droidAPIKeyAccount)
+	}
+}
+
 // buildProviderSetting 由配置与凭据存储组装单个 Provider 的设置项。
 func buildProviderSetting(cfg config.Config, secrets config.SecretStore, spec providerSettingSpec) mcodeui.ProviderSetting {
 	s := mcodeui.ProviderSetting{
@@ -131,15 +148,12 @@ func buildProviderSetting(cfg config.Config, secrets config.SecretStore, spec pr
 		s.Enabled = cfg.Providers.CommandCode.Enabled
 		s.Bin = cfg.Providers.CommandCode.Bin
 	case "droid", "cline", "cursor", "opencode", "grok", "devin":
-		pc, ok := cfg.Providers.ACP[spec.id]
-		// ACP map 中缺省时视为启用，与 registerExtraProviders 的注册逻辑一致。
-		s.Enabled = !ok || pc.Enabled
-		s.Bin = pc.Bin
-		if spec.id == "droid" {
-			s.Auth = pc.Auth
-			s.HasAPIKey = hasProviderSecret(secrets, droidAPIKeyAccount)
-		}
+		fillACPProviderSetting(&s, cfg, secrets)
 	default:
+		if providerSettingIsACP(cfg, spec.id) {
+			fillACPProviderSetting(&s, cfg, secrets)
+			return s
+		}
 		preset, ok := apisource.PresetByID(spec.id)
 		if !ok {
 			return s
@@ -153,6 +167,21 @@ func buildProviderSetting(cfg config.Config, secrets config.SecretStore, spec pr
 		s.HasAPIKey = hasProviderSecret(secrets, preset.APIKeyAccount)
 	}
 	return s
+}
+
+// applyACPProviderSetting 把设置写回 providers.acp 的对应条目；
+// 只覆盖 Enabled/Bin（droid 另加 Auth），保留 Args 等设置页不展示的字段。
+func applyACPProviderSetting(cfg *config.Config, id string, s mcodeui.ProviderSetting) {
+	pc := cfg.Providers.ACP[id]
+	pc.Enabled = s.Enabled
+	pc.Bin = strings.TrimSpace(s.Bin)
+	if id == "droid" {
+		pc.Auth = strings.TrimSpace(s.Auth)
+	}
+	if cfg.Providers.ACP == nil {
+		cfg.Providers.ACP = make(map[string]config.ProviderConfig)
+	}
+	cfg.Providers.ACP[id] = pc
 }
 
 // applyProviderSetting 把设置页提交的单个 Provider 配置写回配置结构体。
@@ -179,17 +208,12 @@ func applyProviderSetting(cfg *config.Config, id string, s mcodeui.ProviderSetti
 		cfg.Providers.CommandCode.Enabled = s.Enabled
 		cfg.Providers.CommandCode.Bin = strings.TrimSpace(s.Bin)
 	case "droid", "cline", "cursor", "opencode", "grok", "devin":
-		pc := cfg.Providers.ACP[id]
-		pc.Enabled = s.Enabled
-		pc.Bin = strings.TrimSpace(s.Bin)
-		if id == "droid" {
-			pc.Auth = strings.TrimSpace(s.Auth)
-		}
-		if cfg.Providers.ACP == nil {
-			cfg.Providers.ACP = make(map[string]config.ProviderConfig)
-		}
-		cfg.Providers.ACP[id] = pc
+		applyACPProviderSetting(cfg, id, s)
 	default:
+		if _, ok := cfg.Providers.ACP[id]; ok {
+			applyACPProviderSetting(cfg, id, s)
+			return
+		}
 		pc := cfg.Providers.Presets[id]
 		pc.Enabled = s.Enabled
 		pc.BaseURL = strings.TrimSpace(s.BaseURL)
@@ -214,9 +238,20 @@ func (c *Client) ProviderSettings(ctx context.Context) ([]mcodeui.ProviderSettin
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	res := make([]mcodeui.ProviderSetting, 0, len(providerSettingSpecs))
+	res := make([]mcodeui.ProviderSetting, 0, len(providerSettingSpecs)+len(cfg.Providers.ACP))
 	for _, spec := range providerSettingSpecs {
 		res = append(res, buildProviderSetting(cfg, secrets, spec))
+	}
+	// providers.acp 里手写的自定义 Agent 追加在固定列表之后；展示名用 id，按 id 排序保证顺序稳定。
+	extra := make([]string, 0, len(cfg.Providers.ACP))
+	for id := range cfg.Providers.ACP {
+		if _, ok := providerSettingSpecByID(id); !ok {
+			extra = append(extra, id)
+		}
+	}
+	sort.Strings(extra)
+	for _, id := range extra {
+		res = append(res, buildProviderSetting(cfg, secrets, providerSettingSpec{id: id, name: id, kind: "cli"}))
 	}
 	return res, nil
 }
@@ -241,9 +276,18 @@ func (c *Client) SaveProviderSetting(ctx context.Context, s mcodeui.ProviderSett
 	c.providersMu.Lock()
 	defer c.providersMu.Unlock()
 
-	spec, ok := providerSettingSpecByID(strings.TrimSpace(s.ID))
+	id := strings.TrimSpace(s.ID)
+	spec, ok := providerSettingSpecByID(id)
 	if !ok {
-		return mcodeui.ProviderSetting{}, fmt.Errorf("未知的 Provider ID %q", s.ID)
+		// providers.acp 里手写的自定义 ACP Agent 同样可保存：展示名用 id，Kind 固定为 cli。
+		cfg, err := config.Load(c.dataDir)
+		if err != nil {
+			return mcodeui.ProviderSetting{}, fmt.Errorf("load config: %w", err)
+		}
+		if !providerSettingIsACP(cfg, id) {
+			return mcodeui.ProviderSetting{}, fmt.Errorf("未知的 Provider ID %q", s.ID)
+		}
+		spec = providerSettingSpec{id: id, name: id, kind: "cli"}
 	}
 
 	trimmedKey := strings.TrimSpace(apiKey)
@@ -290,9 +334,9 @@ func (c *Client) SaveProviderSetting(ctx context.Context, s mcodeui.ProviderSett
 	}
 
 	// 热更新运行时注册：先注销旧 harness，启用时按新配置重建并注册。
-	// ACP（droid/cline/cursor/opencode/grok/devin）的 harness 由启动时的 ACP 循环构造（含 droid 认证环境变量），
-	// 此处只写配置，启用/停用与 Bin、Auth 变更均需重启后生效。
-	if c.backend != nil && !providerSettingIsACP(spec.id) {
+	// ACP（内置 droid/cline/cursor/opencode/grok/devin 与 providers.acp 自定义 id）的 harness
+	// 由启动时的 ACP 循环构造（含 droid 认证环境变量），此处只写配置，启用/停用与 Bin、Auth 变更均需重启后生效。
+	if c.backend != nil && !providerSettingIsACP(cfg, spec.id) {
 		c.releaseReplacedHarness(spec.id)
 		if spec.id == "anthropic" {
 			// 先注销后重建：保存了新 Key 时按最新来源重新注册，没有 Key 时保持注销。

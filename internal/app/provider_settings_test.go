@@ -555,3 +555,96 @@ func TestRegisterExtraProviders_McodeAlias(t *testing.T) {
 		t.Fatalf("默认来源不能是 mcode: %v", providers)
 	}
 }
+
+// 配置声明的自定义 ACP Agent 在启动时注册；禁用的条目跳过，内置枚举不受影响。
+func TestRegisterExtraProviders_CustomACPAgent(t *testing.T) {
+	dir := t.TempDir()
+	previousDir := getAppDataDir()
+	t.Cleanup(func() { setAppDataDir(previousDir) })
+	hub := remote.NewStreamHub(remote.StreamHubOptions{})
+	t.Cleanup(hub.Close)
+	backend := remote.NewMemoryBackend(hub)
+	t.Cleanup(backend.Close)
+
+	cfg := config.Config{}
+	cfg.Providers.ACP = map[string]config.ProviderConfig{
+		"myagent":  {Enabled: true, Bin: "/opt/myagent", Args: []string{"exec", "--output-format", "acp"}},
+		"offagent": {Enabled: false, Bin: "/opt/offagent"},
+	}
+	registerExtraProviders(backend, cfg, dir, accounts.Options{}, providerMCP{})
+
+	h := backend.RegisteredHarness("myagent")
+	if h == nil {
+		t.Fatal("配置声明的自定义 ACP Agent 应被注册")
+	}
+	if h.Kind() != "myagent" {
+		t.Fatalf("自定义 ACP Agent 的 Kind 应为 myagent: %q", h.Kind())
+	}
+	if backend.RegisteredHarness("offagent") != nil {
+		t.Fatal("禁用的自定义 ACP Agent 不应注册")
+	}
+	if backend.RegisteredHarness("cline") == nil {
+		t.Fatal("内置 ACP Agent 不应受自定义条目影响")
+	}
+}
+
+// providers.acp 里手写的自定义 Agent 出现在设置页末尾（按 id 排序），
+// 保存关闭状态后配置里的 Bin/Args 保留，可执行文件解析优先用配置路径。
+func TestProviderSettings_CustomACPAgent(t *testing.T) {
+	client, dataDir, _ := newProviderSettingsClient(t)
+	ctx := context.Background()
+
+	if err := config.Update(dataDir, func(latest *config.Config) error {
+		latest.Providers.ACP = map[string]config.ProviderConfig{
+			"myagent": {Enabled: true, Bin: "  /opt/myagent  ", Args: []string{"--stdio"}},
+			"aagent":  {Enabled: false, Bin: "/opt/aagent"},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := client.ProviderSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := list[len(list)-2].ID + "," + list[len(list)-1].ID; got != "aagent,myagent" {
+		t.Fatalf("自定义 ACP Agent 应按 id 排序追加在固定列表之后: got %q", got)
+	}
+	var agent mcodeui.ProviderSetting
+	for _, s := range list {
+		if s.ID == "myagent" {
+			agent = s
+		}
+	}
+	if agent.Name != "myagent" || agent.Kind != "cli" || !agent.Enabled || agent.Bin != "  /opt/myagent  " {
+		t.Fatalf("自定义 ACP 设置不匹配: %+v", agent)
+	}
+
+	// 设置页回传整行，仅改 Enabled：Bin 保留，配置里其他字段（Args）不被覆盖。
+	if _, err := client.SaveProviderSetting(ctx, mcodeui.ProviderSetting{
+		ID:   agent.ID,
+		Name: agent.Name,
+		Kind: agent.Kind,
+		Bin:  agent.Bin,
+	}, ""); err != nil {
+		t.Fatalf("SaveProviderSetting(myagent) failed: %v", err)
+	}
+	cfg, err := config.Load(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := cfg.Providers.ACP["myagent"]
+	if pc.Enabled || pc.Bin != "/opt/myagent" {
+		t.Fatalf("保存关闭状态后配置不匹配: %+v", pc)
+	}
+	if !reflect.DeepEqual(pc.Args, []string{"--stdio"}) {
+		t.Fatalf("保存不应丢 Args: %+v", pc)
+	}
+
+	// 解析可执行文件时优先用配置路径，而不是报「没有已知的可执行文件」。
+	bin, err := client.providerExecutable("myagent")
+	if err != nil || bin != "/opt/myagent" {
+		t.Fatalf("myagent 的可执行文件解析失败: %q %v", bin, err)
+	}
+}

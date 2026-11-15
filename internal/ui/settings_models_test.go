@@ -1639,3 +1639,200 @@ func TestSettingsModelsPinDragReduceMotion(t *testing.T) {
 		t.Fatalf("减少动效时相邻行应立即移动 59: %+v -> %+v", before, after)
 	}
 }
+
+// 自定义 ACP provider 的目录只有显式刷新才会探测：面板首帧自动探测一次，
+// 之后同一 provider 由 catalogProbed 去重，不再重复发起。
+func TestProviderSheetAutoProbesEmptyCatalog(t *testing.T) {
+	var refreshCalls atomic.Int32
+	client := modelsRefreshTestClient{
+		Client: NewFakeClient(),
+		refresh: func(context.Context) ([]ProviderInfo, error) {
+			refreshCalls.Add(1)
+			return []ProviderInfo{{ID: "maki", Available: true, Models: []ModelInfo{{ID: "maki-1"}}}}, nil
+		},
+	}
+	chat := newChatState(client)
+	st := NewSettingsState(settingsTestDir(t), nil, chat)
+	empty := &modelsLibraryView{providers: []ProviderInfo{{ID: "maki", Available: true}}}
+
+	if !shouldAutoProbeCatalog(st, empty, "maki") {
+		t.Fatal("空目录的已安装 CLI 供应商应触发自动探测")
+	}
+	st.refreshModels()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st.mu.Lock()
+		refreshing, finished := st.modelsRefreshing, st.modelsRefreshDone
+		st.mu.Unlock()
+		if !refreshing && finished {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("自动探测的刷新未完成")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("自动探测刷新次数 %d，期望 1", got)
+	}
+	// 清掉全局刷新完成标志：第二轮只能由 catalogProbed 拦住，避免被别的状态误挡。
+	st.mu.Lock()
+	st.modelsRefreshDone = false
+	st.mu.Unlock()
+	if shouldAutoProbeCatalog(st, empty, "maki") {
+		t.Fatal("同一 provider 不应重复自动探测")
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("第二帧后自动探测刷新次数 %d，期望仍为 1", got)
+	}
+}
+
+// 自动探测只在「已安装且目录为空或只有 default 占位行」时成立。
+func TestShouldAutoProbeCatalogConditions(t *testing.T) {
+	st := NewSettingsState(settingsTestDir(t), nil, newChatState(NewFakeClient()))
+	cases := []struct {
+		name string
+		info ProviderInfo
+		want bool
+	}{
+		{"空目录", ProviderInfo{ID: "maki", Available: true}, true},
+		{"仅 default 占位行", ProviderInfo{ID: "maki", Available: true, Models: []ModelInfo{{ID: "default"}}}, true},
+		{"已有真实模型", ProviderInfo{ID: "maki", Available: true, Models: []ModelInfo{{ID: "maki-1"}}}, false},
+		{"未安装", ProviderInfo{ID: "maki"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lib := &modelsLibraryView{providers: []ProviderInfo{tc.info}}
+			if got := shouldAutoProbeCatalog(st, lib, "maki"); got != tc.want {
+				t.Fatalf("shouldAutoProbeCatalog = %v，期望 %v", got, tc.want)
+			}
+			st.mu.Lock()
+			st.catalogProbed = nil
+			st.mu.Unlock()
+		})
+	}
+	if shouldAutoProbeCatalog(st, nil, "maki") {
+		t.Fatal("目录未加载时不应自动探测")
+	}
+	if shouldAutoProbeCatalog(st, &modelsLibraryView{}, "maki") {
+		t.Fatal("目录里没有该供应商时不应自动探测")
+	}
+}
+
+// 配置里的自定义 ACP provider（Kind=="cli"）只出现在运行期 cliIDs 里，也应被当作 CLI 供应商。
+func TestIsCLIProviderIDIncludesConfiguredCLI(t *testing.T) {
+	st := NewSettingsState(settingsTestDir(t), nil, newChatState(NewFakeClient()))
+	if isCLIProviderID(st, "maki") {
+		t.Fatal("cliIDs 未加载前 maki 不应被识别")
+	}
+	if !isCLIProviderID(st, "cursor") || !isCLIProviderID(nil, "cursor") {
+		t.Fatal("静态名单在 cliIDs 为空时仍需命中")
+	}
+	st.mu.Lock()
+	st.providerRows.cliIDs = []string{"maki"}
+	st.mu.Unlock()
+	if !isCLIProviderID(st, "maki") {
+		t.Fatal("cliIDs 含 maki 时应被识别为 CLI 供应商")
+	}
+	st.mu.Lock()
+	st.providerRows.cliIDs = nil
+	st.mu.Unlock()
+	if !isCLIProviderID(st, "cursor") {
+		t.Fatal("cliIDs 清空后静态名单仍应命中")
+	}
+	if isCLIProviderID(st, "maki") {
+		t.Fatal("cliIDs 清空后 maki 不应再被识别")
+	}
+}
+
+// 启动快照里只有占位目录时必须强制探测一次：占位目录没有任何生产者，只读缓存永远是占位。
+func TestStartupProbesPendingCatalogOnce(t *testing.T) {
+	origDelays := providerCatalogRetryDelays
+	providerCatalogRetryDelays = nil
+	defer func() { providerCatalogRetryDelays = origDelays }()
+
+	var refreshCalls atomic.Int32
+	updated := []ProviderInfo{{ID: "maki", Available: true, Models: []ModelInfo{{ID: "kimi-k2"}}}}
+	client := modelsRefreshTestClient{
+		Client: NewFakeClient(),
+		refresh: func(context.Context) ([]ProviderInfo, error) {
+			refreshCalls.Add(1)
+			return updated, nil
+		},
+	}
+	chat := newChatState(client)
+	t.Cleanup(chat.close)
+
+	placeholder := []ProviderInfo{{ID: "maki", Available: true}}
+	chat.settleProviderCatalog(placeholder)
+
+	deadline := time.Now().Add(uiWaitTimeout)
+	for time.Now().Before(deadline) {
+		chat.mu.Lock()
+		applied := len(chat.providers) == 1 && len(chat.providers[0].Models) == 1 && chat.providers[0].Models[0].ID == "kimi-k2"
+		chat.mu.Unlock()
+		if applied {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	chat.mu.Lock()
+	applied := len(chat.providers) == 1 && len(chat.providers[0].Models) == 1 && chat.providers[0].Models[0].ID == "kimi-k2"
+	chat.mu.Unlock()
+	if !applied {
+		t.Fatal("启动占位目录应被探测结果替换")
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("启动占位目录应探测一次，实际 %d 次", got)
+	}
+
+	// 再次走同一段启动逻辑不应重新探测（catalogStartupProbed 每进程一次）。
+	chat.settleProviderCatalog(placeholder)
+	time.Sleep(20 * time.Millisecond)
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("第二次 settle 不应再次探测，实际 %d 次", got)
+	}
+}
+
+// 启动探测失败不弹错误提示，但 catalogRefreshing 必须复位，否则后台补拉会一直跳过。
+func TestStartupProbeFailureHasNoToast(t *testing.T) {
+	origDelays := providerCatalogRetryDelays
+	providerCatalogRetryDelays = nil
+	defer func() { providerCatalogRetryDelays = origDelays }()
+
+	var refreshCalls atomic.Int32
+	client := modelsRefreshTestClient{
+		Client: NewFakeClient(),
+		refresh: func(context.Context) ([]ProviderInfo, error) {
+			refreshCalls.Add(1)
+			return nil, errors.New("offline")
+		},
+	}
+	chat := newChatState(client)
+	t.Cleanup(chat.close)
+
+	chat.settleProviderCatalog([]ProviderInfo{{ID: "maki", Available: true}})
+
+	deadline := time.Now().Add(uiWaitTimeout)
+	for time.Now().Before(deadline) {
+		chat.mu.Lock()
+		refreshing := chat.catalogRefreshing
+		chat.mu.Unlock()
+		if refreshCalls.Load() >= 1 && !refreshing {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("启动应探测一次，实际 %d 次", got)
+	}
+	chat.mu.Lock()
+	refreshing := chat.catalogRefreshing
+	chat.mu.Unlock()
+	if refreshing {
+		t.Fatal("探测结束后 catalogRefreshing 应复位")
+	}
+	if toast := recallTestToast(chat); toast != "" {
+		t.Fatalf("启动探测失败不应弹提示，实际 %q", toast)
+	}
+}

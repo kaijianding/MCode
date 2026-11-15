@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1913,6 +1914,12 @@ func (c AnthropicConfig) IsEnabled() bool {
 type ProviderConfig struct {
 	Enabled bool   `json:"enabled"`
 	Bin     string `json:"bin"` // 可执行文件路径，空表示从 PATH 查找
+	// Args 仅 ACP Agent 使用：启动参数，非空时整组替换内置默认参数
+	// （见 internal/providers/acp/agents.go 的 LaunchArgs），留空表示用内置默认值。
+	Args []string `json:"args,omitempty"`
+	// Env 仅 ACP Agent 使用：追加到 Agent 子进程的环境变量（不替换继承的环境），
+	// 留空表示不追加。例如 {"RPI_ACP_NO_AUTO_REGISTER_ZED": "1"}。
+	Env map[string]string `json:"env,omitempty"`
 	// Auth 仅 ACP droid 使用，取值 "apiKey" 或 "browser"，空视为 "browser"。
 	Auth string `json:"auth,omitempty"`
 	// ResidentIdleMinutes 仅 claude 使用：常驻进程空闲多少分钟后回收。nil 表示默认 10，0 表示关闭常驻
@@ -1929,6 +1936,19 @@ type ProviderConfig struct {
 	// PiVisionModel 仅 pi 使用：格式为 provider/model。填了以后 pi 会提供 vision 工具，
 	// 当前模型看不了图片时用这个模型描述图片；留空则不提供。
 	PiVisionModel string `json:"piVisionModel,omitempty"`
+}
+
+// EnvList 把 Env 转成 "KEY=VALUE" 列表（按 key 排序），可直接追加到子进程环境；Env 为空时返回 nil。
+func (p ProviderConfig) EnvList() []string {
+	if len(p.Env) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.Env))
+	for k, v := range p.Env {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DefaultResidentIdleMinutes 是 claude 常驻进程空闲回收的默认分钟数。

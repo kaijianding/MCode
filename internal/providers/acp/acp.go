@@ -29,9 +29,11 @@ var _ harness.HostToolsReporter = (*Harness)(nil)
 
 // Options 包含 ACP 适配器的配置选项。
 type Options struct {
-	Agent       Agent
-	Binary      string
-	ExtraArgs   []string
+	Agent  Agent
+	Binary string
+	// Args, when non-empty, replaces the entire LaunchArgs result; used to plug in
+	// ACP agents outside the built-in list.
+	Args        []string
 	Env         []string
 	DroidAuth   DroidAuthMode
 	DroidAPIKey func() string
@@ -45,6 +47,11 @@ type Options struct {
 // 同一瞬间批量启动多个 ACP agent（例如 Swarm 的多个 bee）会在 Agent 自身的本地存储
 // （如 OpenCode 的 SQLite）上撞锁，导致某轮对话开局即失败；单个启动不受影响。
 var launchSpacing = 1500 * time.Millisecond
+
+// sessionLoadRetryDelay is the wait before retrying a failed session/load:
+// the previous ACP process may still be exiting while holding the agent's
+// session lease, in which case the retry after it exits succeeds.
+var sessionLoadRetryDelay = 500 * time.Millisecond
 
 var launchGate struct {
 	mu   sync.Mutex
@@ -384,8 +391,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		bin = DefaultBinary(h.opts.Agent)
 	}
 
-	launchArgs := LaunchArgs(h.opts.Agent, turn.Mode)
-	allArgs := append(append([]string{}, launchArgs...), h.opts.ExtraArgs...)
+	allArgs := agentLaunchArgs(h.opts.Agent, h.opts, turn.Mode)
 
 	var cmd *exec.Cmd
 	var cleanup func()
@@ -443,6 +449,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	var sessionID string
 	var sessionMu sync.Mutex
+	// turnUsage 累计本轮的 usage；只由通知读循环串行更新。
+	var turnUsage harness.Usage
+	var replaying atomic.Bool
 
 	setSessionID := func(id string) {
 		sessionMu.Lock()
@@ -695,14 +704,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				Diff       string          `json:"diff"`
 				Path       string          `json:"path"`
 				Patch      string          `json:"patch"`
-				Used       int64           `json:"used"`
-				Size       int64           `json:"size"`
+				acpUsageUpdate
 			} `json:"update"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return
 		}
 		u := p.Update
+		if replaying.Load() && u.SessionUpdate != "usage_update" {
+			return
+		}
 
 		switch u.SessionUpdate {
 		case "agent_message_chunk":
@@ -750,12 +761,14 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			})
 
 		case "usage_update":
-			if u.Used > 0 {
+			// 同一轮可能收到多帧，这里保留本轮累计值后合并；读循环串行调用，
+			// 所以不必加锁，也不另起 goroutine。
+			turnUsage = usageFromUpdate(u.acpUsageUpdate, turnUsage)
+			if usageHasData(turnUsage) {
+				usage := turnUsage
 				_ = harness.Emit(emit, harness.Event{
-					Type: harness.EventUsage,
-					Usage: &harness.Usage{
-						InputTokens: u.Used,
-					},
+					Type:  harness.EventUsage,
+					Usage: &usage,
 				})
 			}
 		}
@@ -854,33 +867,13 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	// sessionModes 缓存会话响应里广告的会话模式，用于下发计划模式与运行时权限档位。
 	var sessionModes acpSessionModes
 
-	createOrResume := func() (string, error) {
-		type sessionSetupResult struct {
-			SessionID     string           `json:"sessionId"`
-			ConfigOptions []map[string]any `json:"configOptions"`
-			Modes         acpSessionModes  `json:"modes"`
-		}
+	type sessionSetupResult struct {
+		SessionID     string           `json:"sessionId"`
+		ConfigOptions []map[string]any `json:"configOptions"`
+		Modes         acpSessionModes  `json:"modes"`
+	}
 
-		if turn.SessionID != "" {
-			if !canLoad {
-				// Agent 不支持 session/load 时明确报错，
-				// 而不是静默开一个丢失上下文的新会话。
-				return "", fmt.Errorf("this ACP agent (%s) cannot resume the original session", DisplayName(h.opts.Agent))
-			}
-			var res sessionSetupResult
-			err := conn.Call(ctx, "session/load", map[string]any{
-				"sessionId":  turn.SessionID,
-				"cwd":        turn.WorkDir,
-				"mcpServers": servers,
-			}, &res)
-			if err != nil {
-				return "", err
-			}
-			sessionOptions = res.ConfigOptions
-			sessionModes = res.Modes
-			return turn.SessionID, nil
-		}
-
+	newSession := func() (string, error) {
 		var res sessionSetupResult
 		err := conn.Call(ctx, "session/new", map[string]any{
 			"cwd":        turn.WorkDir,
@@ -892,6 +885,57 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		sessionOptions = res.ConfigOptions
 		sessionModes = res.Modes
 		return res.SessionID, nil
+	}
+
+	loadSession := func(sessionID string) (string, error) {
+		replaying.Store(true)
+		var res sessionSetupResult
+		err := conn.Call(ctx, "session/load", map[string]any{
+			"sessionId":  sessionID,
+			"cwd":        turn.WorkDir,
+			"mcpServers": servers,
+		}, &res)
+		if err != nil {
+			return "", err
+		}
+		sessionOptions = res.ConfigOptions
+		sessionModes = res.Modes
+		return sessionID, nil
+	}
+
+	createOrResume := func() (string, error) {
+		if turn.SessionID == "" {
+			return newSession()
+		}
+		if !canLoad {
+			// Agent 不支持 session/load 时明确报错，
+			// 而不是静默开一个丢失上下文的新会话。
+			return "", fmt.Errorf("this ACP agent (%s) cannot resume the original session", DisplayName(h.opts.Agent))
+		}
+		sid, err := loadSession(turn.SessionID)
+		if err == nil {
+			return sid, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		// The agent may hold an exclusive lease on the session while its owning
+		// process is still exiting; wait briefly and try once more.
+		timer := time.NewTimer(sessionLoadRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+		if sid, err = loadSession(turn.SessionID); err == nil {
+			return sid, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		log.Printf("acp: cannot resume session %s (%v); starting a new session", turn.SessionID, err)
+		return newSession()
 	}
 
 	sid, err := createOrResume()
@@ -920,12 +964,22 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	})
 
 	// 步骤 5: 设置模型
-	// "default" 是模型目录的占位行，交给 Agent 自己的默认模型，不发 set_model。
+	// Some agents (e.g. maki) advertise models through configOptions and reject
+	// session/set_model; drive them with session/set_config_option instead.
+	// "default" is the catalog placeholder for the agent's own default model.
 	if turn.Model != "" && turn.Model != "default" {
-		_ = conn.Call(ctx, "session/set_model", map[string]any{
-			"sessionId": sid,
-			"modelId":   turn.Model,
-		}, nil)
+		if modelConfigID, _ := selectACPModelOption(sessionOptions); modelConfigID != "" {
+			_ = conn.Call(ctx, "session/set_config_option", map[string]any{
+				"sessionId": sid,
+				"configId":  modelConfigID,
+				"value":     turn.Model,
+			}, nil)
+		} else {
+			_ = conn.Call(ctx, "session/set_model", map[string]any{
+				"sessionId": sid,
+				"modelId":   turn.Model,
+			}, nil)
+		}
 	}
 
 	// 步骤 5.5: 计划模式与运行时权限档位
@@ -1000,6 +1054,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	var promptResult struct {
 		StopReason string `json:"stopReason"`
 	}
+	replaying.Store(false)
 	promptErr := conn.Call(ctx, "session/prompt", map[string]any{
 		"sessionId": sid,
 		"prompt":    promptItems,
@@ -1038,6 +1093,50 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		return fmt.Errorf("acp process exited with error: %w", waitErr)
 	}
 
+	return nil
+}
+
+// selectACPModelOption 从会话响应的 configOptions 里找出模型配置项，
+// 返回它的 id 与可选取值。有些 Agent（如 maki）不广告 models，而用这种方式列出模型。
+func selectACPModelOption(options []map[string]any) (configID string, values []string) {
+	option := findACPModelOption(options)
+	if option == nil {
+		return "", nil
+	}
+	configID, _ = option["id"].(string)
+	entries, _ := option["options"].([]any)
+	for _, entry := range entries {
+		valueMap, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if value, _ := valueMap["value"].(string); strings.TrimSpace(value) != "" {
+			values = append(values, value)
+		}
+	}
+	return configID, values
+}
+
+// findACPModelOption 返回 configOptions 里的模型配置项：
+// category 或 id 为 "model"，且是 select（type 缺省时要求 options 非空）。
+// Fast 这类 id 为 "fast"、category 为 model_config 的项不会被选中。
+func findACPModelOption(options []map[string]any) map[string]any {
+	for _, option := range options {
+		id, _ := option["id"].(string)
+		key, _ := option["category"].(string)
+		if key == "" {
+			key = id
+		}
+		if key != "model" && id != "model" {
+			continue
+		}
+		typ, _ := option["type"].(string)
+		entries, _ := option["options"].([]any)
+		if typ != "select" && (typ != "" || len(entries) == 0) {
+			continue
+		}
+		return option
+	}
 	return nil
 }
 
@@ -1099,6 +1198,58 @@ func hasACPEffortScale(option map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// acpUsageCost 是 usage_update.cost 的协议结构。
+type acpUsageCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
+}
+
+// acpUsageUpdate 是 session/update 里 sessionUpdate=usage_update 的载荷。
+// 协议只定义 used/size/cost；输入、输出、缓存 token 是 agent 在 _meta 里额外提供的约定字段。
+type acpUsageUpdate struct {
+	Used int64         `json:"used"`
+	Size int64         `json:"size"`
+	Cost *acpUsageCost `json:"cost"`
+	// Meta 的约定键：inputTokens（已含缓存部分）、outputTokens、cachedReadTokens、
+	// cachedWriteTokens、cachedTokens（读写合计，存在时优先）。
+	Meta map[string]any `json:"_meta"`
+}
+
+// usageFromUpdate 把一帧 usage_update 合并进本轮累计值：used 是上下文占用而非输入 token，
+// size 是窗口上限；同一轮后帧只覆盖自己携带的字段，未携带的沿用 prev。
+func usageFromUpdate(update acpUsageUpdate, prev harness.Usage) harness.Usage {
+	usage := prev
+	if update.Used > 0 {
+		usage.ContextTokens = update.Used
+	}
+	if update.Size > 0 {
+		usage.ContextWindow = update.Size
+	}
+	if tokens := tokenCountValue(update.Meta["inputTokens"]); tokens > 0 {
+		usage.InputTokens = int64(tokens)
+	}
+	if tokens := tokenCountValue(update.Meta["outputTokens"]); tokens > 0 {
+		usage.OutputTokens = int64(tokens)
+	}
+	cached := tokenCountValue(update.Meta["cachedTokens"])
+	if cached == 0 {
+		cached = tokenCountValue(update.Meta["cachedReadTokens"]) + tokenCountValue(update.Meta["cachedWriteTokens"])
+	}
+	if cached > 0 {
+		usage.CachedTokens = int64(cached)
+	}
+	if update.Cost != nil && update.Cost.Amount > 0 && strings.EqualFold(update.Cost.Currency, "USD") {
+		usage.CostUSD = update.Cost.Amount
+	}
+	return usage
+}
+
+// usageHasData 判断合并结果里是否有值得下发的内容；全部为零时不下发。
+func usageHasData(usage harness.Usage) bool {
+	return usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.CachedTokens > 0 ||
+		usage.ContextTokens > 0 || usage.ContextWindow > 0 || usage.CostUSD > 0
 }
 
 type acpApprovalResponse struct {

@@ -143,6 +143,16 @@ func LaunchArgs(a Agent, mode harness.PermissionMode) []string {
 	}
 }
 
+// agentLaunchArgs returns the process arguments for an ACP launch. A non-empty
+// opts.Args replaces the built-in LaunchArgs set entirely, so custom agents do
+// not inherit the default "acp" argument.
+func agentLaunchArgs(a Agent, opts Options, mode harness.PermissionMode) []string {
+	if len(opts.Args) > 0 {
+		return append([]string{}, opts.Args...)
+	}
+	return LaunchArgs(a, mode)
+}
+
 // ExtraEnv 返回对应 Agent 所需的额外预设环境变量：
 // - Cline 默认通过 CLINE_PROVIDER 指定上游提供方
 func ExtraEnv(a Agent) []string {

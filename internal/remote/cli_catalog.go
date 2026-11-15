@@ -153,14 +153,33 @@ func (c *cliCatalog) reload(ctx context.Context, fetch func(context.Context) ([]
 }
 
 var (
-	piCatalog        cliCatalog
-	ompCatalog       cliCatalog
-	copilotCatalog   cliCatalog
-	droidCatalog     cliCatalog
-	otherACPCatalogs = map[string]*cliCatalog{
-		"cursor": {}, "opencode": {}, "grok": {}, "devin": {},
-	}
+	piCatalog      cliCatalog
+	ompCatalog     cliCatalog
+	copilotCatalog cliCatalog
+	droidCatalog   cliCatalog
+	// acpCatalogs 按 provider id 惰性创建 ACP 模型目录：内置 cursor/opencode/grok/devin 与
+	// 配置里注册的自定义 ACP provider（providers.acp.<id>）共用这份注册表，同一个 id 永远
+	// 得到同一个实例，目录探测与读取才落在同一处。
+	acpCatalogs sync.Map // map[string]*cliCatalog
 )
+
+// acpCatalog 返回 id 对应的 ACP 模型目录，不存在则创建。
+func acpCatalog(id string) *cliCatalog {
+	if cached, ok := acpCatalogs.Load(id); ok {
+		return cached.(*cliCatalog)
+	}
+	actual, _ := acpCatalogs.LoadOrStore(id, &cliCatalog{})
+	return actual.(*cliCatalog)
+}
+
+// acpCatalogSnapshot 返回 id 已探测到的目录；从未探测过的 id 返回 nil，不创建目录实例。
+func acpCatalogSnapshot(id string) []wire.ProviderModel {
+	cached, ok := acpCatalogs.Load(id)
+	if !ok {
+		return nil
+	}
+	return cached.(*cliCatalog).snapshot()
+}
 
 // piMagpieInjection 是取 pi 模型目录时的 Magpie 注入源，由 app 层在启动时设置：
 // 返回 Magpie 桥扩展路径与 MCODE_PI_MAGPIE 取值，任一为空表示按 pi 自己的配置取目录。

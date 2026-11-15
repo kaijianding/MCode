@@ -65,7 +65,7 @@ func (c *Client) CheckProviderUpdate(ctx context.Context, provider string) (mcod
 
 // providerExecutable 解析 provider CLI 的可执行文件路径，顺序为：
 //  1. 配置里的用户路径优先（claude/codex/agy/copilot/pi/omp/commandcode 各自的 providers 字段，
-//     ACP Agent（droid/cline/cursor/opencode/grok/devin）用 providers.acp 表）；
+//     ACP Agent（内置 droid/cline/cursor/opencode/grok/devin 与 providers.acp 中自定义的任意 id）用 providers.acp 表）；
 //  2. 登录 shell 的 PATH（GUI 进程的 PATH 找不到这些 CLI）；
 //  3. provider 的常见安装目录（providerFallbackDirs）。
 func (c *Client) providerExecutable(provider string) (string, error) {
@@ -126,6 +126,15 @@ func (c *Client) providerExecutable(provider string) (string, error) {
 			configured = cfg.Providers.ACP[key].Bin
 		}
 		names = []string{acp.DefaultBinary(acp.Agent(key))}
+	default:
+		// 用户手写的 ACP Agent（providers.acp 里的任意 id）以 id 作为默认可执行文件名，
+		// 与 acp.DefaultBinary 对未知 agent 的约定一致。
+		if hasConfig {
+			if pc, ok := cfg.Providers.ACP[key]; ok {
+				configured = pc.Bin
+				names = []string{key}
+			}
+		}
 	}
 	if configured != "" {
 		return configured, nil

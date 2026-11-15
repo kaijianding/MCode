@@ -190,6 +190,8 @@ type SettingsState struct {
 	modelsRefreshing    bool
 	modelsRefreshDone   bool
 	modelsRefreshErr    string
+	// catalogProbed 记录已自动探测过模型目录的供应商；进程内不清空（理由见 shouldAutoProbeCatalog）。
+	catalogProbed map[string]bool
 
 	// reviewCheckLoaded 表示当前项目的检查命令已从项目配置读入内存。
 	reviewCheckLoaded bool

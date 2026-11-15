@@ -62,9 +62,12 @@ type Harness interface {
 | `omp` | `omp --mode rpc-ui --approval-mode yolo` | 门禁扩展装不上就不注册；不接 MCP |
 | `commandcode`（`cmd`） | `cmd -p --output-format json`，每轮一个进程 | 审批靠 mod 和目录文件 |
 | `openai` | Chat Completions SSE | 预设 deepseek、zai、meta；`custom_endpoints.go` 自定义端点 |
-| `acp` | Agent Client Protocol | cline、cursor（`cursor-agent`）、opencode、grok、devin、droid |
+| `acp` | Agent Client Protocol | 内置 cline、cursor（`cursor-agent`）、opencode、grok、devin、droid；另有配置声明的自定义 ACP agent（`providers.acp.<id>` 可设 `bin`、`args`、`env`） |
 
 部分 Provider 有自己的说明文档：`internal/providers/{cline,codex,commandcode,credits,omp}/README.md`。
+
+ACP 的会话由 Agent 进程独占持有（本地存储型 Agent 会在会话文件上加锁）：同一会话正被别的进程占用时 `session/load` 会失败。此时 mcode 等一个 `sessionLoadRetryDelay` 再重试一次，仍失败就新建会话继续本轮，并打日志；Agent 侧该会话的上下文丢失，mcode 自己的会话记录不受影响。
+session/load 期间，Agent 按规范重放的 session/update（文本、思维、工具、文件变更）会被丢弃，直到发出 session/prompt；usage_update 仍接收。
 
 ## 辅助包
 
@@ -85,7 +88,15 @@ type Harness interface {
 
 - `SetHarness`：默认 Provider。
 - `RegisterHarness`：其他 Provider。
-- `registerExtraProviders`：遍历 `acp.Agents()` 和配置，构造额外 Provider，并注入 `mcpInjection`（`BuiltinMCP`、`ExternalMCP`）。
+- `registerExtraProviders`：遍历 `acp.Agents()` 和配置，构造额外 Provider，并注入 `mcpInjection`（`BuiltinMCP`、`ExternalMCP`）；还会注册 `providers.acp` 里未在枚举中的键，字段为 `enabled`、`bin`、`args`、`env`。`args` 非空时整组替换内置启动参数（内置 agent 也一样），`env` 是对象，追加到 Agent 子进程的环境变量（不替换继承的环境）。模型目录探测（`internal/providers/acp/probe.go`）用同一组 `args` 与 `env` 启动 Agent，否则自定义 Agent 会以默认参数启动、目录读不出来。模型目录里的上下文窗口与推理强度都来自同一次探测：`models.availableModels`（优先）或 model 配置项的每条模型可带 `_meta.maxContextTokens`（也认 `contextWindow`、`contextLimit`），没给 `_meta` 时从 `description` 里读 `"1000000 tokens"`、`"1M context"` 这样的写法；推理强度取 `category` 为 `thought_level`/`effort`/`reasoning_effort` 的 select 项，取值需含 `none/low/medium/high/xhigh/max/extra-high` 之一才会被当作档位。例：`rpi` 的 ACP 入口是 `--acp` 标志而不是子命令，需要 `"args": ["--acp"]`；它启动时会把自己写进 Zed 的 `settings.json`，用 `"env": {"RPI_ACP_NO_AUTO_REGISTER_ZED": "1"}` 关闭。
+
+```json
+"providers": {"acp": {"rpi": {"enabled": true, "args": ["--acp"], "env": {"RPI_ACP_NO_AUTO_REGISTER_ZED": "1"}}}}
+```
+
+### ACP 用量上报
+
+`session/update` 里的 `usage_update` 只有 `used`、`size` 与可选的 `cost`，mcode 映射为 `ContextTokens`、`ContextWindow` 与 `CostUSD`（仅 `USD`）。输入、输出、缓存 token 不是协议字段：agent 要提供时，在 `usage_update` 的 `_meta` 里放 `inputTokens`（已含缓存部分）、`outputTokens`，以及 `cachedReadTokens` 与 `cachedWriteTokens`（或直接 `cachedTokens` 表示读写合计）。`_meta` 的键取到才覆盖，同一轮的末帧要把前面帧给过的 token 数重复带上，否则下游按帧覆盖会把它们清零。
 
 ## 模型与默认值
 

@@ -131,11 +131,11 @@ func TestComposerDefaultEffortFallsBackToModelDefault(t *testing.T) {
 	}
 }
 
-// 用例 3：模型默认档落在后端白名单外（off）时必须丢弃，退回“旧强度仍被支持就保留”的原有逻辑。
+// 用例 3：模型默认档落在后端白名单外（turbo）时必须丢弃，退回“旧强度仍被支持就保留”的原有逻辑。
 func TestComposerDefaultEffortDropsDisallowedDefault(t *testing.T) {
-	// 旧强度 low 在新模型档位里仍可用：off 被丢弃后应原样保留，且不产生任何 ComposerPrefs 写入。
+	// 旧强度 low 在新模型档位里仍可用：turbo 被丢弃后应原样保留，且不产生任何 ComposerPrefs 写入。
 	fake, state := defaultEffortState(t, "low", true)
-	m := ModelInfo{ID: "model-z", Name: "Model Z", Efforts: []string{"off", "low", "medium"}, DefaultEffort: "off"}
+	m := ModelInfo{ID: "model-z", Name: "Model Z", Efforts: []string{"turbo", "low", "medium"}, DefaultEffort: "turbo"}
 	prov := ProviderInfo{ID: "claude", Name: "Claude", Available: true, Models: []ModelInfo{m}}
 
 	var mu sync.Mutex
@@ -154,8 +154,8 @@ func TestComposerDefaultEffortDropsDisallowedDefault(t *testing.T) {
 	sent := append([]string(nil), sentEfforts...)
 	mu.Unlock()
 	for _, e := range sent {
-		if e == "off" {
-			t.Fatalf("白名单外的默认档不得下发: 实际下发过 Effort=off, 全部下发值=%q", sent)
+		if e == "turbo" {
+			t.Fatalf("白名单外的默认档不得下发: 实际下发过 Effort=turbo, 全部下发值=%q", sent)
 		}
 	}
 	if n := fake.ComposerPrefsCallCount(); n != 0 {
