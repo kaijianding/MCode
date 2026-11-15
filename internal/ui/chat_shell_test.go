@@ -337,6 +337,7 @@ func TestCompactSuggestionCardAcceptsCompact(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		return tt.HasText("这个会话较长，继续之前要先压缩上下文吗？")
 	})
+	finishUnfold(tt)
 
 	if err := tt.Click("压缩"); err != nil {
 		t.Fatalf("点击“压缩”失败: %v", err)
