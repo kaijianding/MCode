@@ -261,7 +261,7 @@ func TestSwarmBeeShouldAutoHide(t *testing.T) {
 		{"刚好满 5 秒才收起", done, false, base, base.Add(5 * time.Second), false, true},
 		{"还差 1 秒", done, false, base, base.Add(4 * time.Second), false, false},
 		{"停止属于终态", SwarmBee{Status: "stopped"}, false, base, base.Add(time.Minute), false, true},
-		{"失败保持可见", SwarmBee{Status: "failed"}, false, base, base.Add(time.Minute), false, false},
+		{"失败也收起", SwarmBee{Status: "failed"}, false, base, base.Add(time.Minute), false, true},
 		{"仍在运行", SwarmBee{Status: "running"}, false, base, base.Add(time.Minute), false, false},
 		{"在等用户回答或审批", SwarmBee{Status: "running"}, true, base, base.Add(time.Minute), false, false},
 		// 终态 bee 不可能再回答残留的等待请求，不应因此永久留在浮窗里。
@@ -389,7 +389,7 @@ func TestTrackSwarmAutoHideHidesAlreadyDoneAtStartup(t *testing.T) {
 	}
 }
 
-func TestTrackSwarmAutoHideKeepsFailedBee(t *testing.T) {
+func TestTrackSwarmAutoHideHidesFailedBee(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		seenActive bool
@@ -418,7 +418,12 @@ func TestTrackSwarmAutoHideKeepsFailedBee(t *testing.T) {
 			bees[0].Status = "failed"
 			trackSwarmAutoHide(s, leadID, bees)
 			if got := swarmVisibleBees(leadID, bees); len(got) != 1 {
-				t.Fatalf("失败的子线程应保持可见：%v", got)
+				t.Fatalf("延迟到期前失败的子线程应保持可见：%v", got)
+			}
+			advanceSwarmAutoHideDone(leadID, bees)
+			trackSwarmAutoHide(s, leadID, bees)
+			if got := swarmVisibleBees(leadID, bees); len(got) != 0 {
+				t.Fatalf("延迟到期后失败的子线程应收起：%v", got)
 			}
 		})
 	}
@@ -589,8 +594,8 @@ func TestOpenSwarmFloatForBeeKeepsPanelUntilClosed(t *testing.T) {
 	}
 
 	got := swarmVisibleBees(leadID, bees)
-	if len(got) != 2 || got[0].ThreadID != "h-isle" || got[1].ThreadID != "h-cove" {
-		t.Fatalf("点开和失败的子线程应保持显示：%v", got)
+	if len(got) != 1 || got[0].ThreadID != "h-isle" {
+		t.Fatalf("只有点开的子线程应保持显示：%v", got)
 	}
 	if !swarmFloatVisible(leadID, bees) {
 		t.Fatal("用户点开的子线程还在时，浮窗不应被连带关闭")

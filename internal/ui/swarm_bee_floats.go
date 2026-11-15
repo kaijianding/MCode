@@ -259,7 +259,7 @@ func swarmBeeDormant(h SwarmBee, waiting bool) bool {
 // 该子线程已进入终态、自它进入终态起已满 swarmAutoHideDelay，且这批完成还没处理过
 // （没自动收起过、用户也没手动打开过）。
 func swarmBeeShouldAutoHide(h SwarmBee, waiting bool, doneSince, now time.Time, handled bool) bool {
-	if h.Status == "failed" || handled || doneSince.IsZero() || !swarmBeeDormant(h, waiting) {
+	if handled || doneSince.IsZero() || !swarmBeeDormant(h, waiting) {
 		return false
 	}
 	return !now.Before(doneSince.Add(swarmAutoHideDelay))
@@ -466,12 +466,7 @@ func trackSwarmAutoHide(s *chatState, leadID string, bees []SwarmBee, precompute
 			}
 			continue
 		}
-		// 启动前就已失败的子线程和其他启动前结束的一样直接收起；本次运行中失败的仍常驻。
-		if h.Status == "failed" && !keptOpen[id] && !seenActive[id] && !swarmFloatForced[leadID] && !swarmFloatDismissedBees[leadID][id] {
-			hideNow = append(hideNow, id)
-			continue
-		}
-		if h.Status == "failed" || keptOpen[id] {
+		if keptOpen[id] {
 			// 用户明确点开的子线程一直留在浮窗里：不收起、不重新计时，也不排到期唤醒；
 			// 只有用户关闭浮窗、编排按钮整体重开，或它重新开始运行才会解除。
 			if t, ok := swarmAutoHideTimers[key]; ok {
