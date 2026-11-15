@@ -521,6 +521,7 @@ func TestRegisteredShortcutsDefaultSet(t *testing.T) {
 		{ui.Cmd | ui.Shift, ui.KeyO},
 		{ui.Cmd | ui.Shift, ui.KeyK},
 		{ui.Cmd | ui.Shift, ui.KeyF},
+		{ui.Cmd | ui.Alt, ui.KeyB},
 		{ui.Cmd | ui.Shift, ui.KeyT},
 		{ui.Cmd | ui.Shift, ui.KeyD},
 		{ui.Cmd, ui.KeySlash},

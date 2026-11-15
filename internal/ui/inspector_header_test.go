@@ -109,10 +109,10 @@ func TestInspectorHeaderShortcutOverride(t *testing.T) {
 	s := sidePaneTestState(t)
 	defer s.close()
 	tt := ui.NewTester(func(c *ui.Context) { renderInspectorHeader(c, s, inspectorSession(s), false) }, 500, 60)
-	if node, ok := tt.Access("关闭右栏"); !ok || node.Description != "关闭" {
+	if node, ok := tt.Access("关闭右栏"); !ok || node.Description != "关闭（"+shortcutDisplay("⌥⌘B")+"）" {
 		t.Fatalf("默认关闭按钮说明：%+v %v", node, ok)
 	}
-	if got := shortcutTitleWithKey("toggle-inspector", "关闭"); got != "关闭" {
+	if got := shortcutTitleWithKey("toggle-inspector", "关闭"); got != "关闭（"+shortcutDisplay("⌥⌘B")+"）" {
 		t.Fatalf("默认提示：%q", got)
 	}
 	setShortcutOverrides(map[string]string{"toggle-inspector": "Cmd+Shift+Y"})
