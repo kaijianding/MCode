@@ -1121,12 +1121,8 @@ func renderSwarmHeaderBadge(c *ui.Context, key string, count int, bg ui.Color) {
 	if key == "chat-header-swarm-failed-badge" {
 		right = 18
 	}
-	tone := ToneAccent
-	if key == "chat-header-swarm-waiting-badge" || key == "chat-header-swarm-failed-badge" {
-		tone = ToneDanger
-	}
-	badge := Badge(c, key, text, tone)
-	badge.Absolute().
+	fg, bg := swarmHeaderBadgeColors(c, bg)
+	ui.Row(c.Key(key)).Label(text).Absolute().
 		Top(-4).
 		Right(right).
 		Height(IconSM).
@@ -1134,7 +1130,13 @@ func renderSwarmHeaderBadge(c *ui.Context, key string, count int, bg ui.Color) {
 		Padding(0, Space1).
 		Radius(CapsuleRadius).
 		Center().
-		Background(bg)
+		Background(bg).Children(func() {
+		ui.Text(c, text).FontSize(uiFont(TypeCaption)).TextColor(fg).SingleLine()
+	})
+}
+
+func swarmHeaderBadgeColors(c *ui.Context, bg ui.Color) (ui.Color, ui.Color) {
+	return ThemeOnAccent(c), bg
 }
 
 // renderSwarmReviewBadge 在编排按钮左侧显示「待审查 N」：配色与 bee 行内的「待审查」标签一致，

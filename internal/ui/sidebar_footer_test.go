@@ -156,3 +156,30 @@ func TestEmptyChatAddProject(t *testing.T) {
 		t.Fatalf("主区缺少添加项目按钮: %q", tt.Texts())
 	}
 }
+
+func TestEmptyChatAddProjectCloneClosesPopover(t *testing.T) {
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(nil, nil)
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("暂无项目") })
+	clicked := false
+	for _, node := range tt.AccessAll() {
+		if node.Role == ui.RoleButton && node.Name == "添加项目" && node.Bounds.X > SidebarDefaultWidth {
+			tt.ClickAt(node.Bounds.X+node.Bounds.W/2, node.Bounds.Y+node.Bounds.H/2)
+			clicked = true
+			break
+		}
+	}
+	if !clicked {
+		t.Fatal("找不到主区域添加项目按钮")
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("从 GitHub 克隆…") })
+	if err := tt.Click("从 GitHub 克隆…"); err != nil {
+		t.Fatalf("点击克隆失败: %v", err)
+	}
+	if getSidebarFooterState(state).chatAddProjectOpen {
+		t.Fatal("克隆后空白页添加项目浮层仍然打开")
+	}
+}

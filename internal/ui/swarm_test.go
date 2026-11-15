@@ -1992,3 +1992,15 @@ func TestSwarmHeaderFailedBadge(t *testing.T) {
 		t.Fatalf("应同时显示失败数和运行数：%v", tt.Texts())
 	}
 }
+
+func TestSwarmHeaderBadgeColors(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		for _, bg := range []ui.Color{ThemeAccent(c), ThemeDanger(c)} {
+			fg, actualBG := swarmHeaderBadgeColors(c, bg)
+			if fg == actualBG {
+				t.Errorf("角标文字与背景颜色相同: %v", fg)
+			}
+		}
+	}, 100, 100)
+	tt.Frame()
+}
