@@ -129,6 +129,7 @@ func renderKanbanListRow(c *ui.Context, s *chatState, task KanbanTask) {
 		Radius(RadiusMD).
 		AlignItems(ui.Center).
 		Gap(Space3).
+		Transition(motionListItem(c)).
 		OnClick(func() {
 			if row.ClickModifiers()&ui.Shift != 0 {
 				kanbanKeyboardSelect(s, task.ID, "range")
@@ -381,7 +382,7 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 		Background(ThemeSurfaceCard(c)).
 		BorderWidth(Hairline).
 		BorderColor(ThemeBorder(c)).
-		Transition(motionFeedback(c)).
+		Transition(motionListItem(c)).
 		Gap(Space2).
 		OnClick(func() {
 			if card.ClickModifiers()&ui.Shift != 0 {
@@ -995,6 +996,16 @@ func renderKanbanColumn(
 					FillWidth().
 					Gap(Space3).
 					Children(func() {
+						if len(colTasks) == 0 && colKey != "todo" {
+							ui.Box(c.Key("kanban-col-empty-drop-" + colKey)).
+								Label(colDef.label + "为空").
+								FillWidth().
+								Height(KanbanEmptyDropMinHeight).
+								Radius(RadiusMD).
+								BorderWidth(Hairline).
+								BorderColor(ThemeBorder(c)).
+								BorderStyle(ui.BorderDashed)
+						}
 						for _, task := range colTasks {
 							taskVal := task
 							renderTaskCard(c, s, ks, taskVal, st)
