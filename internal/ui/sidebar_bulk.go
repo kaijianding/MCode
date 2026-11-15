@@ -9,10 +9,14 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+type bulkUndoOp struct {
+	projectID, token string
+}
+
 // lastBulkInfo 记录最近一次批量或单条操作的信息，用于侧边栏撤销条与项目右键菜单。
 type lastBulkInfo struct {
 	projectID string
-	token     string
+	undo      []bulkUndoOp
 	kind      string // "archive"、"dormant" 或 "read"
 	count     int
 	at        time.Time
@@ -311,7 +315,7 @@ func renderBulkUndoNotice(c *ui.Context, s *chatState) {
 				Grow(1).
 				SingleLine()
 
-			if lb.token != "" {
+			if len(lb.undo) > 0 {
 				Button(c.Key("sidebar-bulk-undo-btn"), ButtonOpts{
 					Text:    "撤销",
 					Size:    ControlXS,
@@ -359,7 +363,6 @@ func (s *chatState) bulkMarkRead(projectID string, threadIDs []string) {
 		}
 		s.lastBulk = &lastBulkInfo{
 			projectID: projectID,
-			token:     "",
 			kind:      "read",
 			count:     len(threadIDs),
 			at:        time.Now(),
@@ -411,7 +414,7 @@ func (s *chatState) bulkArchive(projectID string, threadIDs []string) {
 		}
 		s.lastBulk = &lastBulkInfo{
 			projectID: projectID,
-			token:     token,
+			undo:      bulkUndoForToken(projectID, token),
 			kind:      "archive",
 			count:     len(threadIDs),
 			at:        time.Now(),
@@ -469,7 +472,7 @@ func (s *chatState) archiveThreadWithUndo(projectID, threadID string) {
 		if token != "" {
 			s.lastBulk = &lastBulkInfo{
 				projectID: projectID,
-				token:     token,
+				undo:      bulkUndoForToken(projectID, token),
 				kind:      "archive",
 				count:     1,
 				at:        time.Now(),
@@ -514,7 +517,7 @@ func (s *chatState) markDormantWithUndo(projectID, threadID string) {
 		if token != "" {
 			s.lastBulk = &lastBulkInfo{
 				projectID: projectID,
-				token:     token,
+				undo:      bulkUndoForToken(projectID, token),
 				kind:      "dormant",
 				count:     1,
 				at:        time.Now(),
@@ -527,6 +530,13 @@ func (s *chatState) markDormantWithUndo(projectID, threadID string) {
 		s.invalidate()
 		s.playDormantChime()
 	}()
+}
+
+func bulkUndoForToken(projectID, token string) []bulkUndoOp {
+	if token == "" {
+		return nil
+	}
+	return []bulkUndoOp{{projectID, token}}
 }
 
 // undoLastBulk 撤销最近一次批量操作。
@@ -544,9 +554,8 @@ func (s *chatState) undoLastBulk() {
 		s.invalidate()
 		return
 	}
-	projectID := lb.projectID
-	token := lb.token
-	if token == "" {
+	ops := lb.undo
+	if len(ops) == 0 {
 		s.mu.Unlock()
 		return
 	}
@@ -555,29 +564,35 @@ func (s *chatState) undoLastBulk() {
 
 	go func() {
 		ctx := context.Background()
-		err := s.client.UndoBulkOperation(ctx, projectID, token)
-		if err != nil {
-			errMsg := err.Error()
+		var firstErr error
+		projects := make(map[string]bool)
+		for _, op := range ops {
+			projects[op.projectID] = true
+			if err := s.client.UndoBulkOperation(ctx, op.projectID, op.token); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		for projectID := range projects {
+			threads, err := s.client.Threads(ctx, projectID)
+			if err == nil {
+				s.mu.Lock()
+				s.threadsByProj[projectID] = SortThreads(threads)
+				var all []Thread
+				for _, list := range s.threadsByProj {
+					all = append(all, list...)
+				}
+				s.threads = SortThreads(all)
+				s.bumpThreadsRuntimeLocked()
+				s.mu.Unlock()
+			}
+		}
+		if firstErr != nil {
+			errMsg := firstErr.Error()
 			if strings.Contains(strings.ToLower(errMsg), "expire") || strings.Contains(errMsg, "过期") {
 				s.setToast("撤销已过期")
 			} else {
 				s.setToast("撤销失败: " + errMsg)
 			}
-			return
-		}
-		// 撤销成功后重新从后端加载会话列表
-		threads, err := s.client.Threads(ctx, projectID)
-		if err == nil {
-			s.mu.Lock()
-			s.threadsByProj[projectID] = SortThreads(threads)
-			var all []Thread
-			for _, list := range s.threadsByProj {
-				all = append(all, list...)
-			}
-			s.threads = SortThreads(all)
-			// 撤销后重载的列表可能带来新的待处理请求/运行标记。
-			s.bumpThreadsRuntimeLocked()
-			s.mu.Unlock()
 		}
 		s.invalidate()
 	}()

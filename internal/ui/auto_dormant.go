@@ -82,7 +82,7 @@ func (s *chatState) playDormantChime() {
 }
 
 // maybeAutoDormant 在距上次扫描不足 autoDormantScanInterval 时直接返回；
-// 否则把超过 days 天无新消息的会话逐个休眠（走既有的 setThreadDormant 路径）。
+// 否则把超过 days 天无新消息的会话逐个休眠。
 func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 	if s == nil || days <= 0 {
 		return
@@ -97,8 +97,68 @@ func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 	candidates := autoDormantCandidates(s.threads, days, now)
 	s.mu.Unlock()
 
-	for _, id := range candidates {
-		// 自动休眠是后台整理，不播提示音，避免启动时连续响多次。
-		s.setThreadDormantWithSound(id, true, false)
+	if len(candidates) == 0 {
+		return
 	}
+	go func() {
+		var ops []bulkUndoOp
+		var firstErr error
+		success := 0
+		for _, id := range candidates {
+			token, err := s.client.MarkDormantWithUndo(id)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			projectID := s.markAutoDormantLocal(id)
+			success++
+			if token != "" {
+				ops = append(ops, bulkUndoOp{projectID, token})
+			}
+		}
+		if len(ops) > 0 {
+			projectID := ops[0].projectID
+			for _, op := range ops[1:] {
+				if op.projectID != projectID {
+					projectID = ""
+					break
+				}
+			}
+			s.mu.Lock()
+			s.lastBulk = &lastBulkInfo{projectID: projectID, undo: ops, kind: "dormant", count: success, at: time.Now()}
+			s.mu.Unlock()
+			s.scheduleLastBulkExpiry()
+		}
+		if firstErr != nil {
+			s.setToast("标记休眠失败: " + firstErr.Error())
+		}
+		s.invalidate()
+	}()
+}
+
+func (s *chatState) markAutoDormantLocal(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var projectID string
+	for pid, list := range s.threadsByProj {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].Dormant = true
+				projectID = pid
+			}
+		}
+		s.threadsByProj[pid] = SortThreads(list)
+	}
+	for i := range s.threads {
+		if s.threads[i].ID == id {
+			s.threads[i].Dormant = true
+			if s.threads[i].ProjectID != "" {
+				projectID = s.threads[i].ProjectID
+			}
+		}
+	}
+	s.threads = SortThreads(s.threads)
+	return projectID
 }

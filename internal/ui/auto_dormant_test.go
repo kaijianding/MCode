@@ -73,8 +73,8 @@ func TestMaybeAutoDormantThrottle(t *testing.T) {
 	// 首次扫描：超期会话被休眠
 	state.maybeAutoDormant(now, 7)
 	waitForAutoDormant(t, func() bool {
-		calls := fake.SetThreadDormantCalls()
-		return len(calls) == 1 && calls[0].ThreadID == "t-old" && calls[0].Dormant
+		calls := fake.MarkDormantWithUndoCalls()
+		return len(calls) == 1 && calls[0] == "t-old"
 	})
 	waitForAutoDormant(t, func() bool {
 		state.mu.Lock()
@@ -94,15 +94,15 @@ func TestMaybeAutoDormantThrottle(t *testing.T) {
 
 	state.maybeAutoDormant(now.Add(30*time.Minute), 7)
 	time.Sleep(50 * time.Millisecond)
-	if calls := fake.SetThreadDormantCalls(); len(calls) != 1 {
+	if calls := fake.MarkDormantWithUndoCalls(); len(calls) != 1 {
 		t.Fatalf("second scan within an hour should be throttled, got %d calls", len(calls))
 	}
 
 	// 超过 1 小时后：恢复扫描并休眠新的超期会话
 	state.maybeAutoDormant(now.Add(61*time.Minute), 7)
 	waitForAutoDormant(t, func() bool {
-		calls := fake.SetThreadDormantCalls()
-		return len(calls) == 2 && calls[1].ThreadID == "t-new-old" && calls[1].Dormant
+		calls := fake.MarkDormantWithUndoCalls()
+		return len(calls) == 2 && calls[1] == "t-new-old"
 	})
 }
 
@@ -118,7 +118,7 @@ func TestMaybeAutoDormantDisabled(t *testing.T) {
 
 	state.maybeAutoDormant(now, 0)
 	time.Sleep(50 * time.Millisecond)
-	if calls := fake.SetThreadDormantCalls(); len(calls) != 0 {
+	if calls := fake.MarkDormantWithUndoCalls(); len(calls) != 0 {
 		t.Fatalf("days=0 should not settle anything, got %d calls", len(calls))
 	}
 }
@@ -179,4 +179,32 @@ func TestSettingsConversation_AutoDormantDaysRow(t *testing.T) {
 		cfg, err := config.Load(dataDir)
 		return err == nil && cfg.Archive.SidebarAutoDormantDays != nil && *cfg.Archive.SidebarAutoDormantDays == 0 && cfg.Archive.AutoDormantDays() == 0
 	})
+}
+
+func TestAutoDormantMultipleUndo(t *testing.T) {
+	fake := NewFakeClient()
+	fake.markDormantWithUndoToken = "undo"
+	now := time.Now()
+	threads := []Thread{{ID: "a", ProjectID: "p1", UpdatedAt: now.Add(-10 * 24 * time.Hour)}, {ID: "b", ProjectID: "p2", UpdatedAt: now.Add(-10 * 24 * time.Hour)}}
+	s := newChatState(fake)
+	s.threads = append([]Thread(nil), threads...)
+	s.threadsByProj = map[string][]Thread{"p1": {threads[0]}, "p2": {threads[1]}}
+	s.maybeAutoDormant(now, 7)
+	waitForAutoDormant(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.lastBulk != nil
+	})
+	s.mu.Lock()
+	lb := s.lastBulk
+	if lb.projectID != "" || lb.count != 2 || lb.kind != "dormant" || len(lb.undo) != 2 || lb.undo[0] != (bulkUndoOp{"p1", "undo"}) || lb.undo[1] != (bulkUndoOp{"p2", "undo"}) {
+		t.Fatalf("lastBulk = %+v", lb)
+	}
+	s.mu.Unlock()
+	s.undoLastBulk()
+	waitForAutoDormant(t, func() bool { return len(fake.UndoBulkOpCalls()) == 2 })
+	calls := fake.UndoBulkOpCalls()
+	if calls[0].ProjectID != "p1" || calls[0].Token != "undo" || calls[1].ProjectID != "p2" || calls[1].Token != "undo" {
+		t.Fatalf("undo calls = %+v", calls)
+	}
 }

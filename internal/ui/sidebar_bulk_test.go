@@ -423,7 +423,7 @@ func TestSidebarBulk_ArchiveThreadWithUndo(t *testing.T) {
 	if lb == nil {
 		t.Fatal("归档后应记录 lastBulk")
 	}
-	if lb.projectID != "p1" || lb.kind != "archive" || lb.count != 1 || lb.token != "undo-single-archive" {
+	if lb.projectID != "p1" || lb.kind != "archive" || lb.count != 1 || len(lb.undo) != 1 || lb.undo[0] != (bulkUndoOp{"p1", "undo-single-archive"}) {
 		t.Fatalf("lastBulk = %+v, want projectID=p1 kind=archive count=1 token=undo-single-archive", lb)
 	}
 	if remaining != 1 {
@@ -472,7 +472,7 @@ func TestSidebarBulk_MarkDormantWithUndo(t *testing.T) {
 	if lb == nil {
 		t.Fatal("休眠后应记录 lastBulk")
 	}
-	if lb.projectID != "p1" || lb.kind != "dormant" || lb.count != 1 || lb.token != "undo-single-settle" {
+	if lb.projectID != "p1" || lb.kind != "dormant" || lb.count != 1 || len(lb.undo) != 1 || lb.undo[0] != (bulkUndoOp{"p1", "undo-single-settle"}) {
 		t.Fatalf("lastBulk = %+v, want projectID=p1 kind=settle count=1 token=undo-single-settle", lb)
 	}
 	if !dormant {

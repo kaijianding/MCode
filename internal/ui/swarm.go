@@ -993,6 +993,12 @@ func renderSwarmHeaderButton(c *ui.Context, s *chatState) {
 		queuedCount = 0
 	}
 	pendingCount := runningCount + queuedCount
+	failedCount := 0
+	for _, bee := range activeBees {
+		if bee.Status == "failed" {
+			failedCount++
+		}
+	}
 	floatShown := swarmFloatVisible(leadID, activeBees)
 	// 等待用户回答的子线程：按钮右上角叠角标，tooltip 说明，点击直接打开对应子线程的浮窗。
 	waitingBees := swarmWaitingBeeIDs(s, activeBees)
@@ -1097,6 +1103,9 @@ func renderSwarmHeaderButton(c *ui.Context, s *chatState) {
 			} else if !isBee && pendingCount > 0 {
 				renderSwarmHeaderBadge(c, "chat-header-swarm-count-badge", pendingCount, ThemeAccent(c))
 			}
+			if !isBee && failedCount > 0 {
+				renderSwarmHeaderBadge(c, "chat-header-swarm-failed-badge", failedCount, ThemeDanger(c))
+			}
 		})
 }
 
@@ -1108,10 +1117,14 @@ func renderSwarmHeaderBadge(c *ui.Context, key string, count int, bg ui.Color) {
 	if count > 99 {
 		text = "99+"
 	}
+	right := float32(-6)
+	if key == "chat-header-swarm-failed-badge" {
+		right = 18
+	}
 	ui.Row(c.Key(key)).
 		Absolute().
 		Top(-4).
-		Right(-6).
+		Right(right).
 		Height(IconSM).
 		MinWidth(14).
 		Padding(0, Space1).

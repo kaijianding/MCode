@@ -1973,3 +1973,22 @@ func TestSwarmStopBusy(t *testing.T) {
 		t.Fatalf("停止按钮未禁用: %+v", node)
 	}
 }
+
+func TestSwarmHeaderFailedBadge(t *testing.T) {
+	testenv.TempHome(t)
+	s := newChatState(NewFakeClient())
+	s.selectedThreadID = "t1"
+	hp := getSwarmPanelState(s)
+	swarmPanelMu.Lock()
+	hp.loadedFor = "t1"
+	hp.refreshed = time.Now()
+	hp.setStateLocked(SwarmState{LeadThreadID: "t1", Available: true, Enabled: true, Bees: []SwarmBee{
+		{ThreadID: "h1", Status: "failed"}, {ThreadID: "h2", Status: "failed"}, {ThreadID: "h3", Status: "running"},
+	}})
+	swarmPanelMu.Unlock()
+	tt := ui.NewTester(func(c *ui.Context) { renderSwarmHeaderButton(c, s) }, 900, 600)
+	tt.Frame()
+	if !tt.HasText("2") || !tt.HasText("1") {
+		t.Fatalf("应同时显示失败数和运行数：%v", tt.Texts())
+	}
+}
