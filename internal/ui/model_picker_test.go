@@ -642,6 +642,7 @@ func TestRenderModelListSecondaryModelsCollapsed(t *testing.T) {
 			renderModelList(c, props, "lead-more-", "lead", providers, "",
 				func(ProviderInfo, int, ModelInfo) bool { return false },
 				func(ProviderInfo) bool { return false },
+				nil,
 				nil)
 		})
 	}, 320, 640)
@@ -799,6 +800,7 @@ func TestRenderModelList_ProviderCatalogNotice(t *testing.T) {
 				renderModelList(c, props, "lead-more-", "lead", providers, query,
 					func(ProviderInfo, int, ModelInfo) bool { return false },
 					func(ProviderInfo) bool { return false },
+					nil,
 					nil)
 			})
 		}, 340, 360)
@@ -967,6 +969,8 @@ func TestModelPickerSelectedRowChangesEffort(t *testing.T) {
 	if err := tt.Click("推理强度 低"); err != nil {
 		t.Fatal(err)
 	}
+	tt.Frame()
+	clickEffortSlider(t, tt, 1)
 	if selected != "high" || picked {
 		t.Fatalf("强度=%q, 选模型=%v", selected, picked)
 	}

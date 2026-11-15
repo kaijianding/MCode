@@ -176,11 +176,6 @@ func TestComposerBeeTiers_RenderAndPick(t *testing.T) {
 		t.Fatalf("click bees tab failed: %v", err)
 	}
 
-	// 点击卡片进入二级列表页
-	if err := tt.Click("选择其他模型"); err != nil {
-		t.Fatalf("click model title failed: %v", err)
-	}
-
 	// 1. 验证档位与徽章正常渲染
 	waitFor(t, tt, func() bool {
 		return tt.HasText("档位") && tt.HasText("只读") && tt.HasText("执行")
@@ -292,10 +287,6 @@ func TestComposerBeeTiers_SingleTierReset(t *testing.T) {
 	if err := tt.Click("子代理"); err != nil {
 		t.Fatalf("click bees tab failed: %v", err)
 	}
-	if err := tt.Click("选择其他模型"); err != nil {
-		t.Fatalf("click model title failed: %v", err)
-	}
-
 	waitFor(t, tt, func() bool {
 		return tt.HasText("恢复")
 	})

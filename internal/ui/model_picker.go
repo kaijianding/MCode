@@ -56,6 +56,8 @@ type ModelPickerState struct {
 	MenuOpen    bool            // 触发胶囊的 Popover 展开状态
 	Tab         string          // Swarm 模式当前分段："lead"（默认）或 "bees"
 	ListOpen    map[string]bool // 二级模型列表页展开状态，key 为 ScopeKey+"/"+side
+	EffortOpen  bool            // 选中模型的推理强度卡片是否展开
+	EffortSide  ModelPickerSide // 推理强度卡片对应的侧别
 	MaxBeesOpen bool            // 并发 Bee 上限下拉菜单展开状态
 	TierEditing string          // 正在为其选择模型的档位 ID，空表示未编辑档位
 	searchQuery string          // 列表页搜索框内容，按名称筛选模型
@@ -74,6 +76,8 @@ func (st *ModelPickerState) Reset() {
 	st.MenuOpen = false
 	st.Tab = ""
 	st.ListOpen = nil
+	st.EffortOpen = false
+	st.EffortSide = ModelPickerSideLead
 	st.MaxBeesOpen = false
 	st.TierEditing = ""
 	st.searchQuery = ""
@@ -1006,10 +1010,14 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 					clearModelPanelMoreOpen(p.ScopeKey, "bees")
 					state.TierEditing = ""
 					state.Tab = ""
+					state.EffortOpen = false
+					state.EffortSide = ModelPickerSideLead
 				} else {
 					clearModelCapsuleSnapshot(p.ScopeKey)
 					state.TierEditing = ""
 					state.Tab = ""
+					state.EffortOpen = false
+					state.EffortSide = ModelPickerSideLead
 					state.setListOpen(p.ScopeKey, ModelPickerSideLead, false)
 					state.setListOpen(p.ScopeKey, ModelPickerSideBees, false)
 					clearModelPanelMoreOpen(p.ScopeKey, "lead")
@@ -1263,7 +1271,13 @@ func renderModelPickerMenuBody(c *ui.Context, p ModelPickerProps, state *ModelPi
 		}
 
 		wrap := ui.Box(c.Key(p.KeyPrefix + "model-list-wrap")).Padding(Space2)
-		wrap.Children(func() { renderModelPickerListPage(c, p, state, side) })
+		wrap.Children(func() {
+			if state.EffortOpen {
+				renderModelPickerCard(c, p, state, state.EffortSide)
+				return
+			}
+			renderModelPickerListPage(c, p, state, side)
+		})
 	})
 }
 
@@ -1400,6 +1414,8 @@ func renderModelPickerCard(c *ui.Context, p ModelPickerProps, state *ModelPicker
 	var onOpenModelList func()
 	if !p.Inline {
 		onOpenModelList = func() {
+			state.EffortOpen = false
+			state.EffortSide = side
 			state.setListOpen(p.ScopeKey, side, true)
 			clearModelPanelMoreOpen(p.ScopeKey, modelPickerSideKey(side))
 			modelPickerInvalidate(p)
@@ -1890,7 +1906,7 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		if isMoreOpen {
 			setModelPanelMoreOpen(scopeKey, sideKey, false)
 		} else {
-			state.MenuOpen = false
+			state.Reset()
 			clearModelPanelMoreOpen(scopeKey, sideKey)
 		}
 		if state != nil {
@@ -1923,12 +1939,20 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 			return
 		}
 		state.setListOpen(scopeKey, side, false)
+		state.EffortOpen = false
 		clearModelPanelMoreOpen(scopeKey, sideKey)
 		// 选中后清空查询，下次打开列表不残留旧搜索。
 		state.searchQuery = ""
 		if p.OnPickModel != nil {
 			p.OnPickModel(side, prov, m)
 		}
+	}
+
+	onEffort := func() {
+		state.EffortOpen = true
+		state.EffortSide = side
+		state.setListOpen(scopeKey, side, false)
+		modelPickerInvalidate(p)
 	}
 
 	lead := modelPickerSideInfo(p, ModelPickerSideLead)
@@ -2031,14 +2055,14 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 										return prov.ID == p.Bees.Provider && modelMatches(prov.Models, p.Bees.Model, mIdx, m)
 									},
 									func(ProviderInfo) bool { return false },
-									onPick)
+									onPick, onEffort)
 							} else {
 								rendered = renderModelList(c, p, "lead-more-", sideKey, providers, query,
 									func(prov ProviderInfo, mIdx int, m ModelInfo) bool {
 										return prov.ID == lead.Selection.Provider && modelMatches(prov.Models, lead.Selection.Model, mIdx, m)
 									},
 									func(prov ProviderInfo) bool { return p.HasMessages && prov.ID != lead.Selection.Provider },
-									onPick)
+									onPick, onEffort)
 							}
 							if searching && !rendered {
 								ui.Text(c, "没有匹配的模型").
@@ -2099,6 +2123,7 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 									SubtitleText: prov.Name,
 									ShowQuota:    showQuota,
 									OnPick:       onPick,
+									OnEffort:     onEffort,
 								})
 							}
 
@@ -2124,6 +2149,7 @@ type modelRowOptions struct {
 	SubtitleText string
 	ShowQuota    bool
 	OnPick       func(prov ProviderInfo, m ModelInfo)
+	OnEffort     func()
 }
 
 func defaultModelRowDisplayName(prov ProviderInfo, m ModelInfo) string {
@@ -2277,16 +2303,23 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 					btn.OnClick(func() { p.OnToggleFast(side); modelPickerInvalidate(p) })
 					btn.Children(func() { ui.Icon(c, IconByName("zap")).Size(10, 10).TextColor(modelPickerTextSecondary) })
 				}
-				if opt.IsChecked && len(modelItem.Efforts) > 0 && p.OnEffort != nil {
+				if opt.IsChecked && p.OnEffort != nil {
 					side := ModelPickerSideLead
 					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
 						side = ModelPickerSideBees
 					}
-					current := modelPickerSideInfo(p, side)
-					idx := effortIndex(modelItem.Efforts, current.Selection.Effort, modelItem.DefaultEffort)
-					label := effortLabel(modelItem.Efforts[idx])
-					btn := ui.ButtonBase(c.Key(rowKey+"-effort")).Label("推理强度 "+label).Padding(Space1, Space2).Radius(RadiusSM).Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
-					btn.OnClick(func() { p.OnEffort(side, modelItem.Efforts[(idx+1)%len(modelItem.Efforts)]); modelPickerInvalidate(p) })
+					label := "推理强度"
+					if len(modelItem.Efforts) > 0 {
+						current := modelPickerSideInfo(p, side)
+						idx := effortIndex(modelItem.Efforts, current.Selection.Effort, modelItem.DefaultEffort)
+						label = "推理强度 " + effortLabel(modelItem.Efforts[idx])
+					}
+					btn := ui.ButtonBase(c.Key(rowKey+"-effort")).Label(label).Padding(Space1, Space2).Radius(RadiusSM).Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn.OnClick(func() {
+						if opt.OnEffort != nil {
+							opt.OnEffort()
+						}
+					})
 					btn.Children(func() { ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(modelPickerTextSecondary) })
 				}
 				if opt.IsChecked {
@@ -2549,12 +2582,12 @@ func renderProviderCatalogNotice(c *ui.Context, p ModelPickerProps, prefix strin
 // renderModelList 渲染按 Agent 分组的模型列表（二级页）；prefix 区分 Lead/Bees 段的控件 key，
 // sideKey 与 p.ScopeKey 一起定位各分组“更多模型”与折叠状态。
 // query 非空时只列出匹配的模型并忽略折叠状态（次要模型也直接展示，不画“更多模型（N）”行）。
-// isChecked 判定选中态，isDisabled 判定整组 Agent 是否不可选，onPick 处理点击。
+// isChecked 判定选中态，isDisabled 判定整组 Agent 是否不可选，onPick 处理点击，onEffort 打开推理强度卡片。
 // 返回是否至少渲染了一行模型，供调用方判断搜索空态。
 func renderModelList(c *ui.Context, p ModelPickerProps, prefix, sideKey string, providers []ProviderInfo, query string,
 	isChecked func(prov ProviderInfo, mIdx int, m ModelInfo) bool,
 	isDisabled func(prov ProviderInfo) bool,
-	onPick func(prov ProviderInfo, m ModelInfo)) bool {
+	onPick func(prov ProviderInfo, m ModelInfo), onEffort func()) bool {
 	searching := strings.TrimSpace(query) != ""
 	renderedAny := false
 	for _, pv := range providers {
@@ -2620,6 +2653,7 @@ func renderModelList(c *ui.Context, p ModelPickerProps, prefix, sideKey string, 
 				SubtitleText: provTitle,
 				ShowQuota:    idx == visible[0],
 				OnPick:       onPick,
+				OnEffort:     onEffort,
 			})
 		}
 
