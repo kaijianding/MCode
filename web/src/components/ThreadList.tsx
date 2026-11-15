@@ -1311,6 +1311,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
       threads.filter(
         (thread) =>
           !thread.isArchived &&
+          !thread.isProvisional &&
           !Boolean(
             (thread as { isHelper?: boolean }).isHelper ||
             (thread as { parentThreadID?: string | null }).parentThreadID
