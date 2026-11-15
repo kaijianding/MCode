@@ -100,14 +100,17 @@ func TestRootThreadShortcutDispatch(t *testing.T) {
 	waitFor(t, tt, func() bool { return selected("t2") })
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyS)
 	waitFor(t, tt, func() bool { return len(fake.SetThreadDormantCalls()) == 1 })
-	// ⌥⌘N 先进入待创建会话（Worktree 模式），输入后才建会话并迁入自动命名的 Worktree。
+	// ⌥⌘N 先进入临时会话（Worktree 模式），输入后转正并迁入自动命名的 Worktree。
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyN)
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.pendingThread != nil && state.pendingThread.Worktree
+		return state.provisionalWorktrees[state.selectedThreadID]
 	})
-	state.noteComposerDraft("", "你好")
+	state.mu.Lock()
+	id := state.selectedThreadID
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool { return fake.CreateThreadCalls() == 1 })
 	waitFor(t, tt, func() bool {
 		fake.mu.Lock()

@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestVisibleThreadsFallbackExcludesProvisional(t *testing.T) {
+	s := &chatState{
+		projects: []Project{{ID: "p1"}},
+		threadsByProj: map[string][]Thread{
+			"p1": {
+				{ID: "provisional", IsProvisional: true},
+				{ID: "t1"},
+				{ID: "t2"},
+			},
+		},
+	}
+	t.Cleanup(func() { releaseChatUIState(s) })
+	var ids []string
+	for _, th := range s.visibleThreads() {
+		ids = append(ids, th.ID)
+	}
+	if !reflect.DeepEqual(ids, []string{"t1", "t2"}) {
+		t.Fatalf("回退列表应只包含普通会话，实际 = %v", ids)
+	}
+}
+
 func TestVisibleThreadsFallbackAndSnapshot(t *testing.T) {
 	s := &chatState{
 		sidebarCollapsed: true,

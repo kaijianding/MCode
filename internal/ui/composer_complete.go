@@ -570,11 +570,6 @@ func (s *chatState) updateCompletion(threadID string) {
 		s.mu.Unlock()
 		return
 	}
-	if s.isPendingThreadLocked(threadID) {
-		// 待创建会话还没有后端会话：创建完成后再拉取命令/文件补全，避免无效请求。
-		s.mu.Unlock()
-		return
-	}
 	s.completionLoading = true
 	seq := s.mentionSeq
 	s.mu.Unlock()
@@ -988,8 +983,6 @@ func (s *chatState) runLocalSlashCommand(threadID, draft string) bool {
 		effort := ""
 		if targetThread != nil {
 			effort = targetThread.Effort
-		} else if p := s.pendingThread; p != nil {
-			effort = p.Thread.Effort
 		}
 		s.mu.Unlock()
 

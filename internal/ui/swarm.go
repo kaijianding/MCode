@@ -413,14 +413,6 @@ func (s *chatState) setSwarmEnabled(enabled bool) {
 		return
 	}
 	s.mu.Lock()
-	if s.isPendingThreadLocked(s.selectedThreadID) {
-		// 待创建会话：开关记在待创建选项里，创建时随会话一起下发。
-		s.setPendingSwarmEnabledLocked(enabled)
-		s.mu.Unlock()
-		rememberSwarmEnabled(enabled)
-		s.invalidate()
-		return
-	}
 	s.mu.Unlock()
 	lead := s.swarmTargetLeadID()
 	if lead == "" {

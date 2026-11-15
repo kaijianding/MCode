@@ -109,6 +109,7 @@ type ProviderInfo struct {
 type Thread struct {
 	ID, ProjectID, Title         string
 	ParentThreadID               string // 所属主会话 ID（若是 Swarm bee 等 helper 会话）
+	IsProvisional                bool   // 尚无草稿的临时会话，仅从展示列表隐藏
 	IsHelper                     bool   // 是否为 helper / bee 会话
 	Provider                     string
 	Model                        string

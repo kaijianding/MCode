@@ -399,8 +399,7 @@ func buildPaletteItems(s *chatState) []paletteItem {
 	projects := make([]Project, len(s.projects))
 	copy(projects, s.projects)
 
-	threads := make([]Thread, len(s.threads))
-	copy(threads, s.threads)
+	threads := withoutProvisional(s.threads)
 
 	projNames := make(map[string]string, len(projects))
 	for _, p := range projects {
@@ -438,9 +437,7 @@ func buildPaletteItems(s *chatState) []paletteItem {
 				cs.mu.Lock()
 				projThreads := cs.threadsByProj[pID]
 				var firstThreadID string
-				if len(projThreads) > 0 {
-					firstThreadID = projThreads[0].ID
-				}
+				firstThreadID = firstVisibleThreadID(projThreads)
 				cs.mu.Unlock()
 
 				if firstThreadID != "" {

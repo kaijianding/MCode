@@ -218,8 +218,6 @@ func TestSettings_CreateThreadIgnoresRoles(t *testing.T) {
 	})
 
 	chat.createThread("p1")
-	// 待创建会话在首个非空输入后才真正创建，这里模拟输入触发。
-	chat.noteComposerDraft("", "你好")
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

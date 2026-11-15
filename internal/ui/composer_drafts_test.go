@@ -143,6 +143,7 @@ func TestComposerDraftsSwapOnSelectThread(t *testing.T) {
 		s.mu.Unlock()
 		t.Fatalf("切到无草稿会话应回填空文本以清空输入框, got %q", fill)
 	}
+	s.draft, _ = s.consumePendingDraftFillLocked()
 	s.draft = "草稿B"
 	s.mu.Unlock()
 
@@ -159,6 +160,18 @@ func TestComposerDraftsSwapOnSelectThread(t *testing.T) {
 			fill = *s.pendingDraftFill
 		}
 		t.Fatalf("切回 t1 应回填草稿A, got %q", fill)
+	}
+}
+
+func TestComposerDraftNoteSkipsRetainForRegularThread(t *testing.T) {
+	fake, s := newPendingTestState(t)
+	for _, text := range []string{"草稿", "草稿更新", ""} {
+		s.noteComposerDraft("t1", text)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.retainThreadCalls) != 0 {
+		t.Fatalf("普通会话输入不应请求转正，got %v", fake.retainThreadCalls)
 	}
 }
 

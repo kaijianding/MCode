@@ -99,10 +99,7 @@ func (s *chatState) pasteLongText(text string) bool {
 	threadID := s.selectedThreadID
 	s.mu.Unlock()
 	s.persistDraftsAsync()
-	// 与输入文字一样：新会话页有了内容，待创建会话才真正创建。
-	if threadID == "" {
-		s.createPendingThread(nil)
-	}
+	go s.retainProvisionalThread(threadID)
 	s.invalidate()
 	return true
 }

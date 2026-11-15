@@ -158,25 +158,22 @@ func renderChat(c *ui.Context, s *chatState) {
 	curAnsweredQuestions = dropAnsweredQuestionsRecordedInMessages(curAnsweredQuestions, messages)
 	curResolvedPlans = dropResolvedPlansRecordedInMessages(curResolvedPlans, messages)
 
-	// 没有选中会话时：待创建会话（尚未在后端建会话）照常显示空会话与 composer，否则显示空状态提示。
+	// 没有选中会话时显示空状态。
 	if selectedID == "" {
 		s.mu.Lock()
-		pendingActive := s.pendingThread != nil
 		hasProjects := len(s.projects) > 0
 		s.mu.Unlock()
-		if !pendingActive {
-			ui.Column(c.Key("chat-empty")).Grow(1).FillHeight().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-				if !hasProjects {
-					fs := getSidebarFooterState(s)
-					btn := Button(c, ButtonOpts{Key: "chat-add-project", Text: "添加项目", Variant: ButtonPrimary, OnClick: func() { fs.chatAddProjectOpen = !fs.chatAddProjectOpen; s.invalidate() }})
-					appPopover(c.Key("chat-add-project-popover"), btn, &fs.chatAddProjectOpen, func() { fs.chatAddProjectOpen = false }, func() { renderAddProjectPopover(c, s) })
-				} else {
-					ui.Text(c, "选择或新建一个会话").TextColor(ThemeSecondaryText(c)).FontSize(TypePageTitle)
-					Button(c, ButtonOpts{Key: "chat-onboarding", Text: "新用户引导", Variant: ButtonSecondary, OnClick: func() { openOnboarding(s) }})
-				}
-			})
-			return
-		}
+		ui.Column(c.Key("chat-empty")).Grow(1).FillHeight().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			if !hasProjects {
+				fs := getSidebarFooterState(s)
+				btn := Button(c, ButtonOpts{Key: "chat-add-project", Text: "添加项目", Variant: ButtonPrimary, OnClick: func() { fs.chatAddProjectOpen = !fs.chatAddProjectOpen; s.invalidate() }})
+				appPopover(c.Key("chat-add-project-popover"), btn, &fs.chatAddProjectOpen, func() { fs.chatAddProjectOpen = false }, func() { renderAddProjectPopover(c, s) })
+			} else {
+				ui.Text(c, "选择或新建一个会话").TextColor(ThemeSecondaryText(c)).FontSize(TypePageTitle)
+				Button(c, ButtonOpts{Key: "chat-onboarding", Text: "新用户引导", Variant: ButtonSecondary, OnClick: func() { openOnboarding(s) }})
+			}
+		})
+		return
 	}
 
 	boardGroups := stewardBoardGroups(s.stewardBoardTasks(), time.Now())
@@ -675,10 +672,6 @@ func currentThreadProject(s *chatState, threadID string) (name, id string) {
 			break
 		}
 	}
-	if id == "" && threadID == "" && s.pendingThread != nil {
-		// 待创建会话没有会话行：项目取自待创建状态。
-		id = s.pendingThread.ProjectID
-	}
 	for _, p := range s.projects {
 		if p.ID == id {
 			name = p.Name
@@ -699,9 +692,7 @@ func switchEmptyThreadProject(s *chatState, projectID string) {
 	}
 	s.mu.Lock()
 	var target string
-	if list := s.threadsByProj[projectID]; len(list) > 0 {
-		target = list[0].ID
-	}
+	target = firstVisibleThreadID(s.threadsByProj[projectID])
 	s.mu.Unlock()
 	if target != "" {
 		s.selectThread(target)

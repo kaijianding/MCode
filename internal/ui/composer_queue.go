@@ -45,9 +45,6 @@ func (s *chatState) steerQueued(item QueuedFollowUp) {
 			break
 		}
 	}
-	if provider == "" && s.pendingThread != nil {
-		provider = s.pendingThread.Thread.Provider
-	}
 	s.mu.Unlock()
 	if threadID == "" {
 		return

@@ -334,8 +334,6 @@ func TestModel_CreateThreadRouting(t *testing.T) {
 	state.projects = []Project{{ID: "p1"}, {ID: "p2"}}
 
 	state.createThread("p2")
-	// 待创建会话在首个非空输入后才真正创建，这里模拟输入触发。
-	state.noteComposerDraft("", "你好")
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -396,7 +394,6 @@ func TestModel_ProvidersAndNewThreadProvider(t *testing.T) {
 	state.mu.Unlock()
 
 	state.createThread("p1")
-	state.noteComposerDraft("", "你好")
 
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

@@ -213,14 +213,17 @@ type FakeClient struct {
 	kanbanWatchers      map[int]func()
 	nextKanbanWatcherID int
 
-	moveTaskCalls   []MoveTaskCall
-	startTaskCalls  []string
-	reviewTaskCalls []ReviewCall
-	createTaskCalls []KanbanTask
-	goalCalls       []GoalCall
-	reviewTaskErr   error
-	historyCalls    []string
-	diffCalls       []string
+	moveTaskCalls           []MoveTaskCall
+	startTaskCalls          []string
+	reviewTaskCalls         []ReviewCall
+	createTaskCalls         []KanbanTask
+	goalCalls               []GoalCall
+	reviewTaskErr           error
+	retainThreadCalls       []string
+	releaseProvisionalCalls []string
+	retainThreadErr         error
+	historyCalls            []string
+	diffCalls               []string
 
 	automations               []Automation
 	automationRuns            map[string][]AutomationRun
@@ -798,14 +801,20 @@ func (f *FakeClient) CreateThreadWithOptions(ctx context.Context, projectID stri
 	f.nextThreadSeq++
 	newID := fmt.Sprintf("t-new-%d", f.nextThreadSeq)
 	newThread := Thread{
-		ID:           newID,
-		ProjectID:    projectID,
-		Title:        fmt.Sprintf("新会话 %d", len(f.threads[projectID])+1),
-		Provider:     opts.Provider,
-		Model:        opts.Model,
-		BeesProvider: opts.BeesProvider,
-		BeesModel:    opts.BeesModel,
-		UpdatedAt:    time.Now(),
+		IsProvisional:   opts.Provisional,
+		InteractionMode: "build",
+		Effort:          opts.Effort,
+		FastMode:        opts.Fast,
+		BeesEffort:      opts.BeesEffort,
+		PairID:          opts.PairID,
+		ID:              newID,
+		ProjectID:       projectID,
+		Title:           fmt.Sprintf("新会话 %d", len(f.threads[projectID])+1),
+		Provider:        opts.Provider,
+		Model:           opts.Model,
+		BeesProvider:    opts.BeesProvider,
+		BeesModel:       opts.BeesModel,
+		UpdatedAt:       time.Now(),
 	}
 	f.threads[projectID] = append(f.threads[projectID], newThread)
 	return newID, nil
@@ -1539,13 +1548,29 @@ func (f *FakeClient) MarkDormantWithUndoCalls() []string {
 	return res
 }
 
-// RetainThread 空实现：不改变状态。
+// RetainThread 记录转正并更新后端列表。
 func (f *FakeClient) RetainThread(threadID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retainThreadCalls = append(f.retainThreadCalls, threadID)
+	if f.retainThreadErr != nil {
+		return f.retainThreadErr
+	}
+	for _, list := range f.threads {
+		for i := range list {
+			if list[i].ID == threadID {
+				list[i].IsProvisional = false
+			}
+		}
+	}
 	return nil
 }
 
-// ReleaseProvisionalThread 空实现：不改变状态。
+// ReleaseProvisionalThread 记录延迟清理请求。
 func (f *FakeClient) ReleaseProvisionalThread(threadID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releaseProvisionalCalls = append(f.releaseProvisionalCalls, threadID)
 	return nil
 }
 

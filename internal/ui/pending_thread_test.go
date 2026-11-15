@@ -1,6 +1,9 @@
 package mcodeui
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,6 +22,7 @@ func newPendingTestState(t *testing.T) (*FakeClient, *chatState) {
 	fake.SetProviders([]ProviderInfo{{ID: "claude", Name: "Claude", Available: true}})
 
 	state := newChatState(fake)
+	t.Cleanup(state.close)
 	state.mu.Lock()
 	state.projects = []Project{{ID: "p1", Name: "Proj1"}}
 	state.threadsByProj = map[string][]Thread{
@@ -31,193 +35,307 @@ func newPendingTestState(t *testing.T) (*FakeClient, *chatState) {
 	return fake, state
 }
 
-// 点击新建只进入待创建状态：不建后端会话、侧栏会话数不变、不选中任何已有会话。
-func TestPendingThread_ClickDoesNotCreate(t *testing.T) {
-	fake, state := newPendingTestState(t)
-
-	state.createThread("p1")
-
-	if got := fake.CreateThreadCalls(); got != 0 {
-		t.Fatalf("点击新建会话不应创建后端会话，实际调用 %d 次", got)
-	}
+func createTestProvisionalThread(t *testing.T, state *chatState, worktree bool) string {
+	t.Helper()
 	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.pendingThread == nil || state.pendingThread.ProjectID != "p1" {
-		t.Fatalf("应进入待创建会话，got %+v", state.pendingThread)
-	}
-	if state.selectedThreadID != "" {
-		t.Fatalf("待创建会话不应选中任何会话行，selectedThreadID=%q", state.selectedThreadID)
-	}
-	if got := len(state.threadsByProj["p1"]); got != 1 {
-		t.Fatalf("侧栏会话数不应变化，got %d", got)
-	}
-}
-
-// 输入首个非空文本时恰好创建一次，选项取自待创建状态，创建后选中新会话。
-func TestPendingThread_CreatesOnFirstInputOnce(t *testing.T) {
-	fake, state := newPendingTestState(t)
-
-	state.createThread("p1")
-	// 待创建期间改推理强度：写进待创建状态，创建时随会话一起下发。
-	state.updateComposerPrefs("", func(p *ComposerPrefs) { p.Effort = "high" }, "设置推理强度失败")
-
-	state.mu.Lock()
-	state.draft = "你好"
+	old := state.selectedThreadID
 	state.mu.Unlock()
-	state.noteComposerDraft("", "你好")
-	state.noteComposerDraft("", "你好")
-
-	waitUntil(t, "首个输入后创建会话", func() bool {
+	if worktree {
+		state.createThreadInWorktree("p1")
+	} else {
+		state.createThread("p1")
+	}
+	var id string
+	waitUntil(t, "创建并选中临时会话", func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.selectedThreadID != "" && state.pendingThread == nil
+		id = state.selectedThreadID
+		return id != "" && id != old && !state.creatingThread
 	})
+	return id
+}
 
-	if got := fake.CreateThreadCalls(); got != 1 {
-		t.Fatalf("应恰好创建一次，got %d", got)
+func TestProvisionalThreadCreateEmptyHero(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	if !fake.LastNewThreadOptions().Provisional || fake.CreateThreadCalls() != 1 {
+		t.Fatal("新建应立即调用一次 Provisional=true 的创建请求")
 	}
-	opts := fake.LastNewThreadOptions()
-	if opts.Provider != "claude" || opts.Effort != "high" {
-		t.Fatalf("创建选项应带上待创建状态的模型与推理强度，got %+v", opts)
-	}
-	if _, prefs, ok := fake.LastComposerPrefsCall(); !ok || prefs.Effort != "high" {
-		t.Fatalf("创建后应补写推理强度，got %+v ok=%v", prefs, ok)
-	}
-
 	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.selectedThreadID == "" {
-		t.Fatal("创建成功后应选中新会话")
+	th, ok := state.threadSnapshotLocked(id)
+	visible := withoutProvisional(state.threadsByProj["p1"])
+	loading := state.timelineLoadingThread
+	state.mu.Unlock()
+	if !ok || !th.IsProvisional || len(visible) != 1 || visible[0].ID != "t1" {
+		t.Fatalf("保留真实行并从展示列表隐藏，thread=%+v visible=%+v", th, visible)
 	}
-	if state.pendingDraftFill != nil {
-		t.Fatalf("创建后不应再用草稿回填输入框，got %q", *state.pendingDraftFill)
+	if loading != "" || state.composerDockDecisionFor(true, id).Docked {
+		t.Fatalf("空会话不应显示骨架或停靠输入框，loading=%q", loading)
 	}
-	if got := state.drafts[state.selectedThreadID].Text; got != "你好" {
-		t.Fatalf("创建后已输入文本应挂在待创建会话下，got %q", got)
+	if got := fake.HistoryCalls(); len(got) != 0 {
+		t.Fatalf("已知为空的新会话不应拉取 History，got %v", got)
 	}
-	if got := len(state.threadsByProj["p1"]); got != 2 {
-		t.Fatalf("创建后新会话应出现在侧栏，got %d 个会话", got)
+	for _, item := range buildPaletteItems(state) {
+		if item.id == "thread-"+id {
+			t.Fatal("命令面板不应显示临时会话")
+		}
 	}
 }
 
-// 发送时创建会话，创建成功后接着把这条消息发出去，且不会重复创建。
-func TestPendingThread_SendCreatesThenSends(t *testing.T) {
+func TestProvisionalThreadRetainOncePreservesTimeline(t *testing.T) {
 	fake, state := newPendingTestState(t)
-
-	state.createThread("p1")
-	state.sendMessage("第一条")
-	state.sendMessage("第一条")
-
-	waitUntil(t, "发送后创建会话并发出消息", func() bool {
-		return fake.CreateThreadCalls() == 1 && fake.SendCalls() >= 1
+	id := createTestProvisionalThread(t, state, false)
+	state.mu.Lock()
+	state.pendingDraftFill = nil
+	state.draft = "你好"
+	state.messages = []Message{{ID: "keep", Text: "保留"}}
+	state.mu.Unlock()
+	for i := 0; i < 10; i++ {
+		state.noteComposerDraft(id, "你好")
+	}
+	waitUntil(t, "首次输入转正", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, _ := state.threadSnapshotLocked(id)
+		return !th.IsProvisional
 	})
-	if got := fake.CreateThreadCalls(); got != 1 {
-		t.Fatalf("应恰好创建一次会话，got %d", got)
+	state.mu.Lock()
+	if len(state.messages) != 1 || state.messages[0].ID != "keep" || state.selectedThreadID != id || len(withoutProvisional(state.threads)) != 2 {
+		t.Errorf("转正不应重置页面，messages=%+v selected=%q", state.messages, state.selectedThreadID)
 	}
-	if got := fake.LastSentText(); got != "第一条" {
-		t.Fatalf("应把首条消息发给新会话，got %q", got)
+	state.mu.Unlock()
+	fake.mu.Lock()
+	calls := len(fake.retainThreadCalls)
+	fake.mu.Unlock()
+	if calls != 1 || len(fake.HistoryCalls()) != 0 {
+		t.Fatalf("首次输入只转正一次且不重拉历史，retain=%d history=%v", calls, fake.HistoryCalls())
 	}
 }
 
-// 待创建状态下切到其它会话直接丢弃待创建状态，不留下空会话。
-func TestPendingThread_DiscardOnSwitch(t *testing.T) {
-	fake, state := newPendingTestState(t)
+func TestProvisionalThreadReleaseOnlyEmptyDraft(t *testing.T) {
+	for _, kind := range []string{"empty", "whitespace", "text", "attachment", "snippet"} {
+		t.Run(kind, func(t *testing.T) {
+			fake, state := newPendingTestState(t)
+			id := createTestProvisionalThread(t, state, false)
+			state.mu.Lock()
+			state.pendingDraftFill = nil
+			switch kind {
+			case "whitespace":
+				state.draft = " \t\n"
+			case "text":
+				state.draft = "草稿"
+			case "attachment":
+				state.attachments = []composerAttachment{{ID: "att", LocalID: "ready"}}
+			case "snippet":
+				state.snippets = []composerSnippet{{ID: 1, Text: "片段"}}
+			}
+			state.mu.Unlock()
+			if kind == "whitespace" {
+				state.noteComposerDraft(id, " \t\n")
+			}
+			state.selectThread("t1")
+			state.mu.Lock()
+			_, exists := state.threadSnapshotLocked(id)
+			_, draftExists := state.drafts[id]
+			state.mu.Unlock()
+			if kind == "empty" || kind == "whitespace" {
+				waitUntil(t, "离开空会话后释放", func() bool {
+					fake.mu.Lock()
+					defer fake.mu.Unlock()
+					return len(fake.releaseProvisionalCalls) == 1
+				})
+				if exists || draftExists {
+					t.Fatal("空会话应从源列表移除并清理草稿")
+				}
+				state.refreshProjectThreads(context.Background(), "p1")
+				state.mu.Lock()
+				_, resurrected := state.threadSnapshotLocked(id)
+				state.mu.Unlock()
+				if resurrected {
+					t.Fatal("延迟删除前的列表刷新不应复活已释放会话")
+				}
+			} else {
+				fake.mu.Lock()
+				calls := len(fake.releaseProvisionalCalls)
+				fake.mu.Unlock()
+				if !exists || !draftExists || calls != 0 {
+					t.Fatalf("有草稿时应保留，exists=%v draft=%v release=%d", exists, draftExists, calls)
+				}
+			}
+		})
+	}
+}
 
+func TestProvisionalThreadWorktreeOnRetain(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, true)
+	fake.mu.Lock()
+	before := len(fake.moveToWorktreeCalls)
+	fake.mu.Unlock()
+	if before != 0 {
+		t.Fatal("临时会话创建时不应创建 Worktree")
+	}
+	if err := state.retainProvisionalThread(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.retainProvisionalThread(id); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.moveToWorktreeCalls) != 1 || fake.moveToWorktreeCalls[0].ThreadID != id {
+		t.Fatalf("转正时应只迁入一次 Worktree，got %+v", fake.moveToWorktreeCalls)
+	}
+}
+
+func TestProvisionalThreadRetainRetry(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	fake.mu.Lock()
+	fake.retainThreadErr = errors.New("retain failed")
+	fake.mu.Unlock()
+	state.noteComposerDraft(id, "草稿")
+	waitUntil(t, "转正失败提示", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return strings.Contains(state.toastMessage, "retain failed")
+	})
+	fake.mu.Lock()
+	fake.retainThreadErr = nil
+	fake.mu.Unlock()
+	state.noteComposerDraft(id, "草稿重试")
+	waitUntil(t, "后续输入可重试转正", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, _ := state.threadSnapshotLocked(id)
+		return !th.IsProvisional
+	})
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.retainThreadCalls) != 2 {
+		t.Fatalf("失败后应允许重试，got %v", fake.retainThreadCalls)
+	}
+}
+
+type blockedProvisionalClient struct {
+	*FakeClient
+	started   chan struct{}
+	gate      chan struct{}
+	createErr error
+}
+
+func (f *blockedProvisionalClient) CreateThreadWithOptions(ctx context.Context, projectID string, opts NewThreadOptions) (string, error) {
+	close(f.started)
+	<-f.gate
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	return f.FakeClient.CreateThreadWithOptions(ctx, projectID, opts)
+}
+
+func TestProvisionalThreadCreateCancellationAndDuplicate(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	blocked := &blockedProvisionalClient{FakeClient: fake, started: make(chan struct{}), gate: make(chan struct{})}
+	state.client = blocked
+	state.createThread("p1")
+	<-blocked.started
 	state.createThread("p1")
 	state.selectThread("t1")
-
-	if got := fake.CreateThreadCalls(); got != 0 {
-		t.Fatalf("切走不应创建会话，got %d", got)
-	}
+	close(blocked.gate)
+	waitUntil(t, "取消创建后的空会话被释放", func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.releaseProvisionalCalls) == 1
+	})
 	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.pendingThread != nil {
-		t.Fatalf("切到其它会话应丢弃待创建状态，got %+v", state.pendingThread)
-	}
-	if state.selectedThreadID != "t1" {
-		t.Fatalf("选中会话应为 t1，got %q", state.selectedThreadID)
+	selected := state.selectedThreadID
+	state.mu.Unlock()
+	if fake.CreateThreadCalls() != 1 || selected != "t1" {
+		t.Fatalf("快速连点应合并，切走后不抢回页面，create=%d selected=%q", fake.CreateThreadCalls(), selected)
 	}
 }
 
-// 待创建状态下更新子线程偏好与应用配对，应记住子线程模型与推理强度。
-func TestPendingThread_RemembersSwarmBees(t *testing.T) {
-	_, state := newPendingTestState(t)
-
-	state.createThread("p1")
-	// 待创建期间修改子线程提供方、模型与推理强度
-	state.updateComposerPrefs("", func(p *ComposerPrefs) {
-		p.BeesProvider = "pi"
-		p.BeesModel = "magpie/jp/auto/deepseek-v4.1-flash"
-		p.BeesEffort = "max"
-	}, "设置子代理失败")
-
-	swarm := loadLastSwarmSelection()
-	if swarm.Bees == nil {
-		t.Fatal("修改待创建会话的子线程偏好后，应记录到 lastSwarmSelection")
-	}
-	if swarm.Bees.Provider != "pi" || swarm.Bees.Model != "magpie/jp/auto/deepseek-v4.1-flash" || swarm.Bees.Effort != "max" {
-		t.Fatalf("记录的子线程配置不符，got %+v", *swarm.Bees)
-	}
-
-	// 待创建期间应用配对
-	pair := SwarmPair{
-		LeadProvider:   "claude",
-		LeadModel:      "opus",
-		WorkerProvider: "pi",
-		WorkerModel:    "magpie/jp/auto/glm-5.3-flash",
-	}
-	state.applyPendingSwarmPairLocked(pair, "high", "medium")
-	rememberSwarmBees(pair.WorkerProvider, pair.WorkerModel, "medium")
-
-	swarm = loadLastSwarmSelection()
-	if swarm.Bees == nil || swarm.Bees.Provider != "pi" || swarm.Bees.Model != "magpie/jp/auto/glm-5.3-flash" || swarm.Bees.Effort != "medium" {
-		t.Fatalf("应用配对后记录的子线程配置不符，got %+v", swarm.Bees)
-	}
-}
-
-// 待创建会话选中的配对记在占位会话与创建选项上，创建时随参数下发。
-func TestPendingThread_PairIDFlowsIntoCreateOptions(t *testing.T) {
+func TestProvisionalThreadCreateFailureKeepsPage(t *testing.T) {
 	fake, state := newPendingTestState(t)
-
+	blocked := &blockedProvisionalClient{FakeClient: fake, started: make(chan struct{}), gate: make(chan struct{}), createErr: errors.New("create failed")}
+	state.client = blocked
+	state.mu.Lock()
+	state.messages = []Message{{ID: "keep"}}
+	state.mu.Unlock()
 	state.createThread("p1")
-	pair := SwarmPair{
-		ID:             "pair-7",
-		LeadProvider:   "claude",
-		LeadModel:      "opus",
-		WorkerProvider: "claude",
-		WorkerModel:    "sonnet",
-	}
-	state.applyPendingSwarmPairLocked(pair, "high", "medium")
-
-	state.mu.Lock()
-	pendingThreadPairID, pendingOptionPairID := "", ""
-	if p := state.pendingThread; p != nil {
-		pendingThreadPairID = p.Thread.PairID
-		pendingOptionPairID = p.Options.PairID
-	}
-	state.mu.Unlock()
-	if pendingThreadPairID != "pair-7" || pendingOptionPairID != "pair-7" {
-		t.Fatalf("待创建会话应记住配对 ID，thread=%q options=%q", pendingThreadPairID, pendingOptionPairID)
-	}
-
-	// 首个输入触发建会话，配对 ID 随 NewThreadOptions 下发。
-	state.mu.Lock()
-	state.draft = "你好"
-	state.mu.Unlock()
-	state.noteComposerDraft("", "你好")
-	waitUntil(t, "首个输入后创建会话", func() bool {
+	<-blocked.started
+	close(blocked.gate)
+	waitUntil(t, "创建失败结束", func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.selectedThreadID != "" && state.pendingThread == nil
+		return !state.creatingThread
 	})
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.selectedThreadID != "t1" || len(state.messages) != 1 || !strings.Contains(state.toastMessage, "create failed") {
+		t.Fatalf("创建失败应保持原页面并提示，selected=%q messages=%v toast=%q", state.selectedThreadID, state.messages, state.toastMessage)
+	}
+}
 
-	if got := fake.LastNewThreadOptions().PairID; got != "pair-7" {
-		t.Fatalf("创建选项应带上选中的配对 ID，got %q", got)
+func TestProvisionalThreadPasteAndAttachmentRetain(t *testing.T) {
+	for _, kind := range []string{"paste", "attachment"} {
+		t.Run(kind, func(t *testing.T) {
+			_, state := newPendingTestState(t)
+			id := createTestProvisionalThread(t, state, false)
+			if kind == "paste" {
+				if !state.pasteLongText(strings.Repeat("粘贴文本\n", 200)) {
+					t.Fatal("应产生粘贴卡片")
+				}
+			} else if !state.addAttachment("a.txt", "text/plain", []byte("附件")) {
+				t.Fatal("应添加附件")
+			}
+			waitUntil(t, "粘贴或附件转正", func() bool {
+				state.mu.Lock()
+				defer state.mu.Unlock()
+				th, _ := state.threadSnapshotLocked(id)
+				return !th.IsProvisional
+			})
+		})
+	}
+}
+
+func TestProvisionalThreadStaleProjectSnapshotPreservesSelection(t *testing.T) {
+	_, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	loaded := state.reconcileProjectThreadsLocked("p1", []Thread{{ID: "t1", ProjectID: "p1"}})
+	if len(loaded) != 2 || firstVisibleThreadID(loaded) != "t1" {
+		t.Fatalf("旧快照应保留选中的临时会话并继续隐藏，got %+v", loaded)
+	}
+	found := false
+	for _, th := range loaded {
+		found = found || th.ID == id
+	}
+	if !found {
+		t.Fatal("较早的快照不应丢掉新会话 ID")
+	}
+}
+
+func TestProvisionalThreadSendWithoutDraftUsesBackendPromotion(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	state.sendMessage("第一条")
+	waitUntil(t, "直接发送转正", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, _ := state.threadSnapshotLocked(id)
+		return !state.sending && !th.IsProvisional
+	})
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.retainThreadCalls) != 0 || len(fake.sendCalls) != 1 || fake.sendCalls[0].ThreadID != id {
+		t.Fatalf("直接按真实 ID 发送，由后端转正，retain=%v send=%v", fake.retainThreadCalls, fake.sendCalls)
 	}
 }
 
 // 新建会话时模型回退到目录里的其它模型，不得把回退结果写回“上次使用”的记忆。
-func TestPendingThread_CreateKeepsLastModelSelection(t *testing.T) {
+func TestProvisionalThreadCreateKeepsLastModelSelection(t *testing.T) {
 	// 整包运行时数据目录是全局共享的，先等上一轮后台写盘结束并把全局记忆状态与数据目录复位，
 	// 避免别的用例遗留的 ui-state.json 或残留写盘 goroutine 把这里的“上次选择”冲成别的值。
 	resetLastSelectionMergeState(t)
@@ -237,17 +355,7 @@ func TestPendingThread_CreateKeepsLastModelSelection(t *testing.T) {
 	setLastModelSelection(&remembered)
 	defer setLastModelSelection(nil)
 
-	state.createThread("p1")
-	state.mu.Lock()
-	state.draft = "你好"
-	state.mu.Unlock()
-	state.noteComposerDraft("", "你好")
-
-	waitUntil(t, "首个输入后创建会话", func() bool {
-		state.mu.Lock()
-		defer state.mu.Unlock()
-		return state.selectedThreadID != "" && state.pendingThread == nil
-	})
+	createTestProvisionalThread(t, state, false)
 
 	if got := fake.CreateThreadCalls(); got != 1 {
 		t.Fatalf("应恰好创建一次，got %d", got)
@@ -261,5 +369,120 @@ func TestPendingThread_CreateKeepsLastModelSelection(t *testing.T) {
 	last, ok := loadLastModelSelection()
 	if !ok || last != remembered {
 		t.Fatalf("建会话不应改写“上次模型选择”，got %+v ok=%v", last, ok)
+	}
+}
+
+func TestProvisionalThreadWatchEmptyUpdatesPreserveHero(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	state.onWatchUpdate(ThreadUpdate{ThreadID: id, Thread: Thread{ID: id, ProjectID: "p1", IsProvisional: true}})
+	if err := state.retainProvisionalThread(id); err != nil {
+		t.Fatal(err)
+	}
+	state.onWatchUpdate(ThreadUpdate{ThreadID: id, Thread: Thread{ID: id, ProjectID: "p1"}})
+	if len(fake.HistoryCalls()) != 0 || state.composerDockDecisionFor(true, id).Docked {
+		t.Fatal("空快照和转正摘要不应拉取 History 或停靠")
+	}
+	state.selectThread("t1")
+}
+
+func TestProvisionalThreadActivityAndProjectSelection(t *testing.T) {
+	_, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	projects := []Project{{ID: "p1"}, {ID: "p2"}}
+	threads := map[string][]Thread{
+		"p1": {{ID: id, IsProvisional: true, UpdatedAt: time.Now()}},
+		"p2": {{ID: "real", UpdatedAt: time.Now().Add(-time.Hour)}},
+	}
+	if got := SortProjectsByActivity(projects, threads); got[0].ID != "p2" {
+		t.Fatalf("临时会话不应影响项目活跃排序，got %+v", got)
+	}
+	state.mu.Lock()
+	state.threadsByProj["p1"] = append([]Thread{{ID: "other-provisional", ProjectID: "p1", IsProvisional: true}}, state.threadsByProj["p1"]...)
+	state.mu.Unlock()
+	switchEmptyThreadProject(state, "p1")
+	state.mu.Lock()
+	selected := state.selectedThreadID
+	state.mu.Unlock()
+	if selected != "t1" {
+		t.Fatalf("切换项目不应选中其它临时会话，got %q", selected)
+	}
+}
+
+func TestProvisionalThreadSummaryPromotion(t *testing.T) {
+	_, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+	state.applyThreadSummary(Thread{ID: id, ProjectID: "p1", IsProvisional: false})
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	th, _ := state.threadSnapshotLocked(id)
+	if th.IsProvisional || len(withoutProvisional(state.threadsByProj["p1"])) != 2 {
+		t.Fatal("全局摘要应同步转正字段并让会话可见")
+	}
+}
+
+type provisionalListFailureClient struct {
+	*FakeClient
+}
+
+func (f provisionalListFailureClient) Threads(context.Context, string) ([]Thread, error) {
+	return nil, errors.New("list failed")
+}
+
+func TestProvisionalThreadListFailureReleasesCreatedThread(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	state.client = provisionalListFailureClient{FakeClient: fake}
+	state.createThread("p1")
+	waitUntil(t, "列表失败后释放新建会话", func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.releaseProvisionalCalls) == 1
+	})
+	waitUntil(t, "列表失败完成收尾", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return !state.creatingThread
+	})
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.selectedThreadID != "t1" || !strings.Contains(state.toastMessage, "list failed") {
+		t.Fatalf("列表失败应保留原页面并提示，selected=%q toast=%q", state.selectedThreadID, state.toastMessage)
+	}
+}
+
+type blockedRetainClient struct {
+	*FakeClient
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (f blockedRetainClient) RetainThread(threadID string) error {
+	close(f.started)
+	<-f.gate
+	return f.FakeClient.RetainThread(threadID)
+}
+
+func TestProvisionalThreadConcurrentRetainAndLeave(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	blocked := blockedRetainClient{FakeClient: fake, started: make(chan struct{}), gate: make(chan struct{})}
+	state.client = blocked
+	id := createTestProvisionalThread(t, state, true)
+	first := make(chan error, 1)
+	second := make(chan error, 1)
+	go func() { first <- state.retainProvisionalThread(id) }()
+	<-blocked.started
+	go func() { second <- state.retainProvisionalThread(id) }()
+	state.selectThread("t1")
+	close(blocked.gate)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.retainThreadCalls) != 1 || len(fake.releaseProvisionalCalls) != 0 || len(fake.moveToWorktreeCalls) != 1 {
+		t.Fatalf("在途转正应合并并保留，retain=%v release=%v worktree=%v", fake.retainThreadCalls, fake.releaseProvisionalCalls, fake.moveToWorktreeCalls)
 	}
 }

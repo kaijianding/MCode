@@ -304,9 +304,7 @@ func TestCompactSuggestionCardDismissAndCompact(t *testing.T) {
 	})
 
 	// 点击“不用了”后卡片消失，本会话不再提示
-	if err := tt.Click("不用了"); err != nil {
-		t.Fatalf("点击“不用了”失败: %v", err)
-	}
+	waitFor(t, tt, func() bool { return tt.Click("不用了") == nil })
 	for i := 0; i < 3; i++ {
 		tt.Frame()
 	}
@@ -471,9 +469,7 @@ func TestCompactSuggestionCardForwards(t *testing.T) {
 		t.Fatalf("压缩卡片显示时不应再出现转发建议卡片")
 	}
 
-	if err := tt.Click("转发到新会话"); err != nil {
-		t.Fatalf("点击“转发到新会话”失败: %v", err)
-	}
+	waitFor(t, tt, func() bool { return tt.Click("转发到新会话") == nil })
 	waitFor(t, tt, func() bool {
 		return forwardCallsContain(fake, "t1")
 	})

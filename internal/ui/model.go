@@ -217,6 +217,9 @@ func SortProjectsByActivity(projects []Project, threadsByProj map[string][]Threa
 	for _, p := range projects {
 		var latest time.Time
 		for _, th := range threadsByProj[p.ID] {
+			if th.IsProvisional {
+				continue
+			}
 			if at := threadActivityTime(th); at.After(latest) {
 				latest = at
 			}
@@ -360,7 +363,7 @@ type chatState struct {
 	respondingApproval   int                           // 在途审批响应数，归零才解锁批量/单卡按钮
 	questionDrafts       map[string]*questionDraft     // 提问卡片草稿，以 RequestID 为键
 	composerFocused      bool                          // composer 输入框是否聚焦，由 composer 渲染时写入，供 ⌘Return 判定
-	composerFocusRequest bool                          // 下一帧主动给 composer 输入框要一次焦点（待创建会话页用）
+	composerFocusRequest bool                          // 下一帧主动给 composer 输入框要一次焦点
 	questionOtherFocused bool                          // 提问卡片“其他”文本框是否聚焦
 	resolvedPlans        map[string][]resolvedPlan     // 按 threadID 记录已裁决的计划历史态
 	answeredQuestions    map[string][]answeredQuestion // 按 threadID 记录已回答的提问历史态
@@ -510,17 +513,20 @@ type chatState struct {
 	sending     bool
 	sentDraft   *string
 
-	providers           []ProviderInfo
-	catalogRequestSeq   uint64
-	catalogAppliedSeq   uint64
-	catalogRefreshing   bool
-	newThreadProvider   string
-	pendingThread       *pendingThreadState // 待创建会话（点新建后、首个输入前），nil 表示没有；受 s.mu 保护
-	selectedProviderIdx int
-	composerPrefsSaving map[string]bool
-	modelPrefCache      map[string]ModelPreference // 模型偏好缓存（key: pin.Key()）
-	modelPrefLoading    map[string]bool            // 正在加载偏好的 pin
-	modelPrefWrites     map[string]chan struct{}   // 同一模型的偏好写入按点击顺序执行
+	providers            []ProviderInfo
+	catalogRequestSeq    uint64
+	catalogAppliedSeq    uint64
+	catalogRefreshing    bool
+	newThreadProvider    string
+	creatingThread       bool // 创建请求进行中，防止重复点击；受 s.mu 保护
+	provisionalWorktrees map[string]bool
+	provisionalRetains   map[string]*provisionalRetain
+	releasedProvisional  map[string]bool
+	selectedProviderIdx  int
+	composerPrefsSaving  map[string]bool
+	modelPrefCache       map[string]ModelPreference // 模型偏好缓存（key: pin.Key()）
+	modelPrefLoading     map[string]bool            // 正在加载偏好的 pin
+	modelPrefWrites      map[string]chan struct{}   // 同一模型的偏好写入按点击顺序执行
 
 	threadListState ui.ListState
 	chatListState   ui.ListState
@@ -1070,6 +1076,7 @@ func (s *chatState) loadProjects() {
 		loadedProjects := 0
 		for pt := range resCh {
 			loadedProjects++
+			pt.threads = s.reconcileProjectThreadsLocked(pt.projID, pt.threads)
 			s.threadsByProj[pt.projID] = pt.threads
 			allThreads = append(allThreads, pt.threads...)
 		}
@@ -1081,18 +1088,18 @@ func (s *chatState) loadProjects() {
 		if s.initialThreadID != "" {
 			targetThreadID = s.initialThreadID
 			s.initialThreadID = ""
-		} else if len(s.threads) > 0 && s.pendingThread != nil {
-			// 正在编辑待创建会话：不自动选中任何会话，避免把用户从新会话页拽走。
+		} else if s.creatingThread {
+			// 新建请求完成后自行选中，避免列表刷新抢走当前页面。
 		} else if len(s.threads) > 0 {
 			if s.selectedThreadID == "" {
 				for _, th := range s.threads {
-					if !th.Dormant {
+					if !th.Dormant && !th.IsProvisional {
 						targetThreadID = th.ID
 						break
 					}
 				}
 				if targetThreadID == "" {
-					targetThreadID = s.threads[0].ID
+					targetThreadID = firstVisibleThreadID(s.threads)
 				}
 			} else {
 				exists := false
@@ -1104,13 +1111,13 @@ func (s *chatState) loadProjects() {
 				}
 				if !exists {
 					for _, th := range s.threads {
-						if !th.Dormant {
+						if !th.Dormant && !th.IsProvisional {
 							targetThreadID = th.ID
 							break
 						}
 					}
 					if targetThreadID == "" {
-						targetThreadID = s.threads[0].ID
+						targetThreadID = firstVisibleThreadID(s.threads)
 					}
 				} else if d := s.takeDraftLocked(s.selectedThreadID); d.Text != "" {
 					// 会话已选中且仍存在，不会走 selectThread，这里直接回填它的草稿。
@@ -1149,6 +1156,7 @@ func (s *chatState) loadThreads(projectID string, autoSelect bool) {
 		sorted := SortThreads(threads)
 
 		s.mu.Lock()
+		sorted = s.reconcileProjectThreadsLocked(projectID, sorted)
 		s.threadsByProj[projectID] = sorted
 		var all []Thread
 		for _, list := range s.threadsByProj {
@@ -1161,15 +1169,15 @@ func (s *chatState) loadThreads(projectID string, autoSelect bool) {
 		if s.initialThreadID != "" {
 			targetThreadID = s.initialThreadID
 			s.initialThreadID = ""
-		} else if autoSelect && len(sorted) > 0 && s.pendingThread == nil {
+		} else if autoSelect && len(sorted) > 0 && !s.creatingThread {
 			for _, th := range sorted {
-				if !th.Dormant {
+				if !th.Dormant && !th.IsProvisional {
 					targetThreadID = th.ID
 					break
 				}
 			}
 			if targetThreadID == "" {
-				targetThreadID = sorted[0].ID
+				targetThreadID = firstVisibleThreadID(sorted)
 			}
 		}
 		s.mu.Unlock()
@@ -1309,18 +1317,26 @@ func (s *chatState) fetchUsage(threadID string) {
 // selectThread 切换会话：先注销前一个 Watch，再加载 History、Approvals 和 Usage，最后 Watch 新会话。
 // 切换前把当前会话草稿（含排队项编辑暂存）写回草稿表，切换后回填目标会话的草稿。
 func (s *chatState) selectThread(threadID string) {
+	s.selectThreadState(threadID, false, nil)
+}
+
+// selectThreadState 让已知为空的新会话直接进入 Hero，同时保留普通会话的订阅与清理。
+func (s *chatState) selectThreadState(threadID string, knownEmpty bool, expectedSeq *uint64) bool {
 	inspectorRemember(s)
 	stewardID := s.stewardThreadID()
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || (expectedSeq != nil && s.watchSeq != *expectedSeq) {
 		s.mu.Unlock()
-		return
+		return false
 	}
 	// 先读出旧会话的草稿：正在编辑排队项时，输入框里是排队项文本，用户草稿在暂存字段里。
 	oldThreadID := s.selectedThreadID
 	// 切走时清掉「首条消息已发出」的透视标记，避免它在别的会话里再次触发停靠动画。
 	s.disarmComposerDockPromote(oldThreadID)
 	oldText := s.draft
+	if s.pendingDraftFill != nil && !s.pendingDraftFillIfEmpty {
+		oldText = *s.pendingDraftFill
+	}
 	oldAtts := s.attachments
 	oldSnippets := s.snippets
 	editingQueued := s.editingFollowUpID != ""
@@ -1331,6 +1347,7 @@ func (s *chatState) selectThread(threadID string) {
 	}
 	if oldThreadID != threadID {
 		s.stashDraftLocked(oldThreadID, oldText, oldAtts, oldSnippets)
+		s.releaseEmptyProvisionalLocked(oldThreadID, oldText, oldAtts, oldSnippets)
 		stopStewardTaskWatchLocked(s)
 	}
 	s.watchSeq++
@@ -1343,6 +1360,10 @@ func (s *chatState) selectThread(threadID string) {
 	delete(s.timelineLoadErrors, oldThreadID)
 	delete(s.timelineLoadErrors, threadID)
 	s.timelineLoadingThread = threadID
+	if knownEmpty {
+		s.timelineLoadingThread = ""
+		s.composerFocusRequest = true
+	}
 	if threadID != s.stewardTaskThreadID {
 		s.stewardTaskThreadID = ""
 		s.stewardTask = stewardTaskSnapshot{}
@@ -1368,10 +1389,6 @@ func (s *chatState) selectThread(threadID string) {
 				}
 			}
 		}
-	}
-	if threadID != "" {
-		// 切到真实会话即丢弃待创建会话，不在后端留下空会话。
-		s.pendingThread = nil
 	}
 	s.pendingDraftFill = nil
 	s.pendingDraftFillIfEmpty = false
@@ -1429,9 +1446,9 @@ func (s *chatState) selectThread(threadID string) {
 		s.persistDraftsAsync()
 	}
 
-	// 新会话页（包括待创建会话）没有后端会话，不拉取任何会话数据。
+	// 未选中会话时无需订阅或加载。
 	if threadID == "" {
-		return
+		return true
 	}
 	if threadID != s.stewardThreadID() {
 		loadStewardTaskForThread(s, threadID)
@@ -1440,67 +1457,69 @@ func (s *chatState) selectThread(threadID string) {
 	go func(tid string) {
 		ctx := context.Background()
 
-		historyStart := time.Now()
-		history, hErr := s.client.History(ctx, tid)
-		initialHistoryOnce.Do(func() {
-			ms := time.Since(historyStart).Milliseconds()
-			startuptrace.Mark(fmt.Sprintf("initial history loaded n=%d took=%dms", len(history), ms))
-		})
+		if !knownEmpty {
+			historyStart := time.Now()
+			history, hErr := s.client.History(ctx, tid)
+			initialHistoryOnce.Do(func() {
+				ms := time.Since(historyStart).Milliseconds()
+				startuptrace.Mark(fmt.Sprintf("initial history loaded n=%d took=%dms", len(history), ms))
+			})
 
-		approvals, aErr := s.client.Approvals(ctx, tid)
+			approvals, aErr := s.client.Approvals(ctx, tid)
 
-		usage, uErr := s.client.Usage(ctx, tid)
+			usage, uErr := s.client.Usage(ctx, tid)
 
-		s.mu.Lock()
-		queueChange := s.queueChanges[tid]
-		s.mu.Unlock()
-		queueItems, qErr := s.client.Queue(ctx, tid)
-
-		s.mu.Lock()
-		if s.watchSeq == seq && s.timelineLoadingThread == tid {
-			s.timelineLoadingThread = ""
-		}
-		if s.closed || s.watchSeq != seq || s.selectedThreadID != tid {
+			s.mu.Lock()
+			queueChange := s.queueChanges[tid]
 			s.mu.Unlock()
-			return
-		}
-		var loadError string
-		if hErr != nil {
-			loadError = "加载历史消息失败: " + hErr.Error()
-		}
-		if aErr != nil {
+			queueItems, qErr := s.client.Queue(ctx, tid)
+
+			s.mu.Lock()
+			if s.watchSeq == seq && s.timelineLoadingThread == tid {
+				s.timelineLoadingThread = ""
+			}
+			if s.closed || s.watchSeq != seq || s.selectedThreadID != tid {
+				s.mu.Unlock()
+				return
+			}
+			var loadError string
+			if hErr != nil {
+				loadError = "加载历史消息失败: " + hErr.Error()
+			}
+			if aErr != nil {
+				if loadError != "" {
+					loadError += "；"
+				}
+				loadError += "加载审批请求失败: " + aErr.Error()
+			}
 			if loadError != "" {
-				loadError += "；"
+				if s.timelineLoadErrors == nil {
+					s.timelineLoadErrors = make(map[string]string)
+				}
+				s.timelineLoadErrors[tid] = loadError
 			}
-			loadError += "加载审批请求失败: " + aErr.Error()
-		}
-		if loadError != "" {
-			if s.timelineLoadErrors == nil {
-				s.timelineLoadErrors = make(map[string]string)
+			if hErr == nil {
+				s.messages = UpsertMessages(nil, history, nil)
+				s.messagesRev++
+				// 打开会话时已有的正文立即完整显示，只有之后新流入的增量才逐字揭示。
+				s.markRevealBaselineLocked(s.messages)
 			}
-			s.timelineLoadErrors[tid] = loadError
-		}
-		if hErr == nil {
-			s.messages = UpsertMessages(nil, history, nil)
-			s.messagesRev++
-			// 打开会话时已有的正文立即完整显示，只有之后新流入的增量才逐字揭示。
-			s.markRevealBaselineLocked(s.messages)
-		}
-		if aErr == nil {
-			s.approvals = approvals
-			s.pruneApprovalDraftsLocked()
-		}
-		if uErr == nil {
-			s.threadUsage = usage
-		}
-		if qErr == nil && s.queueChanges[tid] == queueChange {
-			if s.queue == nil {
-				s.queue = make(map[string][]QueuedFollowUp)
+			if aErr == nil {
+				s.approvals = approvals
+				s.pruneApprovalDraftsLocked()
 			}
-			s.queue[tid] = s.filterRemovingQueuedLocked(tid, queueItems)
+			if uErr == nil {
+				s.threadUsage = usage
+			}
+			if qErr == nil && s.queueChanges[tid] == queueChange {
+				if s.queue == nil {
+					s.queue = make(map[string][]QueuedFollowUp)
+				}
+				s.queue[tid] = s.filterRemovingQueuedLocked(tid, queueItems)
+			}
+			s.mu.Unlock()
+			s.invalidate()
 		}
-		s.mu.Unlock()
-		s.invalidate()
 
 		stop := s.client.Watch(tid, func(update ThreadUpdate) {
 			s.onWatchUpdate(update)
@@ -1536,6 +1555,7 @@ func (s *chatState) selectThread(threadID string) {
 			s.invalidate()
 		}
 	}(threadID)
+	return true
 }
 
 // messageReveal 记录一条助手消息在本窗口的逐字揭示进度。
@@ -1630,6 +1650,13 @@ func (s *chatState) onWatchUpdate(update ThreadUpdate) {
 	var resyncThreadID string
 
 	s.mu.Lock()
+	if s.releasedProvisional[update.ThreadID] {
+		s.mu.Unlock()
+		return
+	}
+	if op := s.provisionalRetains[update.ThreadID]; op != nil && op.retained {
+		update.Thread.IsProvisional = false
+	}
 	// 后端已给出该会话的权威摘要（运行中、已结束或出错）：撤销本地乐观标记，状态以后端为准。
 	delete(s.optimisticRunning, update.ThreadID)
 	for _, th := range s.threads {
@@ -1673,8 +1700,8 @@ func (s *chatState) onWatchUpdate(update ThreadUpdate) {
 					}
 				}
 			}
-		} else if len(update.Messages) == 0 && len(update.RemovedIDs) == 0 {
-			// 后端发布空增量时也刷新用量
+		} else if len(update.Messages) == 0 && len(update.RemovedIDs) == 0 && len(s.messages) > 0 {
+			// 有消息的会话收到空增量时也刷新用量，空会话转正不重拉 History。
 			shouldFetchUsage = true
 		}
 		s.messages = UpsertMessages(s.messages, update.Messages, update.RemovedIDs)
@@ -1932,9 +1959,9 @@ func (s *chatState) newThreadOptions(projectID ...string) NewThreadOptions {
 	return opts
 }
 
-// createThread 进入指定项目的待创建会话：输入或发送时才真正建会话，空会话不进侧栏。
+// createThread 在指定项目创建临时会话，首次有草稿后才进入侧栏。
 func (s *chatState) createThread(projectID string) {
-	s.beginPendingThread(projectID, s.newThreadOptions(projectID), false)
+	s.createProvisionalThread(projectID, false)
 }
 
 // createNewThread 在当前选中会话所属的项目里新建（没有选中会话时用第一个项目）。
@@ -1948,10 +1975,6 @@ func (s *chatState) createNewThread() {
 				break
 			}
 		}
-	}
-	if targetProjectID == "" && s.pendingThread != nil {
-		// 已在待创建会话里再次新建：沿用它的项目。
-		targetProjectID = s.pendingThread.ProjectID
 	}
 	if targetProjectID == "" && len(s.projects) > 0 {
 		targetProjectID = s.projects[0].ID
@@ -2020,7 +2043,7 @@ func (s *chatState) promptAddProject() {
 }
 
 // addProject 在后台调用 client.AddProject 添加项目，成功后刷新项目列表、展开新项目，
-// 并直接在右侧进入这个新项目的待创建会话，用户选完目录就能接着提问。
+// 并直接在右侧创建这个项目的临时会话。
 func (s *chatState) addProject(path string) {
 	go func() {
 		ctx := context.Background()
@@ -2037,8 +2060,7 @@ func (s *chatState) addProject(path string) {
 		s.collapsedProj[proj.ID] = false // 展开新项目
 		s.mu.Unlock()
 
-		// 先进入新项目的待创建会话再刷新列表：刷新时已有 pendingThread，
-		// 不会把选中态挪到别的会话上。
+		// 创建请求期间不让列表刷新自动切换会话。
 		s.createThread(proj.ID)
 		s.loadProjects()
 	}()
@@ -2161,6 +2183,7 @@ func (s *chatState) markThreadIdleLocked(threadID string) {
 func (s *chatState) finishOutgoingMessageLocked(tid, text string, attachmentIDs []string, delegated bool, err error, failPrefix string) {
 	s.sending = false
 	if err == nil {
+		s.markThreadRetainedLocked(tid)
 		delete(s.interrupted, tid)
 		// 用户消息已送达：本地立刻记下发送时间并重排，侧边栏顺序不等后端回推就更新。
 		s.markThreadUserMessageLocked(tid, time.Now())
@@ -2194,15 +2217,6 @@ func (s *chatState) finishOutgoingMessageLocked(tid, text string, attachmentIDs 
 // sendMessage 在后台 goroutine 中向当前会话发送文本与已上传附件。
 func (s *chatState) sendMessage(text string) {
 	s.mu.Lock()
-	sendFromPending := s.isPendingThreadLocked(s.selectedThreadID)
-	s.mu.Unlock()
-	if sendFromPending {
-		// 待创建会话还没有后端会话：先建会话，成功后接着把这条消息发出去。
-		s.createPendingThread(func(string) { s.sendMessage(text) })
-		return
-	}
-
-	s.mu.Lock()
 	// 粘贴卡片接在正文后面一起发出；text 仍是输入框原文，供发送后按 sentDraft 清空输入框。
 	outgoing, snippetIDs := s.outgoingTextLocked(text)
 	tid, attachmentIDs, ok := s.prepareOutgoingMessageLocked(outgoing)
@@ -2225,6 +2239,13 @@ func (s *chatState) sendMessage(text string) {
 
 	go func() {
 		ctx := context.Background()
+		if err := s.prepareProvisionalSend(tid); err != nil {
+			s.mu.Lock()
+			s.finishOutgoingMessageLocked(tid, text, attachmentIDs, false, err, "发送消息失败")
+			s.mu.Unlock()
+			s.invalidate()
+			return
+		}
 		sendText := outgoing
 		if len(mentions) > 0 {
 			// 被引用会话的 <referenced_chat> 资料块连同前言与结束标记一并置于用户当前输入之前。
@@ -2257,12 +2278,6 @@ func (s *chatState) sendMessage(text string) {
 // 决策卡的回答走这条路径：它不应消耗用户正在编辑的草稿，也不应带上待发送的附件。
 func (s *chatState) sendTextOnly(text string) {
 	s.mu.Lock()
-	if s.isPendingThreadLocked(s.selectedThreadID) {
-		s.mu.Unlock()
-		// 待创建会话还没有后端会话：先建会话，成功后接着把这条消息发出去。
-		s.createPendingThread(func(string) { s.sendTextOnly(text) })
-		return
-	}
 	tid := s.selectedThreadID
 	if s.sending || s.sentDraft != nil || tid == "" || s.composerPrefsSaving[tid] {
 		s.mu.Unlock()
@@ -2279,10 +2294,15 @@ func (s *chatState) sendTextOnly(text string) {
 
 	go func() {
 		ctx := context.Background()
-		delegated, err := s.client.Send(ctx, tid, text)
+		err := s.prepareProvisionalSend(tid)
+		var delegated bool
+		if err == nil {
+			delegated, err = s.client.Send(ctx, tid, text)
+		}
 		s.mu.Lock()
 		s.sending = false
 		if err == nil {
+			s.markThreadRetainedLocked(tid)
 			delete(s.interrupted, tid)
 			// 消息已送达：本地立即记下发送时间并重排侧边栏。
 			s.markThreadUserMessageLocked(tid, time.Now())
@@ -4015,13 +4035,6 @@ func (s *chatState) syncSelectedThreadFastMode(pin ModelPin, fast bool) {
 	}
 	s.mu.Lock()
 	threadID := s.selectedThreadID
-	if s.isPendingThreadLocked(threadID) {
-		// 待创建会话：快速模式只记进待创建选项，创建时随选项下发。
-		s.setPendingFastLocked(fast)
-		s.mu.Unlock()
-		s.invalidate()
-		return
-	}
 	matched := false
 	if threadID != "" {
 		for i := range s.threads {
@@ -4051,7 +4064,7 @@ func (s *chatState) syncSelectedThreadFastMode(pin ModelPin, fast bool) {
 }
 
 // toggleThreadFastMode 按会话翻转快速模式：已有会话直接写后端并回填本地列表，
-// 待创建会话只记进待创建选项（创建时随选项下发）。cur 为界面当前展示的会话值。
+// cur 为界面当前展示的会话值。
 // 模型偏好只作为新建会话的默认值，这里不改偏好。
 func (s *chatState) toggleThreadFastMode(threadID string, cur bool) {
 	if s.client == nil {
@@ -4059,10 +4072,6 @@ func (s *chatState) toggleThreadFastMode(threadID string, cur bool) {
 	}
 	next := !cur
 	if threadID == "" {
-		s.mu.Lock()
-		s.setPendingFastLocked(next)
-		s.mu.Unlock()
-		s.invalidate()
 		return
 	}
 	if err := s.client.SetThreadFastMode(threadID, next, ""); err != nil {
@@ -4085,16 +4094,12 @@ func (s *chatState) setModelEffortPreference(pin ModelPin, effort string) {
 }
 
 // resetThreadFastMode 关闭指定会话的快速模式并清空速率档位：
-// 已有会话写回后端并同步本地列表，待创建会话只记进待创建选项（创建时随选项下发）。
+// 写回后端并同步本地列表。
 func (s *chatState) resetThreadFastMode(threadID string) {
 	if s.client == nil {
 		return
 	}
 	if threadID == "" {
-		s.mu.Lock()
-		s.setPendingFastLocked(false)
-		s.mu.Unlock()
-		s.invalidate()
 		return
 	}
 	if err := s.client.SetThreadFastMode(threadID, false, ""); err != nil {

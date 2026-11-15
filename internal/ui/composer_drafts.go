@@ -238,9 +238,10 @@ func (s *chatState) noteComposerDraft(threadID, text string) {
 		s.draftSaveTimer.Stop()
 	}
 	s.draftSaveTimer = time.AfterFunc(composerDraftSaveDebounce, s.persistDraftsAsync)
+	th, ok := s.threadSnapshotLocked(threadID)
+	retain := strings.TrimSpace(text) != "" && ok && th.IsProvisional && s.provisionalRetains[threadID] == nil
 	s.mu.Unlock()
-	// 待创建会话在首个非空输入时真正创建（草稿有内容后会话才出现在列表）。
-	if threadID == "" && pendingDraftHasContent(text) {
-		s.createPendingThread(nil)
+	if retain {
+		go s.retainProvisionalThread(threadID)
 	}
 }

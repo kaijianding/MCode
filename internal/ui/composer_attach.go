@@ -494,6 +494,7 @@ func (s *chatState) addAttachmentToThread(threadID, name, mime string, data []by
 	attachmentTokenCache.Store(localID, estimateAttachmentTokens(mime, data, len(data)))
 	s.invalidate()
 
+	go s.retainProvisionalThread(threadID)
 	go s.uploadAttachmentTask(localID, att.uploadName(), mime, data)
 	return true
 }
@@ -733,7 +734,9 @@ func (s *chatState) readAttachmentFiles(paths []string, rejected []rejectedAttac
 			RetryData: data,
 		}
 		s.attachments = append(s.attachments, att)
+		threadID := s.selectedThreadID
 		s.mu.Unlock()
+		go s.retainProvisionalThread(threadID)
 		attachmentTokenCache.Store(localID, estimateAttachmentTokens(mime, data, len(data)))
 		s.invalidate()
 

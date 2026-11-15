@@ -285,13 +285,11 @@ func renderSidebar(c *ui.Context, s *chatState) {
 	providers := make([]ProviderInfo, len(s.providers))
 	copy(providers, s.providers)
 
-	threads := make([]Thread, len(s.threads))
-	copy(threads, s.threads)
+	threads := withoutProvisional(s.threads)
 
 	threadsByProj := make(map[string][]Thread, len(s.threadsByProj))
 	for pid, list := range s.threadsByProj {
-		cp := make([]Thread, len(list))
-		copy(cp, list)
+		cp := withoutProvisional(list)
 		threadsByProj[pid] = cp
 	}
 
@@ -1728,7 +1726,7 @@ func (s *chatState) forwardThread(projectID, threadID string) {
 			threads, err := s.client.Threads(ctx, projectID)
 			if err == nil {
 				s.mu.Lock()
-				s.threadsByProj[projectID] = SortThreads(threads)
+				s.threadsByProj[projectID] = s.reconcileProjectThreadsLocked(projectID, threads)
 				var all []Thread
 				for _, list := range s.threadsByProj {
 					all = append(all, list...)
@@ -1749,7 +1747,7 @@ func (s *chatState) forwardThread(projectID, threadID string) {
 }
 
 // forwardSelectedThread 把当前选中的会话转发为新会话。
-// 没有选中会话、或选中的会话还不在列表里（如待创建会话）时什么也不做，返回 false。
+// 没有选中会话、或选中的会话还不在列表里时什么也不做，返回 false。
 func (s *chatState) forwardSelectedThread() bool {
 	s.mu.Lock()
 	id := s.selectedThreadID
@@ -1846,16 +1844,16 @@ func getWorktreeUIState(s *chatState) *worktreeUIState {
 }
 
 // refreshProjectThreads 重新拉取指定项目的会话列表并展开该项目。
-func (s *chatState) refreshProjectThreads(ctx context.Context, projectID string) {
+func (s *chatState) refreshProjectThreads(ctx context.Context, projectID string) error {
 	if projectID == "" {
-		return
+		return nil
 	}
 	threads, err := s.client.Threads(ctx, projectID)
 	if err != nil {
-		return
+		return err
 	}
 	s.mu.Lock()
-	s.threadsByProj[projectID] = SortThreads(threads)
+	s.threadsByProj[projectID] = s.reconcileProjectThreadsLocked(projectID, threads)
 	var all []Thread
 	for _, list := range s.threadsByProj {
 		all = append(all, list...)
@@ -1869,12 +1867,13 @@ func (s *chatState) refreshProjectThreads(ctx context.Context, projectID string)
 	s.collapsedProj[projectID] = false
 	s.mu.Unlock()
 	s.invalidate()
+	return nil
 }
 
-// createThreadInWorktree 进入待创建会话：首次输入或发送时才真正建会话，并立即迁入自动命名的 Worktree。
+// createThreadInWorktree 创建临时会话，首次有草稿并转正后才迁入 Worktree。
 // 迁入失败时新建的会话保留，仅提示错误。
 func (s *chatState) createThreadInWorktree(projectID string) {
-	s.beginPendingThread(projectID, s.newThreadOptions(), true)
+	s.createProvisionalThread(projectID, true)
 }
 
 // openWorktreeManage 打开项目的 Worktree 管理模态框并开始扫描。

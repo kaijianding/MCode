@@ -1228,10 +1228,6 @@ func (s *chatState) threadRuntimeMode(threadID string) string {
 			break
 		}
 	}
-	// 待创建会话没有会话行：档位取自本地占位会话。
-	if p := s.pendingThread; p != nil && threadID == "" && p.Thread.RuntimeMode != "" {
-		return p.Thread.RuntimeMode
-	}
 	return "auto"
 }
 
@@ -1239,10 +1235,6 @@ func (s *chatState) threadRuntimeMode(threadID string) string {
 func (s *chatState) threadProvider(threadID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// 待创建会话没有会话行：provider 取自本地占位会话。
-	if p := s.pendingThread; p != nil && threadID == "" {
-		return p.Thread.Provider
-	}
 	for _, th := range s.threads {
 		if th.ID == threadID {
 			return th.Provider
@@ -1255,10 +1247,6 @@ func (s *chatState) threadProvider(threadID string) string {
 func (s *chatState) threadModel(threadID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// 待创建会话没有会话行：模型取自本地占位会话。
-	if p := s.pendingThread; p != nil && threadID == "" {
-		return p.Thread.Model
-	}
 	for _, th := range s.threads {
 		if th.ID == threadID {
 			return th.Model
@@ -1271,10 +1259,6 @@ func (s *chatState) threadModel(threadID string) string {
 func (s *chatState) threadPersona(threadID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// 待创建会话没有会话行：人设取自本地占位会话。
-	if p := s.pendingThread; p != nil && threadID == "" {
-		return p.Thread.Persona
-	}
 	for _, th := range s.threads {
 		if th.ID == threadID {
 			return th.Persona
@@ -1533,12 +1517,6 @@ func (s *chatState) setHeaderRuntimeMode(threadID, mode string) {
 		return
 	}
 	s.mu.Lock()
-	if s.isPendingThreadLocked(threadID) {
-		s.setPendingRuntimeModeLocked(mode)
-		s.mu.Unlock()
-		s.invalidate()
-		return
-	}
 	var oldMode string
 	for i := range s.threads {
 		if s.threads[i].ID == threadID {
@@ -2005,8 +1983,7 @@ func renderChatHeaderAuxGroup(c *ui.Context, s *chatState) {
 // renderChatThreadsPopover 渲染会话列表 Popover：按当前会话列表顺序列出标题，当前会话打勾。
 func renderChatThreadsPopover(c *ui.Context, s *chatState) {
 	s.mu.Lock()
-	threads := make([]Thread, len(s.threads))
-	copy(threads, s.threads)
+	threads := withoutProvisional(s.threads)
 	selectedID := s.selectedThreadID
 	s.mu.Unlock()
 

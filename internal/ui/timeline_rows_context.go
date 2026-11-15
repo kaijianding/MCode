@@ -498,7 +498,6 @@ func continuationStartInfoFor(s *chatState, threadID string) (continuationStartI
 		return continuationStartInfo{}, false
 	}
 	var (
-		foundThread         bool
 		forkedFromThreadID  string
 		forkedFromMessageID string
 		sourceTitle         string
@@ -509,13 +508,8 @@ func continuationStartInfoFor(s *chatState, threadID string) (continuationStartI
 		if th.ID == threadID {
 			forkedFromThreadID = th.ForkedFromThreadID
 			forkedFromMessageID = th.ForkedFromMessageID
-			foundThread = true
 			break
 		}
-	}
-	if !foundThread && s.isPendingThreadLocked(threadID) {
-		forkedFromThreadID = s.pendingThread.Thread.ForkedFromThreadID
-		forkedFromMessageID = s.pendingThread.Thread.ForkedFromMessageID
 	}
 	if forkedFromThreadID != "" {
 		for _, th := range s.threads {
@@ -572,7 +566,7 @@ func continuationStartInfoFor(s *chatState, threadID string) (continuationStartI
 	}, true
 }
 
-// continuationThreadTitle 返回会话标题与所属项目；待创建会话还没有会话行时取自占位状态。
+// continuationThreadTitle 返回会话标题与所属项目。
 func (s *chatState) continuationThreadTitle(threadID string) (title, projectID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -580,9 +574,6 @@ func (s *chatState) continuationThreadTitle(threadID string) (title, projectID s
 		if th.ID == threadID {
 			return th.Title, th.ProjectID
 		}
-	}
-	if s.isPendingThreadLocked(threadID) {
-		return s.pendingThread.Thread.Title, s.pendingThread.ProjectID
 	}
 	return "", ""
 }

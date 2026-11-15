@@ -91,13 +91,9 @@ func resetSkillCache() {
 	skillCache.mu.Unlock()
 }
 
-// projectPathForThreadLocked 返回会话所属项目的路径，待创建会话取 pendingThread 的项目。
 // 调用方需持有 s.mu；会话或项目查不到时返回空字符串。
 func (s *chatState) projectPathForThreadLocked(threadID string) string {
 	projectID := s.projectIDForThreadLocked(threadID)
-	if projectID == "" && s.pendingThread != nil {
-		projectID = s.pendingThread.ProjectID
-	}
 	if projectID == "" {
 		return ""
 	}

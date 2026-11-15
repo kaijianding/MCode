@@ -90,11 +90,11 @@ func TestPendingThreadStartsInBuildMode(t *testing.T) {
 	_, state := newPendingTestState(t)
 	t.Cleanup(state.close)
 
-	state.createThread("p1")
+	id := createTestProvisionalThread(t, state, false)
 	state.mu.Lock()
-	pending := state.pendingThread
+	thread, ok := state.threadSnapshotLocked(id)
 	state.mu.Unlock()
-	if pending == nil || pending.Thread.InteractionMode != "build" {
-		t.Fatalf("新建会话应从 build 开始，got %+v", pending)
+	if !ok || thread.InteractionMode != "build" {
+		t.Fatalf("新建会话应从 build 开始，got %+v", thread)
 	}
 }

@@ -46,7 +46,7 @@ func decideComposerDock(in composerDockInput) composerDockDecision {
 }
 
 // composerDockPromoState 记录「发送了首条消息、后端还没推回」的会话。
-// 自己的锁：发送可能在 createPendingThread 的 goroutine 里发生，不能依赖 UI 线程。
+// 自己的锁：发送可由后台 goroutine 触发，不能依赖 UI 线程。
 // 与 chatAnchorMu 的用法一致（都在持有 s.mu 时被调用，锁序固定为 s.mu → 本锁）。
 type composerDockPromoState struct {
 	mu       sync.Mutex
@@ -55,7 +55,7 @@ type composerDockPromoState struct {
 }
 
 // armComposerDockPromote 在发送首条消息时置位。threadID 用发送当帧已经确定的会话 ID：
-// 待创建会话走 createPendingThread → sendMessage 的递归，进到这里时已是真实 ID。
+// 选中会话后始终使用真实 ID。
 func (s *chatState) armComposerDockPromote(threadID string) {
 	if threadID == "" {
 		return

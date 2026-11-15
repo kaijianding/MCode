@@ -645,14 +645,6 @@ func renderComposer(c *ui.Context, s *chatState) {
 	if currentThreadID == "" {
 		currentThreadID = s.selectedThreadID
 	}
-	pendingActive := false
-	if currentThread == nil && s.selectedThreadID == "" {
-		// 待创建会话：用本地占位会话渲染模型/强度控件，首次输入或发送时才真正建会话。
-		if th, ok := s.pendingComposerThreadLocked(); ok {
-			currentThread = th
-			pendingActive = true
-		}
-	}
 	_, planFeedbackMode := planFeedbackTarget(s.approvals, currentThreadID)
 	if composerApprovalDisabled(currentThread != nil && currentThread.HasPendingRequest, s.approvals, currentThreadID) {
 		disabledReason = "存在待处理的审批请求"
@@ -761,7 +753,7 @@ func renderComposer(c *ui.Context, s *chatState) {
 	// 这里按「有内容」再算一次，让运行中的占位符说明按下 Enter 后实际会执行的动作。
 	runningPlaceholderState := runningSendDraftState(isRunning, true, canContinue, s.queueWhileRunningEnabled(), s.insertIntoRunningTurnEnabled(), isEditingQueued)
 
-	isSendingDisabled := disabledReason != "" || sending || (currentThreadID == "" && !pendingActive) || prefsSaving || (planFeedbackMode && planResponding)
+	isSendingDisabled := disabledReason != "" || sending || currentThreadID == "" || prefsSaving || (planFeedbackMode && planResponding)
 	interactionMode := "build"
 	if currentThread != nil {
 		interactionMode = normalizeInteractionMode(currentThread.InteractionMode)
@@ -929,7 +921,6 @@ func renderComposer(c *ui.Context, s *chatState) {
 							in.AutoFocus()
 						}
 
-						// 进入待创建会话时输入框往往早已挂载（元素 id 未变），AutoFocus 不再是首次出现；
 						// 点击“新建会话”时指针按下又清掉了焦点，这里主动要回一次，点完新建即可直接打字。
 						if focusRequested {
 							in.Focus()
@@ -1609,23 +1600,6 @@ func (s *chatState) updateComposerPrefsWith(threadID string, mutate func(p *Comp
 		s.mu.Unlock()
 		return
 	}
-	if s.isPendingThreadLocked(threadID) {
-		// 待创建会话：偏好只写进待创建状态，创建时随会话一起下发。
-		prev := composerPrefsOf(s.pendingThread.Thread)
-		prefs := prev
-		mutate(&prefs)
-		s.applyPendingComposerPrefsLocked(prefs)
-		s.mu.Unlock()
-		s.invalidate()
-		if onSaved != nil {
-			onSaved(prefs)
-		}
-		// 执行侧的模型与强度只能从这里改（选模型、调强度、跟随主导、配对、重置），待创建会话也记下供后续新建沿用。
-		if prefs.BeesProvider != prev.BeesProvider || prefs.BeesModel != prev.BeesModel || prefs.BeesEffort != prev.BeesEffort {
-			rememberSwarmBees(prefs.BeesProvider, prefs.BeesModel, prefs.BeesEffort)
-		}
-		return
-	}
 	var prev ComposerPrefs
 	found := false
 	for _, th := range s.threads {
@@ -1715,30 +1689,6 @@ func (s *chatState) applySwarmPair(threadID string, p SwarmPair) {
 		s.mu.Unlock()
 		leadEffort = s.defaultEffortForModel(p.LeadProvider, modelPickerModelInfo(providers, p.LeadProvider, p.LeadModel))
 	}
-
-	s.mu.Lock()
-	if s.isPendingThreadLocked(threadID) {
-		// 待创建会话：配对直接写进待创建选项，创建时再下发。
-		s.applyPendingSwarmPairLocked(p, leadEffort, workerEffort)
-		// 记忆只写配对实际生效的取值：配对未给强度时沿用原强度，快速模式沿用记忆里同模型的记录。
-		applied := ModelSelection{}
-		if cur := s.pendingThread; cur != nil {
-			applied = ModelSelection{Provider: cur.Thread.Provider, Model: cur.Thread.Model, Effort: cur.Thread.Effort}
-		}
-		s.mu.Unlock()
-		if applied.Provider != "" && applied.Model != "" {
-			applied.Fast = rememberedFastFor(applied.Provider, applied.Model)
-			s.rememberModelSelectionForThread(threadID, applied)
-		}
-		// 配对模板换掉主导 Agent 时同样记为“上次使用”。
-		s.rememberUsedProvider(p.LeadProvider)
-		rememberSwarmBees(p.WorkerProvider, p.WorkerModel, workerEffort)
-		s.enableSwarmWithGlobal(true)
-		resetComposerModelPickerState(threadID)
-		s.invalidate()
-		return
-	}
-	s.mu.Unlock()
 
 	// 配对变更时后端自动清空档位覆盖，并记下本次选中的配对；本地乐观同步清空档位。
 	s.mu.Lock()
@@ -2014,14 +1964,6 @@ func renderModelSelector(c *ui.Context, s *chatState, currentThread *Thread, pro
 			swarmPanelMu.Unlock()
 		}
 	}
-	if currentThread.ID == "" {
-		// 待创建会话没有后端 Swarm 状态：开关取自待创建选项。
-		s.mu.Lock()
-		if p := s.pendingThread; p != nil {
-			swarmOn = p.Options.SwarmEnabled
-		}
-		s.mu.Unlock()
-	}
 
 	// 胶囊固定显示模型短名，配对名放在悬停提示和面板里。
 	modelTitle := modelPickerDisplayName(providers, currentProvider, leadSelection.Model)
@@ -2232,8 +2174,6 @@ func renderModelSelector(c *ui.Context, s *chatState, currentThread *Thread, pro
 					}
 				}
 			}
-			// 待创建会话与真实会话共用同一个入口：在本创建时随选项下发。
-			s.setPendingBeeTiersLocked(payload)
 			s.mu.Unlock()
 			s.invalidate()
 
@@ -2265,7 +2205,6 @@ func renderModelSelector(c *ui.Context, s *chatState, currentThread *Thread, pro
 					}
 				}
 			}
-			s.setPendingBeeTiersLocked(payload)
 			s.mu.Unlock()
 			s.invalidate()
 
@@ -2287,7 +2226,6 @@ func rememberModelSelection(sel ModelSelection) {
 }
 
 // rememberModelSelectionForThread 记录“上次使用”的模型选择：全局一份，同时按该会话所属项目记一份。
-// threadID 为空（待创建会话）时用待创建选项里的项目；两者都取不到项目时落到 projectSelectionNoneKey。
 func (s *chatState) rememberModelSelectionForThread(threadID string, sel ModelSelection) {
 	rememberModelSelection(sel)
 	if s == nil {
@@ -2299,20 +2237,13 @@ func (s *chatState) rememberModelSelectionForThread(threadID string, sel ModelSe
 	saveProjectModelSelection(projectID, sel)
 }
 
-// projectIDForRememberLocked 返回用于写项目桶的项目 ID：优先会话自身所属项目，
-// 会话不在列表里（待创建会话、空 ID）时退回待创建选项里的项目。调用方持有 s.mu。
+// projectIDForRememberLocked 返回会话所属项目，调用方需持有 s.mu。
 func (s *chatState) projectIDForRememberLocked(threadID string) string {
 	if threadID != "" {
 		if id := s.projectIDForThreadLocked(threadID); id != "" {
 			return id
 		}
-		if s.pendingThread != nil && s.pendingThread.Thread.ID == threadID {
-			return s.pendingThread.Thread.ProjectID
-		}
 		return ""
-	}
-	if s.pendingThread != nil {
-		return s.pendingThread.Thread.ProjectID
 	}
 	return ""
 }
@@ -2387,37 +2318,6 @@ func (s *chatState) applyModelPickerPick(threadID string, side ModelPickerSide, 
 
 	// 主导侧选中的 Agent 就是“上次使用”，写回设置后当前进程的新建会话立即沿用。
 	s.rememberUsedProvider(newProvider)
-
-	s.mu.Lock()
-	if s.isPendingThreadLocked(threadID) {
-		// 待创建会话：只改本地占位会话，创建时随选项下发。
-		s.setPendingAgentLocked(reqProvider, reqModel)
-		// 旧模型的强度与快速模式未必被新模型支持，切换时按新模型能力就地重置。
-		remembered := ModelSelection{}
-		if p := s.pendingThread; p != nil {
-			if targetEffort != "" {
-				// 新模型有默认强度：会话与创建选项必须一起改，创建会话时下发的值是 Options。
-				p.Thread.Effort = targetEffort
-				p.Options.Effort = targetEffort
-			} else if !modelSupportsEffort(m, p.Thread.Effort) {
-				p.Thread.Effort = ""
-				p.Options.Effort = ""
-			}
-			if !m.SupportsFast {
-				s.setPendingFastLocked(false)
-			}
-			p.Thread.SpeedTier = ""
-			remembered = ModelSelection{Provider: p.Thread.Provider, Model: p.Thread.Model, Effort: p.Thread.Effort, Fast: p.Thread.FastMode}
-		}
-		s.mu.Unlock()
-		// 重置之后再记一次，避免把新模型不支持的旧强度留在记忆里。
-		if !s.embeddedBee && remembered.Model != "" {
-			s.rememberModelSelectionForThread(threadID, remembered)
-		}
-		s.invalidate()
-		return
-	}
-	s.mu.Unlock()
 
 	go func() {
 		if err := s.client.SetThreadAgent(threadID, reqProvider, reqModel); err != nil {

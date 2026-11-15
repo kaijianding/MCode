@@ -123,8 +123,6 @@ func (s *chatState) threadSupportsThreadMCP(threadID string) bool {
 	th, ok := s.threadSnapshotLocked(threadID)
 	if ok {
 		provider = th.Provider
-	} else if s.pendingThread != nil {
-		provider = s.pendingThread.Thread.Provider
 	}
 	s.mu.Unlock()
 	return providerSupportsThreadMCP(provider)

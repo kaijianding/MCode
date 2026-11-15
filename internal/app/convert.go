@@ -62,6 +62,7 @@ func ThreadSummaryToUI(s wire.ThreadSummary) mcodeui.Thread {
 		ProjectID:         s.ProjectID,
 		ParentThreadID:    derefString(s.ParentThreadID),
 		IsHelper:          s.IsHelper,
+		IsProvisional:     s.IsProvisional,
 		Title:             s.Title,
 		Provider:          s.Provider,
 		Model:             modelStr,

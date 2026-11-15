@@ -61,7 +61,6 @@ func queuedRecallBlockedReason(items []QueuedFollowUp, currentAttachments int, s
 }
 
 // queuedThreadProvider 返回判断「插入当前轮次」能力时使用的 provider。
-// 与会话选择逻辑保持一致：找不到会话时回退到 pendingThread。
 func (s *chatState) queuedThreadProvider(threadID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -71,9 +70,6 @@ func (s *chatState) queuedThreadProvider(threadID string) string {
 			provider = s.threads[i].Provider
 			break
 		}
-	}
-	if provider == "" && s.pendingThread != nil {
-		provider = s.pendingThread.Thread.Provider
 	}
 	return provider
 }

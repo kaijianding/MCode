@@ -9,7 +9,7 @@ import (
 	"mcode/internal/testenv"
 )
 
-// 点击头部圆形新建会话按钮进入待创建会话：不立即建会话，输入首个字符后才建。
+// 点击头部圆形新建会话按钮后立即创建并选中临时会话。
 func TestChatToolbarNewThreadButton(t *testing.T) {
 	testenv.TempHome(t)
 	fake := NewFakeClient()
@@ -23,10 +23,11 @@ func TestChatToolbarNewThreadButton(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.pendingThread != nil && state.selectedThreadID == ""
+		th, ok := state.threadSnapshotLocked(state.selectedThreadID)
+		return ok && th.IsProvisional
 	})
-	if got := fake.CreateThreadCalls(); got != 0 {
-		t.Fatalf("点击新建会话不应立即创建会话，got %d", got)
+	if got := fake.CreateThreadCalls(); got != 1 {
+		t.Fatalf("点击新建会话应立即创建临时会话，got %d", got)
 	}
 }
 

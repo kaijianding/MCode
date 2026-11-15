@@ -42,7 +42,7 @@ func TestRootInitialRenderTitle(t *testing.T) {
 	})
 }
 
-// 场景 2：点击头部“新建会话 ⌘N”进入待创建会话，输入首个字符后才调 CreateThread
+// 场景 2：点击头部“新建会话 ⌘N”进入临时会话，立即调 CreateThread
 func TestRootCreateThread(t *testing.T) {
 	withShortcutGOOS(t, "darwin")
 	fake := NewFakeClient()
@@ -59,17 +59,21 @@ func TestRootCreateThread(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.pendingThread != nil
+		th, ok := state.threadSnapshotLocked(state.selectedThreadID)
+		return ok && th.IsProvisional
 	})
-	if got := fake.CreateThreadCalls(); got != 0 {
-		t.Fatalf("点击新建会话不应立即创建会话，got %d", got)
+	if got := fake.CreateThreadCalls(); got != 1 {
+		t.Fatalf("点击新建会话应立即创建临时会话，got %d", got)
 	}
 
-	// 输入首个字符才真正创建会话。
+	// 输入首个字符后转正。
 	tt.Frame()
 	tt.Type("你好")
 	waitFor(t, tt, func() bool {
-		return fake.CreateThreadCalls() > 0
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, ok := state.threadSnapshotLocked(state.selectedThreadID)
+		return ok && !th.IsProvisional
 	})
 }
 
@@ -329,7 +333,7 @@ func TestRootMultipleProjectsAndThreadsVisible(t *testing.T) {
 	})
 }
 
-// 场景 9：点击某个项目的“+”后进入该项目的待创建会话，输入后 CreateThread 收到该项目 ID
+// 场景 9：点击某个项目的“+”后立即创建该项目的临时会话。
 func TestRootCreateThreadForProject(t *testing.T) {
 	fake := NewFakeClient()
 	now := time.Now()
@@ -359,14 +363,15 @@ func TestRootCreateThreadForProject(t *testing.T) {
 	pendingProject := func() string {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		if state.pendingThread == nil {
+		th, _ := state.threadSnapshotLocked(state.selectedThreadID)
+		if !th.IsProvisional {
 			return ""
 		}
-		return state.pendingThread.ProjectID
+		return th.ProjectID
 	}
 	waitFor(t, tt, func() bool { return pendingProject() == "p1" })
-	if got := fake.CreateThreadCalls(); got != 0 {
-		t.Fatalf("待创建会话不应立即创建，got %d", got)
+	if got := fake.CreateThreadCalls(); got != 1 {
+		t.Fatalf("应立即创建临时会话，got %d", got)
 	}
 
 	// 2. 点击项目Beta 同行的加号按钮
@@ -378,8 +383,11 @@ func TestRootCreateThreadForProject(t *testing.T) {
 
 	waitFor(t, tt, func() bool { return pendingProject() == "p2" })
 
-	// 3. 输入触发创建，CreateThread 收到待创建会话的项目 ID
-	state.noteComposerDraft("", "你好")
+	// 3. 输入触发转正，创建请求的项目 ID 保持正确。
+	state.mu.Lock()
+	id := state.selectedThreadID
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool {
 		return fake.LastCreatedProjectID() == "p2"
 	})
@@ -423,7 +431,7 @@ func TestRootAddProjectWithDialog(t *testing.T) {
 		return tt.HasText("new-awesome-project")
 	})
 
-	// 添加后右侧默认打开新项目的待创建会话
+	// 添加后右侧默认打开新项目的临时会话
 	addedProjectID := func() string {
 		state.mu.Lock()
 		defer state.mu.Unlock()
@@ -437,10 +445,11 @@ func TestRootAddProjectWithDialog(t *testing.T) {
 	pendingProjectID := func() string {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		if state.pendingThread == nil {
+		th, _ := state.threadSnapshotLocked(state.selectedThreadID)
+		if !th.IsProvisional {
 			return ""
 		}
-		return state.pendingThread.ProjectID
+		return th.ProjectID
 	}
 	waitFor(t, tt, func() bool {
 		id := addedProjectID()
@@ -473,18 +482,22 @@ func TestRootMultiProvidersSelectionAndDisplay(t *testing.T) {
 		return tt.HasText("会话Alpha1")
 	})
 
-	// 2. 点击项目的加号按钮新建会话（进入待创建会话）
+	// 2. 点击项目的加号按钮新建会话（进入临时会话）
 	if err := tt.Click("在此项目中新建会话"); err != nil {
 		t.Fatalf("click '在此项目中新建会话' failed: %v", err)
 	}
 
-	// 3. 待创建会话的 provider 为默认第一个可用 provider ("claude")，创建时沿用它
+	// 3. 临时会话的 provider 为默认第一个可用 provider ("claude")，创建时沿用它
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		return state.pendingThread != nil && state.pendingThread.Options.Provider == "claude"
+		th, ok := state.threadSnapshotLocked(state.selectedThreadID)
+		return ok && th.IsProvisional && th.Provider == "claude"
 	})
-	state.noteComposerDraft("", "你好")
+	state.mu.Lock()
+	id := state.selectedThreadID
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool {
 		return fake.LastCreatedProvider() == "claude"
 	})

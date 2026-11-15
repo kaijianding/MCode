@@ -526,7 +526,7 @@ func (s *chatState) visibleThreads() []Thread {
 			continue
 		}
 		for _, th := range s.threadsByProj[p.ID] {
-			if !th.Dormant && (query == "" || strings.Contains(strings.ToLower(th.Title), query)) {
+			if !th.Dormant && !th.IsProvisional && (query == "" || strings.Contains(strings.ToLower(th.Title), query)) {
 				visible = append(visible, th)
 			}
 		}

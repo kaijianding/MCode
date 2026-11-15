@@ -81,6 +81,10 @@ func (s *chatState) applyThreadSummary(update Thread) {
 		return
 	}
 	s.mu.Lock()
+	if s.releasedProvisional[update.ID] {
+		s.mu.Unlock()
+		return
+	}
 	changed := false
 	// wasRunning 记录推送前本地是否“运行中或仍有子线程在跑”：只认真正的“忙 → 空闲”跳变，
 	// 否则每次空闲摘要都会把已看过的会话重新点亮完成角标。
@@ -93,6 +97,10 @@ func (s *chatState) applyThreadSummary(update Thread) {
 		}
 		if item.IsRunning || item.SwarmBusy {
 			wasRunning = true
+		}
+		if item.IsProvisional && !update.IsProvisional {
+			item.IsProvisional = false
+			changed = true
 		}
 		if item.IsRunning != update.IsRunning || item.SwarmBusy != update.SwarmBusy || item.BackgroundTasks != update.BackgroundTasks || item.HasPendingRequest != update.HasPendingRequest ||
 			(update.LastStatus != "" && item.LastStatus != update.LastStatus) {

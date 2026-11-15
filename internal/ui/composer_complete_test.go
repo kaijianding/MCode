@@ -677,12 +677,12 @@ func TestRunLocalSlashCommand_ClearResetsStewardOnly(t *testing.T) {
 	if got := ordinary.resetCalls(); got != 0 {
 		t.Fatalf("普通会话 /clear 不应调用 ResetStewardThread，实际 %d", got)
 	}
-	o.mu.Lock()
-	pending := o.pendingThread != nil
-	o.mu.Unlock()
-	if !pending {
-		t.Fatal("普通会话 /clear 应创建新会话")
-	}
+	waitUntil(t, "普通会话 /clear 应创建临时会话", func() bool {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		th, ok := o.threadSnapshotLocked(o.selectedThreadID)
+		return ok && th.IsProvisional
+	})
 }
 
 // /export 已接入导出功能，必须本地拦截并触发导出，不能当作普通消息发给 Agent。

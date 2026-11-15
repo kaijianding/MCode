@@ -166,27 +166,20 @@ func TestComposerDefaultEffortDropsDisallowedDefault(t *testing.T) {
 	}
 }
 
-// 用例 4：待创建会话路径一致，占位会话强度与创建选项强度必须同时写成模型默认档，否则创建时下发会漂移。
-func TestComposerDefaultEffortPendingThreadSyncsOptions(t *testing.T) {
+// 用例 4：临时会话与普通会话一样，将模型默认强度写入后端。
+func TestComposerDefaultEffortProvisionalThread(t *testing.T) {
 	testenv.TempHome(t)
-	_, state := newPendingTestState(t)
-	state.createThread("p1")
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
 	m := ModelInfo{ID: "model-p", Name: "Model P", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium"}
 	prov := ProviderInfo{ID: "codex", Name: "Codex", Available: true, Models: []ModelInfo{m}}
-
-	state.applyModelPickerPick("", ModelPickerSideLead, "claude", prov, m)
-
-	state.mu.Lock()
-	pending := state.pendingThread
-	state.mu.Unlock()
-	if pending == nil {
-		t.Fatalf("用例前提被破坏: 点击新建后应处于待创建会话状态")
-	}
-	if pending.Thread.Effort != "medium" {
-		t.Fatalf("待创建会话的占位强度应为模型默认档 medium, 实际 %q", pending.Thread.Effort)
-	}
-	if pending.Options.Effort != "medium" {
-		t.Fatalf("创建选项强度必须与占位强度一致（否则创建会话时下发会漂移）: Thread.Effort=%q, Options.Effort=%q", pending.Thread.Effort, pending.Options.Effort)
+	state.applyModelPickerPick(id, ModelPickerSideLead, "claude", prov, m)
+	waitUntil(t, "临时会话写入默认强度", func() bool {
+		tid, prefs, ok := fake.LastComposerPrefsCall()
+		return ok && tid == id && prefs.Effort == "medium"
+	})
+	if got := threadEffortOf(state, id); got != "medium" {
+		t.Fatalf("临时会话强度应为 medium，实际 %q", got)
 	}
 }
 

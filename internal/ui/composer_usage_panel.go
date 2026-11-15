@@ -974,13 +974,10 @@ func quotaGroupWindows(s *chatState, g quotaStripGroup) []ProviderQuotaWindow {
 	return append([]ProviderQuotaWindow(nil), s.quotaWindowsByProvider[key]...)
 }
 
-// quotaStripSwarmOn 判断会话的子代理（Swarm）是否开启：待创建会话取待创建选项，
-// 其余取后端 Swarm 面板状态。
+// quotaStripSwarmOn 根据后端 Swarm 面板状态判断子代理是否开启。
 func quotaStripSwarmOn(s *chatState, th *Thread) bool {
 	if th.ID == "" {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.pendingThread != nil && s.pendingThread.Options.SwarmEnabled
+		return false
 	}
 	panel := getSwarmPanelState(s)
 	if panel == nil {

@@ -104,7 +104,7 @@ func (s *chatState) quickRepliesVisible() bool {
 	}
 	threadID := s.selectedThreadID
 	if threadID == "" {
-		return s.pendingThread != nil
+		return false
 	}
 	for i := range s.threads {
 		if s.threads[i].ID == threadID {
