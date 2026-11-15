@@ -17,14 +17,15 @@ const kanbanBadgeRefreshInterval = 30 * time.Second
 // addProjectOpen、moreMenuOpen 绑定在控件上，只在 UI 线程读写；
 // kanbanReviewCount、kanbanFetchedAt、kanbanLoading 由后台 goroutine 写入，受 sidebarFooterMu 保护。
 type sidebarFooterState struct {
-	addProjectOpen  bool
-	moreMenuOpen    bool
-	updateVisible   bool
-	updateOpen      bool
-	whatsNewOpen    bool
-	whatsNewChecked bool
-	whatsNewVersion string
-	whatsNewSection string
+	addProjectOpen     bool
+	chatAddProjectOpen bool
+	moreMenuOpen       bool
+	updateVisible      bool
+	updateOpen         bool
+	whatsNewOpen       bool
+	whatsNewChecked    bool
+	whatsNewVersion    string
+	whatsNewSection    string
 
 	kanbanReviewCount int
 	kanbanFetchedAt   time.Time
@@ -80,7 +81,7 @@ func renderSidebarBottomBar(c *ui.Context, s *chatState) {
 			// 点击展开「选择文件夹 / 从 GitHub 克隆」浮层。
 			addBtn := Button(c, ButtonOpts{
 				Key:     "sidebar-add-project-btn",
-				Text:    "新建",
+				Text:    "添加项目",
 				Icon:    IconPlus(),
 				Size:    ControlSM,
 				Variant: ButtonGhost,

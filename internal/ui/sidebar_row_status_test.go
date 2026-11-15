@@ -145,7 +145,7 @@ func TestSidebarStatusSlotExplainsReason(t *testing.T) {
 	})
 
 	if !tt.HasText("等你审批") {
-		t.Fatalf("pending thread should show 等你审批 text, texts: %q", tt.Texts())
+		t.Fatalf("pending thread should have 等你审批 accessibility label, texts: %q", tt.Texts())
 	}
 	// 「运行 3 分钟」只可能来自行尾文案，不会和分组头的「运行中  1」或底栏汇总混淆。
 	if !tt.HasText("运行 3 分钟") {

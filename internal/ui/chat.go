@@ -162,11 +162,18 @@ func renderChat(c *ui.Context, s *chatState) {
 	if selectedID == "" {
 		s.mu.Lock()
 		pendingActive := s.pendingThread != nil
+		hasProjects := len(s.projects) > 0
 		s.mu.Unlock()
 		if !pendingActive {
 			ui.Column(c.Key("chat-empty")).Grow(1).FillHeight().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "选择或新建一个会话").TextColor(ThemeSecondaryText(c)).FontSize(TypePageTitle)
-				Button(c, ButtonOpts{Key: "chat-onboarding", Text: "新用户引导", Variant: ButtonSecondary, OnClick: func() { openOnboarding(s) }})
+				if !hasProjects {
+					fs := getSidebarFooterState(s)
+					btn := Button(c, ButtonOpts{Key: "chat-add-project", Text: "添加项目", Variant: ButtonPrimary, OnClick: func() { fs.chatAddProjectOpen = !fs.chatAddProjectOpen; s.invalidate() }})
+					appPopover(c.Key("chat-add-project-popover"), btn, &fs.chatAddProjectOpen, func() { fs.chatAddProjectOpen = false }, func() { renderAddProjectPopover(c, s) })
+				} else {
+					ui.Text(c, "选择或新建一个会话").TextColor(ThemeSecondaryText(c)).FontSize(TypePageTitle)
+					Button(c, ButtonOpts{Key: "chat-onboarding", Text: "新用户引导", Variant: ButtonSecondary, OnClick: func() { openOnboarding(s) }})
+				}
 			})
 			return
 		}

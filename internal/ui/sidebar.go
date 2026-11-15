@@ -19,8 +19,13 @@ import (
 
 var (
 	sidebarMu     sync.Mutex
-	sidebarSearch = make(map[*chatState]*string)
+	sidebarSearch = make(map[*chatState]*sidebarSearchState)
 )
+
+type sidebarSearchState struct {
+	query   string
+	visible []Thread
+}
 
 type newThreadProviderContext struct {
 	threads         []Thread
@@ -69,11 +74,10 @@ func getSearchQuery(s *chatState) *string {
 	defer sidebarMu.Unlock()
 	q, ok := sidebarSearch[s]
 	if !ok {
-		val := ""
-		q = &val
+		q = &sidebarSearchState{}
 		sidebarSearch[s] = q
 	}
-	return q
+	return &q.query
 }
 
 // formatRelativeTime 将时间格式化为中文短格式。
@@ -229,6 +233,13 @@ func sidebarTopBarHeight(topOffset float32) float32 {
 }
 
 func renderSidebar(c *ui.Context, s *chatState) {
+	sidebarMu.Lock()
+	if state := sidebarSearch[s]; state != nil {
+		state.visible = nil
+	} else {
+		sidebarSearch[s] = &sidebarSearchState{}
+	}
+	sidebarMu.Unlock()
 	if win := s.currentWindow(); win != nil {
 		s.mu.Lock()
 		install := !s.projectPathFocusHook
@@ -520,14 +531,11 @@ func renderSidebar(c *ui.Context, s *chatState) {
 			}
 
 			if len(projects) == 0 {
-				ui.Text(c, "暂无项目").
-					TextColor(secondaryText).
-					FontSize(sidebarFont(TypeFootnote)).
-					Padding(Space5, Space5)
+				EmptyState(c, EmptyStateProps{Title: "暂无项目", Compact: true}).Padding(Space5, Space5)
 				return
 			}
 
-			for idx, p := range projects {
+			for _, p := range projects {
 				pVal := p
 				isCollapsed := collapsed[pVal.ID] && lowerQuery == ""
 				allThs := threadsByProj[pVal.ID]
@@ -688,18 +696,6 @@ func renderSidebar(c *ui.Context, s *chatState) {
 					s.mu.Unlock()
 				}
 
-				// 按住项目行拖动可改变顺序，松手落到目标项目行时重排并持久化。
-				// 框架的 Drag/Drop 会在指针移动后接管按压，拖动不产生点击。
-				if lowerQuery == "" {
-					scope := fmt.Sprintf("%p/projects", s)
-					SortableSource(headerRow, scope, pVal.ID)
-					if _, droppedID := SortableTarget(headerRow, scope, pVal.ID); droppedID != "" {
-						if reorderProjectsByDrop(s, projects, droppedID, idx) {
-							s.invalidate()
-						}
-					}
-				}
-
 				headerRow.Children(func() {
 					projToggleLabel := "展开项目"
 					if !isCollapsed {
@@ -851,7 +847,7 @@ func renderSidebar(c *ui.Context, s *chatState) {
 						return threadActivityTime(dormantThs[i]).After(threadActivityTime(dormantThs[j]))
 					})
 
-					renderThreadItem := func(th Thread, isDormant bool) {
+					renderThreadItem := func(th Thread, isDormant bool, needsYou bool) {
 						// 键盘高亮匹配判定
 						isHighlighted := (searchQuery != "" && len(matchingThreads) > 0 &&
 							s.searchHighlightIndex >= 0 && s.searchHighlightIndex < len(matchingThreads) &&
@@ -870,6 +866,7 @@ func renderSidebar(c *ui.Context, s *chatState) {
 							compact:     isCompact,
 							providers:   providers,
 							latchHover:  true,
+							needsYou:    needsYou,
 						})
 					}
 
@@ -907,13 +904,13 @@ func renderSidebar(c *ui.Context, s *chatState) {
 						if len(needsYouThs) > 0 {
 							renderSidebarStateGroupHeader(c, pVal.ID, pVal.Name, "等你处理", len(needsYouThs), groupHeaderIndent)
 							for _, th := range needsYouThs {
-								renderThreadItem(th, false)
+								renderThreadItem(th, false, true)
 							}
 						}
 						if len(runningThs) > 0 {
 							renderSidebarStateGroupHeader(c, pVal.ID, pVal.Name, "运行中", len(runningThs), groupHeaderIndent)
 							for _, th := range runningThs {
-								renderThreadItem(th, false)
+								renderThreadItem(th, false, false)
 							}
 						}
 
@@ -926,7 +923,7 @@ func renderSidebar(c *ui.Context, s *chatState) {
 						}
 						visibleThs, hiddenThs := visibleThreadWindow(restThs, threadLimit, selectedID, lowerQuery != "")
 						for _, th := range visibleThs {
-							renderThreadItem(th, false)
+							renderThreadItem(th, false, false)
 						}
 
 						// 搜索时不分页（结果本身就是筛选后的全集），只有默认状态下超过一页才给操作栏；
@@ -1041,7 +1038,7 @@ func renderSidebar(c *ui.Context, s *chatState) {
 
 							if isDormantOpen {
 								for _, th := range dormantThs {
-									renderThreadItem(th, true)
+									renderThreadItem(th, true, false)
 								}
 							}
 						}
@@ -1076,6 +1073,7 @@ type sidebarThreadRowOptions struct {
 	indent      float32 // 行左缩进：项目树用文件夹缩进，动态视图为 0
 	compact     bool
 	providers   []ProviderInfo
+	needsYou    bool
 	latchHover  bool   // 项目树：把行悬停写进状态分组闩锁（动态视图不传，保持按帧实时分组）
 	projectName string // 动态视图：行内展示的所属项目名（弱化色小字），空则不展示
 }
@@ -1107,6 +1105,17 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
 		Label(rowLabel)
+
+	if !o.dormant && !thVal.Dormant {
+		sidebarMu.Lock()
+		if state := sidebarSearch[s]; state != nil {
+			state.visible = append(state.visible, thVal)
+		}
+		sidebarMu.Unlock()
+	}
+	if o.highlighted {
+		row.ScrollIntoView()
+	}
 
 	// 行悬停状态：驱动浅底遮罩与右侧操作按钮的显隐
 	rowHovered := row.Hovered()
@@ -1230,7 +1239,7 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 				status.Opacity(0).Disabled(true)
 			}
 			status.Children(func() {
-				renderSidebarStatusSlot(c, s, thVal, secondaryText)
+				renderSidebarStatusSlot(c, s, thVal, secondaryText, o.needsYou)
 			})
 			if showRowActions {
 				ui.Row(c.Key("th-actions-" + thVal.ID)).Absolute().Right(0).Top(0).Bottom(0).AlignItems(ui.Center).Children(func() {
@@ -1308,7 +1317,7 @@ func sidebarRunningLabel(th Thread, now time.Time) string {
 }
 
 // renderSidebarStatusSlot 渲染会话行尾的单一状态位。
-func renderSidebarStatusSlot(c *ui.Context, s *chatState, thVal Thread, secondaryText ui.Color) {
+func renderSidebarStatusSlot(c *ui.Context, s *chatState, thVal Thread, secondaryText ui.Color, needsYou bool) {
 	switch s.sidebarStatusSlotKind(thVal) {
 	case sidebarStatusPending:
 		// 待审批用警示三角加一行同样的短字说明原因，比单个图标更明确；
@@ -1322,10 +1331,12 @@ func renderSidebarStatusSlot(c *ui.Context, s *chatState, thVal Thread, secondar
 				ui.Icon(c, IconAlertTriangle()).
 					Size(12, 12).
 					TextColor(ThemeWarning(c))
-				ui.Text(c, "等你审批").
-					FontSize(sidebarFont(FontSizeRelativeTime)).
-					TextColor(ThemeWarning(c)).
-					SingleLine()
+				if !needsYou {
+					ui.Text(c, "等你审批").
+						FontSize(sidebarFont(FontSizeRelativeTime)).
+						TextColor(ThemeWarning(c)).
+						SingleLine()
+				}
 			})
 	case sidebarStatusRunning:
 		// 运行中用相对时长说明这一轮已经跑了多久；同一时间只占行尾，不再显示相对时间。

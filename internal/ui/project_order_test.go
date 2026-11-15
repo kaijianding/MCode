@@ -77,41 +77,6 @@ func TestMoveProjectInOrder(t *testing.T) {
 	}
 }
 
-// TestReorderProjectsByDrop 验证项目行拖拽落地后的重排与持久化状态。
-func TestReorderProjectsByDrop(t *testing.T) {
-	t.Setenv("MCODE_DATA", t.TempDir())
-	t.Cleanup(waitUIStateWrites)
-	s := newChatState(NewFakeClient())
-	projects := []Project{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-
-	if !reorderProjectsByDrop(s, projects, "c", 0) {
-		t.Fatal("把 c 拖到首位应发生重排")
-	}
-	if got, want := sidebarProjectOrder(s), []string{"c", "a", "b"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("重排后顺序 = %v, want %v", got, want)
-	}
-
-	// 拖到自身位置：不重排
-	ordered := applyProjectOrder(projects, sidebarProjectOrder(s))
-	if reorderProjectsByDrop(s, ordered, "c", 0) {
-		t.Fatal("拖到自身位置不应重排")
-	}
-	if got := sidebarProjectOrder(s); !reflect.DeepEqual(got, []string{"c", "a", "b"}) {
-		t.Fatalf("拖到自身位置不应改变已保存顺序：%v", got)
-	}
-
-	// 未知项目：不重排
-	if reorderProjectsByDrop(s, projects, "不存在", 1) {
-		t.Fatal("未知项目不应重排")
-	}
-
-	// 渲染时按保存的顺序排序
-	ordered = applyProjectOrder(projects, sidebarProjectOrder(s))
-	if got, want := []string{ordered[0].ID, ordered[1].ID, ordered[2].ID}, []string{"c", "a", "b"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("applyProjectOrder 结果 = %v, want %v", got, want)
-	}
-}
-
 // TestUIStateProjectOrderPersistence 验证项目顺序与侧边栏状态同文件读写。
 func TestUIStateProjectOrderPersistence(t *testing.T) {
 	dataDir := settingsTestDir(t)

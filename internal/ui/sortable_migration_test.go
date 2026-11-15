@@ -108,7 +108,7 @@ func TestSortableQueueWindowScopes(t *testing.T) {
 	}
 }
 
-func TestSidebarSortableSearchFilter(t *testing.T) {
+func TestSidebarProjectsNotDraggable(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(waitUIStateWrites)
@@ -156,7 +156,7 @@ func TestSidebarSortableSearchFilter(t *testing.T) {
 	state.invalidate()
 	tt.Frame()
 	drag("共同项目二", "共同项目一")
-	if order := sidebarProjectOrder(state); !reflect.DeepEqual(order, []string{"p2", "p1"}) {
-		t.Fatalf("拖动后的项目顺序 = %v", order)
+	if order := sidebarProjectOrder(state); len(order) != 0 {
+		t.Fatalf("项目行不应拖动排序：%v", order)
 	}
 }

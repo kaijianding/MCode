@@ -2,7 +2,6 @@ package mcodeui
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -500,26 +499,10 @@ func worktreeTargetProjectID(s *chatState) string {
 
 // visibleThreads 返回侧边栏当前可见的会话列表（按项目遍历与过滤后的顺序）。
 func (s *chatState) visibleThreads() []Thread {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	searchQueryPtr := getSearchQuery(s)
-	searchQuery := ""
-	if searchQueryPtr != nil {
-		searchQuery = strings.TrimSpace(*searchQueryPtr)
+	sidebarMu.Lock()
+	defer sidebarMu.Unlock()
+	if state := sidebarSearch[s]; state != nil {
+		return append([]Thread(nil), state.visible...)
 	}
-	lowerQuery := strings.ToLower(searchQuery)
-
-	var visible []Thread
-	for _, p := range s.projects {
-		if s.collapsedProj != nil && s.collapsedProj[p.ID] {
-			continue
-		}
-		for _, th := range s.threadsByProj[p.ID] {
-			if lowerQuery == "" || strings.Contains(strings.ToLower(th.Title), lowerQuery) {
-				visible = append(visible, th)
-			}
-		}
-	}
-	return visible
+	return nil
 }

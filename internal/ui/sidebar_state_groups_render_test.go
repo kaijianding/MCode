@@ -82,9 +82,15 @@ func TestSidebarStateGroupsRenderWithPagination(t *testing.T) {
 		}
 	}
 
-	// 待审批行尾是带「等你审批」标签的警示三角。
-	if _, ok := tt.Find("等你审批"); !ok {
-		t.Fatalf("待审批行应有「等你审批」标签，texts: %q", tt.Texts())
+	// 图标保留无障碍标签，组内不重复显示行尾文字。
+	count := 0
+	for _, text := range tt.Texts() {
+		if text == "等你审批" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("应只保留一个无障碍标签，texts: %q", tt.Texts())
 	}
 
 	// 两个状态组全量显示；其余按初始分页窗口（8 条）折叠。
@@ -198,5 +204,31 @@ func TestSidebarStateGroupsSearchFlattens(t *testing.T) {
 	}
 	if _, ok := tt.Find("打开会话 B-空闲"); !ok {
 		t.Fatalf("搜索态应平铺展示命中的项目 B 会话，texts: %q", tt.Texts())
+	}
+}
+
+func TestSidebarVisibleThreadsMatchRenderedOrder(t *testing.T) {
+	tt, state := buildSidebarStateGroupsFixture(t)
+	got := state.visibleThreads()
+	if len(got) != 11 {
+		t.Fatalf("可见会话数 = %d", len(got))
+	}
+	var prev float32 = -1
+	for _, th := range got {
+		row, ok := tt.Find("打开会话 " + th.Title)
+		if !ok || row.Y <= prev {
+			t.Fatalf("会话顺序与渲染不一致: %q", th.Title)
+		}
+		prev = row.Y
+	}
+	state.mu.Lock()
+	state.collapsedProj["pa"] = true
+	state.threadsByProj["pb"] = append(state.threadsByProj["pb"], Thread{ID: "sleep", ProjectID: "pb", Title: "休眠", Dormant: true})
+	state.mu.Unlock()
+	state.invalidate()
+	tt.Frame()
+	got = state.visibleThreads()
+	if len(got) != 1 || got[0].ID != "b-idle" {
+		t.Fatalf("折叠或休眠会话进入跳转列表: %+v", got)
 	}
 }

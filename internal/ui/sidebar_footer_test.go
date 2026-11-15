@@ -135,3 +135,24 @@ func TestSidebarFooter_AttentionBadgeFallback(t *testing.T) {
 		t.Fatalf("应轮询看板一次，实际 %d 次", fake.KanbanBoardCalls())
 	}
 }
+
+func TestEmptyChatAddProject(t *testing.T) {
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(nil, nil)
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("暂无项目") })
+	if tt.HasText("新用户引导") || tt.HasText("选择或新建一个会话") {
+		t.Fatalf("无项目时应显示添加项目入口: %q", tt.Texts())
+	}
+	count := 0
+	for _, text := range tt.Texts() {
+		if text == "添加项目" {
+			count++
+		}
+	}
+	if count < 4 {
+		t.Fatalf("主区缺少添加项目按钮: %q", tt.Texts())
+	}
+}

@@ -199,10 +199,7 @@ func renderActivityThreadList(c *ui.Context, s *chatState, o sidebarActivityList
 			renderSidebarNoResultsCard(c)
 			return
 		}
-		ui.Text(c, "暂无会话").
-			TextColor(ThemeSecondaryText(c)).
-			FontSize(sidebarFont(TypeFootnote)).
-			Padding(Space1, sidebarEmptyPadX)
+		EmptyState(c, EmptyStateProps{Title: "暂无会话", Compact: true}).Padding(Space1, sidebarEmptyPadX)
 		return
 	}
 
