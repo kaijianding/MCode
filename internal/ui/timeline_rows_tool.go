@@ -231,9 +231,9 @@ func renderSingleToolItem(c *ui.Context, s *chatState, m Message) ui.Element {
 			Children(func() {
 				renderToolChip(c, s, m, siblings)
 			})
-		if open {
+		motionUnfoldBody(c, "tool-body-"+m.ID, open, func() {
 			renderToolDetail(c, s, m)
-		}
+		})
 	})
 }
 

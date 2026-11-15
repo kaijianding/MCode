@@ -482,10 +482,10 @@ func renderToolGroupItem(c *ui.Context, s *chatState, tools []Message, groupID s
 		summaryTools = filtered
 	}
 	btnLabel := "展开"
-	arrowIcon := IconChevronRight()
+	angle := float32(0)
 	if open {
 		btnLabel = "收起"
-		arrowIcon = IconChevronDown()
+		angle = 90
 	}
 	running := toolGroupLive(s, tools, liveID)
 	headerText := toolGroupCategoryNames(countToolGroupCategories(summaryTools))
@@ -520,7 +520,13 @@ func renderToolGroupItem(c *ui.Context, s *chatState, tools []Message, groupID s
 			}
 			// 摘要已带上“工作中 · / 用时 Xs · ”前缀，耗时不再单独显示一次
 			ui.Text(c, headerText).FontSize(scaledFont(TypeBody)).TextColor(textColor)
-			ui.Icon(c, arrowIcon).Size(11, 11).TextColor(textColor)
+			icon := ui.Icon(c, IconChevronRight()).Size(11, 11).TextColor(textColor)
+			if reduceMotion(c) {
+				icon.Jump("tool-group-arrow", angle)
+				icon.Rotate(angle)
+			} else {
+				icon.Rotate(icon.AnimateTo("tool-group-arrow", angle, springSnappy))
+			}
 			// 右侧时刻位：默认透明，组头 hover 或展开时淡入；组内没有时间戳就不画。
 			if clock := toolGroupClock(groupAt); clock != "" {
 				ui.Spacer(c)

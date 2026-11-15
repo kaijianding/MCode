@@ -398,6 +398,7 @@ func renderChat(c *ui.Context, s *chatState) {
 								Tooltip:     jumpLabel,
 								OnClick:     func() { s.jumpChatToLatest(selectedID) },
 							})
+							btn.Transition(motionPopover(c, motionRiseOffset))
 							btn.AttachTo(timeline, ui.AnchorBottomRight, ui.AnchorBottomRight).Margin(0, 24, 10, 0)
 						})
 					}
@@ -544,7 +545,7 @@ func renderCompactSuggestionCard(c *ui.Context, s *chatState, threadID string, c
 		return false
 	}
 
-	ui.Column(c.Key("chat-compact-offer")).FillWidth().Padding(Space3, Space7).AlignItems(ui.Center).Children(func() {
+	ui.Column(c.Key("chat-compact-offer")).FillWidth().Padding(Space3, Space7).AlignItems(ui.Center).Transition(motionCollapse(c)).Children(func() {
 		ui.Column(c.Key("chat-compact-offer-card")).
 			AlignItems(ui.End).
 			Background(ThemeSurface(c)).

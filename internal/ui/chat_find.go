@@ -647,6 +647,7 @@ func renderChatFindBar(c *ui.Context, s *chatState, threadID string, rev uint64,
 
 	ui.Row(c.Key("chat-find-bar")).
 		Absolute().
+		Transition(motionPopover(c, -motionRiseOffset)).
 		Right(minimapRailWidth+12).
 		Top(8).
 		Width(248).

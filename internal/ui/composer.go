@@ -155,15 +155,20 @@ func renderComposerTabSlot(c *ui.Context, s *chatState, threadID string, items [
 							MaxLines(1).
 							TextColor(ThemeSecondaryText(c))
 					}
-					ui.Icon(c, iconChevronDown).
+					icon := ui.Icon(c, iconChevronDown).
 						Size(IconSM, IconSM).
-						Rotate(chevronRotation).
 						TextColor(ThemeSecondaryText(c))
+					if reduceMotion(c) {
+						icon.Jump("queue-arrow", chevronRotation)
+						icon.Rotate(chevronRotation)
+					} else {
+						icon.Rotate(icon.AnimateTo("queue-arrow", chevronRotation, springSnappy))
+					}
 				})
 		})
 
 		// 展开时渲染排队消息抽屉面板
-		if expanded {
+		motionUnfoldBody(c, "composer-queue-body", expanded, func() {
 			ui.Column(c.Key("composer-queue-panel")).
 				Background(ThemeSurface(c)).
 				Border(Hairline, ThemeBorder(c)).
@@ -436,7 +441,7 @@ func renderComposerTabSlot(c *ui.Context, s *chatState, threadID string, items [
 							})
 						})
 				})
-		}
+		})
 	})
 	return false
 }
