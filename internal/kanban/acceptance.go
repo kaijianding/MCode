@@ -34,7 +34,9 @@ const (
 	acceptanceCommandTag = "[命令]"
 	// acceptanceUserVerifyTag 是验收标准里标记「需要用户确认」的行首标签。
 	acceptanceUserVerifyTag = "[你验]"
-	acceptanceRunningText   = "正在跑验收命令…"
+	// acceptanceReviewTag 是需要人阅读改动后判断的行首标签。
+	acceptanceReviewTag   = "[审阅]"
+	acceptanceRunningText = "正在跑验收命令…"
 )
 
 // AcceptanceCommandResult 描述一条验收命令的执行结果。
@@ -86,9 +88,9 @@ func ParseAcceptanceCommands(criteria string) []string {
 	return commands
 }
 
-// hasUserVerify 判断任务是否需要用户确认，不能自动接受。
+// hasUserVerify 判断任务是否需要用户确认或人工审阅，不能自动接受。
 func hasUserVerify(task store.Task) bool {
-	return strings.Contains(task.AcceptanceCriteria, acceptanceUserVerifyTag)
+	return strings.Contains(task.AcceptanceCriteria, acceptanceUserVerifyTag) || strings.Contains(task.AcceptanceCriteria, acceptanceReviewTag)
 }
 
 // startAcceptanceCommands 只在完成落库后调用，命令执行不阻塞调度循环。

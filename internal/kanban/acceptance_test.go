@@ -13,6 +13,15 @@ import (
 	"mcode/internal/store"
 )
 
+func TestReviewTagBlocksAutoAccept(t *testing.T) {
+	if !hasUserVerify(store.Task{AcceptanceCriteria: "- [审阅] 看 diff"}) {
+		t.Error("审阅应阻止自动接受")
+	}
+	if hasUserVerify(store.Task{AcceptanceCriteria: "- [命令] `go test ./...`"}) {
+		t.Error("命令标签不应要求人工确认")
+	}
+}
+
 // setupAcceptanceService 创建带 worktree 目录配置的看板服务与存储。
 func setupAcceptanceService(t *testing.T, worktreeDir string) (*Service, *store.Store) {
 	t.Helper()

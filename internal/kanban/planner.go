@@ -21,7 +21,11 @@ const planJSONExample = "{\"summary\":\"...\",\"tasks\":[{\"title\":\"...\",\"no
 const planPromptRequirements = "要求：\n" +
 	"- dependsOn 用任务在 tasks 数组里的下标表示前置任务。\n" +
 	"- 每个任务可带 acceptanceCriteria 数组，逐条写出该任务的验收标准。\n" +
-	"- 如果目标提示词里有『验收标准』一节，把每条标准分配给负责它的任务，原样保留行首标签（[命令]、[审阅]、[你验]）与其中用反引号包住的命令。"
+	"- 如果目标提示词里有『验收标准』一节，把每条标准分配给负责它的任务，原样保留行首标签（[命令]、[审阅]、[你验]）与其中用反引号包住的命令。\n" +
+	"- 计划最小够用：只列达成目标必需的任务，不凑数量；目标宽泛时一般 2–5 个任务。\n" +
+	"- 每个任务都要能单独验证：完成后靠它自己的 acceptanceCriteria 就能确认。\n" +
+	"- 不单独列只为后续任务做准备的规划、调研或搭环境任务，把这部分工作并入需要它的任务。\n" +
+	"- 相互依赖、改同一批文件的步骤合成一个任务。"
 
 // buildPlanPrompt 组装首次规划提示词；feedback 非空时在末尾附上补充反馈。
 func buildPlanPrompt(goal store.Goal, feedback string) string {

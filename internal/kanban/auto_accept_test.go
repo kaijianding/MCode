@@ -111,6 +111,7 @@ func TestAcceptanceCommandsResumeAfterRestart(t *testing.T) {
 			{name: "自动接受", autoAccept: true, wantStatus: "done"},
 			{name: "人工接受", wantStatus: "review"},
 			{name: "你验", autoAccept: true, criteria: "[命令] `true`\n[你验] 点界面", wantStatus: "review"},
+			{name: "审阅", autoAccept: true, criteria: "[命令] `true`\n[审阅] 看 diff", wantStatus: "review"},
 			{name: "独立任务", standalone: true, wantStatus: "review"},
 			{name: "已完成", status: "done", skip: true},
 			{name: "无运行标记", text: "原回执摘要", skip: true},
@@ -435,6 +436,7 @@ func TestAutoAcceptKeepsGatedTaskInReview(t *testing.T) {
 		criteria string
 	}{
 		{name: "含你验", criteria: "- [你验] 手工点一遍界面"},
+		{name: "含审阅", criteria: "- [审阅] 看 diff"},
 	}
 
 	for _, tc := range cases {
