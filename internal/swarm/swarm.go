@@ -70,6 +70,8 @@ type Bee struct {
 	Task     string `json:"task"`
 	// Prompt 保存派发时写给该 bee 的完整 brief，失败重试时按它重建会话，避免重试丢 brief。
 	Prompt string `json:"prompt,omitempty"`
+	// Brief 保存 lead 原始委派 brief，用于写入范围冲突检查；不使用组装后的 Prompt。
+	Brief string `json:"brief,omitempty"`
 	// Interrupted 标记该 bee 因 MCode 重启被打断、等待用户决定续跑还是放弃；续跑或放弃后清除。
 	Interrupted    bool       `json:"interrupted,omitempty"`
 	Status         BeeStatus  `json:"status"`
@@ -204,15 +206,17 @@ type BeeSpec struct {
 	Name            string `json:"name"`
 	Task            string `json:"task"`
 	Prompt          string `json:"prompt"`
-	ProjectID       string `json:"projectId,omitempty"`
-	WorkDir         string `json:"workDir,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	Model           string `json:"model,omitempty"`
-	Effort          string `json:"effort,omitempty"`
-	FastMode        bool   `json:"fastMode,omitempty"`
-	Profile         string `json:"profile,omitempty"`
-	Tier            string `json:"tier,omitempty"`
-	ReadOnly        bool   `json:"read_only,omitempty"`
+	// Brief 保存 lead 原始委派 brief，用于写入范围冲突检查；为空表示范围未知。
+	Brief     string `json:"brief,omitempty"`
+	ProjectID string `json:"projectId,omitempty"`
+	WorkDir   string `json:"workDir,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	FastMode  bool   `json:"fastMode,omitempty"`
+	Profile   string `json:"profile,omitempty"`
+	Tier      string `json:"tier,omitempty"`
+	ReadOnly  bool   `json:"read_only,omitempty"`
 	// WritePaths 是档位带来的写入白名单，非空时只合并匹配这些 glob 的改动；失败重试时原样继承。
 	WritePaths []string `json:"write_paths,omitempty"`
 	Acceptance []string `json:"acceptance,omitempty"`

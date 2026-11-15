@@ -22,6 +22,7 @@ import (
 	"mcode/internal/kanban"
 	"mcode/internal/procattr"
 	"mcode/internal/providers/loginenv"
+	"mcode/internal/reviewcheck"
 	"mcode/internal/store"
 )
 
@@ -508,6 +509,94 @@ func (m *Manager) runningCountForLeadLocked(leadThreadID string) int {
 		}
 	}
 	return count
+}
+
+type beeWriteScope struct {
+	name  string
+	paths []string
+}
+
+// writeScopePaths 只使用原始 brief，避免组装提示里的示例路径占用文件。
+func writeScopePaths(brief string, changed []string) []string {
+	paths := reviewcheck.ExtractPaths(brief)
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths)+len(changed))
+	out := make([]string, 0, len(paths)+len(changed))
+	for _, p := range paths {
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	for _, p := range changed {
+		p = strings.TrimSpace(strings.TrimPrefix(p, "./"))
+		if p == "" {
+			continue
+		}
+		p = path.Clean(p)
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func overlappingScope(a, b []string) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, p := range a {
+		seen[p] = struct{}{}
+	}
+	var out []string
+	for _, p := range b {
+		if _, ok := seen[p]; ok {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m *Manager) activeWriteScopesLocked(leadThreadID string) []beeWriteScope {
+	lead := m.leads[leadThreadID]
+	if lead == nil {
+		return nil
+	}
+	var out []beeWriteScope
+	for _, bee := range lead.bees {
+		if bee.ReadOnly || (bee.Status != StatusRunning && bee.ReviewState != ReviewRunning) {
+			continue
+		}
+		if paths := writeScopePaths(bee.Brief, bee.ChangedFiles); len(paths) > 0 {
+			out = append(out, beeWriteScope{name: bee.Name, paths: paths})
+		}
+	}
+	return out
+}
+
+func findScopeConflict(scope beeWriteScope, others []beeWriteScope) (string, []string) {
+	for _, other := range others {
+		if files := overlappingScope(scope.paths, other.paths); len(files) > 0 {
+			return other.name, files
+		}
+	}
+	return "", nil
+}
+
+func (m *Manager) overlappingSpecLocked(leadThreadID string, spec BeeSpec) (string, []string) {
+	if spec.ReadOnly {
+		return "", nil
+	}
+	scope := beeWriteScope{name: spec.Name, paths: writeScopePaths(spec.Brief, nil)}
+	if len(scope.paths) == 0 {
+		return "", nil
+	}
+	return findScopeConflict(scope, m.activeWriteScopesLocked(leadThreadID))
 }
 
 func (m *Manager) getRetryCount(threadID string) int {
@@ -1329,6 +1418,7 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		Name:              spec.Name,
 		Task:              spec.Task,
 		Prompt:            spec.Prompt,
+		Brief:             spec.Brief,
 		Status:            StatusRunning,
 		StartedAt:         now,
 		LastProgressAt:    now,
@@ -1386,6 +1476,7 @@ func (m *Manager) processQueue(ctx context.Context) {
 	var ready []queuedBee
 	var remaining []queuedBee
 	perLead := make(map[string]int, len(m.leads))
+	reservedScopes := make(map[string][]beeWriteScope)
 	for _, q := range m.queue {
 		count, ok := perLead[q.leadThreadID]
 		if !ok {
@@ -1394,6 +1485,18 @@ func (m *Manager) processQueue(ctx context.Context) {
 		if count >= maxBees {
 			remaining = append(remaining, q)
 			continue
+		}
+		if !q.spec.ReadOnly {
+			scope := beeWriteScope{name: q.spec.Name, paths: writeScopePaths(q.spec.Brief, nil)}
+			if len(scope.paths) > 0 {
+				others := m.activeWriteScopesLocked(q.leadThreadID)
+				others = append(others, reservedScopes[q.leadThreadID]...)
+				if _, files := findScopeConflict(scope, others); len(files) > 0 {
+					remaining = append(remaining, q)
+					continue
+				}
+				reservedScopes[q.leadThreadID] = append(reservedScopes[q.leadThreadID], scope)
+			}
 		}
 		// 同一个 Lead 本轮已放行的条目也计入，避免同一轮越过上限。
 		perLead[q.leadThreadID] = count + 1
@@ -1548,7 +1651,8 @@ func (m *Manager) dispatch(ctx context.Context, req DispatchRequest) ([]Bee, err
 
 		m.mu.Lock()
 		// 按 Lead 比较并发：一个 Lead 满额只让本条排队，不影响其它 Lead 的派发。
-		if m.runningCountForLeadLocked(req.LeadThreadID) >= maxBees {
+		conflictName, conflictFiles := m.overlappingSpecLocked(req.LeadThreadID, spec)
+		if m.runningCountForLeadLocked(req.LeadThreadID) >= maxBees || len(conflictFiles) > 0 {
 			m.queue = append(m.queue, queuedBee{
 				leadThreadID: req.LeadThreadID,
 				projectID:    beeProjectID,
@@ -1557,6 +1661,9 @@ func (m *Manager) dispatch(ctx context.Context, req DispatchRequest) ([]Bee, err
 				index:        index,
 			})
 			m.mu.Unlock()
+			if len(conflictFiles) > 0 {
+				log.Printf("swarm: queue bee %s because it overlaps %s on %s", spec.Name, conflictName, strings.Join(conflictFiles, ", "))
+			}
 			// 入队后立即落盘，重启后才有可能把这条未启动的委派交回用户。
 			m.persistLead(req.LeadThreadID)
 			continue
@@ -1782,6 +1889,7 @@ func (m *Manager) planEntry(ctx context.Context, leadThreadID string, d Delegati
 		Tier:        cfg.Tier,
 		ReadOnly:    cfg.ReadOnly,
 		WritePaths:  append([]string(nil), cfg.WritePaths...),
+		Brief:       d.Prompt,
 		Acceptance:  append([]string(nil), d.Acceptance...),
 		DirectModel: cfg.DirectModel,
 	}
@@ -2404,6 +2512,7 @@ func (m *Manager) Tick(ctx context.Context) {
 						Acceptance:  append([]string(nil), tgt.bee.Acceptance...),
 						RuntimeMode: tgt.bee.RuntimeMode,
 						DirectModel: tgt.bee.DirectModel,
+						Brief:       tgt.bee.Brief,
 					}
 					// 保留半成品：先统计失败前已有的改动，再决定是复用 worktree 接着做还是删掉重来。
 					m.recordPartialWork(ctx, &tgt.bee)
@@ -2418,7 +2527,7 @@ func (m *Manager) Tick(ctx context.Context) {
 						spec.reuseWorktree = tgt.bee.WorktreePath
 						spec.reuseBranch = tgt.bee.Branch
 						spec.reuseBaseCommit = tgt.bee.BaseCommit
-						spec.Prompt = fmt.Sprintf("上一个子代理因「%s」中断，当前 worktree 里已有它的改动，文件清单为 %s。请先用 git status 与 git diff 检查现状，已完成的部分不要重做，只补齐剩余工作。\n\n原始任务：\n%s", st.FailureReason, strings.Join(tgt.bee.ChangedFiles, ", "), promptText)
+						spec.Prompt = handoffPrompt(fmt.Sprintf("因「%s」中断", st.FailureReason), tgt.bee.ChangedFiles, st.LastAssistantText, promptText)
 					} else if tgt.bee.WorktreePath != "" {
 						if m.opts.Git != nil {
 							_ = m.opts.Git.WorktreeRemove(ctx, tgt.targetWorkDir, tgt.bee.WorktreePath, true)
@@ -4157,6 +4266,7 @@ func (m *Manager) handbackConflict(ctx context.Context, leadThreadID, targetWork
 		ReadOnly:        h.ReadOnly,
 		WritePaths:      append([]string(nil), h.WritePaths...),
 		Acceptance:      append([]string(nil), h.Acceptance...),
+		Brief:           h.Brief,
 		RuntimeMode:     h.RuntimeMode,
 		DirectModel:     h.DirectModel,
 	}
@@ -6096,6 +6206,27 @@ func (m *Manager) respawnInterruptedBee(ctx context.Context, leadThreadID string
 	return m.respawnBeeWithHandoff(ctx, leadThreadID, old, "因 MCode 重启中断", false)
 }
 
+// handoffPrompt 把保留的 worktree 状态与上一个 bee 的最后输出交给接手者。
+func handoffPrompt(cause string, files []string, lastOutput, task string) string {
+	var b strings.Builder
+	b.WriteString("上一个子代理")
+	b.WriteString(cause)
+	b.WriteString("，worktree 里保留了它的改动。\n\n## 交接\n- 已改文件：")
+	b.WriteString(strings.Join(files, ", "))
+	if strings.TrimSpace(lastOutput) != "" {
+		output := lastOutput
+		runes := []rune(output)
+		if len(runes) > 2000 {
+			output = "（已截断，以下为末尾 2000 个字符）\n" + string(runes[len(runes)-2000:])
+		}
+		b.WriteString("\n- 它中断前最后的输出：\n")
+		b.WriteString(output)
+	}
+	b.WriteString("\n\n## 你要做\n先用 git status 与 git diff 核对现状，已完成的部分不要重做，只补齐剩余工作；上一个子代理的输出只是线索，以 diff 为准。\n\n## 原始任务\n")
+	b.WriteString(task)
+	return b.String()
+}
+
 // respawnBeeWithHandoff 为一次重派构造 spec 并把旧 bee 的半成品交接给新 bee：
 // 先统计旧 bee 中断前的改动，原 worktree 还在就复用它与基线，不在就清理后新建；
 // cause 是要写进提示的中断原因（如「因 MCode 重启中断」），noteLostWorktree 为真时
@@ -6140,6 +6271,7 @@ func (m *Manager) respawnBeeWithHandoff(ctx context.Context, leadThreadID string
 		ReadOnly:    old.ReadOnly,
 		WritePaths:  append([]string(nil), old.WritePaths...),
 		Acceptance:  append([]string(nil), old.Acceptance...),
+		Brief:       old.Brief,
 		RuntimeMode: old.RuntimeMode,
 		DirectModel: old.DirectModel,
 	}
@@ -6157,7 +6289,7 @@ func (m *Manager) respawnBeeWithHandoff(ctx context.Context, leadThreadID string
 		spec.reuseWorktree = partial.WorktreePath
 		spec.reuseBranch = partial.Branch
 		spec.reuseBaseCommit = partial.BaseCommit
-		spec.Prompt = fmt.Sprintf("上一个子代理%s，当前 worktree 里已有它的改动，文件清单为 %s。请先用 git status 与 git diff 检查现状，已完成的部分不要重做，只补齐剩余工作。\n\n原始任务：\n%s", cause, strings.Join(partial.ChangedFiles, ", "), promptText)
+		spec.Prompt = handoffPrompt(cause, partial.ChangedFiles, old.Summary, promptText)
 	} else {
 		if partial.WorktreePath != "" {
 			if m.opts.Git != nil {

@@ -2,6 +2,7 @@ package swarm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -2669,5 +2670,189 @@ func TestFormatFailureReason(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHandoffPromptIncludesLastOutput(t *testing.T) {
+	short := handoffPrompt("因「失败」中断", []string{"a.go", "b.go"}, "最后输出", "原始任务")
+	for _, want := range []string{"a.go, b.go", "最后输出", "原始任务", "## 交接", "## 你要做"} {
+		if !strings.Contains(short, want) {
+			t.Fatalf("交接提示缺少 %q：%q", want, short)
+		}
+	}
+	if got := handoffPrompt("因「失败」中断", nil, "", "任务"); strings.Contains(got, "最后的输出") {
+		t.Fatalf("空输出不应出现最后输出条目：%q", got)
+	}
+	long := strings.Repeat("前", 2001) + "末尾"
+	got := handoffPrompt("因「失败」中断", nil, long, "任务")
+	if !strings.Contains(got, "已截断") || !strings.Contains(got, "末尾\n\n## 你要做") {
+		t.Fatalf("超长输出应标注截断并保留末尾：%q", got)
+	}
+	if strings.Contains(got, strings.Repeat("前", 2001)) {
+		t.Fatal("超长输出不应保留被截断的开头")
+	}
+	body := strings.Split(strings.Split(got, "以下为末尾 2000 个字符）\n")[1], "\n\n## 你要做")[0]
+	if want := string([]rune(long)[len([]rune(long))-2000:]); body != want {
+		t.Fatal("截断必须精确保留末尾 2000 rune")
+	}
+	atLimit := strings.Repeat("界", 2000)
+	if got := handoffPrompt("中断", nil, atLimit, "任务"); strings.Contains(got, "已截断") || !strings.Contains(got, atLimit) {
+		t.Fatal("恰好 2000 rune 时不应截断")
+	}
+}
+
+func TestDispatchQueuesOverlappingBrief(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runner, dir := initTestRepo(t)
+	persister := newFakePersister()
+	mgr := NewManager(Options{Git: runner, Driver: newFakeDriver(), WorktreeDir: t.TempDir(), Persister: persister})
+	mgr.SetSettingsFunc(func() Settings { return Settings{Enabled: true, AutoDelegate: true, WorkspaceMode: "worktree"} })
+	leadID := "lead-scope-dispatch"
+	firstText := "```swarm\n[{\"task\":\"first\",\"prompt\":\"修改 internal/swarm/shared.go\"}]\n```"
+	bees, _, err := mgr.DispatchFromReply(ctx, ReplyDispatchRequest{LeadThreadID: leadID, ProjectID: "p", LeadWorkDir: dir, ReplyText: firstText})
+	if err != nil || len(bees) != 1 {
+		t.Fatalf("首条委派失败：bees=%d err=%v", len(bees), err)
+	}
+	if !strings.Contains(bees[0].Prompt, "internal/ui/sidebar.go:865") {
+		t.Fatalf("组装后的提示应包含汇报示例路径：%q", bees[0].Prompt)
+	}
+	secondText := "```swarm\n[{\"task\":\"second\",\"prompt\":\"修改 internal/swarm/shared.go\"}]\n```"
+	queued, _, err := mgr.DispatchFromReply(ctx, ReplyDispatchRequest{LeadThreadID: leadID, ProjectID: "p", LeadWorkDir: dir, ReplyText: secondText})
+	if err != nil {
+		t.Fatalf("重叠委派失败：%v", err)
+	}
+	if len(queued) != 0 || mgr.QueueLength() != 1 {
+		t.Fatalf("重叠 brief 应排队：bees=%d queued=%d", len(queued), mgr.QueueLength())
+	}
+	thirdText := "```swarm\n[{\"task\":\"third\",\"prompt\":\"修改 internal/swarm/other.go\"}]\n```"
+	started, _, err := mgr.DispatchFromReply(ctx, ReplyDispatchRequest{LeadThreadID: leadID, ProjectID: "p", LeadWorkDir: dir, ReplyText: thirdText})
+	if err != nil || len(started) != 1 {
+		t.Fatalf("不重叠 brief 应立即启动：bees=%d err=%v", len(started), err)
+	}
+	if !strings.Contains(started[0].Prompt, "internal/ui/sidebar.go:865") {
+		t.Fatal("不同 brief 的组装提示也应包含同一个示例路径")
+	}
+	// 经 JSON 落盘再恢复，排队条目仍使用原始 brief，不从完整 Prompt 猜测范围。
+	data, err := json.Marshal(persister.leads[leadID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec LeadRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Queue) != 1 || rec.Queue[0].Spec.Brief != "修改 internal/swarm/shared.go" {
+		t.Fatalf("落盘排队条目丢失原始 brief：%+v", rec.Queue)
+	}
+	if err := persister.SaveLead(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	restored := NewManager(Options{Persister: persister})
+	if err := restored.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.leads[leadID].heldQueue[0].spec.Brief; got != rec.Queue[0].Spec.Brief {
+		t.Fatalf("恢复后 brief = %q", got)
+	}
+}
+
+func TestDispatchScopeBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		active    Bee
+		spec      BeeSpec
+		otherLead bool
+		want      bool
+	}{
+		{name: "审查中", active: Bee{Status: StatusCompleted, ReviewState: ReviewRunning, Brief: "a.go"}, spec: BeeSpec{Brief: "a.go"}, want: true},
+		{name: "已有改动文件", active: Bee{Status: StatusRunning, Brief: "a.go", ChangedFiles: []string{"b.go"}}, spec: BeeSpec{Brief: "b.go"}, want: true},
+		{name: "只读新条目", active: Bee{Status: StatusRunning, Brief: "a.go"}, spec: BeeSpec{Brief: "a.go", ReadOnly: true}},
+		{name: "只读运行条目", active: Bee{Status: StatusRunning, Brief: "a.go", ReadOnly: true}, spec: BeeSpec{Brief: "a.go"}},
+		{name: "已结束", active: Bee{Status: StatusCompleted, Brief: "a.go"}, spec: BeeSpec{Brief: "a.go"}},
+		{name: "新条目范围未知", active: Bee{Status: StatusRunning, Brief: "a.go"}, spec: BeeSpec{Prompt: "a.go"}},
+		{name: "旧条目范围未知", active: Bee{Status: StatusRunning, Prompt: "a.go", ChangedFiles: []string{"a.go"}}, spec: BeeSpec{Brief: "a.go"}},
+		{name: "brief没有路径", active: Bee{Status: StatusRunning, Brief: "完成工作", ChangedFiles: []string{"a.go"}}, spec: BeeSpec{Brief: "a.go"}},
+		{name: "不同lead", active: Bee{Status: StatusRunning, Brief: "a.go"}, spec: BeeSpec{Brief: "a.go"}, otherLead: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := NewManager(Options{})
+			leadID := "lead"
+			if tt.otherLead {
+				leadID = "other"
+			}
+			mgr.leads[leadID] = &leadState{bees: []Bee{tt.active}}
+			_, files := mgr.overlappingSpecLocked("lead", tt.spec)
+			if got := len(files) > 0; got != tt.want {
+				t.Fatalf("冲突文件 = %v，应冲突 = %v", files, tt.want)
+			}
+		})
+	}
+}
+
+func TestDispatchConcurrentOverlappingBrief(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runner, dir := initTestRepo(t)
+	mgr := NewManager(Options{Git: runner, Driver: newFakeDriver(), WorktreeDir: t.TempDir()})
+	mgr.SetSettingsFunc(func() Settings { return Settings{Enabled: true, AutoDelegate: true} })
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := mgr.DispatchSingleEntry(ctx, SingleEntryRequest{
+				LeadThreadID: "lead-scope-race", ProjectID: "p", LeadWorkDir: dir,
+				Entry: Delegation{Task: "修改", Prompt: "修改 a.go"},
+			})
+			if err != nil {
+				t.Errorf("派发失败：%v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	state := mgr.State("lead-scope-race")
+	if len(state.Bees) != 1 || state.Queued != 1 {
+		t.Fatalf("并发派发重叠条目应只启动一个：%+v", state)
+	}
+}
+
+func TestProcessQueueHoldsOverlappingEntry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runner, dir := initTestRepo(t)
+	mgr := NewManager(Options{Git: runner, Driver: newFakeDriver(), WorktreeDir: t.TempDir()})
+	mgr.SetSettingsFunc(func() Settings { return Settings{Enabled: true, MaxBees: 3, WorkspaceMode: "worktree"} })
+	leadID := "lead-scope-queue"
+	mgr.SetEnabled(leadID, true)
+	mgr.mu.Lock()
+	mgr.leads[leadID].bees = append(mgr.leads[leadID].bees, Bee{Name: "Running", Status: StatusRunning, Brief: "修改 internal/swarm/shared.go"})
+	mgr.queue = []queuedBee{
+		{leadThreadID: leadID, projectID: "p", leadWorkDir: dir, index: 1, spec: BeeSpec{Name: "Queued-1", Task: "one", Prompt: "one", Brief: "修改 internal/swarm/shared.go"}},
+		{leadThreadID: leadID, projectID: "p", leadWorkDir: dir, index: 2, spec: BeeSpec{Name: "Queued-2", Task: "two", Prompt: "two", Brief: "修改 internal/swarm/shared.go"}},
+	}
+	mgr.mu.Unlock()
+
+	mgr.processQueue(ctx)
+	if got := mgr.QueueLength(); got != 2 {
+		t.Fatalf("运行中 bee 冲突时应全部留队：%d", got)
+	}
+	mgr.mu.Lock()
+	mgr.leads[leadID].bees[0].Status = StatusCompleted
+	mgr.mu.Unlock()
+	mgr.processQueue(ctx)
+	if got := mgr.QueueLength(); got != 1 {
+		t.Fatalf("本轮只应放行一个互相重叠的条目：%d", got)
+	}
+	state := mgr.State(leadID)
+	if len(state.Bees) != 2 || state.Bees[1].Name != "Queued-1" || state.Bees[1].Status != StatusRunning {
+		t.Fatalf("首个排队条目应启动：%+v", state.Bees)
+	}
+	mgr.mu.Lock()
+	mgr.leads[leadID].bees[1].Status = StatusCompleted
+	mgr.mu.Unlock()
+	mgr.processQueue(ctx)
+	if got := mgr.QueueLength(); got != 0 {
+		t.Fatalf("前一个条目结束后应放行下一个：%d", got)
 	}
 }
