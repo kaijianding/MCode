@@ -1339,6 +1339,7 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		Tier:              spec.Tier,
 		ReadOnly:          spec.ReadOnly,
 		WritePaths:        append([]string(nil), spec.WritePaths...),
+		Acceptance:        append([]string(nil), spec.Acceptance...),
 		RuntimeMode:       sessionReq.RuntimeMode,
 		DirectModel:       spec.DirectModel,
 		FastMode:          spec.FastMode,
@@ -1443,6 +1444,7 @@ func (m *Manager) recordFailedBee(leadThreadID, projectID, targetWorkDir string,
 		Index:         index,
 		Name:          spec.Name,
 		Task:          spec.Task,
+		Acceptance:    append([]string(nil), spec.Acceptance...),
 		Status:        StatusFailed,
 		Summary:       summary,
 		StartedAt:     now,
@@ -1780,6 +1782,7 @@ func (m *Manager) planEntry(ctx context.Context, leadThreadID string, d Delegati
 		Tier:        cfg.Tier,
 		ReadOnly:    cfg.ReadOnly,
 		WritePaths:  append([]string(nil), cfg.WritePaths...),
+		Acceptance:  append([]string(nil), d.Acceptance...),
 		DirectModel: cfg.DirectModel,
 	}
 	// 返工关联：显式 reworkOf 按名字或 ThreadID 匹配被驳回的 bee；没写时按 brief 里的
@@ -2398,6 +2401,7 @@ func (m *Manager) Tick(ctx context.Context) {
 						Tier:        tgt.bee.Tier,
 						ReadOnly:    tgt.bee.ReadOnly,
 						WritePaths:  append([]string(nil), tgt.bee.WritePaths...),
+						Acceptance:  append([]string(nil), tgt.bee.Acceptance...),
 						RuntimeMode: tgt.bee.RuntimeMode,
 						DirectModel: tgt.bee.DirectModel,
 					}
@@ -2582,7 +2586,8 @@ func (m *Manager) Tick(ctx context.Context) {
 				if ok && len(bytes.TrimSpace(patch)) > 0 {
 					tgt.bee.PendingMerge = true
 					tgt.bee.MergePatch = patch
-					if mode == reviewModeHuman {
+					tgt.bee.ReviewConcerns = nil
+					if mode == reviewModeHuman && len(tgt.bee.Acceptance) == 0 {
 						tgt.bee.ReviewState = ReviewNeedsHuman
 						tgt.bee.ReviewLayer = "human"
 					} else {
@@ -4151,6 +4156,7 @@ func (m *Manager) handbackConflict(ctx context.Context, leadThreadID, targetWork
 		Tier:            h.Tier,
 		ReadOnly:        h.ReadOnly,
 		WritePaths:      append([]string(nil), h.WritePaths...),
+		Acceptance:      append([]string(nil), h.Acceptance...),
 		RuntimeMode:     h.RuntimeMode,
 		DirectModel:     h.DirectModel,
 	}
@@ -4422,6 +4428,32 @@ func (m *Manager) mergeBee(ctx context.Context, leadThreadID, targetWorkDir stri
 	if len(bytes.TrimSpace(rawPatch)) == 0 {
 		h.MergeWaitSince = nil
 		return true
+	}
+
+	if len(h.Acceptance) > 0 && !h.ReadOnly {
+		passed, detail := m.runAcceptance(ctx, leadThreadID, *h)
+		if ctx.Err() != nil {
+			return false
+		}
+		if h.Status == StatusCompleted && !m.beeStillRunning(leadThreadID, h.ThreadID) {
+			return true
+		}
+		if !passed {
+			h.Status = StatusFailed
+			h.Merged = false
+			h.PendingMerge = false
+			h.MergeWaitSince = nil
+			h.MergePatch = append([]byte(nil), rawPatch...)
+			h.MergeError = "验收命令失败：" + detail
+			if path, err := m.savePatch(leadThreadID, h.Index, rawPatch); err == nil {
+				h.ArchivedPatchPath = path
+				h.MergeError += "，补丁已保存到 " + path
+			} else {
+				h.MergeError += "，保存补丁失败：" + err.Error()
+			}
+			h.Summary = appendSummary(h.Summary, h.MergeError)
+			return true
+		}
 	}
 
 	if m.canLandBeeCommit(ctx, targetWorkDir, h) {
@@ -4880,6 +4912,11 @@ func (m *Manager) approveMerge(ctx context.Context, leadThreadID, beeThreadID st
 	if !target.PendingMerge {
 		m.mu.Unlock()
 		return Bee{}, ErrNoPendingMerge
+	}
+	if len(target.Acceptance) > 0 && !target.ReadOnly && len(target.ChangedFiles) > 0 &&
+		!containsString(target.ReviewConcerns, fmt.Sprintf("验收命令通过：%d 条", len(target.Acceptance))) {
+		m.mu.Unlock()
+		return Bee{}, errors.New("验收命令尚未通过")
 	}
 	h := target.clone()
 	targetDir := h.TargetWorkDir
@@ -6072,6 +6109,7 @@ func (m *Manager) respawnBeeWithHandoff(ctx context.Context, leadThreadID string
 		Tier:        old.Tier,
 		ReadOnly:    old.ReadOnly,
 		WritePaths:  append([]string(nil), old.WritePaths...),
+		Acceptance:  append([]string(nil), old.Acceptance...),
 		RuntimeMode: old.RuntimeMode,
 		DirectModel: old.DirectModel,
 	}

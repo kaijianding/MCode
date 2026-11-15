@@ -1994,7 +1994,7 @@ func TestManager_RetryFailed_FollowUpErrorFallsBackToNewBee(t *testing.T) {
 		ProjectID:    "proj-retry-followup-error",
 		LeadWorkDir:  dir,
 		Bees: []BeeSpec{
-			{Name: "Bee-Retry-Fallback", Task: "task fallback", Prompt: "pfallback"},
+			{Name: "Bee-Retry-Fallback", Task: "task fallback", Prompt: "pfallback", Acceptance: []string{"true"}},
 		},
 	})
 	if err != nil {
@@ -2018,6 +2018,9 @@ func TestManager_RetryFailed_FollowUpErrorFallsBackToNewBee(t *testing.T) {
 	// 续接催促失败，应该直接替换成新 bee，状态为 StatusRunning
 	if st.Bees[0].Status != StatusRunning {
 		t.Fatalf("expected bee to be running (new bee retry), got %v", st.Bees[0].Status)
+	}
+	if len(st.Bees[0].Acceptance) != 1 || st.Bees[0].Acceptance[0] != "true" {
+		t.Fatalf("自动重试丢失验收命令：%v", st.Bees[0].Acceptance)
 	}
 	secondThreadID := st.Bees[0].ThreadID
 	if secondThreadID == firstThreadID {

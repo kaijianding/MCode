@@ -94,6 +94,7 @@ type Bee struct {
 	ReadOnly bool   `json:"read_only,omitempty"`
 	// WritePaths 是派发时档位带来的写入白名单，非空时只合并匹配这些 glob 的改动。
 	WritePaths []string `json:"write_paths,omitempty"`
+	Acceptance []string `json:"acceptance,omitempty"`
 	// RuntimeMode 是派发时由宿主指定的权限模式，非空时子代理不继承主线程的权限模式；
 	// 失败重试时原样继承。
 	RuntimeMode    string   `json:"runtime_mode,omitempty"`
@@ -214,6 +215,7 @@ type BeeSpec struct {
 	ReadOnly        bool   `json:"read_only,omitempty"`
 	// WritePaths 是档位带来的写入白名单，非空时只合并匹配这些 glob 的改动；失败重试时原样继承。
 	WritePaths []string `json:"write_paths,omitempty"`
+	Acceptance []string `json:"acceptance,omitempty"`
 	// RuntimeMode 是派发时由宿主指定的权限模式，非空时子代理不继承主线程的权限模式；
 	// 失败重试时原样继承。
 	RuntimeMode string `json:"runtime_mode,omitempty"`
@@ -475,6 +477,7 @@ type Options struct {
 // clone 返回 Bee 结构的深拷贝副本。
 func (h Bee) clone() Bee {
 	cp := h
+	cp.Acceptance = append([]string(nil), h.Acceptance...)
 	cp.MergePatch = append([]byte(nil), h.MergePatch...)
 	if h.FinishedAt != nil {
 		t := *h.FinishedAt

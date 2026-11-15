@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"mcode/internal/swarm"
 )
 
 func callSwarmDelegate(t *testing.T, srv *Server, threadID string, args map[string]any) (string, bool) {
@@ -74,8 +76,8 @@ func TestSwarmDelegateCallPassesEntriesToHook(t *testing.T) {
 	})
 
 	text, isError := callSwarmDelegate(t, srv, "lead-1", map[string]any{"tasks": []any{
-		map[string]any{"prompt": "do a\n```go\nx\n```", "task": "A"},
-		map[string]any{"prompt": "do b", "skills": []any{"review"}},
+		map[string]any{"prompt": "do a\n```go\nx\n```", "task": "A", "acceptance": []any{" true ", ""}},
+		map[string]any{"prompt": "do b", "skills": []any{"review"}, "acceptance": " true "},
 	}})
 	if isError || text != "Started 2 bee(s)." {
 		t.Fatalf("工具结果异常: %q error=%v", text, isError)
@@ -83,6 +85,13 @@ func TestSwarmDelegateCallPassesEntriesToHook(t *testing.T) {
 	if gotThread != "lead-1" || len(gotEntries) != 2 || !strings.Contains(gotEntries[0]["prompt"].(string), "```go") {
 		t.Fatalf("钩子收到的参数异常: thread=%q entries=%v", gotThread, gotEntries)
 	}
+	for _, entry := range gotEntries {
+		parsed, ok := swarm.ParseEntry(entry)
+		if !ok || len(parsed.Acceptance) != 1 || parsed.Acceptance[0] != "true" {
+			t.Fatalf("acceptance未传给解析入口：%+v", parsed)
+		}
+	}
+
 }
 
 func TestSwarmDelegateRejectsUnavailableAndEmpty(t *testing.T) {
@@ -135,6 +144,15 @@ func TestSwarmDelegateSchemaDeclaresReplaces(t *testing.T) {
 	if field["type"] != "string" {
 		t.Fatalf("replaces 类型期望 string, 实际为 %v", field["type"])
 	}
+	acceptance, ok := entryProps["acceptance"].(map[string]any)
+	if !ok || acceptance["type"] != "array" {
+		t.Fatalf("acceptance schema=%v", acceptance)
+	}
+	element, _ := acceptance["items"].(map[string]any)
+	if element["type"] != "string" {
+		t.Fatalf("acceptance items=%v", element)
+	}
+
 }
 
 func TestSwarmDelegateRejectsEntriesWithoutPrompt(t *testing.T) {

@@ -78,6 +78,7 @@ func TestManager_RetryBee_ReusesWorktreeWithPartialWork(t *testing.T) {
 		ProjectID:     "proj-1",
 		TargetWorkDir: dir,
 		RuntimeMode:   "auto",
+		Acceptance:    []string{"true"},
 		Reported:      true,
 	})
 	mgr.mu.Unlock()
@@ -97,6 +98,9 @@ func TestManager_RetryBee_ReusesWorktreeWithPartialWork(t *testing.T) {
 	}
 	if newBee.Index != 0 {
 		t.Fatalf("重试出的 bee 应沿用原 Index=0，实际 %d", newBee.Index)
+	}
+	if len(newBee.Acceptance) != 1 || newBee.Acceptance[0] != "true" {
+		t.Fatalf("重试丢失验收命令：%v", newBee.Acceptance)
 	}
 	if newBee.RuntimeMode != "auto" {
 		t.Fatalf("重试出的 bee 应继承原权限模式 auto，实际 %q", newBee.RuntimeMode)

@@ -75,7 +75,8 @@ type Delegation struct {
 	Pair     string
 	Tier     string
 	// Skills 是声明给该 bee 的技能名；为空时 bee 不携带任何技能提示块。
-	Skills []string
+	Skills     []string
+	Acceptance []string
 	// Replaces 是要取代的在跑 bee 的名字，宿主会先停掉该 bee 再启动本条。
 	Replaces string
 	// ReworkOf 是要返工的已驳回 bee 的名字或 ThreadID；为空时按 brief 里的补丁路径推断。
@@ -178,19 +179,51 @@ func parseEntry(m map[string]any) (Delegation, bool) {
 	reworkOf := strings.TrimSpace(reworkRaw)
 
 	return Delegation{
-		Task:     task,
-		Prompt:   prompt,
-		Name:     name,
-		Project:  project,
-		Provider: provider,
-		Model:    model,
-		Profile:  profile,
-		Pair:     pair,
-		Tier:     tier,
-		Skills:   parseSkills(m["skills"]),
-		Replaces: replaces,
-		ReworkOf: reworkOf,
+		Task:       task,
+		Prompt:     prompt,
+		Name:       name,
+		Project:    project,
+		Provider:   provider,
+		Model:      model,
+		Profile:    profile,
+		Pair:       pair,
+		Tier:       tier,
+		Skills:     parseSkills(m["skills"]),
+		Acceptance: parseAcceptance(m["acceptance"]),
+		Replaces:   replaces,
+		ReworkOf:   reworkOf,
 	}, true
+}
+
+// parseAcceptance 保留 shell 命令原文（逗号不分割），只清理首尾空白。
+func parseAcceptance(raw any) []string {
+	var items []string
+	switch v := raw.(type) {
+	case string:
+		items = []string{v}
+	case []string:
+		items = v
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			items = append(items, s)
+		}
+	default:
+		return nil
+	}
+	var commands []string
+	for _, item := range items {
+		if command := strings.TrimSpace(item); command != "" {
+			commands = append(commands, command)
+			if len(commands) == 8 {
+				break
+			}
+		}
+	}
+	return commands
 }
 
 // parseSkills 宽松解析条目里的 skills：接受字符串数组或单个逗号分隔字符串，

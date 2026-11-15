@@ -383,8 +383,8 @@ func (m *Manager) pollReview(ctx context.Context, leadThreadID string, h Bee, no
 			}
 			return
 		}
-		// L0 是同步检查命令，预算取项目配置超时再加 30 秒余量。
-		if now.Sub(*h.ReviewStartedAt) > m.reviewCheckBudget(leadThreadID) {
+		// L0 预算覆盖项目检查与全部验收命令，再加 30 秒余量。
+		if now.Sub(*h.ReviewStartedAt) > m.reviewCheckBudget(leadThreadID, h) {
 			if m.reviewActive(leadThreadID, h.ThreadID, "") {
 				m.markReviewNeedsHuman(leadThreadID, h.ThreadID, "L0 检查超时")
 			}

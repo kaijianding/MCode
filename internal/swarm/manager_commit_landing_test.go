@@ -370,6 +370,7 @@ func TestManager_CommitLanding_Handback(t *testing.T) {
 	before := gitTestRun(t, root, "rev-parse", "HEAD")
 	a := startCommitLandingBee(t, m, root, "lead-conflict", 0)
 	b := startCommitLandingBee(t, m, root, "lead-conflict", 1)
+	b.Acceptance = []string{"true"}
 	first := strings.Replace(landingBase, "one\n", "first\n", 1)
 	writePipelineFile(t, a.WorktreePath, "lines.txt", first)
 	writePipelineFile(t, b.WorktreePath, "lines.txt", strings.Replace(landingBase, "one\n", "second\n", 1))
@@ -378,6 +379,9 @@ func TestManager_CommitLanding_Handback(t *testing.T) {
 	}
 	if !landCommitBee(m, root, "lead-conflict", &b) || b.Merged || b.ConflictHandbacks != 1 {
 		t.Fatalf("未交回: %+v", b)
+	}
+	if len(b.Acceptance) != 1 || b.Acceptance[0] != "true" {
+		t.Fatalf("冲突交回丢失验收命令：%v", b.Acceptance)
 	}
 	if b.BaseCommit != a.LandedCommit {
 		t.Fatalf("交回基线=%s want=%s", b.BaseCommit, a.LandedCommit)

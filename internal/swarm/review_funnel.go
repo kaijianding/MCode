@@ -299,6 +299,32 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 		return
 	}
 
+	passed, detail := m.runAcceptance(ctx, leadThreadID, h)
+	if ctx.Err() != nil {
+		return
+	}
+	if !passed {
+		m.finishL0Reject(leadThreadID, h, fingerprint, concerns, "验收命令失败："+detail)
+		return
+	}
+	if !h.ReadOnly && len(h.ChangedFiles) > 0 && len(h.Acceptance) > 0 {
+		concerns = append(concerns, fmt.Sprintf("验收命令通过：%d 条", len(h.Acceptance)))
+	}
+	if m.reviewMode() == reviewModeHuman {
+		if m.funnelUpdate(leadThreadID, h.ThreadID, ReviewStageL0, patchSHA, func(b *Bee) {
+			b.ReviewState = ReviewNeedsHuman
+			b.ReviewStage = ""
+			b.ReviewLayer = "human"
+			b.ReviewStartedAt = nil
+			b.ReviewConcerns = append([]string(nil), concerns...)
+			b.ReviewFingerprint = fingerprint
+		}) {
+			m.persistLead(leadThreadID)
+			m.notifyChange(leadThreadID)
+		}
+		return
+	}
+
 	if h.ReworkOf != "" {
 		// 返工只审增量：L1 的“小改动自动通过”不能套在返工上，直接进 L2。
 		m.enterL2Queue(leadThreadID, h, fingerprint, concerns, check)
@@ -407,10 +433,10 @@ func (m *Manager) reviewProjectRuntime(ctx context.Context, leadThreadID, beeWor
 	}
 }
 
-// reviewCheckBudget 是 L0 的兜底超时：项目检查超时再加 30 秒余量。
-func (m *Manager) reviewCheckBudget(leadThreadID string) time.Duration {
+// reviewCheckBudget 为项目检查和逐条验收预留各自超时，再加 30 秒余量。
+func (m *Manager) reviewCheckBudget(leadThreadID string, h Bee) time.Duration {
 	rt := m.reviewProjectRuntime(context.Background(), leadThreadID, "")
-	return rt.timeout + reviewCheckBudgetMargin
+	return rt.timeout*time.Duration(1+len(h.Acceptance)) + reviewCheckBudgetMargin
 }
 
 // finishL0Reject 写回 L0 失败结论并驳回。
@@ -578,6 +604,13 @@ func (m *Manager) buildL2Request(ctx context.Context, leadThreadID string, h Bee
 func (m *Manager) applyL2Decision(ctx context.Context, leadThreadID string, h Bee, decision reviewfunnel.Decision, tokens int, extraConcerns []string, provider, model string) {
 	concerns := append([]string(nil), extraConcerns...)
 	concerns = append(concerns, decision.Concerns...)
+	if len(h.Acceptance) > 0 {
+		passed := fmt.Sprintf("验收命令通过：%d 条", len(h.Acceptance))
+		if containsString(h.ReviewConcerns, passed) {
+			concerns = append(concerns, passed)
+		}
+	}
+
 	switch decision.Verdict {
 	case reviewfunnel.VerdictApprove:
 		if !m.reviewSnapshotIntact(leadThreadID, h) {
@@ -884,4 +917,41 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// runAcceptance 在 bee 副本中顺序验收；reviewcheck 负责进程组取消及输出限额。
+func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee) (bool, string) {
+	if h.ReadOnly || len(h.ChangedFiles) == 0 || len(h.Acceptance) == 0 {
+		return true, ""
+	}
+	timeout := m.reviewProjectRuntime(ctx, leadThreadID, h.WorktreePath).timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	const marker = "\nmcode-acceptance-exit:"
+	for _, command := range h.Acceptance {
+		// 独立 shell 保证命令里的 exit 不会跳过退出码记录。
+		result := reviewcheck.Run(ctx, h.WorktreePath, reviewcheck.Command{
+			Shell: "sh", Args: [][]string{{"-c", `sh -c "$1"; code=$?; printf '\nmcode-acceptance-exit:%s\n' "$code"; exit "$code"`, "mcode-acceptance", command}},
+			Display: command, Timeout: timeout,
+		}, l0MaxOutput)
+		if result.OK {
+			continue
+		}
+		status := "执行失败"
+		output := result.Output
+		if i := strings.LastIndex(output, marker); i >= 0 {
+			status = "退出码 " + strings.TrimSpace(output[i+len(marker):])
+			output = output[:i]
+		}
+		if result.TimedOut {
+			status = "超时"
+		}
+		detail := fmt.Sprintf("%s（%s）", command, status)
+		if tail := strings.TrimSpace(reviewcheck.Tail(output, 30, 4096)); tail != "" {
+			detail += "\n" + tail
+		}
+		return false, detail
+	}
+	return true, ""
 }
