@@ -293,6 +293,12 @@ func (g *GoalScheduler) tickGoal(ctx context.Context, goal store.Goal) error {
 
 	// (a) 对 in_progress / needs_approval 且有 ThreadID 的任务查 SessionState
 	for i, t := range tasks {
+		if t.Status == string(TaskStatusReview) && t.LastActivityText != nil && *t.LastActivityText == acceptanceRunningText && len(ParseAcceptanceCommands(t.AcceptanceCriteria)) > 0 {
+			if !g.svc.isAcceptanceRunning(t.ID) {
+				g.svc.startAcceptanceCommands(t, autoAccept)
+			}
+			continue
+		}
 		if t.Status == string(TaskStatusReview) && isStewardOwnerIn(goal, t) {
 			meta, err := ParseTaskMeta(t.Meta)
 			if err != nil || g.svc.isReviewActive(ctx, t) {

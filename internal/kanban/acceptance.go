@@ -34,6 +34,7 @@ const (
 	acceptanceCommandTag = "[命令]"
 	// acceptanceUserVerifyTag 是验收标准里标记「需要用户确认」的行首标签。
 	acceptanceUserVerifyTag = "[你验]"
+	acceptanceRunningText   = "正在跑验收命令…"
 )
 
 // AcceptanceCommandResult 描述一条验收命令的执行结果。
@@ -91,7 +92,6 @@ func hasUserVerify(task store.Task) bool {
 }
 
 // startAcceptanceCommands 只在完成落库后调用，命令执行不阻塞调度循环。
-// shortcut: 验收状态仅存于进程内，重启恢复需另行持久化执行记录。
 func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
 	s.acceptanceMu.Lock()
 	if s.ctx.Err() != nil || s.acceptanceRunning[task.ID] {
@@ -101,7 +101,7 @@ func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
 	s.mu.Lock()
 	latest, err := s.opts.Store.GetTask(s.ctx, task.ID)
 	if err == nil && latest.Status == string(TaskStatusReview) && latest.Revision == task.Revision {
-		text := "正在跑验收命令…"
+		text := acceptanceRunningText
 		latest.LastActivityText = &text
 		_, err = s.opts.Store.UpdateTask(s.ctx, latest, latest.Revision)
 		if err == nil {
@@ -134,6 +134,12 @@ func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
 	s.notifyChange()
 }
 
+func (s *Service) isAcceptanceRunning(id string) bool {
+	s.acceptanceMu.Lock()
+	defer s.acceptanceMu.Unlock()
+	return s.acceptanceRunning[id]
+}
+
 func acceptanceFailureFeedback(commands []string, results []AcceptanceCommandResult, err error) string {
 	var failures []string
 	if err != nil {
@@ -154,7 +160,7 @@ func acceptanceFailureFeedback(commands []string, results []AcceptanceCommandRes
 
 func (s *Service) finishAcceptanceCommands(original store.Task, autoAccept bool) {
 	results, runErr := s.RunAcceptanceCommands(s.ctx, original.ID)
-	// 服务退出不算验收失败，保留 review 交给人工。
+	// 服务退出不算验收失败，保留运行中标记供重启后续跑。
 	if s.ctx.Err() != nil {
 		return
 	}
@@ -171,22 +177,21 @@ func (s *Service) finishAcceptanceCommands(original store.Task, autoAccept bool)
 		decision = ReviewReject
 	} else if feedback == "" && autoAccept && !hasUserVerify(task) {
 		decision = ReviewAccept
-	} else {
-		text := feedback
-		if text == "" {
-			text = "验收命令全部通过"
-			if original.LastActivityText != nil && *original.LastActivityText != "" {
-				text += "\n" + *original.LastActivityText
-			}
-		}
-		task.LastActivityText = &text
-		_, err = s.opts.Store.UpdateTask(s.ctx, task, task.Revision)
-		if err == nil {
-			s.revision.Add(1)
+	}
+	text := feedback
+	if text == "" {
+		text = "验收命令全部通过"
+		if original.LastActivityText != nil && *original.LastActivityText != "" && *original.LastActivityText != acceptanceRunningText {
+			text += "\n" + *original.LastActivityText
 		}
 	}
+	task.LastActivityText = &text
+	task, err = s.opts.Store.UpdateTask(s.ctx, task, task.Revision)
+	if err == nil {
+		s.revision.Add(1)
+	}
 	s.mu.Unlock()
-	if decision != "" {
+	if err == nil && decision != "" {
 		_, err = s.ReviewTask(s.ctx, task.ID, decision, feedback, task.Revision)
 	}
 	if err != nil {

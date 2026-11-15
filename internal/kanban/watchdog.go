@@ -146,6 +146,12 @@ func (w *Watchdog) Check(ctx context.Context) error {
 	changed := false
 
 	for _, t := range tasks {
+		if t.Status == string(TaskStatusReview) && t.LastActivityText != nil && *t.LastActivityText == acceptanceRunningText && len(ParseAcceptanceCommands(t.AcceptanceCriteria)) > 0 {
+			if !w.svc.isAcceptanceRunning(t.ID) {
+				w.svc.startAcceptanceCommands(t, w.autoAcceptEnabled(ctx, t))
+			}
+			continue
+		}
 		// 只巡视进行中的任务；停在 needs_approval 的任务只有在执行会话补交了回执时才收尾，
 		// 这样没有目标调度的独立任务也能在提交结果后自动离开 Needs You。
 		pendingReceipt := t.Status == string(TaskStatusNeedsApproval) && w.svc.hasReceipt(t.ID, threadIDOf(t))

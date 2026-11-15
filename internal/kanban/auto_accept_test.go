@@ -20,7 +20,7 @@ func TestFinishedTaskAcceptanceCommands(t *testing.T) {
 		autoAccept, missingWorktree      bool
 		rejectCount, wantRejectCount     int
 	}{
-		{name: "自动接受", criteria: "[命令] `true`", autoAccept: true, status: "done"},
+		{name: "自动接受", criteria: "[命令] `true`", autoAccept: true, status: "done", feedback: "验收命令全部通过"},
 		{name: "首次失败", criteria: "[命令] `false`\n[命令] `printf failure-output; exit 3`", autoAccept: true, status: "todo", wantRejectCount: 1, feedback: "退出码 1"},
 		{name: "再次失败", criteria: "[命令] `false`", autoAccept: true, rejectCount: 1, wantRejectCount: 1, status: "review", feedback: "退出码 1"},
 		{name: "你验", criteria: "[命令] `true`\n[你验] 点界面", autoAccept: true, status: "review", feedback: "验收命令全部通过"},
@@ -78,8 +78,11 @@ func TestFinishedTaskAcceptanceCommands(t *testing.T) {
 					t.Fatalf("状态=%s RejectCount=%d，期望 %s/%d", latest.Status, latest.RejectCount, tc.status, tc.wantRejectCount)
 				}
 				text := latest.LastActivityText
-				if tc.status == "todo" {
-					text = latest.ReviewFeedback
+				if text == nil || strings.Contains(*text, acceptanceRunningText) {
+					t.Fatalf("验收后仍缺少结果或保留运行中标记: %v", text)
+				}
+				if tc.status == "todo" && (latest.ReviewFeedback == nil || *latest.ReviewFeedback != *text) {
+					t.Fatalf("卡片文字与驳回反馈不一致: %v / %v", text, latest.ReviewFeedback)
 				}
 				if tc.feedback != "" && (text == nil || !strings.Contains(*text, tc.feedback)) {
 					t.Fatalf("期望反馈包含 %q，实际 %v", tc.feedback, text)
@@ -95,6 +98,118 @@ func TestFinishedTaskAcceptanceCommands(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAcceptanceCommandsResumeAfterRestart(t *testing.T) {
+	for _, watchdog := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, status, text, criteria string
+			autoAccept, standalone, skip bool
+			wantStatus                   string
+		}{
+			{name: "自动接受", autoAccept: true, wantStatus: "done"},
+			{name: "人工接受", wantStatus: "review"},
+			{name: "你验", autoAccept: true, criteria: "[命令] `true`\n[你验] 点界面", wantStatus: "review"},
+			{name: "独立任务", standalone: true, wantStatus: "review"},
+			{name: "已完成", status: "done", skip: true},
+			{name: "无运行标记", text: "原回执摘要", skip: true},
+			{name: "无验收命令", criteria: "[审阅] 检查代码", skip: true},
+		} {
+			if tc.standalone && !watchdog {
+				continue
+			}
+			t.Run(fmt.Sprintf("watchdog=%t/%s", watchdog, tc.name), func(t *testing.T) {
+				ctx := context.Background()
+				svc, st := setupAcceptanceService(t, t.TempDir())
+				text := acceptanceRunningText
+				if tc.text != "" {
+					text = tc.text
+				}
+				task := store.Task{ID: "task-resume", Title: "重启续跑", Status: "review", LastActivityText: &text, AcceptanceCriteria: "[命令] `true`"}
+				if tc.status != "" {
+					task.Status = tc.status
+				}
+				if tc.criteria != "" {
+					task.AcceptanceCriteria = tc.criteria
+				}
+				if err := os.MkdirAll(svc.TaskWorktreePath(task.ID), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if tc.standalone {
+					if err := st.CreateTask(ctx, task); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					seedSchedulerGoal(t, ctx, st, store.Goal{ID: "goal-resume", ProjectID: "proj-accept", Title: "续跑", Policy: map[string]any{"autoAccept": tc.autoAccept}}, task)
+				}
+				before, err := st.GetTask(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if watchdog {
+					if err := NewWatchdog(svc, time.Minute).Check(ctx); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					NewGoalScheduler(svc, time.Minute).Tick(ctx)
+				}
+				svc.wg.Wait()
+				latest, err := st.GetTask(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.skip {
+					if latest.Revision != before.Revision {
+						t.Fatalf("不应续跑的任务被更新: %+v", latest)
+					}
+					return
+				}
+				if latest.Status != tc.wantStatus || latest.LastActivityText == nil || *latest.LastActivityText != "验收命令全部通过" {
+					t.Fatalf("续跑结果错误或拼回了运行标记: %+v", latest)
+				}
+			})
+		}
+	}
+}
+
+func TestAcceptanceCommandsRecoveryDoesNotDuplicateRunning(t *testing.T) {
+	ctx := context.Background()
+	svc, st := setupAcceptanceService(t, t.TempDir())
+	taskID := "task-recovery-dedup"
+	wtPath := svc.TaskWorktreePath(taskID)
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	text := acceptanceRunningText
+	seedSchedulerGoal(t, ctx, st, store.Goal{ID: "goal-recovery-dedup", ProjectID: "proj-accept", Title: "续跑去重"}, store.Task{
+		ID: taskID, Title: "续跑去重", Status: "review", LastActivityText: &text,
+		AcceptanceCriteria: "[命令] `printf x >> runs; while [ ! -f release ]; do sleep 0.01; done`",
+	})
+	scheduler := NewGoalScheduler(svc, time.Minute)
+	watchdog := NewWatchdog(svc, time.Minute)
+	var checks sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		checks.Add(2)
+		go func() { defer checks.Done(); scheduler.Tick(ctx) }()
+		go func() {
+			defer checks.Done()
+			if err := watchdog.Check(ctx); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	checks.Wait()
+	waitAcceptanceMarker(t, filepath.Join(wtPath, "runs"))
+	if !svc.isAcceptanceRunning(taskID) {
+		t.Fatal("验收命令未保持运行状态")
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc.wg.Wait()
+	if data, err := os.ReadFile(filepath.Join(wtPath, "runs")); err != nil || string(data) != "x" {
+		t.Fatalf("调度器与看门狗重复执行验收: %q, %v", data, err)
 	}
 }
 
