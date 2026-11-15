@@ -4398,10 +4398,8 @@ func (m *Manager) landBeeCommit(ctx context.Context, leadID, root string, h *Bee
 			return fail(restore(err))
 		}
 		log.Printf("swarm: 落地提交已创建，但同步索引失败: %v", err)
-		h.MergeError = fmt.Sprintf("提交已创建，但同步索引失败：%v", err)
-	} else {
-		h.MergeError = ""
 	}
+	h.MergeError = ""
 	h.Merged, h.MergeWaitSince, h.LandedCommit = true, nil, newSHA
 	h.ConflictFiles = []string{}
 	if path, err := m.saveLandedPatch(leadID, h.Index, rawPatch); err != nil {

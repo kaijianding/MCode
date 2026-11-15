@@ -58,7 +58,13 @@ func runGitWrapperHelper(cfg string) int {
 		return 127
 	}
 	args := os.Args[1:]
-	if len(args) >= 6 && args[0] == "update-ref" && args[3] == "HEAD" && other != "" {
+	if other == "fail-reset" && len(args) >= 4 && args[0] == "reset" && args[1] == "-q" {
+		if err := os.Remove(flag); err == nil {
+			fmt.Fprintln(os.Stderr, "模拟索引同步失败")
+			return 1
+		}
+	}
+	if len(args) >= 6 && args[0] == "update-ref" && args[3] == "HEAD" && other != "" && other != "fail-reset" {
 		if err := os.Remove(flag); err == nil {
 			// 先替外部把 HEAD 挪走，再让原来的 update-ref 因旧值不匹配而失败。
 			if code := runGitCommand(realGit, []string{"update-ref", "HEAD", other, args[5]}); code != 0 {
@@ -518,6 +524,39 @@ func TestManager_CommitLanding_HeadMoved(t *testing.T) {
 	}
 	assertLandingCommit(t, m, root, bee)
 	assertLandingFile(t, root, beeText)
+}
+
+func TestLandingIndexSyncFailureAfterCommitIsNotMergeError(t *testing.T) {
+	t.Parallel()
+	m, _, root := newCommitLandingManager(t)
+	const lead = "lead-index-sync"
+	bee := startCommitLandingBee(t, m, root, lead, 0)
+	old := gitTestRun(t, root, "rev-parse", "HEAD")
+	dir := t.TempDir()
+	flag := filepath.Join(dir, "once")
+	if err := os.WriteFile(flag, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(dir, "git.exe")
+	if err := linkOrCopyFile(os.Args[0], wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "git-wrapper.conf"), []byte(m.opts.Git.Bin+"\nfail-reset\n"+flag+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.opts.Git = git.NewRunner(wrapper, 4)
+	writePipelineFile(t, bee.WorktreePath, "lines.txt", strings.Replace(landingBase, "one\n", "bee\n", 1))
+	bee.MergeError = "旧错误"
+	if !landCommitBee(m, root, lead, &bee) {
+		t.Fatal("落地不应等待")
+	}
+	if _, err := os.Stat(flag); !os.IsNotExist(err) {
+		t.Fatalf("未触发索引同步失败: %v", err)
+	}
+	assertLandingCommit(t, m, root, bee)
+	if bee.LandedCommit == old || bee.MergeError != "" {
+		t.Fatalf("落地状态错误: %+v", bee)
+	}
 }
 
 func TestManager_CommitLanding_SerialAcrossManagers(t *testing.T) {
