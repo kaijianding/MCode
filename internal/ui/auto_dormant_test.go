@@ -8,6 +8,21 @@ import (
 	"mcode/internal/config"
 )
 
+type autoDormantTestClient struct {
+	*FakeClient
+	started chan struct{}
+	release chan struct{}
+	tokens  map[string]string
+}
+
+func (f *autoDormantTestClient) MarkDormantWithUndo(id string) (string, error) {
+	if f.started != nil {
+		close(f.started)
+		<-f.release
+	}
+	return f.tokens[id], nil
+}
+
 // waitForAutoDormant 轮询等待异步休眠（fake client 的调用在 goroutine 中完成）。
 func waitForAutoDormant(t *testing.T, cond func() bool) {
 	t.Helper()
@@ -206,5 +221,40 @@ func TestAutoDormantMultipleUndo(t *testing.T) {
 	calls := fake.UndoBulkOpCalls()
 	if calls[0].ProjectID != "p1" || calls[0].Token != "undo" || calls[1].ProjectID != "p2" || calls[1].Token != "undo" {
 		t.Fatalf("undo calls = %+v", calls)
+	}
+}
+
+func TestAutoDormantPreservesUserUndo(t *testing.T) {
+	fake := &autoDormantTestClient{FakeClient: NewFakeClient(), started: make(chan struct{}), release: make(chan struct{}), tokens: map[string]string{"old": "auto"}}
+	fake.archiveThreadWithUndoToken = "user"
+	s := newChatState(fake)
+	now := time.Now()
+	s.threads = []Thread{{ID: "old", ProjectID: "p1", UpdatedAt: now.Add(-10 * 24 * time.Hour)}, {ID: "user", ProjectID: "p1", UpdatedAt: now}}
+	s.threadsByProj["p1"] = append([]Thread(nil), s.threads...)
+	s.maybeAutoDormant(now, 7)
+	<-fake.started
+	s.archiveThreadWithUndo("p1", "user")
+	waitForAutoDormant(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.lastBulk != nil })
+	close(fake.release)
+	waitForAutoDormant(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return len(s.threads) == 1 && s.threads[0].Dormant })
+	time.Sleep(50 * time.Millisecond)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastBulk == nil || s.lastBulk.kind != "archive" || len(s.lastBulk.undo) != 1 || s.lastBulk.undo[0].token != "user" {
+		t.Fatalf("lastBulk = %+v", s.lastBulk)
+	}
+}
+
+func TestAutoDormantCountUndoTokens(t *testing.T) {
+	fake := &autoDormantTestClient{FakeClient: NewFakeClient(), tokens: map[string]string{"a": "undo"}}
+	s := newChatState(fake)
+	now := time.Now()
+	s.threads = []Thread{{ID: "a", ProjectID: "p1", UpdatedAt: now.Add(-10 * 24 * time.Hour)}, {ID: "b", ProjectID: "p1", UpdatedAt: now.Add(-10 * 24 * time.Hour)}}
+	s.maybeAutoDormant(now, 7)
+	waitForAutoDormant(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.lastBulk != nil })
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastBulk.count != 1 || len(s.lastBulk.undo) != 1 {
+		t.Fatalf("lastBulk = %+v", s.lastBulk)
 	}
 }

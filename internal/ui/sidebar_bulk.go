@@ -565,11 +565,18 @@ func (s *chatState) undoLastBulk() {
 	go func() {
 		ctx := context.Background()
 		var firstErr error
+		var failed, retry []bulkUndoOp
 		projects := make(map[string]bool)
 		for _, op := range ops {
 			projects[op.projectID] = true
-			if err := s.client.UndoBulkOperation(ctx, op.projectID, op.token); err != nil && firstErr == nil {
-				firstErr = err
+			if err := s.client.UndoBulkOperation(ctx, op.projectID, op.token); err != nil {
+				failed = append(failed, op)
+				if firstErr == nil {
+					firstErr = err
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), "expire") && !strings.Contains(err.Error(), "过期") {
+					retry = append(retry, op)
+				}
 			}
 		}
 		for projectID := range projects {
@@ -589,10 +596,23 @@ func (s *chatState) undoLastBulk() {
 		if firstErr != nil {
 			errMsg := firstErr.Error()
 			if strings.Contains(strings.ToLower(errMsg), "expire") || strings.Contains(errMsg, "过期") {
-				s.setToast("撤销已过期")
-			} else {
-				s.setToast("撤销失败: " + errMsg)
+				errMsg = "撤销已过期"
 			}
+			if len(retry) > 0 {
+				s.mu.Lock()
+				installed := s.lastBulk == nil
+				if installed {
+					copy := *lb
+					copy.undo = retry
+					copy.count = len(retry)
+					s.lastBulk = &copy
+				}
+				s.mu.Unlock()
+				if installed {
+					s.scheduleLastBulkExpiry()
+				}
+			}
+			s.setToast(fmt.Sprintf("已撤销 %d 项，%d 项失败：%s", len(ops)-len(failed), len(failed), errMsg))
 		}
 		s.invalidate()
 	}()

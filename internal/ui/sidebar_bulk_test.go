@@ -1,6 +1,8 @@
 package mcodeui
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -8,6 +10,53 @@ import (
 	"mcode/internal/config"
 	"mcode/internal/testenv"
 )
+
+type bulkUndoTestClient struct {
+	*FakeClient
+	errorsByProject map[string]error
+}
+
+func (f *bulkUndoTestClient) UndoBulkOperation(ctx context.Context, projectID, token string) error {
+	_ = f.FakeClient.UndoBulkOperation(ctx, projectID, token)
+	return f.errorsByProject[projectID]
+}
+
+func TestSidebarBulk_PartialUndo(t *testing.T) {
+	for _, tc := range []struct {
+		name, err, message string
+		retry              bool
+	}{
+		{"retry", "offline", "已撤销 1 项，1 项失败：offline", true},
+		{"expired", "token expired", "已撤销 1 项，1 项失败：撤销已过期", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &bulkUndoTestClient{FakeClient: NewFakeClient(), errorsByProject: map[string]error{"p2": errors.New(tc.err)}}
+			s := newChatState(fake)
+			s.lastBulk = &lastBulkInfo{kind: "dormant", count: 2, at: time.Now(), undo: []bulkUndoOp{{"p1", "a"}, {"p2", "b"}}}
+			s.undoLastBulk()
+			waitUntil(t, "撤销结果", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.toastMessage != "" })
+			s.mu.Lock()
+			lb, message := s.lastBulk, s.toastMessage
+			s.mu.Unlock()
+			if message != tc.message {
+				t.Fatalf("toast = %q", message)
+			}
+			if tc.retry {
+				if lb == nil || lb.count != 1 || len(lb.undo) != 1 || lb.undo[0] != (bulkUndoOp{"p2", "b"}) {
+					t.Fatalf("lastBulk = %+v", lb)
+				}
+				s.undoLastBulk()
+				waitUntil(t, "重试", func() bool { return len(fake.UndoBulkOpCalls()) == 3 })
+				calls := fake.UndoBulkOpCalls()
+				if calls[2].ProjectID != "p2" {
+					t.Fatalf("calls = %+v", calls)
+				}
+			} else if lb != nil {
+				t.Fatalf("lastBulk = %+v", lb)
+			}
+		})
+	}
+}
 
 func TestArchiveStopsStewardTaskWatch(t *testing.T) {
 	for _, bulk := range []bool{false, true} {

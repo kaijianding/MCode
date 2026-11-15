@@ -94,6 +94,7 @@ func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 		return
 	}
 	s.autoDormantScannedAt = now
+	startedAt := time.Now()
 	candidates := autoDormantCandidates(s.threads, days, now)
 	s.mu.Unlock()
 
@@ -103,7 +104,6 @@ func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 	go func() {
 		var ops []bulkUndoOp
 		var firstErr error
-		success := 0
 		for _, id := range candidates {
 			token, err := s.client.MarkDormantWithUndo(id)
 			if err != nil {
@@ -113,7 +113,6 @@ func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 				continue
 			}
 			projectID := s.markAutoDormantLocal(id)
-			success++
 			if token != "" {
 				ops = append(ops, bulkUndoOp{projectID, token})
 			}
@@ -127,9 +126,14 @@ func (s *chatState) maybeAutoDormant(now time.Time, days int) {
 				}
 			}
 			s.mu.Lock()
-			s.lastBulk = &lastBulkInfo{projectID: projectID, undo: ops, kind: "dormant", count: success, at: time.Now()}
+			installed := s.lastBulk == nil || s.lastBulk.at.Before(startedAt)
+			if installed {
+				s.lastBulk = &lastBulkInfo{projectID: projectID, undo: ops, kind: "dormant", count: len(ops), at: time.Now()}
+			}
 			s.mu.Unlock()
-			s.scheduleLastBulkExpiry()
+			if installed {
+				s.scheduleLastBulkExpiry()
+			}
 		}
 		if firstErr != nil {
 			s.setToast("标记休眠失败: " + firstErr.Error())
