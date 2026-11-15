@@ -352,6 +352,23 @@ func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 	}
 }
 
+func TestBeePromptListsAcceptance(t *testing.T) {
+	d := Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test ./...", "go vet ./..."}}
+	got := beePrompt("Aspen", d, BeeConfig{})
+	for _, want := range []string{"## 验收", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("提示词缺少 %q: %s", want, got)
+		}
+	}
+	if strings.Index(got, "## 验收") > strings.Index(got, "## 工作方式") {
+		t.Fatal("验收应在工作方式之前")
+	}
+	d.Acceptance = nil
+	if strings.Contains(beePrompt("Aspen", d, BeeConfig{}), "## 验收") {
+		t.Fatal("没有验收命令时不应显示验收段落")
+	}
+}
+
 func TestBeePrompt_ScopedSelfChecks(t *testing.T) {
 	got := beePrompt("Aspen", Delegation{Task: "T", Prompt: "P"}, BeeConfig{})
 	for _, want := range []string{"有范围的自测", "-timeout", "跑了哪些自测命令及结果"} {

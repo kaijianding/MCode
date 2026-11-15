@@ -634,6 +634,12 @@ func beePrompt(name string, d Delegation, cfg BeeConfig) string {
 	if sys := strings.TrimSpace(cfg.SystemPrompt); sys != "" {
 		b.WriteString("\n\n## 档位要求\n" + sys)
 	}
+	if len(d.Acceptance) > 0 {
+		b.WriteString("\n\n## 验收\nmcode 在你汇报后于工作副本根目录逐条运行以下命令，全部退出码为 0 才合并；汇报前先自己跑通：")
+		for _, command := range d.Acceptance {
+			fmt.Fprintf(&b, "\n- `%s`", command)
+		}
+	}
 	b.WriteString("\n\n## 工作方式\n" + beeWorkRulesFor(cfg))
 	b.WriteString("\n\n## 汇报\n" + beeReportRulesFor(cfg))
 	return b.String()

@@ -150,6 +150,34 @@ func TestRunAcceptanceStopsAndSkips(t *testing.T) {
 	}
 }
 
+func TestRunAcceptanceRewritesAbsoluteCdToWorktree(t *testing.T) {
+	parent := t.TempDir()
+	source := filepath.Join(parent, "source")
+	worktree := filepath.Join(parent, "copy")
+	other := source + "-other"
+	for _, dir := range []string{source, worktree, other} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "only-copy"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(Options{})
+	h := Bee{TargetWorkDir: source, WorktreePath: worktree, ChangedFiles: []string{"a.go"}, Acceptance: []string{"cd '" + source + "' && test -f only-copy"}}
+	if passed, detail := m.runAcceptance(context.Background(), "lead", h); !passed {
+		t.Fatalf("passed=%v detail=%q", passed, detail)
+	}
+	h.Acceptance = []string{"cd '" + other + "' && test ! -f only-copy"}
+	if passed, detail := m.runAcceptance(context.Background(), "lead", h); !passed {
+		t.Fatalf("同前缀路径不应改写: passed=%v detail=%q", passed, detail)
+	}
+	h.Acceptance = []string{"cd '" + source + "' && false"}
+	if passed, detail := m.runAcceptance(context.Background(), "lead", h); passed || !strings.Contains(detail, h.Acceptance[0]) {
+		t.Fatalf("失败详情应保留原始命令: passed=%v detail=%q", passed, detail)
+	}
+}
+
 func TestRunAcceptanceTimeoutAndCancel(t *testing.T) {
 	m := NewManager(Options{ReviewProjectConfig: func(string, string) (reviewcheck.ProjectConfig, error) {
 		return reviewcheck.ProjectConfig{TimeoutSeconds: 1}, nil

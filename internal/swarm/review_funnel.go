@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"mcode/internal/reviewcheck"
 	"mcode/internal/reviewfunnel"
@@ -954,9 +957,36 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 	}
 	const marker = "\nmcode-acceptance-exit:"
 	for _, command := range h.Acceptance {
+		executed := command
+		// 主代理常用绝对路径 cd 到主工作区，验收必须在副本中执行。
+		if filepath.IsAbs(h.TargetWorkDir) && h.WorktreePath != "" {
+			var rewritten strings.Builder
+			remaining := command
+			for {
+				i := strings.Index(remaining, h.TargetWorkDir)
+				if i < 0 {
+					rewritten.WriteString(remaining)
+					break
+				}
+				end := i + len(h.TargetWorkDir)
+				boundary := end == len(remaining)
+				if !boundary {
+					r, _ := utf8.DecodeRuneInString(remaining[end:])
+					boundary = unicode.IsSpace(r) || strings.ContainsRune("/\"';&|)", r)
+				}
+				rewritten.WriteString(remaining[:i])
+				if boundary {
+					rewritten.WriteString(h.WorktreePath)
+				} else {
+					rewritten.WriteString(h.TargetWorkDir)
+				}
+				remaining = remaining[end:]
+			}
+			executed = rewritten.String()
+		}
 		// 独立 shell 保证命令里的 exit 不会跳过退出码记录。
 		result := reviewcheck.Run(ctx, h.WorktreePath, reviewcheck.Command{
-			Shell: "sh", Args: [][]string{{"-c", `sh -c "$1"; code=$?; printf '\nmcode-acceptance-exit:%s\n' "$code"; exit "$code"`, "mcode-acceptance", command}},
+			Shell: "sh", Args: [][]string{{"-c", `sh -c "$1"; code=$?; printf '\nmcode-acceptance-exit:%s\n' "$code"; exit "$code"`, "mcode-acceptance", executed}},
 			Display: command, Timeout: timeout,
 		}, l0MaxOutput)
 		if result.OK {

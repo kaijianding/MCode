@@ -87,7 +87,7 @@ func (r *Registry) registerSwarmTools(s *Server) {
 							"model":      str("Model override."),
 							"profile":    str("Profile override."),
 							"pair":       str("Lead and bee model pair."),
-							"acceptance": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Shell commands mcode runs in the bee's copy after it reports; the change merges only if every command exits 0"},
+							"acceptance": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Shell commands mcode runs from the root of the bee's copy after it reports; use relative paths; the change merges only if every command exits 0"},
 							"skills":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						},
 						"required": []string{"prompt"},
