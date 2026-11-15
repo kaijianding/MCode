@@ -11,6 +11,13 @@ import (
 	"mcode/internal/store"
 )
 
+func TestTruncateReportSummaryNamesBeeIDArg(t *testing.T) {
+	text, truncated := truncateReportSummary(strings.Repeat("长", ReportSummaryLimit+1))
+	if !truncated || !strings.Contains(text, "bee_id") {
+		t.Fatalf("unexpected truncated summary: truncated=%v, text=%q", truncated, text)
+	}
+}
+
 // 短汇报与改动前逐字一致：不加 ID 字段，也没有截断提示。
 func TestBuildReport_ShortSummaryUnchanged(t *testing.T) {
 	bee := Bee{ThreadID: "bee-short", Name: "Ada", Task: "改文件", Status: StatusCompleted, Merged: true, Summary: "  改好了  "}

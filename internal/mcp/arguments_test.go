@@ -3,8 +3,17 @@ package mcp
 import (
 	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestValidateArgumentsUnknownFieldListsAllowed(t *testing.T) {
+	tool := ToolDefinition{InputSchema: map[string]any{"properties": map[string]any{"bee_id": map[string]any{"type": "string"}}}}
+	result := validateArguments(tool, map[string]any{"id": "x"})
+	if result == nil || toolErrorCode(*result) != CodeUnknownField || !strings.Contains(result.Text, "Allowed arguments: bee_id") {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
 
 func TestMCP_EditArgumentsRejectInvalidFieldsBeforeWriting(t *testing.T) {
 	srv, st, dir := setupTestMCP(t)

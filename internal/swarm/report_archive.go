@@ -28,7 +28,7 @@ func truncateReportSummary(summary string) (text string, truncated bool) {
 	}
 	runes := []rune(summary)
 	head := strings.TrimRight(string(runes[:ReportSummaryLimit]), " \t\r\n")
-	return fmt.Sprintf("%s\n%s全文共 %d 字，这里只保留前 %d 字；可用 swarm_report_get 工具按 bee ID 取回全文。）", head, ReportTruncatedPrefix, total, ReportSummaryLimit), true
+	return fmt.Sprintf("%s\n%s全文共 %d 字，这里只保留前 %d 字；可用 swarm_report_get 工具传 bee_id（即上方 ID 行的值）取回全文。）", head, ReportTruncatedPrefix, total, ReportSummaryLimit), true
 }
 
 // archiveReports 在拼汇报之前把每个已结束 bee 的完整汇报总结存档；存档失败只记日志，不阻断汇报。

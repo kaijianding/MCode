@@ -3,6 +3,8 @@ package mcp
 import (
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 )
 
 // validateArguments 校验已声明字段的 JSON 类型，避免错误类型被 handler 当成“未提供”。
@@ -14,7 +16,18 @@ func validateArguments(tool ToolDefinition, args map[string]any) *ToolResult {
 			raw, exists = map[string]any{"type": "string"}, true
 		}
 		if !exists {
-			result := toolError(CodeUnknownField, "Unknown argument: "+name, false)
+			message := "Unknown argument: " + name
+			if len(properties) == 0 {
+				message += ". This tool takes no arguments"
+			} else {
+				names := make([]string, 0, len(properties))
+				for property := range properties {
+					names = append(names, property)
+				}
+				sort.Strings(names)
+				message += ". Allowed arguments: " + strings.Join(names, ", ")
+			}
+			result := toolError(CodeUnknownField, message, false)
 			return &result
 		}
 		spec, _ := raw.(map[string]any)
