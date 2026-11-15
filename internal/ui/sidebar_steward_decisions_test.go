@@ -71,5 +71,5 @@ func TestSidebarStewardDecisionAndAttentionBadges(t *testing.T) {
 	if err := tt.Click("待处理 1 条"); err != nil {
 		t.Fatalf("点击待处理徽标失败: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("标记已处理") })
+	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
 }

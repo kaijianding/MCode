@@ -148,7 +148,9 @@ func TestInlineToolDiff_ExpandShowsLines(t *testing.T) {
 		t.Fatalf("不应显示本步骤未修改的文件: %q", tt.Texts())
 	}
 
+	finishUnfold(tt)
 	clickText(t, tt, "收起改动")
+	finishUnfold(tt)
 	if tt.HasText("return a - b") {
 		t.Fatalf("收起后不应再显示 diff 行")
 	}

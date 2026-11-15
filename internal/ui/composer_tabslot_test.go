@@ -46,6 +46,7 @@ func TestComposerTabSlot_FollowUpQueue(t *testing.T) {
 			tt.HasText("编辑") &&
 			tt.HasText("删除")
 	})
+	finishUnfold(tt)
 
 	// 点击删除按钮（点击第一个可见的“删除”，对应 q1）
 	if err := tt.Click("删除"); err != nil {

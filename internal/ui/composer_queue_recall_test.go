@@ -441,6 +441,7 @@ func TestComposerQueue_RecallAllButton(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		return tt.HasText("全部退回编辑")
 	})
+	finishUnfold(tt)
 
 	waitRecallAllQueued(t, func() {
 		if err := tt.Click("全部退回编辑"); err != nil {

@@ -738,6 +738,7 @@ func TestComposer_QueueBubbleActions(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		return tt.HasText("follow up bubble") && tt.HasText("立即发送") && tt.HasText("删除")
 	})
+	finishUnfold(tt)
 
 	if err := tt.Click("立即发送"); err != nil {
 		t.Fatalf("click 立即发送 failed: %v", err)

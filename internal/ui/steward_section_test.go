@@ -156,7 +156,7 @@ func TestSidebarStewardSectionFallsBackToAttentionRow(t *testing.T) {
 	if err := tt.Click("待处理"); err != nil {
 		t.Fatalf("点击待处理行失败: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("标记已处理") })
+	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
 }
 
 // 宿主转来的事件以 Role user 落库，但渲染成卡片而不是用户气泡，也不带编辑等操作。
