@@ -367,9 +367,10 @@ func (s *Service) Board(ctx context.Context) (Board, error) {
 	taskViews := make([]TaskView, len(tasks))
 	for i, t := range tasks {
 		rt := RuntimeState{
-			Now:          now,
-			Heartbeat:    t.UpdatedAt,
-			IsOptimistic: optimisticMap[t.ID],
+			Now:               now,
+			Heartbeat:         t.UpdatedAt,
+			IsOptimistic:      optimisticMap[t.ID],
+			AcceptanceRunning: s.isAcceptanceRunning(t.ID),
 		}
 		if t.Status == string(TaskStatusInProgress) && t.ThreadID != nil && *t.ThreadID != "" && s.opts.Driver != nil {
 			if st, err := s.opts.Driver.SessionState(ctx, *t.ThreadID); err == nil {
@@ -1837,7 +1838,7 @@ func (s *Service) goalProgress(ctx context.Context, tasks []store.Task) map[stri
 	active := make(map[string]bool)
 	for _, task := range tasks {
 		if task.Status == string(TaskStatusReview) {
-			active[task.ID] = s.isReviewActive(ctx, task)
+			active[task.ID] = s.isAcceptanceRunning(task.ID) || s.isReviewActive(ctx, task)
 		}
 	}
 	return goalProgress(tasks, func(id string) bool { return active[id] })

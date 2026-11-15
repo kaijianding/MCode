@@ -214,7 +214,7 @@ func TestAcceptanceCommandsRecoveryDoesNotDuplicateRunning(t *testing.T) {
 }
 
 func TestAcceptanceCommandsConcurrentLifecycle(t *testing.T) {
-	for _, action := range []string{"latest_revision", "left_review", "close"} {
+	for _, action := range []string{"latest_revision", "left_review", "left_review_new_text", "close"} {
 		t.Run(action, func(t *testing.T) {
 			ctx := context.Background()
 			svc, st := setupAcceptanceService(t, t.TempDir())
@@ -242,6 +242,14 @@ func TestAcceptanceCommandsConcurrentLifecycle(t *testing.T) {
 			if latest.LastActivityText == nil || *latest.LastActivityText != "正在跑验收命令…" {
 				t.Fatalf("缺少执行中状态: %v", latest.LastActivityText)
 			}
+			board, err := svc.Board(ctx)
+			if err != nil || len(board.Tasks) != 1 || board.Tasks[0].Derived.CanApprove || board.Tasks[0].Derived.CanReview {
+				t.Fatalf("验收运行中不应允许评审: %+v, %v", board.Tasks, err)
+			}
+			progress := svc.goalProgress(ctx, []store.Task{latest})
+			if progress["waitingOnYou"] != 0 || progress["running"] != 1 {
+				t.Fatalf("验收运行中的进度错误: %+v", progress)
+			}
 			var starts sync.WaitGroup
 			for i := 0; i < 8; i++ {
 				starts.Add(1)
@@ -262,8 +270,12 @@ func TestAcceptanceCommandsConcurrentLifecycle(t *testing.T) {
 				// 关闭后不能再 Add，与 Wait 并发竞争也不能启动新命令。
 				svc.startAcceptanceCommands(latest, false)
 			} else {
-				if action == "left_review" {
+				if action == "left_review" || action == "left_review_new_text" {
 					latest.Status = "todo"
+				}
+				if action == "left_review_new_text" {
+					text := "新的活动"
+					latest.LastActivityText = &text
 				}
 				latest.Notes = "验收期间的新版本"
 				latest, err = st.UpdateTask(ctx, latest, latest.Revision)
@@ -282,6 +294,14 @@ func TestAcceptanceCommandsConcurrentLifecycle(t *testing.T) {
 			if action == "latest_revision" {
 				if final.Notes != "验收期间的新版本" || final.LastActivityText == nil || !strings.Contains(*final.LastActivityText, "全部通过") {
 					t.Fatalf("未基于最新 revision 写回: %+v", final)
+				}
+			} else if action == "left_review" {
+				if final.Status != latest.Status || final.RejectCount != 0 || final.LastActivityText != nil {
+					t.Fatalf("离开 review 后未清理运行状态: %+v", final)
+				}
+			} else if action == "left_review_new_text" {
+				if final.LastActivityText == nil || *final.LastActivityText != "新的活动" || final.Revision != latest.Revision {
+					t.Fatalf("离开 review 后覆盖了新的活动: %+v", final)
 				}
 			} else if final.Status != latest.Status || final.RejectCount != 0 || final.Revision != latest.Revision {
 				t.Fatalf("取消或离开 review 后不应写回: %+v", final)

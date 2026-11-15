@@ -15,16 +15,17 @@ const (
 
 // RuntimeState 描述线程运行时信号。
 type RuntimeState struct {
-	Running          bool      // 线程是否正在执行
-	ThreadFailed     bool      // 线程是否失败
-	AwaitingApproval bool      // 是否等待用户审批
-	AwaitingInput    bool      // 是否等待用户输入
-	SessionIsDead    bool      // 会话是否已终止
-	Heartbeat        time.Time // 最后有效活动/心跳时间戳
-	Now              time.Time // 当前参考时间，为零值时自动取当前系统时间
-	IsHardStuck      bool      // 显式指定严重卡死（>= 40分钟）
-	IsWarnStuck      bool      // 显式指定告警卡死（20 ~ 40分钟）
-	IsOptimistic     bool      // 乐观派发标记（调度中仍为 todo 时推导为 in_progress）
+	Running           bool      // 线程是否正在执行
+	AcceptanceRunning bool      // 验收命令是否正在执行
+	ThreadFailed      bool      // 线程是否失败
+	AwaitingApproval  bool      // 是否等待用户审批
+	AwaitingInput     bool      // 是否等待用户输入
+	SessionIsDead     bool      // 会话是否已终止
+	Heartbeat         time.Time // 最后有效活动/心跳时间戳
+	Now               time.Time // 当前参考时间，为零值时自动取当前系统时间
+	IsHardStuck       bool      // 显式指定严重卡死（>= 40分钟）
+	IsWarnStuck       bool      // 显式指定告警卡死（20 ~ 40分钟）
+	IsOptimistic      bool      // 乐观派发标记（调度中仍为 todo 时推导为 in_progress）
 }
 
 // Derived 包含看板卡片派生得到的视觉列、阻塞状态、操作权限和关注标志。
@@ -46,8 +47,8 @@ func Derive(task store.Task, all map[string]store.Task, rt RuntimeState) Derived
 
 	canStart := task.Status == string(TaskStatusTodo) && !blocked && !rt.Running && !rt.IsOptimistic
 	canMove := !rt.Running && !rt.IsOptimistic && task.Status != string(TaskStatusInProgress) && task.Status != string(TaskStatusNeedsApproval)
-	canReview := task.Status == string(TaskStatusReview) && !rt.Running
-	canApprove := task.Status == string(TaskStatusReview) && !rt.Running
+	canReview := task.Status == string(TaskStatusReview) && !rt.Running && !rt.AcceptanceRunning
+	canApprove := task.Status == string(TaskStatusReview) && !rt.Running && !rt.AcceptanceRunning
 
 	return Derived{
 		DisplayColumn:  col,

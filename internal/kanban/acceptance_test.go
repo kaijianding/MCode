@@ -207,6 +207,28 @@ func TestRunAcceptanceCommandsTimeout(t *testing.T) {
 	}
 }
 
+func TestAcceptanceCommandBackgroundAndOutputLimit(t *testing.T) {
+	old := acceptanceCommandTimeout
+	acceptanceCommandTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { acceptanceCommandTimeout = old })
+	svc, st := setupAcceptanceService(t, t.TempDir())
+	taskID := "task-background-output"
+	if err := os.MkdirAll(svc.TaskWorktreePath(taskID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createAcceptanceTask(t, st, taskID, "[命令] `sh -c 'sleep 600 &'`\n[命令] `yes | head -c 10000000`")
+	results, err := svc.RunAcceptanceCommands(context.Background(), taskID)
+	if err != nil || len(results) != 2 {
+		t.Fatalf("执行结果: %+v, %v", results, err)
+	}
+	if !results[0].TimedOut || results[0].Duration > 3*time.Second {
+		t.Fatalf("后台进程未及时清理: %+v", results[0])
+	}
+	if results[1].ExitCode != 0 || len(results[1].Output) > acceptanceOutputLimit || !strings.HasPrefix(results[1].Output, acceptanceTruncatedPrefix) {
+		t.Fatalf("输出截断错误: exit=%d length=%d", results[1].ExitCode, len(results[1].Output))
+	}
+}
+
 // TestRunAcceptanceCommandsTotalTimeout 用极小的合计上限验证：越界后剩余命令不再执行且标记超时。
 func TestRunAcceptanceCommandsTotalTimeout(t *testing.T) {
 	oldTotal := acceptanceTotalTimeout

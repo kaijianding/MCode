@@ -1,7 +1,6 @@
 package kanban
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"mcode/internal/procattr"
+	"mcode/internal/procutil"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/store"
 )
@@ -93,12 +93,13 @@ func hasUserVerify(task store.Task) bool {
 
 // startAcceptanceCommands 只在完成落库后调用，命令执行不阻塞调度循环。
 func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
+	s.mu.Lock()
 	s.acceptanceMu.Lock()
 	if s.ctx.Err() != nil || s.acceptanceRunning[task.ID] {
 		s.acceptanceMu.Unlock()
+		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	latest, err := s.opts.Store.GetTask(s.ctx, task.ID)
 	if err == nil && latest.Status == string(TaskStatusReview) && latest.Revision == task.Revision {
 		text := acceptanceRunningText
@@ -110,9 +111,9 @@ func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
 	} else if err == nil {
 		err = store.ErrRevisionConflict
 	}
-	s.mu.Unlock()
 	if err != nil {
 		s.acceptanceMu.Unlock()
+		s.mu.Unlock()
 		log.Printf("kanban: 启动任务 %s 验收失败: %v", task.ID, err)
 		return
 	}
@@ -127,10 +128,12 @@ func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
 			s.acceptanceMu.Lock()
 			delete(s.acceptanceRunning, task.ID)
 			s.acceptanceMu.Unlock()
+			s.notifyChange()
 		}()
 		s.finishAcceptanceCommands(task, autoAccept)
 	}()
 	s.acceptanceMu.Unlock()
+	s.mu.Unlock()
 	s.notifyChange()
 }
 
@@ -168,7 +171,19 @@ func (s *Service) finishAcceptanceCommands(original store.Task, autoAccept bool)
 	defer s.notifyChange()
 	s.mu.Lock()
 	task, err := s.opts.Store.GetTask(s.ctx, original.ID)
-	if err != nil || task.Status != string(TaskStatusReview) {
+	if err != nil {
+		s.mu.Unlock()
+		return
+	}
+	if task.Status != string(TaskStatusReview) {
+		if task.LastActivityText != nil && *task.LastActivityText == acceptanceRunningText {
+			task.LastActivityText = nil
+			if _, err = s.opts.Store.UpdateTask(s.ctx, task, task.Revision); err == nil {
+				s.revision.Add(1)
+			} else {
+				log.Printf("kanban: 清理任务 %s 验收状态失败: %v", task.ID, err)
+			}
+		}
 		s.mu.Unlock()
 		return
 	}
@@ -251,9 +266,12 @@ func (s *Service) RunAcceptanceCommands(ctx context.Context, taskID string) ([]A
 		cmd.Dir = dir
 		// 与 gitCmd 一致继承登录 Shell 环境变量，并告知命令自己运行在任务 worktree 里。
 		cmd.Env = append(loginenv.Environ(), "MCODE_WORKTREE_PATH="+dir)
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
+		procutil.SetProcessGroup(cmd)
+		cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd, os.Kill) }
+		cmd.WaitDelay = 2 * time.Second
+		out := procutil.NewTailBuffer(acceptanceOutputLimit + 1)
+		cmd.Stdout = out
+		cmd.Stderr = out
 		runErr := cmd.Run()
 		timedOut := runCtx.Err() == context.DeadlineExceeded
 		cancel()
@@ -293,7 +311,7 @@ func truncateAcceptanceOutput(out string) string {
 	if len(out) <= acceptanceOutputLimit {
 		return out
 	}
-	cut := out[len(out)-acceptanceOutputLimit:]
+	cut := out[len(out)-(acceptanceOutputLimit-len(acceptanceTruncatedPrefix)):]
 	// 丢掉落在 rune 中间的起始字节，再削掉尾部不完整 rune，保证结果仍是合法 UTF-8。
 	for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
 		cut = cut[1:]
