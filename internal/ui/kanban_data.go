@@ -347,6 +347,11 @@ func (s *chatState) updateKanbanTask(task KanbanTask, title, notes *string) {
 		defer func() { endKanbanTask(ks, task.ID); s.invalidate() }()
 		updated, err := client.UpdateTask(context.Background(), task.ID, title, notes, task.Revision)
 		if err != nil {
+			kanbanMu.Lock()
+			if ks.detailEditTaskID == task.ID {
+				ks.detailEditHadFocus = false
+			}
+			kanbanMu.Unlock()
 			s.setToast("更新任务失败：" + err.Error())
 			return
 		}
@@ -367,6 +372,10 @@ func (s *chatState) updateKanbanTask(task KanbanTask, title, notes *string) {
 			}
 			ks.detailEditField = ""
 			ks.detailEditTaskID = ""
+			ks.detailEditHadFocus = false
+			if ks.detailTaskID == task.ID {
+				ks.detailRevision = updated.Revision
+			}
 			kanbanMu.Unlock()
 		})
 	}()
@@ -395,7 +404,11 @@ func (s *chatState) commitKanbanDetailEdit(task KanbanTask, field string) {
 	if field == "title" {
 		value := strings.TrimSpace(ks.detailEditTitle)
 		if value == "" {
-			s.setToast("标题不可为空")
+			ks.detailEditTitle = ks.detailEditOrigTitle
+			ks.detailEditField = ""
+			ks.detailEditTaskID = ""
+			ks.detailEditHadFocus = false
+			s.invalidate()
 			return
 		}
 		if value == ks.detailEditOrigTitle {

@@ -162,6 +162,7 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 			} else if focused {
 				ks.detailEditHadFocus = true
 			} else if ks.detailEditHadFocus {
+				ks.detailEditHadFocus = false
 				s.commitKanbanDetailEdit(*task, "title")
 			}
 		} else {
@@ -289,6 +290,7 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 						if focused {
 							ks.detailEditHadFocus = true
 						} else if ks.detailEditHadFocus {
+							ks.detailEditHadFocus = false
 							s.commitKanbanDetailEdit(*task, "notes")
 						}
 					} else {

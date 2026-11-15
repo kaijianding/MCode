@@ -103,6 +103,81 @@ func TestKanbanDetailTitleEditEscapeAndUnchangedDoNotCall(t *testing.T) {
 	}
 }
 
+func TestKanbanDetailEditFailureDoesNotRetry(t *testing.T) {
+	fake := newKanbanEditFakeClient()
+	fake.updateErr = errors.New("失败")
+	task := KanbanTask{ID: "edit-fail", Title: "原标题", Revision: 1, Status: "todo", Column: "todo"}
+	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{task}})
+	tt, s := newKanbanDetailEditorTester(fake, task)
+	defer s.close()
+	if err := tt.Click(task.Title); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, func() bool { return tt.Focused("任务标题") })
+	tt.Type("保留的输入")
+	tt.ClickAt(850, 650)
+	waitFor(t, tt, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.updateCalls) == 1 && !kanbanTaskBusy(getKanbanState(s), task.ID)
+	})
+	for i := 0; i < 5; i++ {
+		tt.Frame()
+	}
+	fake.mu.Lock()
+	calls := len(fake.updateCalls)
+	fake.mu.Unlock()
+	ks := getKanbanState(s)
+	if calls != 1 || ks.detailEditField != "title" || ks.detailEditTitle != "保留的输入" {
+		t.Fatalf("失败后编辑状态错误: calls=%d field=%q title=%q", calls, ks.detailEditField, ks.detailEditTitle)
+	}
+}
+
+func TestKanbanDetailEmptyTitleCancelsOnBlur(t *testing.T) {
+	setAppReduceMotion(t, true)
+	fake := newKanbanEditFakeClient()
+	task := KanbanTask{ID: "edit-empty", Title: "原标题", Revision: 1, Status: "todo", Column: "todo"}
+	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{task}})
+	tt, s := newKanbanDetailEditorTester(fake, task)
+	defer s.close()
+	if err := tt.Click(task.Title); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, func() bool { return tt.Focused("任务标题") })
+	tt.Key(0, ui.KeyBackspace)
+	tt.ClickAt(850, 650)
+	for i := 0; i < 5; i++ {
+		tt.Frame()
+	}
+	ks := getKanbanState(s)
+	if ks.detailEditField != "" || ks.detailEditHadFocus || !tt.HasText(task.Title) || len(fake.updateCalls) != 0 || tt.FramePending() {
+		t.Fatalf("空标题未取消: field=%q focus=%v calls=%d pending=%v", ks.detailEditField, ks.detailEditHadFocus, len(fake.updateCalls), tt.FramePending())
+	}
+}
+
+func TestKanbanDetailEditSuccessDoesNotReload(t *testing.T) {
+	fake := newKanbanEditFakeClient()
+	task := KanbanTask{ID: "edit-success", Title: "原标题", Revision: 1, Status: "todo", Column: "todo"}
+	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{task}})
+	tt, s := newKanbanDetailEditorTester(fake, task)
+	defer s.close()
+	ks := getKanbanState(s)
+	loadID := ks.detailLoadID
+	if err := tt.Click(task.Title); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, func() bool { return tt.Focused("任务标题") })
+	tt.Type("新标题")
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool { s.applyWorkspaceUpdates(); return ks.detailRevision == 2 })
+	for i := 0; i < 5; i++ {
+		tt.Frame()
+	}
+	if ks.detailLoadID != loadID || !tt.HasText("新标题") {
+		t.Fatalf("编辑后详情被重载: loadID=%d, 原值=%d", ks.detailLoadID, loadID)
+	}
+}
+
 func newKanbanDetailEditorTester(fake *kanbanEditFakeClient, task KanbanTask) (*ui.Tester, *chatState) {
 	s := newChatState(fake)
 	ks := getKanbanState(s)

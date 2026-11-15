@@ -881,7 +881,7 @@ func renderKanbanColumn(
 			Transition(motionCollapse(c)).
 			Focusable().Width(KanbanDoneRailWidth).MinWidth(KanbanDoneRailWidth).
 			FillHeight().MinHeight(KanbanEmptyDropMinHeight).
-			Padding(Space2).Gap(Space2).
+			Padding(Space2).Gap(Space2).AlignItems(ui.Center).
 			OnClick(func() {
 				kanbanMu.Lock()
 				ks.doneExpanded = true
@@ -904,7 +904,11 @@ func renderKanbanColumn(
 		}
 		rail.Children(func() {
 			ui.Icon(c, IconCircleCheck()).Size(IconSM, IconSM).TextColor(secondaryText)
-			ui.Text(c, colDef.label).FontSize(uiFont(TypeCaption)).TextColor(secondaryText)
+			ui.Column(c.Key("kanban-done-rail-title")).Label(colDef.label).Gap(0).AlignItems(ui.Center).Children(func() {
+				for _, char := range colDef.label {
+					ui.Text(c, string(char)).FontSize(uiFont(TypeCaption)).TextColor(secondaryText)
+				}
+			})
 			kanbanColumnCountBadge(c, "kanban-col-count-"+colKey, len(colTasks), totalCount, searching)
 		})
 		return

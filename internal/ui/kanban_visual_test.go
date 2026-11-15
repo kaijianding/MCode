@@ -114,6 +114,42 @@ func TestKanbanDoneRailReduceMotion(t *testing.T) {
 	}
 }
 
+func TestKanbanDoneRailVerticalTitle(t *testing.T) {
+	setAppReduceMotion(t, true)
+	s := newChatState(NewFakeClient())
+	defer s.close()
+	ks := &kanbanState{}
+	def := kanbanColumnDefs[len(kanbanColumnDefs)-1]
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		renderKanbanColumn(c, s, ks, def, nil, nil, false, 280, kanbanTaskCardState{})
+	}, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+	rail, ok := tt.Find("kanban-column-done")
+	if !ok || rail.W != KanbanDoneRailWidth {
+		t.Fatalf("窄轨尺寸错误: %v", rail)
+	}
+	if _, ok := tt.Find("已完成"); !ok {
+		t.Fatal("窄轨缺少完整的无障碍标签")
+	}
+	baseline := ui.NewTester(func(c *ui.Context) {
+		ui.Text(c, "已").FontSize(uiFont(TypeCaption))
+	}, 400, 300)
+	singleLine, ok := baseline.Find("已")
+	if !ok {
+		t.Fatal("单行文字不存在")
+	}
+	var previous ui.Rect
+	for i, char := range []string{"已", "完", "成"} {
+		box, ok := tt.Find(char)
+		if !ok || box.X < rail.X || box.X+box.W > rail.X+rail.W || box.W <= 0 || box.H != singleLine.H {
+			t.Fatalf("标题字 %s 的布局错误: %v", char, box)
+		}
+		if i > 0 && (box.Y < previous.Y+previous.H || box.H != previous.H) {
+			t.Fatalf("标题字 %s 未按单行竖排: %v, 前一字 %v", char, box, previous)
+		}
+		previous = box
+	}
+}
+
 func TestKanbanCardFocusAndSelectionHaveSeparateMarkers(t *testing.T) {
 	s := newChatState(NewFakeClient())
 	defer s.close()
