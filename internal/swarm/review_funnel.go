@@ -267,6 +267,30 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 	if ctx.Err() != nil {
 		return
 	}
+	if m.reviewMode() == reviewModeOff {
+		passed, detail := m.runAcceptance(ctx, leadThreadID, h)
+		if ctx.Err() != nil {
+			return
+		}
+		if !passed {
+			m.finishAcceptanceFailure(leadThreadID, h, detail)
+			return
+		}
+		reason := fmt.Sprintf("验收命令通过：%d 条", len(h.Acceptance))
+		if !m.funnelUpdate(leadThreadID, h.ThreadID, ReviewStageL0, patchSHA, func(b *Bee) {
+			b.ReviewLayer = "l0"
+			b.ReviewConcerns = []string{reason}
+			b.ReviewReason = reason
+			b.ReviewApplyPending = false
+		}) {
+			return
+		}
+		m.persistLead(leadThreadID)
+		m.notifyChange(leadThreadID)
+		m.applyReviewApprove(ctx, leadThreadID, h.ThreadID, reason)
+		m.setReviewApplyPending(leadThreadID, h.ThreadID, patchSHA)
+		return
+	}
 	runtime := m.reviewProjectRuntime(ctx, leadThreadID, h.WorktreePath)
 	changes := reviewChanges(h.ChangedFiles)
 	allPlan := len(changes) > 0 && allOfClass(changes, reviewcheck.ClassPlan)
@@ -794,7 +818,7 @@ func (m *Manager) funnelUpdate(leadThreadID, beeThreadID string, stage ReviewSta
 		if b.ThreadID != beeThreadID {
 			continue
 		}
-		if b.ReviewState != ReviewRunning || b.ReviewStage != stage || b.ReviewPatchSHA != patchSHA {
+		if !b.PendingMerge || b.Status == StatusStopped || b.ReviewState != ReviewRunning || b.ReviewStage != stage || b.ReviewPatchSHA != patchSHA {
 			return false
 		}
 		fn(b)

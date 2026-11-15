@@ -2578,7 +2578,11 @@ func (m *Manager) Tick(ctx context.Context) {
 			mergeMu.Lock()
 			switch mode := m.reviewMode(); mode {
 			case reviewModeOff:
-				landed = m.mergeBee(ctx, tgt.leadThreadID, tgt.targetWorkDir, &tgt.bee)
+				if len(tgt.bee.Acceptance) == 0 {
+					landed = m.mergeBee(ctx, tgt.leadThreadID, tgt.targetWorkDir, &tgt.bee)
+					break
+				}
+				fallthrough
 			default:
 				// 审查档：补丁先暂存，等审查结论后再合入。补丁为空说明没有可合入的改动，
 				// 与 off 档一致直接算已合入；准备补丁失败时同 off 档一样带着 MergeError 落定。
@@ -4430,32 +4434,6 @@ func (m *Manager) mergeBee(ctx context.Context, leadThreadID, targetWorkDir stri
 		return true
 	}
 
-	if len(h.Acceptance) > 0 && !h.ReadOnly {
-		passed, detail := m.runAcceptance(ctx, leadThreadID, *h)
-		if ctx.Err() != nil {
-			return false
-		}
-		if h.Status == StatusCompleted && !m.beeStillRunning(leadThreadID, h.ThreadID) {
-			return true
-		}
-		if !passed {
-			h.Status = StatusFailed
-			h.Merged = false
-			h.PendingMerge = false
-			h.MergeWaitSince = nil
-			h.MergePatch = append([]byte(nil), rawPatch...)
-			h.MergeError = "验收命令失败：" + detail
-			if path, err := m.savePatch(leadThreadID, h.Index, rawPatch); err == nil {
-				h.ArchivedPatchPath = path
-				h.MergeError += "，补丁已保存到 " + path
-			} else {
-				h.MergeError += "，保存补丁失败：" + err.Error()
-			}
-			h.Summary = appendSummary(h.Summary, h.MergeError)
-			return true
-		}
-	}
-
 	if m.canLandBeeCommit(ctx, targetWorkDir, h) {
 		if done, fallback := m.landBeeCommit(ctx, leadThreadID, targetWorkDir, h, rawPatch); !fallback {
 			return done
@@ -4503,6 +4481,35 @@ func (m *Manager) mergeBee(ctx context.Context, leadThreadID, targetWorkDir stri
 		}
 		return true
 	}
+}
+
+// finishAcceptanceFailure 保留 off 档的失败补丁；晚到的验收不能覆盖停止或删除。
+func (m *Manager) finishAcceptanceFailure(leadThreadID string, h Bee, detail string) {
+	path, err := m.savePatch(leadThreadID, h.Index, h.MergePatch)
+	reason := "验收命令失败：" + detail
+	if err == nil {
+		reason += "，补丁已保存到 " + path
+	} else {
+		reason += "，保存补丁失败：" + err.Error()
+	}
+	if !m.funnelUpdate(leadThreadID, h.ThreadID, ReviewStageL0, h.ReviewPatchSHA, func(b *Bee) {
+		b.Status = StatusFailed
+		b.Merged = false
+		b.PendingMerge = false
+		b.MergeWaitSince = nil
+		b.ArchivedPatchPath = path
+		b.MergeError = reason
+		b.Summary = appendSummary(b.Summary, reason)
+		b.ReviewState = ReviewNone
+		b.ReviewStage = ""
+		b.ReviewStartedAt = nil
+		b.ReviewQueuedAt = nil
+		b.ReviewApplyPending = false
+	}) {
+		return
+	}
+	m.persistLead(leadThreadID)
+	m.notifyChange(leadThreadID)
 }
 
 // beeStillRunning 判断指定 bee 在当前状态下是否仍处于 running。
@@ -4583,6 +4590,7 @@ func (m *Manager) markMergeWaitLocked(leadThreadID, beeThreadID string, since, f
 
 // StopBee 停止指定的子会话，并将其置为 stopped 状态，不执行自动合并。
 func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string) error {
+	off := m.reviewMode() == reviewModeOff
 	m.mu.Lock()
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
@@ -4600,7 +4608,8 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 		m.mu.Unlock()
 		return ErrBeeNotFound
 	}
-	if target.Status != StatusRunning {
+	accepting := off && target.PendingMerge && target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0
+	if target.Status != StatusRunning && !accepting {
 		m.mu.Unlock()
 		return nil
 	}
@@ -4610,6 +4619,15 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 	target.Status = StatusStopped
 	target.FinishedAt = &now
 	target.MergeWaitSince = nil
+	if accepting {
+		target.PendingMerge = false
+		target.MergeDiscarded = true
+		target.ReviewState = ReviewNone
+		target.ReviewStage = ""
+		target.ReviewStartedAt = nil
+		target.ReviewQueuedAt = nil
+		target.ReviewApplyPending = false
+	}
 	delete(m.beeProgress, beeThreadID)
 	m.mu.Unlock()
 
@@ -4624,6 +4642,7 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 
 // StopAll 停止指定主会话下的所有处于 running 状态的子会话。
 func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
+	off := m.reviewMode() == reviewModeOff
 	// 先拿 deliverMu 再拿 m.mu：与 checkReports 的投递顺序一致，停止要么等正在进行的
 	// 投递返回，要么先于投递检查生效。持 m.mu 时不得再获取 deliverMu。
 	m.deliverMu.Lock()
@@ -4642,11 +4661,21 @@ func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
 		if !bee.Reported && (bee.Status == StatusCompleted || bee.Status == StatusFailed || bee.Status == StatusStopped) {
 			hasUnreported = true
 		}
-		if lead.bees[i].Status == StatusRunning {
+		accepting := off && bee.PendingMerge && bee.ReviewStage == ReviewStageL0 && len(bee.Acceptance) > 0
+		if bee.Status == StatusRunning || accepting {
 			lead.bees[i].Status = StatusStopped
 			lead.bees[i].Reported = true
 			lead.bees[i].FinishedAt = &now
 			lead.bees[i].MergeWaitSince = nil
+			if accepting {
+				bee.PendingMerge = false
+				bee.MergeDiscarded = true
+				bee.ReviewState = ReviewNone
+				bee.ReviewStage = ""
+				bee.ReviewStartedAt = nil
+				bee.ReviewQueuedAt = nil
+				bee.ReviewApplyPending = false
+			}
 			runningIDs = append(runningIDs, lead.bees[i].ThreadID)
 			delete(m.beeProgress, lead.bees[i].ThreadID)
 		}
@@ -4732,6 +4761,13 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 		if target.PendingMerge {
 			target.PendingMerge = false
 			target.MergeDiscarded = true
+			if target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0 && m.reviewMode() == reviewModeOff {
+				target.ReviewState = ReviewNone
+				target.ReviewStage = ""
+				target.ReviewStartedAt = nil
+				target.ReviewQueuedAt = nil
+				target.ReviewApplyPending = false
+			}
 		}
 		delete(m.beeProgress, threadID)
 		m.mu.Unlock()

@@ -66,7 +66,10 @@ func TestManagerAcceptanceModes(t *testing.T) {
 				completeBee(t, m, bee, "完成")
 				h := waitFunnel(t, m, "lead-acceptance", bee.ThreadID, func(b Bee) bool {
 					if mode == "off" {
-						return b.Status != StatusRunning
+						if pass {
+							return b.Merged
+						}
+						return b.Status == StatusFailed
 					}
 					if !pass {
 						return isRejected(b)
@@ -76,6 +79,11 @@ func TestManagerAcceptanceModes(t *testing.T) {
 					}
 					return isApproved(b)
 				})
+				if mode == "off" {
+					if check, generate := fake.calls(); check != 0 || generate != 0 {
+						t.Fatalf("off ran project check or review: %d, %d", check, generate)
+					}
+				}
 				if !pass {
 					if h.Merged {
 						t.Fatal("failed acceptance merged")
@@ -84,7 +92,7 @@ func TestManagerAcceptanceModes(t *testing.T) {
 						t.Fatalf("main copy changed: %v", err)
 					}
 					if mode == "off" {
-						if h.Status != StatusFailed || h.PendingMerge || !strings.Contains(BuildReport([]Bee{h}), command) {
+						if h.Status != StatusFailed || h.PendingMerge || !strings.Contains(BuildReport([]Bee{h}), "验收命令失败："+command+"（退出码 1）") || !strings.Contains(BuildReport([]Bee{h}), "acceptance failed") {
 							t.Fatalf("failed result: %+v", h)
 						}
 						if _, err := os.Stat(h.WorktreePath); err != nil {
@@ -102,7 +110,7 @@ func TestManagerAcceptanceModes(t *testing.T) {
 					}
 					return
 				}
-				if mode != "off" && !containsReviewConcern(h.ReviewConcerns, "验收命令通过：1 条") {
+				if !containsReviewConcern(h.ReviewConcerns, "验收命令通过：1 条") {
 					t.Fatalf("missing concern: %v", h.ReviewConcerns)
 				}
 				if mode == "human" {
@@ -221,12 +229,16 @@ func TestAcceptanceCommitLanding(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			m, _, root := newCommitLandingManager(t)
 			bee := startCommitLandingBee(t, m, root, "lead-commit-acceptance", 0)
-			bee.Acceptance = []string{command}
+			m.mu.Lock()
+			m.leads["lead-commit-acceptance"].bees[0].Acceptance = []string{command}
+			m.mu.Unlock()
 			before := gitTestRun(t, root, "rev-parse", "HEAD")
 			writePipelineFile(t, bee.WorktreePath, "lines.txt", strings.Replace(landingBase, "one\n", "changed\n", 1))
-			if !landCommitBee(m, root, "lead-commit-acceptance", &bee) {
-				t.Fatal("unexpected wait")
-			}
+			completeBee(t, m, bee, "完成")
+			bee = waitFunnel(t, m, "lead-commit-acceptance", bee.ThreadID, func(b Bee) bool {
+				return b.Merged || b.Status == StatusFailed
+			})
+			m.wg.Wait()
 			if command == "false" {
 				if bee.Merged || bee.Status != StatusFailed || gitTestRun(t, root, "rev-parse", "HEAD") != before {
 					t.Fatalf("failed acceptance landed: %+v", bee)
@@ -239,49 +251,109 @@ func TestAcceptanceCommitLanding(t *testing.T) {
 	}
 }
 
+func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
+	for _, command := range []string{"sleep 3", ""} {
+		t.Run(command, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			settings := m.Settings()
+			settings.ReviewMode = "off"
+			m.SetSettingsFunc(func() Settings { return settings })
+			var acceptance []string
+			if command != "" {
+				acceptance = []string{command}
+			}
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: "lead-async-acceptance", LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: acceptance}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "完成")
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer func() { cancel(); m.wg.Wait() }()
+			started := time.Now()
+			m.Tick(ctx)
+			if elapsed := time.Since(started); elapsed >= time.Second {
+				t.Fatalf("Tick blocked: %v", elapsed)
+			}
+			h := beeByThread(t, m, "lead-async-acceptance", bee.ThreadID)
+			if command == "" {
+				if !h.Merged || h.PendingMerge || h.ReviewState != ReviewNone {
+					t.Fatalf("bee without acceptance did not merge directly: %+v", h)
+				}
+			} else {
+				if !h.PendingMerge || h.Merged || h.ReviewStage != ReviewStageL0 {
+					t.Fatalf("acceptance not queued: %+v", h)
+				}
+				waitFunnel(t, m, "lead-async-acceptance", bee.ThreadID, isApproved)
+			}
+			if check, generate := fake.calls(); check != 0 || generate != 0 {
+				t.Fatalf("off ran project check or review: %d, %d", check, generate)
+			}
+		})
+	}
+}
+
 func TestAcceptanceOffStoppedBeeDoesNotMerge(t *testing.T) {
-	m, dir := newFunnelManager(t, &funnelFake{})
-	settings := m.Settings()
-	settings.ReviewMode = "off"
-	m.SetSettingsFunc(func() Settings { return settings })
-	bees, err := m.Dispatch(context.Background(), DispatchRequest{
-		LeadThreadID: "lead-stop-acceptance", LeadWorkDir: dir,
-		Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{"touch started; while ! test -f release; do sleep 0.02; done"}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bee := bees[0]
-	writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
-	completeBee(t, m, bee, "完成")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan struct{})
-	go func() { defer close(done); m.Tick(ctx) }()
-	defer func() { cancel(); <-done }()
-	for {
-		if _, err := os.Stat(filepath.Join(bee.WorktreePath, "started")); err == nil {
-			break
+	for _, action := range []string{"stop", "stop-all", "delete"} {
+		for _, result := range []string{"true", "false"} {
+			t.Run(action+"/"+result, func(t *testing.T) {
+				m, dir := newFunnelManager(t, &funnelFake{})
+				settings := m.Settings()
+				settings.ReviewMode = "off"
+				m.SetSettingsFunc(func() Settings { return settings })
+				bees, err := m.Dispatch(context.Background(), DispatchRequest{
+					LeadThreadID: "lead-stop-acceptance", LeadWorkDir: dir,
+					Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{"touch started; while ! test -f release; do sleep 0.02; done; " + result}}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				bee := bees[0]
+				writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+				completeBee(t, m, bee, "完成")
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer func() { cancel(); m.wg.Wait() }()
+				m.Tick(ctx)
+				for {
+					if _, err := os.Stat(filepath.Join(bee.WorktreePath, "started")); err == nil {
+						break
+					}
+					select {
+					case <-ctx.Done():
+						t.Fatal("acceptance did not start")
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+				if action == "stop" {
+					if err := m.StopBee(ctx, "lead-stop-acceptance", bee.ThreadID); err != nil {
+						t.Fatal(err)
+					}
+				} else if action == "stop-all" {
+					if err := m.StopAll(ctx, "lead-stop-acceptance"); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					m.BeeThreadDeleted(ctx, bee.ThreadID)
+				}
+				before := beeByThread(t, m, "lead-stop-acceptance", bee.ThreadID)
+				if err := os.WriteFile(filepath.Join(bee.WorktreePath, "release"), nil, 0644); err != nil {
+					t.Fatal(err)
+				}
+				m.wg.Wait()
+				h := beeByThread(t, m, "lead-stop-acceptance", bee.ThreadID)
+				if !reflect.DeepEqual(before, h) || h.Merged || h.PendingMerge || (action != "delete" && h.Status != StatusStopped) {
+					t.Fatalf("late result changed stopped/deleted bee: before=%+v after=%+v", before, h)
+				}
+				if _, err := os.Stat(filepath.Join(dir, "internal/feature.go")); !os.IsNotExist(err) {
+					t.Fatalf("main copy changed: %v", err)
+				}
+			})
 		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("acceptance did not start")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	if err := m.StopBee(ctx, "lead-stop-acceptance", bee.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bee.WorktreePath, "release"), nil, 0644); err != nil {
-		t.Fatal(err)
-	}
-	<-done
-	h := beeByThread(t, m, "lead-stop-acceptance", bee.ThreadID)
-	if h.Status != StatusStopped || h.Merged {
-		t.Fatalf("stopped bee merged: %+v", h)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "internal/feature.go")); !os.IsNotExist(err) {
-		t.Fatalf("main copy changed: %v", err)
 	}
 }
 
