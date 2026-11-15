@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -526,6 +527,180 @@ func TestTimelineTurnHeader_StatusOnlyFinishReplacesCachedRunningHeader(t *testi
 			}
 		})
 	}
+}
+
+// countTurnRunningHeaders 数缓存条目里的运行态计时头个数。
+func countTurnRunningHeaders(items []timelineItem) int {
+	n := 0
+	for _, it := range items {
+		if it.kind == timelineItemTurnWork && it.workRunning {
+			n++
+		}
+	}
+	return n
+}
+
+// TestTimelineTurnHeader_IncrementalBodyFirstKeepsSingleTimer 验证先正文后工具的回合：
+// 仅用户消息与正文先行时都有纯计时头；追加正文后的工具与子代理汇报时头仍唯一，
+// 正文、工具与汇报按原顺序留在头外；回合结束后没有残留运行头，结束态沿用既有行为。
+func TestTimelineTurnHeader_IncrementalBodyFirstKeepsSingleTimer(t *testing.T) {
+	start := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	msg := func(id, role, kind, text string, offset time.Duration) Message {
+		return Message{ID: id, Role: role, Kind: kind, Text: text, TurnIndex: 1, CreatedAt: start.Add(offset).Format(time.RFC3339)}
+	}
+	msgs := []Message{msg("u1", "user", "", "先答复再派工", 0)}
+	msgs[0].IsFinal = true
+	s := &chatState{threads: []Thread{{ID: "t1", IsRunning: true}}, messages: msgs}
+	build := func(n int, label string) {
+		s.messages = msgs[:n]
+		helperBuildAndAssertIncremental(t, s, "t1", s.messages, nil, label)
+	}
+	assertEmptyHeader := func(label string) {
+		t.Helper()
+		if got := countTurnRunningHeaders(s.timelineCacheItems); got != 1 {
+			t.Fatalf("%s：应有且只有一个运行态计时头，got %d: %+v", label, got, s.timelineCacheItems)
+		}
+		head := s.timelineCacheItems[1]
+		if len(head.workItems) != 0 || len(head.tools) != 0 {
+			t.Fatalf("%s：无活动时折叠区应为空: %+v", label, head)
+		}
+		if head.msgIndex != 0 || head.msgLastIndex != 0 {
+			t.Fatalf("%s：空折叠区下标应只覆盖用户消息，got [%d,%d]", label, head.msgIndex, head.msgLastIndex)
+		}
+		if !head.workStartedAt.Equal(start) {
+			t.Fatalf("%s：计时起点应为用户消息时间，got %v", label, head.workStartedAt)
+		}
+	}
+
+	build(1, "仅用户消息")
+	assertEmptyHeader("仅用户消息")
+	if len(s.timelineCacheItems) != 2 {
+		t.Fatalf("仅用户消息时应只有用户行与计时头: %+v", s.timelineCacheItems)
+	}
+
+	msgs = append(msgs, msg("a1", "assistant", "text", "先看结果", time.Second))
+	msgs[1].IsFinal = true
+	build(2, "首条正文紧跟用户消息")
+	assertEmptyHeader("正文先行")
+	if len(s.timelineCacheItems) != 3 || s.timelineCacheItems[2].msg.ID != "a1" {
+		t.Fatalf("正文应紧跟计时头之后: %+v", s.timelineCacheItems)
+	}
+
+	// 正文之后追加运行中的工具与子代理汇报：都留在头外，顺序不变。
+	msgs = append(msgs, msg("t1", "tool", "", `Bash {"command":"go build ./..."}`, 2*time.Second))
+	msgs[2].ToolStatus = "running"
+	msgs = append(msgs, msg("rpt", "user", "", "[编排] 子代理汇报：Ives 已开工", 3*time.Second))
+	build(4, "正文后追加工具与汇报")
+	assertEmptyHeader("正文后追加活动")
+	var order []string
+	for _, it := range s.timelineCacheItems {
+		if it.kind == timelineItemTurnWork {
+			order = append(order, "header")
+			continue
+		}
+		order = append(order, it.msg.ID)
+	}
+	if want := []string{"u1", "header", "a1", "t1", "rpt"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("正文、工具与汇报顺序不对: got %v want %v", order, want)
+	}
+
+	// 仅状态改变转结束：没有可折叠过程，沿用纯答复回合的完成行，不造折叠头。
+	s.threads[0].IsRunning = false
+	build(4, "回合结束")
+	assertNoRunningTurnHeader(t, s.timelineCacheItems)
+	for _, it := range s.timelineCacheItems {
+		if it.kind == timelineItemTurnWork {
+			t.Fatalf("无前置活动的回合结束后不应硬造折叠头: %+v", it)
+		}
+	}
+}
+
+// TestTimelineTurnHeader_EmptyHeaderKeepsNonActivityNotice 验证空折叠区不吞非活动提示：
+// 正文前后的错误提示与后续工具都留在头外可见，不会被收进折叠区。
+func TestTimelineTurnHeader_EmptyHeaderKeepsNonActivityNotice(t *testing.T) {
+	start := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	t.Run("before_body", func(t *testing.T) {
+		msgs := []Message{
+			{ID: "u1", Role: "user", Text: "继续", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)},
+			{ID: "e1", Role: "error", Text: "请求失败，请重试", TurnIndex: 1},
+		}
+		s := &chatState{threads: []Thread{{ID: "t1", IsRunning: true}}, messages: msgs}
+		helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "未出正文的提示")
+		if len(s.timelineCacheItems) != 3 {
+			t.Fatalf("正文前应只有用户行、计时头与错误提示: %+v", s.timelineCacheItems)
+		}
+		if s.timelineCacheItems[0].msg.ID != "u1" || s.timelineCacheItems[2].msg.ID != "e1" {
+			t.Fatalf("错误提示应独立留在计时头之后: %+v", s.timelineCacheItems)
+		}
+		head := s.timelineCacheItems[1]
+		if head.kind != timelineItemTurnWork || !head.workRunning {
+			t.Fatalf("用户消息后应有运行态计时头: %+v", head)
+		}
+		if len(head.workItems) != 0 || len(head.tools) != 0 {
+			t.Fatalf("正文前无活动时折叠区应为空: %+v", head)
+		}
+		if head.msgIndex != 0 || head.msgLastIndex != 0 {
+			t.Fatalf("空折叠区下标应只覆盖用户消息，got [%d,%d]", head.msgIndex, head.msgLastIndex)
+		}
+	})
+
+	msgs := []Message{
+		{ID: "u1", Role: "user", Text: "继续", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)},
+		{ID: "a1", Role: "assistant", Kind: "text", Text: "先试一次", TurnIndex: 1},
+		{ID: "e1", Role: "error", Text: "请求失败，请重试", TurnIndex: 1},
+	}
+	s := &chatState{threads: []Thread{{ID: "t1", IsRunning: true}}, messages: msgs}
+	helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "提示在运行头之后")
+	if got := countTurnRunningHeaders(s.timelineCacheItems); got != 1 {
+		t.Fatalf("应有且只有一个运行态头，got %d: %+v", got, s.timelineCacheItems)
+	}
+	if len(s.timelineCacheItems[1].workItems) != 0 {
+		t.Fatalf("无前置活动时折叠区应为空: %+v", s.timelineCacheItems[1])
+	}
+
+	msgs = append(msgs, Message{ID: "t1", Role: "tool", Text: `Bash {"command":"go build ./..."}`, TurnIndex: 1, ToolStatus: "running"})
+	s.messages = msgs
+	helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "提示后追加活动")
+	if got := countTurnRunningHeaders(s.timelineCacheItems); got != 1 {
+		t.Fatalf("追加活动后头仍应唯一，got %d: %+v", got, s.timelineCacheItems)
+	}
+	var order []string
+	for _, it := range s.timelineCacheItems {
+		if it.kind == timelineItemTurnWork {
+			order = append(order, "header")
+			continue
+		}
+		order = append(order, it.msg.ID)
+	}
+	if want := []string{"u1", "header", "a1", "e1", "t1"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("提示不能被活动收进折叠区: got %v want %v", order, want)
+	}
+}
+
+// TestTimelineTurnHeader_StatusOnlyFinishUserOnlyTimer 验证仅用户消息的纯计时头在只改运行状态、
+// 没有新消息时也能正确转结束：无残留运行头，也不硬造结束态折叠头。
+func TestTimelineTurnHeader_StatusOnlyFinishUserOnlyTimer(t *testing.T) {
+	start := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(
+		[]Project{{ID: "p1", Name: "Proj1", Path: "/workspace"}},
+		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "运行中", Provider: "claude", UpdatedAt: time.Now(), IsRunning: true}}},
+	)
+	fake.messages["t1"] = []Message{{ID: "u1", Role: "user", Text: "只有一问", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)}}
+	state, view := buildRoot(fake)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("已处理") && tt.HasText("只有一问") })
+	state.mu.Lock()
+	state.threads[0].IsRunning = false
+	state.mu.Unlock()
+	state.invalidate()
+	waitFor(t, tt, func() bool { return !tt.HasText("已处理") })
+	tt.Advance(2 * time.Second)
+	if tt.HasText("已处理") || tt.HasText("用时") || !tt.HasText("只有一问") {
+		t.Fatalf("仅状态转结束后显示不正确: %v", tt.Texts())
+	}
+	assertNoRunningTurnHeader(t, state.timelineCacheItems)
+	assertNoRunningTurnHeader(t, state.timelineAssembledItems)
 }
 
 // TestTimelineBackgroundRow_ShowsLingeringCommand 验证回合结束后仍在跑的命令只留下工具行，

@@ -258,7 +258,7 @@ func assistantMetaText(model string, duration time.Duration, at time.Time) strin
 		parts = append(parts, formatShortDuration(duration))
 	}
 	if !at.IsZero() {
-		parts = append(parts, at.Format("15:04"))
+		parts = append(parts, at.Local().Format("15:04"))
 	}
 	return strings.Join(parts, " · ")
 }

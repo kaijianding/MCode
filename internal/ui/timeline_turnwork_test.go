@@ -1,7 +1,9 @@
 package mcodeui
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +189,226 @@ func TestTimelineRows_TurnWorkFoldKeepsRunningTurn(t *testing.T) {
 	}
 	if tt.HasText("用时") {
 		t.Fatalf("运行中的回合不应出现可折叠的用时头: %v", tt.Texts())
+	}
+}
+
+// TestTimelineRows_TurnWorkFoldEmptyHeaderGainsWorkItems 验证仅用户消息的空头在追加前置工具后
+// 正确转成有 workItems 的头：重复折叠幂等，增量与全量一致，正文与后续工具仍留在头外。
+func TestTimelineRows_TurnWorkFoldEmptyHeaderGainsWorkItems(t *testing.T) {
+	start := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	user := Message{ID: "u1", Role: "user", Text: "跑一下构建", TurnIndex: 1, IsFinal: true, CreatedAt: start.Format(time.RFC3339)}
+	msgs := []Message{user}
+	s := &chatState{threads: []Thread{{ID: "t1", IsRunning: true}}, messages: msgs}
+	helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "仅用户消息")
+	if len(s.timelineCacheItems) != 2 || s.timelineCacheItems[1].kind != timelineItemTurnWork ||
+		!s.timelineCacheItems[1].workRunning || len(s.timelineCacheItems[1].workItems) != 0 {
+		t.Fatalf("仅用户消息时应有空折叠区的纯计时头: %+v", s.timelineCacheItems)
+	}
+
+	// 重复 applyTurnWorkFold 幂等：上一帧的头摊平重建后结果不变。
+	twice := applyTurnWorkFold(s, "t1", s.timelineCacheItems)
+	if !reflect.DeepEqual(twice, s.timelineCacheItems) {
+		t.Fatalf("重复折叠应幂等:\ngot:  %+v\nwant: %+v", twice, s.timelineCacheItems)
+	}
+
+	// 用户消息之后追加思考与运行中的工具：空头转成收住它们的有 workItems 头。
+	msgs = append(msgs,
+		Message{ID: "r1", Role: "assistant", Kind: "reasoning", Text: "先确认构建脚本", TurnIndex: 1},
+		Message{ID: "t1", Role: "tool", Text: `Bash {"command":"go build ./..."}`, TurnIndex: 1, ToolStatus: "running"},
+	)
+	s.messages = msgs
+	helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "空头追加前置活动")
+	if got := countTurnRunningHeaders(s.timelineCacheItems); got != 1 {
+		t.Fatalf("追加活动后头仍应唯一，got %d: %+v", got, s.timelineCacheItems)
+	}
+	head := s.timelineCacheItems[1]
+	if len(head.workItems) == 0 || !containsMessageID(head.tools, "t1") {
+		t.Fatalf("前置活动应收进头里: %+v", head)
+	}
+	if head.msgIndex != 1 || head.msgLastIndex != 2 {
+		t.Fatalf("有活动后下标应覆盖折叠区，got [%d,%d]", head.msgIndex, head.msgLastIndex)
+	}
+	if !reflect.DeepEqual(applyTurnWorkFold(s, "t1", s.timelineCacheItems), s.timelineCacheItems) {
+		t.Fatalf("有活动后重复折叠仍应幂等")
+	}
+
+	// 再追加正文与其后的工具：都留在头外，顺序不变。
+	msgs = append(msgs,
+		Message{ID: "a1", Role: "assistant", Kind: "text", Text: "构建进行中", TurnIndex: 1},
+		Message{ID: "t2", Role: "tool", Text: `Bash {"command":"go vet ./..."}`, TurnIndex: 1, ToolStatus: "running"},
+	)
+	s.messages = msgs
+	helperBuildAndAssertIncremental(t, s, "t1", msgs, nil, "正文与后续工具")
+	if got := countTurnRunningHeaders(s.timelineCacheItems); got != 1 {
+		t.Fatalf("正文后头仍应唯一，got %d: %+v", got, s.timelineCacheItems)
+	}
+	var order []string
+	for _, it := range s.timelineCacheItems {
+		if it.kind == timelineItemTurnWork {
+			order = append(order, "header")
+			continue
+		}
+		order = append(order, it.msg.ID)
+	}
+	if want := []string{"u1", "header", "a1", "t2"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("正文与后续工具应留在头外且顺序不变: got %v want %v", order, want)
+	}
+}
+
+// TestTimelineTurnWork_RunningTimerTicksWithoutMessages 验证无新消息、无 rev 改变时，
+// 仅靠 fake clock 推进，运行态头的计时文字与 Tooltip 逐秒增长；ReduceMotion 开关两种状态都读秒。
+// 时间戳按 Tester 时钟对齐到整秒，避免帧格边界漂移；全程不用真实 sleep。
+func TestTimelineTurnWork_RunningTimerTicksWithoutMessages(t *testing.T) {
+	for _, reduced := range []bool{false, true} {
+		t.Run(map[bool]string{true: "reduced", false: "normal"}[reduced], func(t *testing.T) {
+			setAppReduceMotion(t, reduced)
+			var s *chatState
+			var item timelineItem
+			tt := ui.NewTesterWith(func(c *ui.Context) {
+				if s == nil {
+					s = newChatState(NewFakeClient())
+					// 起点按真实精度对齐到整秒：Advance 整秒后秒数正好落在整秒边界内，不漂移。
+					start := c.Now().Truncate(time.Second).Add(-5 * time.Second)
+					s.messages = []Message{{ID: "u1", Role: "user", Text: "想一想", TurnIndex: 1, CreatedAt: start.Format(time.RFC3339Nano)}}
+					item = timelineItem{kind: timelineItemTurnWork, id: turnWorkFoldID("u1"), turnIndex: 1, workRunning: true, workStartedAt: start}
+				}
+				renderTurnWorkItem(c, s, item, TokenUsage{}, false)
+			}, 900, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced}})
+			assertTick := func(secs int) {
+				t.Helper()
+				label := fmt.Sprintf("已处理 %ds", secs)
+				if !hasExactText(tt, label) {
+					t.Fatalf("应显示 %q: %v", label, tt.Texts())
+				}
+				info, ok := tt.Access(label)
+				if !ok || info.Description != "本回合"+label {
+					t.Fatalf("Tooltip 应为 本回合%s，got %+v found=%v", label, info, ok)
+				}
+			}
+			assertTick(5)
+			for secs := 6; secs <= 9; secs++ {
+				tt.Advance(time.Second)
+				assertTick(secs)
+			}
+		})
+	}
+}
+
+// TestTimelineTurnWork_SwarmBusyKeepsTickingAfterCompletion 验证 SwarmBusy 等子代理时，
+// 主轮已有 TurnCompletedAt 也仍按 TurnStartedAt 继续读秒。
+func TestTimelineTurnWork_SwarmBusyKeepsTickingAfterCompletion(t *testing.T) {
+	var s *chatState
+	var item timelineItem
+	tt := ui.NewTester(func(c *ui.Context) {
+		if s == nil {
+			s = newChatState(NewFakeClient())
+			s.threads = []Thread{{ID: "t1", SwarmBusy: true}}
+			start := c.Now().Truncate(time.Second).Add(-12 * time.Second)
+			s.messages = []Message{
+				{ID: "u1", Role: "user", Text: "派工", TurnIndex: 1, CreatedAt: start.Format(time.RFC3339Nano)},
+				{ID: "a1", Role: "assistant", Kind: "text", Text: "已派发", TurnIndex: 1, IsFinal: true,
+					TurnStartedAt: start.Format(time.RFC3339Nano), TurnCompletedAt: start.Add(6 * time.Second).Format(time.RFC3339Nano)},
+			}
+			items := applyTurnWorkFold(s, "t1", buildTimelineItems(s.messages))
+			if len(items) < 2 || !items[1].workRunning {
+				panic("SwarmBusy 时主轮应仍在运行")
+			}
+			item = items[1]
+			if !item.workStartedAt.Equal(start) {
+				panic("计时起点应取权威 TurnStartedAt")
+			}
+		}
+		renderTurnWorkItem(c, s, item, TokenUsage{}, false)
+	}, 900, 300)
+	if !hasExactText(tt, "已处理 12s") {
+		t.Fatalf("已有 TurnCompletedAt 也应从起点读秒: %v", tt.Texts())
+	}
+	tt.Advance(3 * time.Second)
+	if !hasExactText(tt, "已处理 15s") {
+		t.Fatalf("SwarmBusy 等待子代理时计时应继续增长: %v", tt.Texts())
+	}
+}
+
+// TestTimelineTurnWork_BodyFirstHeaderHasNoButton 验证正文先行的空折叠区头只是纯计时：
+// 没有按钮角色、没有展开箭头，正文始终可见；拿不到时间戳时只写「已处理」，不凭空取 now 作起点。
+func TestTimelineTurnWork_BodyFirstHeaderHasNoButton(t *testing.T) {
+	msgs := []Message{
+		{ID: "u1", Role: "user", Text: "直接回答", TurnIndex: 1, IsFinal: true},
+		{ID: "a1", Role: "assistant", Kind: "text", Text: "BODY-FIRST-TEXT", TurnIndex: 1, IsFinal: true},
+	}
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(
+		[]Project{{ID: "p1", Name: "Proj1", Path: "/workspace"}},
+		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "运行中", Provider: "claude", UpdatedAt: time.Now(), IsRunning: true}}},
+	)
+	fake.messages["t1"] = msgs
+	state, view := buildRoot(fake)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("已处理") && tt.HasText("BODY-FIRST-TEXT") })
+
+	// 用户消息没有时间戳：沿用「已处理」，不编造秒数。
+	if hasExactText(tt, "已处理") != true {
+		t.Fatalf("无时间戳时应只写「已处理」: %v", tt.Texts())
+	}
+	for _, text := range tt.Texts() {
+		if strings.HasPrefix(text, "已处理 ") {
+			t.Fatalf("无时间戳时不应凭空取 now 读秒: %v", tt.Texts())
+		}
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "已处理"); ok {
+		t.Fatalf("纯计时头不应带按钮角色: %v", tt.Texts())
+	}
+	// 行的 Tooltip 挂在 Label 行上，无障碍树里是它的父节点；逐节点找带说明的那一行。
+	tipOK := false
+	for _, node := range tt.AccessAll() {
+		if node.Description == "本回合正在处理" {
+			tipOK = true
+		}
+	}
+	if !tipOK {
+		t.Fatalf("无时间戳时 Tooltip 应为「本回合正在处理」: %v", tt.Texts())
+	}
+	// 运行态头不画展开箭头：整棵无障碍树里不应出现带「点按展开/收起」说明的节点。
+	for _, node := range tt.AccessAll() {
+		if strings.Contains(node.Name, "点按展开") || strings.Contains(node.Name, "点按收起") ||
+			strings.Contains(node.Description, "本回合的工作过程") {
+			t.Fatalf("纯计时头不应有展开控件: %+v", node)
+		}
+	}
+	head, ok := tt.Find("已处理")
+	if !ok {
+		t.Fatalf("找不到计时头")
+	}
+	// 流式中的正文带光标后缀：只要文本在帧里且不是零矩形，就算始终可见。
+	waitFor(t, tt, func() bool {
+		for _, text := range tt.Texts() {
+			if strings.HasPrefix(text, "BODY-FIRST-TEXT") {
+				if body, ok := tt.Find(text); ok && body.H > 0 {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	bodyText := ""
+	for _, text := range tt.Texts() {
+		if strings.HasPrefix(text, "BODY-FIRST-TEXT") {
+			bodyText = text
+			break
+		}
+	}
+	body, _ := tt.Find(bodyText)
+	if body.Y <= head.Y {
+		t.Fatalf("正文应紧跟在计时头下方且始终可见: head=%+v body=%+v", head, body)
+	}
+	emptyHeader := false
+	for _, it := range state.timelineCacheItems {
+		if it.kind == timelineItemTurnWork && it.workRunning && len(it.workItems) == 0 {
+			emptyHeader = true
+		}
+	}
+	if !emptyHeader {
+		t.Fatalf("应存在空折叠区的纯计时头: %+v", state.timelineCacheItems)
 	}
 }
 

@@ -1,8 +1,10 @@
 package mcodeui
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -500,6 +502,142 @@ func TestFlyoutSessionStats(t *testing.T) {
 	menu := ui.NewTester(popoverTestView(t, entry.services, "test-stats-popover"), 330, 300)
 	if !menu.HasText("暂无统计数据") {
 		t.Fatalf("缺少统计内容: %v", menu.Texts())
+	}
+}
+
+// TestFlyoutSessionStatsTicksAndStopsNative 验证原生独立窗口里，宿主不出新帧、
+// 仅内容窗口自身时钟推进时总用时逐秒增长；主轮完成后冻结且不再续帧；
+// 关闭后内容不再渲染也不再调度（用渲染计数与 FramePending 观察，不单靠文本不变）。
+func TestFlyoutSessionStatsTicksAndStopsNative(t *testing.T) {
+	entry, capture := setupPopoverFlyoutTest(t)
+	var s *chatState
+	renders := 0
+	t.Cleanup(func() { setSessionStatsOpen(s, false) })
+	host := ui.NewTester(func(c *ui.Context) {
+		entry.services = c.Services()
+		if s == nil {
+			s, _ = newSessionStatsLiveFixture(c)
+		}
+		renderSessionStatsButton(c, s, "t1", "test")
+	}, 400, 300)
+	if err := host.Click("会话统计"); err != nil {
+		t.Fatal(err)
+	}
+	if len(capture.options) != 1 {
+		t.Fatal("未创建会话统计窗口")
+	}
+	view := popoverTestView(t, entry.services, "test-stats-popover")
+	anchored := false
+	menu := ui.NewTester(func(c *ui.Context) {
+		renders++
+		if !anchored {
+			anchored = true
+			// 内容窗口与宿主是两套时钟：把运行轮起点重新对齐到内容窗口的整秒，避免跨秒边界漂移。
+			start := c.Now().Truncate(time.Second).Add(-5 * time.Second).Format(time.RFC3339Nano)
+			s.mu.Lock()
+			for i := range s.messages {
+				if s.messages[i].TurnIndex != 3 {
+					continue
+				}
+				if s.messages[i].CreatedAt != "" {
+					s.messages[i].CreatedAt = start
+				}
+				if s.messages[i].TurnStartedAt != "" {
+					s.messages[i].TurnStartedAt = start
+				}
+			}
+			s.mu.Unlock()
+		}
+		view(c)
+	}, 330, 400)
+	if !hasExactText(menu, "1m5s") {
+		t.Fatalf("总用时应含历史累计与当前轮: %v", menu.Texts())
+	}
+	for secs := 6; secs <= 7; secs++ {
+		menu.Advance(time.Second)
+		if !hasExactText(menu, fmt.Sprintf("1m%ds", secs)) {
+			t.Fatalf("宿主无新帧时内容窗口应自行读秒到 1m%ds: %v", secs, menu.Texts())
+		}
+	}
+	// 主轮完成：统计冻结，不再续帧（用渲染计数观察，FramePending 不含 After 定时器）。
+	s.mu.Lock()
+	done := menu.Now().Add(-time.Second)
+	s.messages[6].TurnStatus = "completed"
+	s.messages[6].TurnCompletedAt = done.Format(time.RFC3339Nano)
+	s.mu.Unlock()
+	menu.Frame()
+	if !hasExactText(menu, "1m6s") {
+		t.Fatalf("主轮完成后应冻结在 1m6s: %v", menu.Texts())
+	}
+	before := renders
+	menu.Advance(2 * time.Second)
+	if renders != before || menu.FramePending() {
+		t.Fatalf("终态不应再续帧: %d -> %d", before, renders)
+	}
+	if !hasExactText(menu, "1m6s") {
+		t.Fatalf("终态不应再读秒: %v", menu.Texts())
+	}
+	// 关闭浮层：宿主帧销毁窗口；强制再渲染一帧，内容被 active 守卫拦住，不再调度。
+	if err := host.Click("会话统计"); err != nil {
+		t.Fatal(err)
+	}
+	if len(capture.destroyedWindows) != 1 {
+		t.Fatalf("关闭后应销毁窗口: %v", capture.destroyedWindows)
+	}
+	menu.Frame()
+	if menu.HasText("总用时") {
+		t.Fatalf("关闭后内容不应再渲染: %v", menu.Texts())
+	}
+	if menu.FramePending() {
+		t.Fatal("关闭后不应继续调度")
+	}
+	before = renders
+	menu.Advance(3 * time.Second)
+	if renders != before || menu.FramePending() {
+		t.Fatalf("关闭后仍在渲染或调度: %d -> %d", before, renders)
+	}
+}
+
+// TestFlyoutSessionStatsFallbackTicksAndStops 验证无原生宿主时 fallback 浮层的
+// 打开读秒与关闭停止：起点 0 秒也安排刷新，关闭后内容消失且宿主不再续帧。
+// 用减少动效运行：既验证读秒不受 ReduceMotion 影响，也避免浮层升起动画移动 After 相位；
+// 正常动效下的读秒由浮层内容测试覆盖。
+func TestFlyoutSessionStatsFallbackTicksAndStops(t *testing.T) {
+	setAppReduceMotion(t, true)
+	var s *chatState
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		if s == nil {
+			s = &chatState{selectedThreadID: "t1", threads: []Thread{{ID: "t1", IsRunning: true}}}
+			start := c.Now().Truncate(time.Second).Format(time.RFC3339Nano)
+			s.messages = []Message{{Role: "user", TurnIndex: 1, CreatedAt: start}}
+		}
+		ui.Box(c).Fill().Children(func() {
+			renderSessionStatsButton(c, s, "t1", "fb")
+		})
+	}, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+	t.Cleanup(func() { setSessionStatsOpen(s, false) })
+	if err := tt.Click("会话统计"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasExactText(tt, "0s") {
+		t.Fatalf("fallback 打开后应从 0s 读秒: %v", tt.Texts())
+	}
+	tt.Advance(2 * time.Second)
+	if !hasExactText(tt, "2s") {
+		t.Fatalf("fallback 应从 0s 逐秒读秒: %v", tt.Texts())
+	}
+	if err := tt.Click("会话统计"); err != nil {
+		t.Fatal(err)
+	}
+	if sessionStatsOpen(s) || tt.HasText("总用时") {
+		t.Fatalf("再次点击应关闭浮层: open=%v %v", sessionStatsOpen(s), tt.Texts())
+	}
+	tt.Advance(3 * time.Second)
+	if tt.FramePending() {
+		t.Fatal("关闭后宿主不应继续调度")
+	}
+	if tt.HasText("总用时") {
+		t.Fatalf("关闭后内容不应再出现: %v", tt.Texts())
 	}
 }
 

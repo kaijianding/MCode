@@ -2,7 +2,6 @@
 package mcodeui
 
 import (
-	"fmt"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"strings"
@@ -19,13 +18,10 @@ func turnWorkHeaderText(counts toolGroupCounts, elapsed string) string {
 	return "用时 " + elapsed
 }
 
-// turnHeaderRunningLabel 把运行中回合已处理的时长写成组头文案：只取整秒，避免小数位每秒来回跳。
+// turnHeaderRunningLabel 把运行中回合已处理的时长写成组头文案：与会话统计同一套整秒时分秒
+// （59s / 1m / 1h2m3s），主会话、子代理浮层与独立窗口共用，各自仍用自己线程的起点。
 func turnHeaderRunningLabel(elapsed time.Duration) string {
-	secs := int(elapsed / time.Second)
-	if secs < 0 {
-		secs = 0
-	}
-	return fmt.Sprintf("已处理 %ds", secs)
+	return "已处理 " + formatLiveStatsDuration(elapsed)
 }
 
 // runningTurnHeaderLabel 返回运行态头此刻的文字：拿不到起始时刻时只写「已处理」，不编造数字。
@@ -39,6 +35,9 @@ func runningTurnHeaderLabel(item timelineItem, now time.Time) string {
 // turnWorkHeaderLabel 返回回合折叠项组头的完整文字：
 // 静默回合只说巡视了几次、不需要处理；其余回合只留用时，唤醒原因与计数移到 Tooltip。
 func turnWorkHeaderLabel(item timelineItem, counts toolGroupCounts) string {
+	if item.workTaskSpan.ok {
+		return "任务用时 " + formatLiveStatsDuration(item.workTaskSpan.end.Sub(item.workTaskSpan.start))
+	}
 	return turnWorkHeaderText(counts, item.workElapsed)
 }
 
@@ -48,6 +47,9 @@ func turnWorkHeaderAccessLabel(item timelineItem, open bool) string {
 	action := "点按展开"
 	if open {
 		action = "点按收起"
+	}
+	if item.workTaskSpan.ok {
+		return "工具调用，任务用时 " + formatLiveStatsDuration(item.workTaskSpan.end.Sub(item.workTaskSpan.start)) + "，" + action
 	}
 	if item.workElapsed != "" {
 		return "工具调用，用时 " + item.workElapsed + "，" + action
@@ -68,20 +70,29 @@ func turnWorkHeaderTooltip(s *chatState, item timelineItem, counts toolGroupCoun
 	if summary := toolGroupSummaryText(counts); summary != "" {
 		parts = append(parts, summary)
 	}
+	stats := turnToolStatsFor(s, item.turnIndex)
+	endMsg := turnEndMessageFor(s, item.turnIndex)
+	start, end := turnFinishedSpanFor(s, endMsg)
+	round := turnFinishedDuration(s, endMsg, usage)
+	costUSD, hasCost := turnFinishedCost(s, endMsg, usage)
+	if item.workTaskSpan.ok {
+		start, end = item.workTaskSpan.start, item.workTaskSpan.end
+	}
+	info := turnFinishedInfo{
+		usage:   usage,
+		stats:   stats,
+		costUSD: costUSD,
+		hasCost: hasCost,
+		start:   start,
+		end:     end,
+	}
+	if item.workTaskSpan.ok {
+		// 没有 usage 时也要保留任务起止与本轮用时，不能整段丢掉时间详情。
+		parts = append(parts, taskFinishedTooltip(info, round))
+		return strings.Join(parts, "\n")
+	}
 	if hasUsage {
-		stats := turnToolStatsFor(s, item.turnIndex)
-		endMsg := turnEndMessageFor(s, item.turnIndex)
-		start, end := turnFinishedSpanFor(s, endMsg)
-		costUSD, hasCost := turnFinishedCost(s, endMsg, usage)
-		detail := formatTurnFinishedTooltip(turnFinishedInfo{
-			usage:   usage,
-			stats:   stats,
-			costUSD: costUSD,
-			hasCost: hasCost,
-			start:   start,
-			end:     end,
-		})
-		if detail != "" {
+		if detail := formatTurnFinishedTooltip(info); detail != "" {
 			parts = append(parts, detail)
 		}
 	}
@@ -115,7 +126,7 @@ func runningTurnHasRunningTool(s *chatState, item timelineItem) bool {
 // renderTurnWorkHeaderText 渲染折叠组头的摘要文字：结束态只显示用时，组头的计数与完成明细
 // 已经移到 Tooltip 与展开体尾部，这里不再需要滚动数字。
 func renderTurnWorkHeaderText(c *ui.Context, item timelineItem, counts toolGroupCounts, color ui.Color) {
-	ui.Text(c, turnWorkHeaderText(counts, item.workElapsed)).FontSize(scaledFont(TypeBody)).TextColor(color).SingleLine()
+	ui.Text(c, turnWorkHeaderLabel(item, counts)).FontSize(scaledFont(TypeBody)).TextColor(color).SingleLine()
 }
 
 // turnWorkSummaryTools 返回用于组头计数的消息：关闭「显示思考过程」时不再统计思考次数，
@@ -265,7 +276,7 @@ func renderTurnWorkFooter(c *ui.Context, s *chatState, item timelineItem, usage 
 	if !hasUsage {
 		usage = TokenUsage{}
 	}
-	text := turnWorkFooterText(s, item.turnIndex, usage)
+	text := turnWorkFooterText(s, item.turnIndex, usage, item.workTaskSpan)
 	if text == "" {
 		return
 	}
@@ -276,14 +287,19 @@ func renderTurnWorkFooter(c *ui.Context, s *chatState, item timelineItem, usage 
 }
 
 // turnWorkFooterText 拼装展开体尾部的完成详情：模型、用时、工具数、改动、token 与输出速度，
-// 末尾追加与用时同源的结束时钟。用时与独立完成行走 turnFinishedDuration，
-// DurationMs 只作速度分母回退；全部数据缺失时返回空字符串。
-func turnWorkFooterText(s *chatState, turnIndex int, usage TokenUsage) string {
+// 末尾追加与用时同源的结束时钟。task 有效时用任务整体跨度与任务结束时刻（与折叠头同源）；
+// 否则用时与独立完成行走 turnFinishedDuration，DurationMs 只作速度分母回退；全部数据缺失时返回空字符串。
+func turnWorkFooterText(s *chatState, turnIndex int, usage TokenUsage, task taskTimingSpan) string {
 	stats := turnToolStatsFor(s, turnIndex)
 	endMsg := turnEndMessageFor(s, turnIndex)
 	_, end := turnFinishedSpanFor(s, endMsg)
 	duration := turnFinishedDuration(s, endMsg, usage)
 	text := formatTurnFinishedSummary("", stats, usage, duration)
+	if task.ok {
+		text = taskFinishedSummary("", stats, usage, task.end.Sub(task.start))
+		end = task.end
+	}
+	// 速度分母始终是本回合的墙钟/DurationMs，不被任务等待时间稀释。
 	text = appendTurnOutputSpeed(text, usage, resolveTurnDuration(usage, duration))
 	return appendTurnEndClock(text, end)
 }

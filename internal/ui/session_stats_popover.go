@@ -118,8 +118,12 @@ type sessionStatsSummary struct {
 	toolCalls     int
 	topTools      []ToolCallCount
 	totalDuration time.Duration
-	avgResponse   time.Duration
-	speed         string
+	// liveDuration 只供「总用时」展示：已完成轮次累计加上当前主回合的实时时长；
+	// liveRunning 为真时每秒刷新。平均响应与输出速度仍用 totalDuration。
+	liveDuration time.Duration
+	liveRunning  bool
+	avgResponse  time.Duration
+	speed        string
 	// speedSamples 是速度统计用的有效请求样本数，0 表示后端未提供样本（速度按整轮口径）。
 	speedSamples int
 	cacheHit     string
@@ -137,7 +141,7 @@ type sessionStatsSummary struct {
 // collectSessionStats 汇总会话统计：用量来自 ThreadUsage，时长优先取后端记录的每轮耗时、
 // 缺失时用消息时间戳推导，速度优先用各轮的逐请求样本，改动取改动统计缓存，
 // 子代理取 Swarm 面板状态，费用按模型参考价估算。
-func collectSessionStats(s *chatState, threadID string) sessionStatsSummary {
+func collectSessionStats(s *chatState, threadID string, now time.Time) sessionStatsSummary {
 	var st sessionStatsSummary
 	if s == nil {
 		return st
@@ -147,6 +151,28 @@ func collectSessionStats(s *chatState, threadID string) sessionStatsSummary {
 	provider, model := threadAgentLocked(s, threadID)
 	providers := s.providers
 	st.totalDuration = sessionDurationForTurns(s.messages, s.threadUsage.Turns)
+	start, running := sessionLiveTurnLocked(s, threadID)
+	if running {
+		// 当前轮的贡献整体换成实时值：先从副本里去掉这一轮的消息与用量再累计，
+		// 避免旧算法可能已通过 usage/消息回退把它计入后再加 now-start 造成双计。
+		msgs := make([]Message, 0, len(s.messages))
+		for _, m := range s.messages {
+			if m.TurnIndex == start.index && (m.TurnID == start.id || m.TurnID == "" || start.id == "") {
+				continue
+			}
+			msgs = append(msgs, m)
+		}
+		usage := make(map[int]TokenUsage, len(s.threadUsage.Turns))
+		for index, u := range s.threadUsage.Turns {
+			if index != start.index {
+				usage[index] = u
+			}
+		}
+		st.liveDuration = sessionDurationForTurns(msgs, usage) + max(0, now.Sub(start.at))
+		st.liveRunning = true
+	} else {
+		st.liveDuration = st.totalDuration
+	}
 	s.mu.Unlock()
 
 	st.turns = len(st.usage.Turns)
@@ -191,6 +217,69 @@ func collectSessionStats(s *chatState, threadID string) sessionStatsSummary {
 		}
 	}
 	return st
+}
+
+// sessionLiveTurn 是当前运行主回合的定位：轮次索引、TurnID（可能为空）与可解析的起点。
+type sessionLiveTurn struct {
+	index int
+	id    string
+	at    time.Time
+}
+
+// sessionLiveTurnLocked 在同一份快照里判定选中会话的主回合是否仍在执行（需持有 s.mu）：
+// 仅当线程 IsRunning 且非乐观运行、当前轮（最大 TurnIndex 的实际消息轮）能解析起点、
+// 没有完成时间也没有终态时返回 true。主轮一旦完成即冻结；SwarmBusy 只代表子代理等待，
+// 不启动计时，也不把等待时间追加进总用时。
+func sessionLiveTurnLocked(s *chatState, threadID string) (sessionLiveTurn, bool) {
+	var cur sessionLiveTurn
+	if threadID == "" || threadID != s.selectedThreadID || s.optimisticRunning[threadID] {
+		return cur, false
+	}
+	running := false
+	for _, th := range s.threads {
+		if th.ID == threadID {
+			running = th.IsRunning
+			break
+		}
+	}
+	if !running {
+		return cur, false
+	}
+	latest := -1
+	for _, m := range s.messages {
+		if m.TurnID == "" && m.TurnIndex < 0 {
+			continue
+		}
+		latest = max(latest, m.TurnIndex)
+	}
+	if latest < 0 {
+		return cur, false
+	}
+	cur.index = latest
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		if m := s.messages[i]; m.TurnIndex == latest && m.TurnID != "" {
+			cur.id = m.TurnID
+			break
+		}
+	}
+	target := Message{TurnID: cur.id, TurnIndex: latest}
+	for _, m := range s.messages {
+		if !sameTurn(m, target) {
+			continue
+		}
+		switch m.TurnStatus {
+		case "completed", "failed", "interrupted":
+			return cur, false
+		}
+		if _, err := time.Parse(time.RFC3339Nano, m.TurnCompletedAt); err == nil {
+			return cur, false
+		}
+	}
+	cur.at = turnStartTime(s.messages, latest)
+	if cur.at.IsZero() {
+		return cur, false
+	}
+	return cur, true
 }
 
 // sessionSpeedSamples 收集会话里各轮的请求速度样本；总数 Total 里不带样本，只用每轮明细。
@@ -307,10 +396,34 @@ func formatStatsDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%dm", hours, minutes)
 }
 
+// formatLiveStatsDuration 把实时总用时格式化为整秒文本（「59s」「1m」「1h2m3s」），
+// 整分整时省略零秒位，不足一分钟仍每秒可见变化。负值按 0s。
+func formatLiveStatsDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	secs := int(d / time.Second)
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs%60 == 0 {
+		return formatStatsDuration(d)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm%ds", secs/60, secs%60)
+	}
+	return fmt.Sprintf("%dh%dm%ds", secs/3600, (secs%3600)/60, secs%60)
+}
+
 // renderSessionStatsPopover 渲染会话统计浮层内容：Token、活动、常用工具、时间、改动、
 // 子代理与费用分组，没有数据的分组整组跳过。
 func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string, native bool) {
-	st := collectSessionStats(s, threadID)
+	st := collectSessionStats(s, threadID, c.Now())
+	// 主回合仍在执行时每秒重渲染读秒；起点 0 秒也要安排下一帧。
+	// 浮层关闭后内容不再渲染，终态不再续帧；读秒与 ReduceMotion 无关。
+	if st.liveRunning {
+		c.After(time.Second)
+	}
 
 	var tokenRows, activityRows, toolRows, timeRows, changeRows, beeRows [][2]string
 	total := st.usage.Total
@@ -340,8 +453,8 @@ func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string
 		}
 		toolRows = append(toolRows, [2]string{t.Name, fmt.Sprintf("%d 次", t.Count)})
 	}
-	if d := formatStatsDuration(st.totalDuration); d != "" {
-		timeRows = append(timeRows, [2]string{"总用时", d})
+	if st.liveRunning || st.liveDuration > 0 {
+		timeRows = append(timeRows, [2]string{"总用时", formatLiveStatsDuration(st.liveDuration)})
 	}
 	if d := formatStatsDuration(st.avgResponse); d != "" {
 		timeRows = append(timeRows, [2]string{"平均响应", d})

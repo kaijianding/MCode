@@ -266,23 +266,38 @@ func renderTurnFinishedBlock(c *ui.Context, s *chatState, m Message, usage Token
 // 「已完成」行下面再挂一张本回合改动文件卡片（见 renderTurnFilesCard），没有改动时它不画。
 func renderTurnFinishedBlockWithDuration(c *ui.Context, s *chatState, m Message, usage TokenUsage, duration time.Duration) {
 	stats := turnToolStatsFor(s, m.TurnIndex)
-	text := formatTurnFinishedSummary("", stats, usage, duration)
+	// 精确识别为自动汇报续跑时，完成行用时段显示从原始请求到本报告回合完成的任务整体跨度；
+	// duration 保持本轮口径，速度分母不吞等待时间。普通完成行走原有回退。
+	task := taskDurationFor(s, m)
+	var text string
+	if task.ok {
+		text = taskFinishedSummary("", stats, usage, task.end.Sub(task.start))
+	} else {
+		text = formatTurnFinishedSummary("", stats, usage, duration)
+	}
 	text = appendTurnOutputSpeed(text, usage, resolveTurnDuration(usage, duration))
 	if text == "" {
 		return
 	}
 	start, end := turnFinishedSpanFor(s, m)
+	if task.ok {
+		start, end = task.start, task.end
+	}
 	// 文本末尾追加具体结束时间，让完成行不只看耗时也能对上时钟。
 	text = appendTurnEndClock(text, end)
 	costUSD, hasCost := turnFinishedCost(s, m, usage)
-	tooltip := formatTurnFinishedTooltip(turnFinishedInfo{
+	info := turnFinishedInfo{
 		usage:   usage,
 		stats:   stats,
 		costUSD: costUSD,
 		hasCost: hasCost,
 		start:   start,
 		end:     end,
-	})
+	}
+	tooltip := formatTurnFinishedTooltip(info)
+	if task.ok {
+		tooltip = taskFinishedTooltip(info, duration)
+	}
 	row := ui.Row(c.Key("turn-finished-"+m.ID)).
 		AlignItems(ui.Center).
 		Gap(Space3).

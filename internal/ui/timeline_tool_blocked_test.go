@@ -68,6 +68,35 @@ PreToolUse:WebFetch hook error: context-mode: WebFetch redirected.
 			wantBlocked: true,
 			wantFailed:  false,
 		},
+		{
+			name: "completed 但返回的历史会话含旧工具 [failed]",
+			msg: Message{
+				Role:       "tool",
+				ToolName:   "mcp__mcode__session_get",
+				ToolStatus: "completed",
+				Text:       "历史会话回放：\nExit code: 2\n[failed]",
+			},
+			wantBlocked: false,
+			wantFailed:  false,
+		},
+		{
+			name:        "running 不被历史 [failed] 覆盖",
+			msg:         Message{Role: "tool", ToolStatus: "running", Text: "历史输出\nExit code: 2\n[failed]"},
+			wantBlocked: false,
+			wantFailed:  false,
+		},
+		{
+			name:        "background 不被历史 [failed] 覆盖",
+			msg:         Message{Role: "tool", ToolStatus: "background", Text: "历史输出\nExit code: 2\n[failed]"},
+			wantBlocked: false,
+			wantFailed:  false,
+		},
+		{
+			name:        "failed 显式状态无 [failed] 标记也失败",
+			msg:         Message{Role: "tool", ToolStatus: "failed", Text: "Exit code: 2"},
+			wantBlocked: false,
+			wantFailed:  true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -110,5 +139,42 @@ func TestInterruptedToolNoticeRendersAsFailedNotRunning(t *testing.T) {
 	}
 	if toolIsRunningCommand(m) {
 		t.Fatal("toolIsRunningCommand(interrupted tool) = true, want false")
+	}
+}
+
+// TestTurnWorkFoldAttentionIgnoresHistoricalFailedText 验证折叠组头的失败警示只看工具自身状态：
+// 成功工具返回的历史会话正文里含旧 [failed] 时不算失败，显式 failed 才点亮警示。
+func TestTurnWorkFoldAttentionIgnoresHistoricalFailedText(t *testing.T) {
+	cases := []struct {
+		name          string
+		toolStatus    string
+		wantAttention bool
+	}{
+		{name: "completed 含历史 [failed]", toolStatus: "completed", wantAttention: false},
+		{name: "显式 failed", toolStatus: "failed", wantAttention: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := []Message{
+				{ID: "u1", Role: "user", Text: "看看上个会话的结果", TurnIndex: 1, IsFinal: true},
+				{ID: "t1", Role: "tool", ToolName: "mcp__mcode__session_get", ToolStatus: tc.toolStatus, TurnIndex: 1,
+					Text: "历史会话回放：\nExit code: 2\n[failed]"},
+				{ID: "a1", Role: "assistant", Kind: "text", Text: "已读取历史会话", TurnIndex: 1, IsFinal: true},
+			}
+			s := &chatState{messages: msgs}
+			folded := applyTurnWorkFold(s, "t1", buildTimelineItems(msgs))
+			var folds []timelineItem
+			for _, it := range folded {
+				if it.kind == timelineItemTurnWork {
+					folds = append(folds, it)
+				}
+			}
+			if len(folds) != 1 {
+				t.Fatalf("结束回合应折叠成 1 项，got %d 项", len(folds))
+			}
+			if folds[0].workAttention != tc.wantAttention {
+				t.Fatalf("workAttention = %v, want %v", folds[0].workAttention, tc.wantAttention)
+			}
+		})
 	}
 }
