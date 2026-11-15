@@ -161,10 +161,16 @@ func renderTimelineSkeleton(c *ui.Context) {
 // renderTimelineSkeletonLayer 在聊天区顶部铺骨架层；数据落地后用 motionFast 淡出。
 // 骨架是绝对定位的 PassThrough 层，不参与布局、不改变已有滚动位置。
 func renderTimelineSkeletonLayer(c *ui.Context, s *chatState, threadID string, rev uint64, hasMessages bool) {
-	firstEnter, loading := timelineSkeletonPhase(s, threadID, rev, c.Now())
+	s.mu.Lock()
+	loading := threadID != "" && s.timelineLoadingThread == threadID && s.timelineLoadErrors[threadID] == ""
+	hasError := s.timelineLoadErrors[threadID] != ""
+	s.mu.Unlock()
 	target := float32(0)
-	if shouldShowTimelineSkeleton(hasMessages, loading, firstEnter) {
+	if !hasMessages && loading {
 		target = 1
+	}
+	if hasError {
+		return
 	}
 
 	layer := ui.Column(c.Key("timeline-skeleton-layer")).

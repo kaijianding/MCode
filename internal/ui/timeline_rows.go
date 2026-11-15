@@ -198,6 +198,7 @@ const (
 	timelineItemStewardTask
 	timelineItemStewardAmend
 	timelineItemStewardTaskChips
+	timelineItemLoadError
 )
 
 // timelineItem 表示时间线中的一个渲染项（单条消息、连续工具合并组或组内的一个节拍）。

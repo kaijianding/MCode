@@ -345,6 +345,9 @@ func (s *chatState) closeChatFind() {
 	}
 	f.open = false
 	f.focusPending = false
+	s.mu.Lock()
+	s.composerFocusRequest = true
+	s.mu.Unlock()
 	s.invalidate()
 }
 

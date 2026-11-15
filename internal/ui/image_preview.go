@@ -101,6 +101,7 @@ func localImagePath(url string) (string, error) {
 type previewImageEntry struct {
 	mu  sync.Mutex
 	src ui.ImageSource
+	err error
 }
 
 // imagePreviewCache 按 url 缓存图片加载状态，避免每帧重新解码。
@@ -120,9 +121,10 @@ func cachedPreviewImage(c *ui.Context, url string) ui.ImageSource {
 	if !loaded {
 		services := c.Services()
 		go func() {
-			src, _ := loadLocalImage(url)
+			src, err := loadLocalImage(url)
 			e.mu.Lock()
 			e.src = src
+			e.err = err
 			e.mu.Unlock()
 			services.Invalidate()
 		}()
@@ -284,7 +286,21 @@ func previewImageSource(c *ui.Context, s *chatState, pv *imagePreviewState) ui.I
 			return full
 		}
 	}
+	if pv.src == nil && pv.url != "" {
+		return cachedPreviewImage(c, pv.url)
+	}
 	return pv.src
+}
+
+func previewImageError(url string) error {
+	v, ok := imagePreviewCache.Load(url)
+	if !ok {
+		return nil
+	}
+	e := v.(*previewImageEntry)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.err
 }
 
 // renderImagePreviewOverlay 渲染大图浮层：全窗口半透明遮罩、可缩放平移的图片、
@@ -390,6 +406,13 @@ func renderImagePreviewStage(c *ui.Context, s *chatState, pv *imagePreviewState,
 		Center()
 	stage.Children(func() {
 		if src == nil {
+			if pv.url != "" && previewImageError(pv.url) != nil {
+				ui.Column(c.Key("image-preview-error")).AlignItems(ui.Center).Gap(Space3).Children(func() {
+					ui.Text(c.Key("image-preview-error-text"), "图片加载失败").FontSize(uiFont(TypeBody)).TextColor(ThemeDanger(c))
+					previewActionButton(c, "image-preview-close", "关闭", "关闭", func() { closeImagePreview(s) })
+				})
+				return
+			}
 			// 原图或缩略图还没加载好，先给一行提示，加载完成后由重绘换成图片。
 			ui.Text(c.Key("image-preview-loading"), "图片加载中…").
 				FontSize(uiFont(TypeBody)).

@@ -71,6 +71,8 @@ func renderTimelineItem(c *ui.Context, s *chatState, item timelineItem, liveID, 
 		Children(func() {
 			ui.Column(c.Key("timeline-col-"+item.id)).FillWidth().MaxWidth(timelineContentMaxWidth(s)).Padding(0, colPadX).Children(func() {
 				switch item.kind {
+				case timelineItemLoadError:
+					renderTimelineLoadError(c, s, item)
 				case timelineItemStewardTask:
 					renderStewardTaskCard(c, s, item.id, item.stewardTask)
 				case timelineItemStewardAmend:

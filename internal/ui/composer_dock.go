@@ -87,6 +87,15 @@ func (s *chatState) disarmComposerDockPromote(threadID string) {
 // composerDockDecisionFor 是渲染期用的只读版本：不写任何状态，可以被同一帧多处调用
 // （chat.go 判分支、composer.go 注册过渡），两次结果必须一致。
 func (s *chatState) composerDockDecisionFor(empty bool, selectedThreadID string) composerDockDecision {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.composerDockDecisionLocked(empty, selectedThreadID)
+}
+
+func (s *chatState) composerDockDecisionLocked(empty bool, selectedThreadID string) composerDockDecision {
+	if selectedThreadID != "" && (s.timelineLoadingThread == selectedThreadID || s.timelineLoadErrors[selectedThreadID] != "") {
+		empty = false
+	}
 	armed := s.composerDockPromoArmed(selectedThreadID)
 	prevDocked := s.composerView.dockDocked
 	if s.composerView.dockThreadID != selectedThreadID && !armed {

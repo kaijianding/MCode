@@ -672,7 +672,7 @@ func renderComposer(c *ui.Context, s *chatState) {
 		len(s.resolvedPlans[currentThreadID]),
 		len(s.answeredQuestions[currentThreadID]),
 	)
-	dockDec := s.composerDockDecisionFor(empty, currentThreadID)
+	dockDec := s.composerDockDecisionLocked(empty, currentThreadID)
 	docked, promote := dockDec.Docked, dockDec.Promote
 	promoteArmed := s.composerDockPromoArmed(currentThreadID)
 	providers := append([]ProviderInfo(nil), s.providers...)

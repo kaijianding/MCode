@@ -266,6 +266,8 @@ type chatState struct {
 	collapsedProj         map[string]bool     // 组折叠状态（保存在内存中，true 为折叠）
 	threads               []Thread            // 全部会话的平铺视图，按时间倒序
 	selectedThreadID      string
+	timelineLoadingThread string
+	timelineLoadErrors    map[string]string
 	stewardTaskThreadID   string
 	stewardTask           stewardTaskSnapshot
 	stewardTaskWatchStop  func()
@@ -1338,6 +1340,9 @@ func (s *chatState) selectThread(threadID string) {
 		s.watchStop = nil
 	}
 	s.selectedThreadID = threadID
+	delete(s.timelineLoadErrors, oldThreadID)
+	delete(s.timelineLoadErrors, threadID)
+	s.timelineLoadingThread = threadID
 	if threadID != s.stewardTaskThreadID {
 		s.stewardTaskThreadID = ""
 		s.stewardTask = stewardTaskSnapshot{}
@@ -1441,14 +1446,8 @@ func (s *chatState) selectThread(threadID string) {
 			ms := time.Since(historyStart).Milliseconds()
 			startuptrace.Mark(fmt.Sprintf("initial history loaded n=%d took=%dms", len(history), ms))
 		})
-		if hErr != nil {
-			s.setToast("加载历史消息失败: " + hErr.Error())
-		}
 
 		approvals, aErr := s.client.Approvals(ctx, tid)
-		if aErr != nil {
-			s.setToast("加载审批请求失败: " + aErr.Error())
-		}
 
 		usage, uErr := s.client.Usage(ctx, tid)
 
@@ -1461,6 +1460,23 @@ func (s *chatState) selectThread(threadID string) {
 		if s.closed || s.watchSeq != seq || s.selectedThreadID != tid {
 			s.mu.Unlock()
 			return
+		}
+		s.timelineLoadingThread = ""
+		var loadError string
+		if hErr != nil {
+			loadError = "加载历史消息失败: " + hErr.Error()
+		}
+		if aErr != nil {
+			if loadError != "" {
+				loadError += "；"
+			}
+			loadError += "加载审批请求失败: " + aErr.Error()
+		}
+		if loadError != "" {
+			if s.timelineLoadErrors == nil {
+				s.timelineLoadErrors = make(map[string]string)
+			}
+			s.timelineLoadErrors[tid] = loadError
 		}
 		if hErr == nil {
 			s.messages = UpsertMessages(nil, history, nil)

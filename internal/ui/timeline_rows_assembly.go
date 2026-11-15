@@ -854,7 +854,7 @@ func (s *chatState) assembledTimelineItemsWithQuestions(plans []resolvedPlan, an
 		s.timelineAssembledPlans == key {
 		items := s.timelineAssembledItems
 		s.mu.Unlock()
-		return s.withForkOriginItem(items)
+		return s.withTimelineLoadError(s.withForkOriginItem(items))
 	}
 	// 拼装期间不持锁（外部消息增量可能正在落地）；拼完再确认这几个输入没变才存缓存，
 	// 否则只把本次结果交给调用方，下一帧重建。
@@ -887,7 +887,7 @@ func (s *chatState) assembledTimelineItemsWithQuestions(plans []resolvedPlan, an
 		s.timelineAssembledValid = true
 	}
 	s.mu.Unlock()
-	return s.withForkOriginItem(items)
+	return s.withTimelineLoadError(s.withForkOriginItem(items))
 }
 
 // withForkOriginItem 把带入的历史或 fork 来源条插到时间线最顶部。
