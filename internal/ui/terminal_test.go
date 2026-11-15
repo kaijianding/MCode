@@ -18,6 +18,40 @@ import (
 	"mcode/internal/config"
 )
 
+func TestTerminalDockTransition(t *testing.T) {
+	for _, reduced := range []bool{false, true} {
+		t.Run(fmt.Sprint(reduced), func(t *testing.T) {
+			setAppReduceMotion(t, reduced)
+			s := newChatState(NewFakeClient())
+			defer s.close()
+			st := getTerminalState(s)
+			tt := ui.NewTesterWith(func(c *ui.Context) {
+				ui.Column(c.Key("shell")).Fill().Children(func() { renderTerminalDock(c, s) })
+			}, 800, 600, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced}})
+			st.visible = true
+			tt.Frame()
+			if !tt.HasText("没有选中会话") {
+				t.Fatal("缺少终端空状态")
+			}
+			if !reduced && !tt.FramePending() {
+				t.Fatal("打开终端未请求动画帧")
+			}
+			if reduced && tt.FramePending() {
+				t.Fatal("减少动效时打开终端仍请求动画帧")
+			}
+			tt.Advance(DurSheet)
+			st.visible = false
+			tt.Frame()
+			if reduced && tt.FramePending() {
+				t.Fatal("减少动效时关闭终端仍请求动画帧")
+			}
+			if !reduced && !tt.FramePending() {
+				t.Fatal("关闭终端未请求动画帧")
+			}
+		})
+	}
+}
+
 // 测试工作目录解析：通过 s.selectedThreadID 在 s.threads 里找到 ProjectID，再到 s.projects 里找 Path
 func TestTerminal_WorkDirResolution(t *testing.T) {
 	fake := NewFakeClient()
@@ -1499,6 +1533,7 @@ func TestTerminalDock_ResizerDrag(t *testing.T) {
 	st := getTerminalState(s)
 	toggleTerminal(s)
 	tt.Frame()
+	tt.Advance(DurBase)
 
 	dockHeight := func() float32 {
 		terminalMu.Lock()

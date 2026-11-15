@@ -1181,12 +1181,14 @@ func renderTerminalDockResizer(c *ui.Context, s *chatState, st *terminalState, w
 		}
 	}
 
-	// 悬停或按住时用一条细线提示可拖拽，颜色取主题强调色，不硬编码。
+	hovered := resizer.Hovered()
+	elapsed, wait := sidePaneHandles.observe(c, "terminal-dock-resizer", c.Now(), hovered)
+	if wait > 0 {
+		c.After(wait)
+	}
+	ink := resizer.AnimateTo("ink", sidePaneHandleInkTarget(hovered, held, elapsed), ui.Animation{Duration: animateDuration(c, motionFast), Ease: motionEaseStandard})
 	resizer.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !held && !resizer.Hovered() {
-			return
-		}
-		p.Fill(ui.Rect{X: r.X, Y: r.Y + (r.H-1)/2, W: r.W, H: 1}, ThemeAccent(c), 0)
+		p.Fill(ui.Rect{X: r.X, Y: r.Y + (r.H-1)/2, W: r.W, H: 1}, ThemeAccent(c).Alpha(ink), 0)
 	})
 
 	// 拖拽结束（按住后松开且确实移动过）时持久化高度。
@@ -1283,6 +1285,7 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 		Background(ThemeWindowBg(c)).
 		BorderWidth(1, 0, 0, 0).
 		BorderColor(ThemeBorder(c)).
+		Transition(motionCollapse(c)).
 		Children(func() {
 			renderTerminalDockResizer(c, s, st, winHeight)
 
@@ -1513,9 +1516,7 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 					Justify(ui.Center).
 					AlignItems(ui.Center).
 					Children(func() {
-						ui.Text(c, "没有选中会话").
-							FontSize(uiFont(TypeBody)).
-							TextColor(ThemeSecondaryText(c))
+						EmptyState(c, EmptyStateProps{Icon: IconTerminal(), Title: "没有选中会话", Compact: true})
 					})
 			} else if currentErrText != "" && actTab == nil {
 				ui.Column(c.Key("terminal-dock-error")).

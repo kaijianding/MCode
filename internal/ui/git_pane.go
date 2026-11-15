@@ -617,7 +617,11 @@ func renderGitPane(c *ui.Context, s *chatState) {
 	if ps == nil {
 		return
 	}
-	if _, ok := s.client.(gitPaneClient); !ok || ps.threadID == "" {
+	if ps.threadID == "" {
+		renderGitPaneEmpty(c, "未选中会话", IconGitBranch())
+		return
+	}
+	if _, ok := s.client.(gitPaneClient); !ok {
 		renderGitPaneEmpty(c, "Git", IconGitBranch())
 		return
 	}
@@ -644,7 +648,7 @@ func renderGitPane(c *ui.Context, s *chatState) {
 				return
 			}
 			if state.WorkDir == "" {
-				renderGitPaneEmpty(c, "Git", IconGitBranch())
+				renderGitPaneEmpty(c, "不是 Git 仓库", IconGitBranch())
 				return
 			}
 			if segment == 0 {
@@ -1031,7 +1035,6 @@ func renderGitPaneUndo(c *ui.Context, ps *gitPaneState) {
 
 func renderGitPaneEmpty(c *ui.Context, title string, icon *ui.SVG) {
 	ui.Column(c.Key("git-pane-empty")).Fill().Center().Gap(Space3).Children(func() {
-		ui.Icon(c, icon).Size(Space8, Space8).TextColor(ThemeTertiaryText(c))
-		ui.Text(c, title).FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
+		EmptyState(c, EmptyStateProps{Icon: icon, Title: title})
 	})
 }

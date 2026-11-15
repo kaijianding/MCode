@@ -868,9 +868,10 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 					AlignItems(ui.Center).
 					Children(func() {
 						msg := snap.err
-						if msg != "" {
-							EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg})
+						if msg == "" {
+							msg = "未打开网页"
 						}
+						EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg})
 					})
 			} else if browserTabVisible(st) {
 				// 没有推送通道，只按最小间隔 drain 预装的控制台与拾取队列。

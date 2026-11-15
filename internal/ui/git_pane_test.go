@@ -613,6 +613,24 @@ func TestGitPaneMissingCapabilityEmpty(t *testing.T) {
 	}
 }
 
+func TestGitPaneEmptyStates(t *testing.T) {
+	s, ps, _ := gitPaneTestState(t)
+	ps.mu.Lock()
+	ps.visible = true
+	ps.mu.Unlock()
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPane(c, s) }, 480, 300)
+	if !tt.HasText("不是 Git 仓库") {
+		t.Fatal("缺少非仓库空状态")
+	}
+	s.mu.Lock()
+	s.selectedThreadID = ""
+	s.mu.Unlock()
+	tt.Frame()
+	if !tt.HasText("未选中会话") {
+		t.Fatal("缺少未选中会话空状态")
+	}
+}
+
 func TestGitStatusSharedPresentation(t *testing.T) {
 	ui.NewTester(func(c *ui.Context) {
 		for _, code := range []string{"M", "A", "D", "R", "C", "?", "U"} {

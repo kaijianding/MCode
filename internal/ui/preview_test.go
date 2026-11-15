@@ -8,8 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
 	"mcode/internal/config"
 )
+
+func TestPreviewEmptyState(t *testing.T) {
+	s := sidePaneTestState(t)
+	defer s.close()
+	tt := ui.NewTester(func(c *ui.Context) { renderPreviewPanel(c, s) }, 800, 600)
+	if !tt.HasText("未打开网页") {
+		t.Fatal("缺少网页空状态")
+	}
+}
 
 type previewTestPage struct {
 	eval func(string) (any, error)
