@@ -46,7 +46,7 @@ func TestCreateThreadNeverWritesMemory(t *testing.T) {
 		t.Fatalf("用户新建会话失败: %v", err)
 	}
 	// 系统路径（看板任务、编排子代理、自动化）。
-	if _, err := b.createThread(ctx, wire.ThreadCreateParams{ProjectID: "p1"}, false); err != nil {
+	if _, err := b.createThread(ctx, wire.ThreadCreateParams{ProjectID: "p1"}, false, threadInit{}); err != nil {
 		t.Fatalf("系统会话创建失败: %v", err)
 	}
 	if writes != 0 {
@@ -116,7 +116,7 @@ func TestCreateThreadFillsDefaultsFromMemory(t *testing.T) {
 	}
 
 	// 系统路径不读记忆：仍是默认 provider、无推理强度、不开启编排。
-	sysRes, err := b.createThread(ctx, wire.ThreadCreateParams{ProjectID: "p1"}, false)
+	sysRes, err := b.createThread(ctx, wire.ThreadCreateParams{ProjectID: "p1"}, false, threadInit{})
 	if err != nil {
 		t.Fatalf("系统会话创建失败: %v", err)
 	}

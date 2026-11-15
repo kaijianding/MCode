@@ -16,14 +16,20 @@ import (
 
 // CreateThread 创建新线程，支持按 ActionID 幂等。
 func (b *MemoryBackend) CreateThread(ctx context.Context, params wire.ThreadCreateParams) (wire.ThreadCreateResult, error) {
-	return b.createThread(ctx, params, true)
+	return b.createThread(ctx, params, true, threadInit{})
+}
+
+type threadInit struct {
+	parentThreadID string
+	isHelper       bool
+	title          string
 }
 
 // createThread 创建新线程；userInitiated 表示用户主动新建（threads.create）。
 // 用户主动新建时会用宿主记忆补齐没传的选择；编排子代理、看板任务与自动化会话
 // 走的是 StartSession 这条系统路径，不读也不写这份记忆。记忆只由用户主动操作
 // （providers.rememberSelection）写入，建会话绝不回写。
-func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCreateParams, userInitiated bool) (wire.ThreadCreateResult, error) {
+func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCreateParams, userInitiated bool, init threadInit) (wire.ThreadCreateResult, error) {
 	// 客户端没传（nil）时套用全局「新会话默认停用」名单；读盘必须在持锁前完成。
 	// 空数组表示明确要求全部启用，不套默认。
 	if params.MCPDisabled == nil {
@@ -194,10 +200,16 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 	}
 
 	isProvisional := params.Provisional != nil && *params.Provisional
+	title := init.title
+	if title == "" {
+		title = defaultThreadTitle
+	}
 	summary := wire.ThreadSummary{
 		ID:                threadID,
 		ProjectID:         params.ProjectID,
-		Title:             defaultThreadTitle,
+		Title:             title,
+		ParentThreadID:    optionalString(init.parentThreadID),
+		IsHelper:          init.isHelper,
 		Provider:          provider,
 		Model:             &modelVal,
 		IsRunning:         false,
@@ -243,8 +255,8 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 		persisted:      make(map[string]bool),
 		pending:        make(map[string]*pendingRequest),
 		alwaysAllow:    make(map[string]bool),
-		parentThreadID: "",
-		isHelper:       false,
+		parentThreadID: init.parentThreadID,
+		isHelper:       init.isHelper,
 		dormantAt:      nil,
 	}
 	if params.ActionID != "" {

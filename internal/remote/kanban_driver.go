@@ -82,6 +82,11 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 		runtimeMode = req.RuntimeMode
 	}
 	createActionID := newUUID()
+	init := threadInit{title: req.Title}
+	if req.LeadThreadID != "" {
+		init.parentThreadID = req.LeadThreadID
+		init.isHelper = true
+	}
 	// 系统发起的会话（编排子代理、看板任务、自动化）不是用户主动新建的：
 	// 不读也不写模型记忆，它们带的子代理/档位模型不能顶替用户的新会话选择。
 	res, err := b.createThread(ctx, wire.ThreadCreateParams{
@@ -90,7 +95,7 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 		Options:     &wire.ComposerOptions{Provider: optionalString(provider)},
 		Model:       optionalString(model),
 		RuntimeMode: optionalString(runtimeMode),
-	}, false)
+	}, false, init)
 	if err != nil {
 		return "", err
 	}
@@ -129,9 +134,6 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 	td, ok := b.threads[threadID]
 	if ok {
 		td.workDir = req.WorkDir
-		if req.Title != "" {
-			td.summary.Title = req.Title
-		}
 	}
 	s := b.store
 	b.mu.Unlock()
@@ -140,9 +142,6 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 		if err := s.UpdateThreadWorktreePath(ctx, threadID, req.WorkDir); err != nil {
 			log.Printf("persist worktree path for thread %s: %v", threadID, err)
 		}
-	}
-	if s != nil && req.Title != "" {
-		_ = s.UpdateThreadTitle(ctx, threadID, req.Title)
 	}
 
 	// Prompt 去空白后为空：只要会话（含标题与偏好），不发起第一轮。
