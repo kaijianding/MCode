@@ -419,9 +419,9 @@ func renderChat(c *ui.Context, s *chatState) {
 					renderComposer(c, s)
 				}
 
-				// D-18 首帧骨架：只在会话首次进入、历史还没落地时显示，数据到达后用 motionFast 淡出。
+				// D-18 骨架：历史加载时显示，数据到达后用 motionFast 淡出。
 				// 它是绝对定位的 PassThrough 层，不参与布局，也不改变已有滚动位置。
-				renderTimelineSkeletonLayer(c, s, selectedID, rev, len(messages) > 0)
+				renderTimelineSkeletonLayer(c, s, selectedID, len(messages) > 0)
 				// D-9 拖文件覆盖层：铺在时间线与输入区整块区域上方，不拦截拖放。
 				renderComposerDropOverlay(c, s)
 			})

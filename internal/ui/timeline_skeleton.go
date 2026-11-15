@@ -2,8 +2,6 @@ package mcodeui
 
 import (
 	"strconv"
-	"sync"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -27,12 +25,6 @@ func renderSkeletonRows(c *ui.Context, key string, rows int, rowHeight, gap floa
 	})
 }
 
-// timelineSkeletonMaxWait 是首帧骨架等待历史落地的上限。
-// 历史加载失败时 selectThread 只弹 toast、不会推进 messagesRev；
-// 如果首帧骨架在历史落地之后才第一次被观测到，messagesRev 也不会再变，
-// 因此上限取两次呼吸周期，避免骨架永远呼吸，也避免空会话刚打开时骨架停留过久。
-const timelineSkeletonMaxWait = 2 * motionSweep
-
 // 骨架行：用户消息右对齐、助手消息左对齐、工具行居中偏左。
 const (
 	timelineSkeletonUserWidth      float32 = 40
@@ -43,81 +35,6 @@ const (
 	timelineSkeletonRadius         float32 = RadiusSM
 	timelineSkeletonFillAlpha      float32 = 0.35
 )
-
-// timelineSkeletonState 记录每个会话是否已经落地过历史。
-// 与输入区一样用包级 map 按 *chatState 存放，不改 chatState。
-type timelineSkeletonState struct {
-	threadID   string
-	revAtEnter uint64
-	enteredAt  time.Time
-	loading    bool
-	// seenThreads 记录已经落地过历史的会话：再次进入时不再显示骨架。
-	seenThreads map[string]bool
-}
-
-var (
-	timelineSkeletonMu     sync.Mutex
-	timelineSkeletonStates = make(map[*chatState]*timelineSkeletonState)
-)
-
-// getTimelineSkeletonState 取（必要时创建）会话的首帧骨架状态；会话关闭时顺手清理。
-func getTimelineSkeletonState(s *chatState) *timelineSkeletonState {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-
-	timelineSkeletonMu.Lock()
-	defer timelineSkeletonMu.Unlock()
-	if closed {
-		delete(timelineSkeletonStates, s)
-		return nil
-	}
-	st := timelineSkeletonStates[s]
-	if st == nil {
-		st = &timelineSkeletonState{seenThreads: make(map[string]bool)}
-		timelineSkeletonStates[s] = st
-	}
-	return st
-}
-
-// shouldShowTimelineSkeleton 判断首帧骨架是否显示：
-// 消息还没落地（列表为空）、历史仍在加载、且是首次进入该会话。
-func shouldShowTimelineSkeleton(hasMessages, loading, firstEnter bool) bool {
-	return !hasMessages && loading && firstEnter
-}
-
-// observe 观测当前 (threadID, messagesRev)，返回历史是否仍在加载。
-// 切换会话时把首次观测到的 rev 记为起点；rev 增长即代表历史落地，
-// 超过 timelineSkeletonMaxWait 也按落地处理（加载失败时 rev 不会动）。
-func (st *timelineSkeletonState) observe(threadID string, rev uint64, now time.Time) bool {
-	if st.threadID != threadID {
-		st.threadID = threadID
-		st.revAtEnter = rev
-		st.enteredAt = now
-		st.loading = !st.seenThreads[threadID]
-		return st.loading
-	}
-	if st.loading && (rev != st.revAtEnter || now.Sub(st.enteredAt) > timelineSkeletonMaxWait) {
-		st.loading = false
-		st.seenThreads[threadID] = true
-	}
-	return st.loading
-}
-
-// timelineSkeletonPhase 返回当前会话的首次进入标记与加载状态。
-func timelineSkeletonPhase(s *chatState, threadID string, rev uint64, now time.Time) (firstEnter, loading bool) {
-	st := getTimelineSkeletonState(s)
-	if st == nil || threadID == "" {
-		return false, false
-	}
-	timelineSkeletonMu.Lock()
-	defer timelineSkeletonMu.Unlock()
-	loading = st.observe(threadID, rev, now)
-	return !st.seenThreads[threadID], loading
-}
 
 // renderTimelineSkeleton 画 3 条呼吸中的骨架行，宽度分别为父容器的 40% / 78% / 56%。
 // 减少动效时不呼吸，停在 35% 的静态填充上。
@@ -160,7 +77,7 @@ func renderTimelineSkeleton(c *ui.Context) {
 
 // renderTimelineSkeletonLayer 在聊天区顶部铺骨架层；数据落地后用 motionFast 淡出。
 // 骨架是绝对定位的 PassThrough 层，不参与布局、不改变已有滚动位置。
-func renderTimelineSkeletonLayer(c *ui.Context, s *chatState, threadID string, rev uint64, hasMessages bool) {
+func renderTimelineSkeletonLayer(c *ui.Context, s *chatState, threadID string, hasMessages bool) {
 	s.mu.Lock()
 	loading := threadID != "" && s.timelineLoadingThread == threadID && s.timelineLoadErrors[threadID] == ""
 	hasError := s.timelineLoadErrors[threadID] != ""

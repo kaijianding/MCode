@@ -4,7 +4,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -132,57 +131,5 @@ func TestChatBodyReceivesFileDrops(t *testing.T) {
 		if strings.Contains(string(composer), unwanted) {
 			t.Errorf("输入卡不应注册拖放 %q", unwanted)
 		}
-	}
-}
-
-// TestShouldShowTimelineSkeleton 表驱动覆盖 D-18 的显示条件。
-func TestShouldShowTimelineSkeleton(t *testing.T) {
-	cases := []struct {
-		name        string
-		hasMessages bool
-		loading     bool
-		firstEnter  bool
-		want        bool
-	}{
-		{name: "首次进入且历史加载中", hasMessages: false, loading: true, firstEnter: true, want: true},
-		{name: "已有消息", hasMessages: true, loading: true, firstEnter: true, want: false},
-		{name: "加载完成", hasMessages: false, loading: false, firstEnter: true, want: false},
-		{name: "再次进入同一会话", hasMessages: false, loading: true, firstEnter: false, want: false},
-		{name: "三个条件都不满足", hasMessages: false, loading: false, firstEnter: false, want: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldShowTimelineSkeleton(tc.hasMessages, tc.loading, tc.firstEnter); got != tc.want {
-				t.Fatalf("shouldShowTimelineSkeleton(%v, %v, %v) = %v, want %v",
-					tc.hasMessages, tc.loading, tc.firstEnter, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestTimelineSkeletonObserve 验证以 messagesRev 增长判定历史落地，以及加载失败时的超时兜底。
-func TestTimelineSkeletonObserve(t *testing.T) {
-	now := time.Now()
-	st := &timelineSkeletonState{seenThreads: map[string]bool{}}
-
-	if !st.observe("t1", 7, now) {
-		t.Fatal("首次进入且 rev 未变时应视为加载中")
-	}
-	if !st.observe("t1", 7, now.Add(time.Second)) {
-		t.Fatal("rev 未变且未超时仍应视为加载中")
-	}
-	if st.observe("t1", 8, now.Add(2*time.Second)) {
-		t.Fatal("rev 增长后应视为加载完成")
-	}
-	if st.observe("t1", 8, now.Add(3*time.Second)) {
-		t.Fatal("已落地过的会话不应重新进入加载中")
-	}
-
-	st2 := &timelineSkeletonState{seenThreads: map[string]bool{}}
-	if !st2.observe("t2", 1, now) {
-		t.Fatal("新会话首次观测应视为加载中")
-	}
-	if st2.observe("t2", 1, now.Add(timelineSkeletonMaxWait+time.Second)) {
-		t.Fatal("加载失败导致 rev 不动时，超过上限应收起骨架")
 	}
 }

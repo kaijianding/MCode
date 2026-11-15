@@ -41,42 +41,6 @@ func TestApplyProjectOrder(t *testing.T) {
 	}
 }
 
-// TestMoveProjectInOrder 验证把项目移动到指定下标：删除原位置、插入目标位置并夹取下标。
-func TestMoveProjectInOrder(t *testing.T) {
-	base := []string{"a", "b", "c"}
-
-	tests := []struct {
-		name    string
-		order   []string
-		id      string
-		toIndex int
-		want    []string
-	}{
-		{"移到最前", base, "c", 0, []string{"c", "a", "b"}},
-		{"移到中间", base, "a", 1, []string{"b", "a", "c"}},
-		{"移到末尾", base, "a", 2, []string{"b", "c", "a"}},
-		{"下标越界夹取到末尾", base, "a", 99, []string{"b", "c", "a"}},
-		{"负下标夹取到最前", base, "b", -3, []string{"b", "a", "c"}},
-		{"移到自身位置保持不变", base, "b", 1, []string{"a", "b", "c"}},
-		{"id 不在列表中时插入", base, "d", 1, []string{"a", "d", "b", "c"}},
-		{"空 id 返回原顺序副本", base, "", 0, []string{"a", "b", "c"}},
-		{"空顺序插入", nil, "a", 0, []string{"a"}},
-	}
-	for _, tc := range tests {
-		got := moveProjectInOrder(tc.order, tc.id, tc.toIndex)
-		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s: moveProjectInOrder(%v, %q, %d) = %v, want %v", tc.name, tc.order, tc.id, tc.toIndex, got, tc.want)
-		}
-	}
-
-	// 不修改入参
-	order := []string{"a", "b", "c"}
-	_ = moveProjectInOrder(order, "c", 0)
-	if !reflect.DeepEqual(order, base) {
-		t.Fatalf("moveProjectInOrder 不应修改入参，got %v", order)
-	}
-}
-
 // TestUIStateProjectOrderPersistence 验证项目顺序与侧边栏状态同文件读写。
 func TestUIStateProjectOrderPersistence(t *testing.T) {
 	dataDir := settingsTestDir(t)

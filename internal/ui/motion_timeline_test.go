@@ -98,21 +98,42 @@ func TestMotionTimelineSkeletonAndShimmer(t *testing.T) {
 func TestMotionTimelineSkeletonDisappears(t *testing.T) {
 	setAppReduceMotion(t, true)
 	s := newChatState(NewFakeClient())
-	rev := uint64(1)
+	s.timelineLoadingThread = "motion-skeleton"
 	tester := ui.NewTesterWith(func(c *ui.Context) {
 		ui.Column(c.Key("host")).Fill().Children(func() {
-			renderTimelineSkeletonLayer(c, s, "motion-skeleton", rev, false)
+			renderTimelineSkeletonLayer(c, s, "motion-skeleton", false)
 		})
 	}, 300, 200, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
 	tester.Frame()
 	before := append([]byte(nil), tester.Image().Pix...)
-	rev++
+	s.timelineLoadingThread = ""
 	tester.Frame()
 	if bytes.Equal(before, tester.Image().Pix) {
 		t.Fatal("历史加载完成后骨架屏未消失")
 	}
 	if tester.FramePending() {
 		t.Fatal("骨架屏消失后仍请求帧")
+	}
+}
+
+func TestMotionTimelineSkeletonLoadError(t *testing.T) {
+	setAppReduceMotion(t, true)
+	s := newChatState(NewFakeClient())
+	s.timelineLoadingThread = "motion-skeleton"
+	s.timelineLoadErrors = map[string]string{"motion-skeleton": "加载失败"}
+	view := func(c *ui.Context) {
+		ui.Column(c.Key("host")).Fill().Children(func() {
+			renderTimelineSkeletonLayer(c, s, "motion-skeleton", false)
+		})
+	}
+	empty := func(c *ui.Context) { ui.Column(c.Key("host")).Fill() }
+	options := ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}}
+	tester := ui.NewTesterWith(view, 300, 200, options)
+	baseline := ui.NewTesterWith(empty, 300, 200, options)
+	tester.Frame()
+	baseline.Frame()
+	if !bytes.Equal(tester.Image().Pix, baseline.Image().Pix) || tester.FramePending() {
+		t.Fatal("历史加载出错时不应显示骨架或请求帧")
 	}
 }
 

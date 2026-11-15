@@ -1418,15 +1418,6 @@ func storeSidebarProjectOrder(s *chatState, order []string) {
 	chatUIMu.Unlock()
 }
 
-// setSidebarProjectOrder 写入项目顺序并持久化到 ui-state.json。
-func setSidebarProjectOrder(s *chatState, order []string) {
-	if s == nil {
-		return
-	}
-	storeSidebarProjectOrder(s, order)
-	persistUIState(s)
-}
-
 // sidebarProjectActivation 返回当前窗口保存的项目激活覆盖表副本；无覆盖时返回 nil。
 func sidebarProjectActivation(s *chatState) map[string]bool {
 	if s == nil {
@@ -1497,48 +1488,6 @@ func applyProjectOrder(projects []Project, order []string) []Project {
 		seen[p.ID] = true
 	}
 	return result
-}
-
-// moveProjectInOrder 纯函数：把 id 移动到 toIndex 位置并返回新顺序。
-// id 不在列表中时直接插入；越界下标夹取到有效范围。
-func moveProjectInOrder(order []string, id string, toIndex int) []string {
-	if id == "" {
-		return append([]string(nil), order...)
-	}
-	result := make([]string, 0, len(order)+1)
-	for _, x := range order {
-		if x != id {
-			result = append(result, x)
-		}
-	}
-	if toIndex < 0 {
-		toIndex = 0
-	}
-	if toIndex > len(result) {
-		toIndex = len(result)
-	}
-	result = append(result, "")
-	copy(result[toIndex+1:], result[toIndex:])
-	result[toIndex] = id
-	return result
-}
-
-// reorderProjectsByDrop 处理项目行拖拽落地：把 droppedID 移动到目标下标，
-// 以当前展示顺序为基础重排并持久化；返回是否发生了重排。
-func reorderProjectsByDrop(s *chatState, projects []Project, droppedID string, toIndex int) bool {
-	ids := make([]string, 0, len(projects))
-	from := -1
-	for i, p := range projects {
-		ids = append(ids, p.ID)
-		if p.ID == droppedID {
-			from = i
-		}
-	}
-	if from < 0 || from == toIndex {
-		return false
-	}
-	setSidebarProjectOrder(s, moveProjectInOrder(ids, droppedID, toIndex))
-	return true
 }
 
 // --- 模型记忆的跨包入口（供 internal/app 注入远程控制后端使用）---

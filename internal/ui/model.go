@@ -1457,11 +1457,13 @@ func (s *chatState) selectThread(threadID string) {
 		queueItems, qErr := s.client.Queue(ctx, tid)
 
 		s.mu.Lock()
+		if s.watchSeq == seq && s.timelineLoadingThread == tid {
+			s.timelineLoadingThread = ""
+		}
 		if s.closed || s.watchSeq != seq || s.selectedThreadID != tid {
 			s.mu.Unlock()
 			return
 		}
-		s.timelineLoadingThread = ""
 		var loadError string
 		if hErr != nil {
 			loadError = "加载历史消息失败: " + hErr.Error()

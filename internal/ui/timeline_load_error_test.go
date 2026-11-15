@@ -42,6 +42,9 @@ func TestTimelineLoadErrorRetry(t *testing.T) {
 				defer s.close()
 				s.selectThread("t1")
 				synctest.Wait()
+				if s.timelineLoadingThread != "" || !strings.Contains(s.timelineLoadErrors["t1"], which+" error") {
+					t.Fatalf("加载状态未清除或错误未记录：%q，%v", s.timelineLoadingThread, s.timelineLoadErrors)
+				}
 				items := s.withTimelineLoadError(nil)
 				if len(items) != 1 || items[0].kind != timelineItemLoadError || !strings.Contains(items[0].msg.Text, which+" error") {
 					t.Fatalf("错误行: %+v", items)
