@@ -506,7 +506,8 @@ func renderMCPServerRow(
 
 					// 引擎侧关闭标记：Claude Code 配置里已停用该服务，仅做展示，不与 mcode 的开关联动。
 					if srvVal.DisabledByEngine {
-						Badge(c, mcpKey+"-engine-off", "已在 Claude Code 关闭", ToneWarning)
+						Badge(c, mcpKey+"-engine-off", "已在 Claude Code 关闭", ToneWarning).
+							Tooltip("这个服务在 Claude Code 里被关掉了（~/.claude.json 的 disabledMcpServers）。MCode 是否注入仍由这里的开关决定。")
 					}
 
 					// 对 URL 非空的远程服务器（http/sse），显示“已登录 / 未登录”及登录按钮
@@ -911,12 +912,6 @@ func renderMCPServerRow(
 					Gap(Space1).
 					Background(ThemeOverlay(c, 0.04)).
 					Children(func() {
-						// 引擎侧已关闭的说明：只解释原因，不改变这里的开关行为。
-						if srvVal.DisabledByEngine {
-							ui.Text(c, "这个服务在 Claude Code 里被关掉了（~/.claude.json 的 disabledMcpServers）。MCode 是否注入仍由这里的开关决定。").
-								FontSize(uiFont(TypeFootnote)).
-								TextColor(ThemeSecondaryText(c))
-						}
 						if isLoadingTools {
 							ui.Text(c, "正在探测工具列表…").
 								FontSize(uiFont(TypeFootnote)).

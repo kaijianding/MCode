@@ -122,7 +122,7 @@ func TestSettingsPageWorkbench_Tree(t *testing.T) {
 	for _, want := range []string{
 		"项目文档", "注入项目说明", "注入文档", "标准 4 · 自定义 1",
 		"Instructions", "Overview", "Decisions", "Notes", "Api Design",
-		"看板与任务", "默认视图", "看板", "列表",
+		"看板", "任务执行", "MCP 工具", "默认视图", "列表",
 		"验收后自动合并工作树", "完成后自动送审", "在独立工作树中执行",
 		"注册看板 MCP 工具", "普通会话暴露单一入口", "创建后自动启动", "卡死任务自动救援", "无活动中断",
 		"终端", "默认终端", "Web 预览", "起始地址", "捕获控制台输出",
@@ -143,6 +143,34 @@ func TestSettingsPageWorkbench_Tree(t *testing.T) {
 	} {
 		if tt.HasText(gone) {
 			t.Fatalf("工作台页不该再有 %q", gone)
+		}
+	}
+}
+
+func TestSettingsPageWorkbench_SectionsKeepRows(t *testing.T) {
+	want := map[string]string{
+		"row-kanban-default-view":            "看板",
+		"row-tasks-auto-merge-worktree":      "任务执行",
+		"row-kanban-auto-review":             "任务执行",
+		"row-kanban-run-in-worktree":         "任务执行",
+		"row-kanban-auto-start-on-create":    "任务执行",
+		"row-kanban-auto-rescue-stuck":       "任务执行",
+		"row-kanban-stuck-nudge-timeout":     "任务执行",
+		"row-kanban-stuck-interrupt-timeout": "任务执行",
+		"row-kanban-mcp-tools":               "MCP 工具",
+		"row-kanban-entry-ordinary":          "MCP 工具",
+	}
+	got := map[string]string{}
+	for _, section := range pageWorkbench.Sections {
+		for _, row := range section.Rows {
+			if _, ok := want[row.ID]; ok {
+				got[row.ID] = section.Title
+			}
+		}
+	}
+	for id, section := range want {
+		if got[id] != section {
+			t.Errorf("%s 位于 %q，期望 %q", id, got[id], section)
 		}
 	}
 }

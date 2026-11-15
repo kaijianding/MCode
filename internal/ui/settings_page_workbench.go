@@ -76,7 +76,7 @@ var pageWorkbench = settingsPage{
 		},
 		{
 			ID:    "workbench.kanban",
-			Title: "看板与任务",
+			Title: "看板",
 			Rows: []setting{
 				{
 					ID:      "row-kanban-default-view",
@@ -87,6 +87,12 @@ var pageWorkbench = settingsPage{
 						{Value: config.KanbanViewList, Label: "列表"},
 					}),
 				},
+			},
+		},
+		{
+			ID:    "workbench.execution",
+			Title: "任务执行",
+			Rows: []setting{
 				{
 					ID:      "row-tasks-auto-merge-worktree",
 					Title:   "验收后自动合并工作树",
@@ -104,19 +110,6 @@ var pageWorkbench = settingsPage{
 					Title:   "在独立工作树中执行",
 					Aliases: []string{"看板", "任务", "工作树", "worktree"},
 					Control: toggle(ptr(func(c *config.Config) **bool { return &c.Workbench.KanbanRunInWorktree }, true)),
-				},
-				{
-					ID:      "row-kanban-mcp-tools",
-					Title:   "注册看板 MCP 工具",
-					Aliases: []string{"看板", "MCP", "工具", "tool", "会话", "agent"},
-					Control: toggle(ptr(func(c *config.Config) **bool { return &c.Workbench.KanbanMCPEnabled }, true)),
-				},
-				{
-					ID:      "row-kanban-entry-ordinary",
-					Title:   "普通会话暴露单一入口",
-					Aliases: []string{"看板", "会话", "入口", "kanban", "tool"},
-					Enabled: func(st *SettingsState) bool { return st.cfg.Workbench.KanbanMCPToolsEnabled() },
-					Control: toggle(ptr(func(c *config.Config) **bool { return &c.Workbench.KanbanEntryOrdinary }, true)),
 				},
 				{
 					ID:      "row-kanban-auto-start-on-create",
@@ -143,6 +136,25 @@ var pageWorkbench = settingsPage{
 					Aliases: []string{"看板", "卡死", "中断", "超时", "stuck"},
 					Control: interruptTimeoutControl{},
 					Enabled: func(st *SettingsState) bool { return st.cfg.Workbench.AutoRescueStuckEnabled() },
+				},
+			},
+		},
+		{
+			ID:    "workbench.mcp",
+			Title: "MCP 工具",
+			Rows: []setting{
+				{
+					ID:      "row-kanban-mcp-tools",
+					Title:   "注册看板 MCP 工具",
+					Aliases: []string{"看板", "MCP", "工具", "tool", "会话", "agent"},
+					Control: toggle(ptr(func(c *config.Config) **bool { return &c.Workbench.KanbanMCPEnabled }, true)),
+				},
+				{
+					ID:      "row-kanban-entry-ordinary",
+					Title:   "普通会话暴露单一入口",
+					Aliases: []string{"看板", "会话", "入口", "kanban", "tool"},
+					Enabled: func(st *SettingsState) bool { return st.cfg.Workbench.KanbanMCPToolsEnabled() },
+					Control: toggle(ptr(func(c *config.Config) **bool { return &c.Workbench.KanbanEntryOrdinary }, true)),
 				},
 			},
 		},

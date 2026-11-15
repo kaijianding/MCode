@@ -68,6 +68,18 @@ func TestSettingsPageGeneral_Tree(t *testing.T) {
 	})
 }
 
+func TestSettingsSearchPreventSleepTargetsGeneral(t *testing.T) {
+	hit := searchSettingsItem(t, "保持唤醒", "row-automation-prevent-sleep")
+	if hit.Item.Page != "general" || hit.Item.Section != "启动与托盘" {
+		t.Fatalf("保持唤醒定位到 %q/%q，期望 general/启动与托盘", hit.Item.Page, hit.Item.Section)
+	}
+	st := NewSettingsState(settingsTestDir(t), nil, newChatState(NewFakeClient()))
+	st.focusSettingsItem(hit)
+	if st.currentPage != "general" || st.jumpToItemID != "row-automation-prevent-sleep" {
+		t.Fatalf("保持唤醒跳转到 %q/%q", st.currentPage, st.jumpToItemID)
+	}
+}
+
 type generalAboutClient struct{ *fakeUpdateClient }
 
 func (generalAboutClient) ExportDiagnosticsTo(string) error { return nil }

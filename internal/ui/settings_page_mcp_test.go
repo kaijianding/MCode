@@ -486,9 +486,9 @@ func TestMCPServerRowShowsEngineDisabledBadge(t *testing.T) {
 	tt := newThreadDefaultsTestTester(t, dataDir)
 	openMCPDetail(t, tt, "ctx7")
 	waitFor(t, tt, func() bool { return tt.HasText("已在 Claude Code 关闭") })
-	waitFor(t, tt, func() bool {
-		return tt.HasText("这个服务在 Claude Code 里被关掉了（~/.claude.json 的 disabledMcpServers）。MCode 是否注入仍由这里的开关决定。")
-	})
+	if tt.HasText("这个服务在 Claude Code 里被关掉了（~/.claude.json 的 disabledMcpServers）。MCode 是否注入仍由这里的开关决定。") {
+		t.Fatal("重复的 Claude Code 关闭说明不应显示在展开面板")
+	}
 
 	// 引擎侧关闭只做展示：mcode 自己的启停开关仍要在。
 	if !tt.HasText("切换启用 ctx7") {
