@@ -165,6 +165,10 @@ func TestComposerModel_SwitchToOtherAgent(t *testing.T) {
 		t.Fatalf("click model trigger failed: %v", err)
 	}
 
+	if err := tapTextErr(t, tt, "选择其他模型"); err != nil {
+		t.Fatal(err)
+	}
+
 	// 展开后能看到 "o3-mini"
 	waitFor(t, tt, func() bool {
 		return tt.HasText("o3-mini")
@@ -249,6 +253,10 @@ func TestComposerModel_HasMessagesCannotSwitchAgent(t *testing.T) {
 		t.Fatalf("click model trigger failed: %v", err)
 	}
 
+	if err := tapTextErr(t, tt, "选择其他模型"); err != nil {
+		t.Fatal(err)
+	}
+
 	// 出现禁用提示 "下回合生效"
 	waitFor(t, tt, func() bool {
 		return tt.HasText("下回合生效")
@@ -308,6 +316,10 @@ func TestComposerModel_SwitchWithinSameAgent(t *testing.T) {
 	// 点击模型胶囊展开 Popover（按触发按钮的无障碍名“选择模型”）
 	if err := tt.Click("选择模型"); err != nil {
 		t.Fatalf("click model trigger failed: %v", err)
+	}
+
+	if err := tapTextErr(t, tt, "选择其他模型"); err != nil {
+		t.Fatal(err)
 	}
 
 	// 展开后看到 "Claude 3.5 Haiku"
@@ -425,10 +437,6 @@ func TestComposerModel_LeadEffort(t *testing.T) {
 	waitFor(t, tt, func() bool {
 		return tt.HasText("主代理 · Medium") && tt.HasText("子代理 · Medium")
 	})
-	if err := tt.Click("推理强度 中"); err != nil {
-		t.Fatalf("open lead effort slider failed: %v", err)
-	}
-	tt.Frame()
 	// 滑轨拖到最右端选中最高档 High。
 	clickEffortSlider(t, tt, 1)
 
@@ -465,6 +473,7 @@ func TestComposerModel_BeesModel(t *testing.T) {
 	}
 	// 点击顶部“执行”分段进入执行侧卡片
 	tapText(t, tt, "子代理 · Medium")
+	tapText(t, tt, "选择其他模型")
 	waitFor(t, tt, func() bool {
 		return tt.HasText("跟随主导") && tt.HasText("o3-mini")
 	})
@@ -505,10 +514,6 @@ func TestComposerModel_BeesEffort(t *testing.T) {
 	})
 	if err := tapTextErr(t, tt, "子代理 · Medium"); err != nil {
 		t.Fatalf("click Bees tab failed: %v", err)
-	}
-	tt.Frame()
-	if err := tt.Click("推理强度 中"); err != nil {
-		t.Fatalf("open bees effort slider failed: %v", err)
 	}
 	tt.Frame()
 	// 滑轨拖到最左端选中最低档 Low。
@@ -639,11 +644,6 @@ func TestComposerModel_ResetToDefault(t *testing.T) {
 		t.Fatalf("click model trigger failed: %v", err)
 	}
 
-	if err := tt.Click("推理强度"); err != nil {
-		t.Fatalf("open effort card failed: %v", err)
-	}
-	tt.Frame()
-
 	// 点击重置按钮
 	tapText(t, tt, "重置强度与快速模式")
 
@@ -749,9 +749,6 @@ func TestComposerModel_EffortsEmpty(t *testing.T) {
 	if err := tt.Click("选择模型"); err != nil {
 		t.Fatalf("click model trigger failed: %v", err)
 	}
-	if err := tt.Click("推理强度"); err != nil {
-		t.Fatalf("open empty effort card failed: %v", err)
-	}
 
 	waitFor(t, tt, func() bool {
 		return tt.HasText("该模型未提供可调的推理强度")
@@ -788,10 +785,6 @@ func TestComposerModel_FastModeClickPersistsDefaultModel(t *testing.T) {
 	if err := tapTextErr(t, tt, "快速模式"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.Click("推理强度 中"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
 	pin := ModelPin{Provider: "claude", ModelID: "default"}
 	// 主导侧快速模式写会话（SetThreadFastMode），不再写模型偏好。
 	waitFor(t, tt, func() bool {

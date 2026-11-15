@@ -56,8 +56,6 @@ type ModelPickerState struct {
 	MenuOpen    bool            // 触发胶囊的 Popover 展开状态
 	Tab         string          // Swarm 模式当前分段："lead"（默认）或 "bees"
 	ListOpen    map[string]bool // 二级模型列表页展开状态，key 为 ScopeKey+"/"+side
-	EffortOpen  bool            // 选中模型的推理强度卡片是否展开
-	EffortSide  ModelPickerSide // 推理强度卡片对应的侧别
 	MaxBeesOpen bool            // 并发 Bee 上限下拉菜单展开状态
 	TierEditing string          // 正在为其选择模型的档位 ID，空表示未编辑档位
 	searchQuery string          // 列表页搜索框内容，按名称筛选模型
@@ -76,8 +74,6 @@ func (st *ModelPickerState) Reset() {
 	st.MenuOpen = false
 	st.Tab = ""
 	st.ListOpen = nil
-	st.EffortOpen = false
-	st.EffortSide = ModelPickerSideLead
 	st.MaxBeesOpen = false
 	st.TierEditing = ""
 	st.searchQuery = ""
@@ -1010,14 +1006,10 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 					clearModelPanelMoreOpen(p.ScopeKey, "bees")
 					state.TierEditing = ""
 					state.Tab = ""
-					state.EffortOpen = false
-					state.EffortSide = ModelPickerSideLead
 				} else {
 					clearModelCapsuleSnapshot(p.ScopeKey)
 					state.TierEditing = ""
 					state.Tab = ""
-					state.EffortOpen = false
-					state.EffortSide = ModelPickerSideLead
 					state.setListOpen(p.ScopeKey, ModelPickerSideLead, false)
 					state.setListOpen(p.ScopeKey, ModelPickerSideBees, false)
 					clearModelPanelMoreOpen(p.ScopeKey, "lead")
@@ -1270,14 +1262,16 @@ func renderModelPickerMenuBody(c *ui.Context, p ModelPickerProps, state *ModelPi
 				})
 		}
 
-		wrap := ui.Box(c.Key(p.KeyPrefix + "model-list-wrap")).Padding(Space2)
-		wrap.Children(func() {
-			if state.EffortOpen {
-				renderModelPickerCard(c, p, state, state.EffortSide)
-				return
-			}
-			renderModelPickerListPage(c, p, state, side)
-		})
+		depth := modelPickerPageDepth(p, state, side)
+		if depth > 0 {
+			wrap := ui.Box(c.Key(p.KeyPrefix + "model-list-wrap")).Padding(Space2)
+			modelPickerPageTransition(c, wrap, state, depth)
+			wrap.Children(func() { renderModelPickerListPage(c, p, state, side) })
+			return
+		}
+		wrap := ui.Column(c.Key(p.KeyPrefix + "model-slider-wrap"))
+		modelPickerPageTransition(c, wrap, state, depth)
+		wrap.Children(func() { renderModelPickerCard(c, p, state, side) })
 	})
 }
 
@@ -1414,8 +1408,6 @@ func renderModelPickerCard(c *ui.Context, p ModelPickerProps, state *ModelPicker
 	var onOpenModelList func()
 	if !p.Inline {
 		onOpenModelList = func() {
-			state.EffortOpen = false
-			state.EffortSide = side
 			state.setListOpen(p.ScopeKey, side, true)
 			clearModelPanelMoreOpen(p.ScopeKey, modelPickerSideKey(side))
 			modelPickerInvalidate(p)
@@ -1906,7 +1898,7 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		if isMoreOpen {
 			setModelPanelMoreOpen(scopeKey, sideKey, false)
 		} else {
-			state.Reset()
+			state.setListOpen(scopeKey, side, false)
 			clearModelPanelMoreOpen(scopeKey, sideKey)
 		}
 		if state != nil {
@@ -1939,7 +1931,6 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 			return
 		}
 		state.setListOpen(scopeKey, side, false)
-		state.EffortOpen = false
 		clearModelPanelMoreOpen(scopeKey, sideKey)
 		// 选中后清空查询，下次打开列表不残留旧搜索。
 		state.searchQuery = ""
@@ -1949,8 +1940,6 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 	}
 
 	onEffort := func() {
-		state.EffortOpen = true
-		state.EffortSide = side
 		state.setListOpen(scopeKey, side, false)
 		modelPickerInvalidate(p)
 	}
@@ -2255,15 +2244,16 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 				// 中间 Column，Gap 1、Grow 1
 				ui.Column(c.Key(rowKey + "-col")).
 					Gap(Space0).
+					MinWidth(0).
 					Grow(1).
 					Children(func() {
 						ui.Text(c, modelDisplayName).
 							FontSize(uiFont(TypeProse)).
-							TextColor(modelPickerTextPrimary)
+							TextColor(modelPickerTextPrimary).SingleLine().Ellipsis("…")
 						if subtitle != "" {
 							ui.Text(c, subtitle).
 								FontSize(uiFont(TypeFootnote)).
-								TextColor(modelPickerTextSecondary)
+								TextColor(modelPickerTextSecondary).SingleLine().Ellipsis("…")
 						}
 					})
 
@@ -2290,7 +2280,7 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
 						side = ModelPickerSideBees
 					}
-					btn := ui.ButtonBase(c.Key(rowKey+"-reset")).Label("重置").Size(ControlXS, ControlXS).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn := ui.ButtonBase(c.Key(rowKey+"-reset")).Label("重置").Size(ControlXS, ControlXS).Shrink(0).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
 					btn.OnClick(func() { p.OnReset(side); modelPickerInvalidate(p) })
 					btn.Children(func() { ui.Icon(c, iconRotateCcw).Size(10, 10).TextColor(modelPickerTextSecondary) })
 				}
@@ -2299,7 +2289,7 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
 						side = ModelPickerSideBees
 					}
-					btn := ui.ButtonBase(c.Key(rowKey+"-fast")).Label("快速模式").Size(ControlXS, ControlXS).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn := ui.ButtonBase(c.Key(rowKey+"-fast")).Label("快速模式").Size(ControlXS, ControlXS).Shrink(0).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
 					btn.OnClick(func() { p.OnToggleFast(side); modelPickerInvalidate(p) })
 					btn.Children(func() { ui.Icon(c, IconByName("zap")).Size(10, 10).TextColor(modelPickerTextSecondary) })
 				}
@@ -2314,7 +2304,7 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 						idx := effortIndex(modelItem.Efforts, current.Selection.Effort, modelItem.DefaultEffort)
 						label = "推理强度 " + effortLabel(modelItem.Efforts[idx])
 					}
-					btn := ui.ButtonBase(c.Key(rowKey+"-effort")).Label(label).Padding(Space1, Space2).Radius(RadiusSM).Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn := ui.ButtonBase(c.Key(rowKey+"-effort")).Label(label).Padding(Space1, Space2).Radius(RadiusSM).Shrink(0).Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
 					btn.OnClick(func() {
 						if opt.OnEffort != nil {
 							opt.OnEffort()

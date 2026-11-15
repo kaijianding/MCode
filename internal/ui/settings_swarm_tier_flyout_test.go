@@ -108,10 +108,6 @@ func TestSwarmTierModelFlyout(t *testing.T) {
 	model = state.editor.model
 	menu = ui.NewTester(model.view, 330, 800)
 	menu.Frame()
-	if err := menu.Click("推理强度 低"); err != nil {
-		t.Fatalf("展开推理强度: %v，内容: %v", err, menu.Texts())
-	}
-	menu.Frame()
 	clickEffortSlider(t, menu, 1)
 	if state.draft.Effort != "high" {
 		t.Fatalf("强度: %q", state.draft.Effort)

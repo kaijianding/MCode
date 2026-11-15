@@ -301,8 +301,20 @@ func TestModelPickerFlyoutSelection(t *testing.T) {
 	if !fast || !state.MenuOpen {
 		t.Fatal("快速模式应保持浮层打开")
 	}
-	if !menu.HasText("Claude 3.7 Sonnet") {
-		t.Fatalf("打开后应直接显示模型列表: %v", menu.Texts())
+	if !menu.HasText("选择其他模型") || menu.HasText("model-list-search-input") {
+		t.Fatalf("首屏应为强度卡片: %v", menu.Texts())
+	}
+	if err := menu.Click("选择其他模型"); err != nil {
+		t.Fatal(err)
+	}
+	if err := menu.Click("返回"); err != nil {
+		t.Fatal(err)
+	}
+	if !state.MenuOpen || !menu.HasText("选择其他模型") {
+		t.Fatal("返回应保留弹层并显示强度卡片")
+	}
+	if err := menu.Click("选择其他模型"); err != nil {
+		t.Fatal(err)
 	}
 	if err := menu.Click("model-list-search-input"); err != nil {
 		t.Fatal(err)
@@ -962,6 +974,7 @@ func TestModelPickerSelectedRowChangesEffort(t *testing.T) {
 		OnEffort:    func(_ ModelPickerSide, effort string) { selected = effort },
 		OnPickModel: func(ModelPickerSide, ProviderInfo, ModelInfo) { picked = true },
 	}
+	props.State.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
 	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerMenuBody(c, props, props.State) }, 330, 600)
 	if !tt.HasText("Claude 3.7 Sonnet") {
 		t.Fatalf("缺少模型列表: %v", tt.Texts())
@@ -973,5 +986,45 @@ func TestModelPickerSelectedRowChangesEffort(t *testing.T) {
 	clickEffortSlider(t, tt, 1)
 	if selected != "high" || picked {
 		t.Fatalf("强度=%q, 选模型=%v", selected, picked)
+	}
+}
+
+func TestModelPickerCardUsesSelectedSide(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[0].Models[0].Efforts = []string{"low", "high"}
+	providers[1].Models[0].Efforts = []string{"low", "high"}
+	state := &ModelPickerState{MenuOpen: true}
+	var gotSide ModelPickerSide
+	var gotEffort string
+	props := ModelPickerProps{Mode: ModelPickerSwarm, KeyPrefix: "side-test-", ScopeKey: "side-test", State: state,
+		Providers: providers, SwarmOn: true,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet", Effort: "low"},
+		Bees:      ModelSelection{Provider: "codex", Model: "o3-mini", Effort: "low"},
+		OnEffort:  func(side ModelPickerSide, effort string) { gotSide, gotEffort = side, effort },
+	}
+	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerMenuBody(c, props, state) }, 330, 600)
+	if err := tt.Click("子代理 · Low"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("o3-mini") || tt.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("执行侧卡片内容错误: %v", tt.Texts())
+	}
+	clickEffortSlider(t, tt, 1)
+	if gotSide != ModelPickerSideBees || gotEffort != "high" {
+		t.Fatalf("强度写入侧别=%v，强度=%q", gotSide, gotEffort)
+	}
+}
+
+func TestModelPickerSelectedRowSubtitleFitsSingleLine(t *testing.T) {
+	provider := ProviderInfo{ID: "claude", Name: "A very long provider subtitle that must fit on one line"}
+	model := ModelInfo{ID: "long", Name: "A very long model name that must fit on one line", SupportsFast: true, Efforts: []string{"low", "high"}}
+	props := ModelPickerProps{KeyPrefix: "row-fit-", OnReset: func(ModelPickerSide) {}, OnToggleFast: func(ModelPickerSide) {}, OnEffort: func(ModelPickerSide, string) {}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(330).Children(func() {
+			renderModelRow(c, props, modelRowOptions{Provider: provider, Model: model, IsChecked: true, ShowSubtitle: true, OnEffort: func() {}})
+		})
+	}, 330, 200)
+	if r, ok := tt.Find(provider.Name); !ok || r.H > 20 {
+		t.Fatalf("副标题应为单行: rect=%+v, found=%v", r, ok)
 	}
 }
