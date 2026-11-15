@@ -4,7 +4,7 @@
 // 本适配器基于本机 codex-cli 0.165.0 导出的 app-server JSON-RPC 2.0 规范实现。
 //
 // 性能优化与架构设计：
-//  1. 常驻子进程池：每个 Harness 实例按 (workDir, sandbox, 路由指纹) 维护一组常驻的 `codex app-server` 子进程，
+//  1. 常驻子进程池：每个 Harness 实例按 (workDir, sandbox, 路由指纹, transient) 维护一组常驻的 `codex app-server` 子进程，
 //     跨会话与跨轮次复用，消除每轮 fork/exec 进程冷启动与 initialize/initialized 握手开销；
 //     不同项目的会话各持独立进程（切换项目不再杀进程重起），同一项目的并发会话也互不阻塞。
 //  2. 会话级线程缓存：按 threadId 缓存活跃线程，后续轮次直接发起 turn/start，免去重复 session 加载。
@@ -62,7 +62,7 @@ type Options struct {
 	MagpieRoutes func() []MagpieRoute
 }
 
-// maxIdleProcsPerKey 同一 (workDir, sandbox, 路由指纹) 组合下允许保留的空闲常驻进程上限。
+// maxIdleProcsPerKey 同一 (workDir, sandbox, 路由指纹, transient) 组合下允许保留的空闲常驻进程上限。
 const maxIdleProcsPerKey = 2
 
 // codexRunMaxAttempts 是一轮对话允许的最大尝试次数：首次尝试加最多 2 次重试。
@@ -387,6 +387,7 @@ type residentProcess struct {
 	workDir   string
 	sandbox   harness.Sandbox
 	routeKey  string
+	transient bool
 	cleanup   func()
 
 	deadCh   chan struct{}
@@ -444,11 +445,11 @@ func (p *residentProcess) servesMcodeThread(threadID string) bool {
 	return ok
 }
 
-// sameKey 判断该进程是否服务于同一 (workDir, sandbox, 路由指纹) 组合。
+// sameKey 判断该进程是否服务于同一 (workDir, sandbox, 路由指纹, transient) 组合。
 // CODEX_HOME（即所切换的账号）属于 Harness 级别，同一 Harness 内不会变化，
 // 因此无需纳入分组 key；切换账号需新建 Harness。
 func (p *residentProcess) sameKey(turn harness.Turn, routeKey string) bool {
-	return p.workDir == turn.WorkDir && p.sandbox == turn.Sandbox && p.routeKey == routeKey
+	return p.workDir == turn.WorkDir && p.sandbox == turn.Sandbox && p.routeKey == routeKey && p.transient == turn.Transient
 }
 
 func (p *residentProcess) setActiveTurn(at *activeTurnContext) {
@@ -607,7 +608,7 @@ func hardLockedPermission(mode harness.PermissionMode, hardLocked bool, override
 }
 
 // acquireProcess 从进程池里取一个可用的常驻 app-server 进程并标记为 busy；池中没有可用进程时新起一个。
-// 取用规则：在 (workDir, sandbox, 路由指纹) 相同、存活且空闲的进程中，优先选已缓存 turn.SessionID 的那个，
+// 取用规则：在 (workDir, sandbox, 路由指纹, transient) 相同、存活且空闲的进程中，优先选已缓存 turn.SessionID 的那个，
 // 其次选任意一个；取用时顺手把已死的进程移出池并回收。
 func (h *Harness) acquireProcess(ctx context.Context, turn harness.Turn, route *MagpieRoute) (*residentProcess, error) {
 	h.mu.Lock()
@@ -673,7 +674,7 @@ func reapProcesses(procs []*residentProcess) {
 	}
 }
 
-// releaseProcess 把一轮结束后的进程放回池里；同一 (workDir, sandbox, 路由指纹) 下空闲进程超过上限时直接关闭多余的（优先关最旧的）。
+// releaseProcess 把一轮结束后的进程放回池里；同一 (workDir, sandbox, 路由指纹, transient) 下空闲进程超过上限时直接关闭多余的（优先关最旧的）。
 // 已死的进程不再放回，并顺手回收。
 func (h *Harness) releaseProcess(proc *residentProcess) {
 	if proc == nil {
@@ -699,10 +700,10 @@ func (h *Harness) releaseProcess(proc *residentProcess) {
 
 	// 同一 key 下空闲进程数超过上限时，关闭最旧的（即池中靠前的）空闲进程
 	var evicted []*residentProcess
-	for h.idleCountLocked(proc.workDir, proc.sandbox, proc.routeKey) > maxIdleProcsPerKey {
+	for h.idleCountLocked(proc.workDir, proc.sandbox, proc.routeKey, proc.transient) > maxIdleProcsPerKey {
 		idx := -1
 		for i, p := range h.procs {
-			if p != proc && !p.busy && p.workDir == proc.workDir && p.sandbox == proc.sandbox && p.routeKey == proc.routeKey {
+			if p != proc && !p.busy && p.workDir == proc.workDir && p.sandbox == proc.sandbox && p.routeKey == proc.routeKey && p.transient == proc.transient {
 				idx = i
 				break
 			}
@@ -720,11 +721,11 @@ func (h *Harness) releaseProcess(proc *residentProcess) {
 	}
 }
 
-// idleCountLocked 统计指定 (workDir, sandbox, 路由指纹) 下空闲进程的数量（保持调用方持有的 h.mu）。
-func (h *Harness) idleCountLocked(workDir string, sandbox harness.Sandbox, routeKey string) int {
+// idleCountLocked 统计指定 (workDir, sandbox, 路由指纹, transient) 下空闲进程的数量（保持调用方持有的 h.mu）。
+func (h *Harness) idleCountLocked(workDir string, sandbox harness.Sandbox, routeKey string, transient bool) int {
 	n := 0
 	for _, p := range h.procs {
-		if p != nil && !p.busy && p.workDir == workDir && p.sandbox == sandbox && p.routeKey == routeKey {
+		if p != nil && !p.busy && p.workDir == workDir && p.sandbox == sandbox && p.routeKey == routeKey && p.transient == transient {
 			n++
 		}
 	}
@@ -774,6 +775,10 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn, route *Ma
 	}
 
 	args := []string{"app-server", "--stdio"}
+	if turn.Transient {
+		// bee 由 mcode 编排，Codex 多代理工具会让回合挂起。
+		args = append(args, "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false")
+	}
 	if len(h.opts.ExtraArgs) > 0 {
 		args = append(args, h.opts.ExtraArgs...)
 	}
@@ -854,6 +859,7 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn, route *Ma
 		workDir:       turn.WorkDir,
 		sandbox:       turn.Sandbox,
 		routeKey:      magpieRouteKey(route),
+		transient:     turn.Transient,
 		cleanup:       cleanup,
 		deadCh:        make(chan struct{}),
 		cachedThreads: make(map[string]harness.PermissionMode),

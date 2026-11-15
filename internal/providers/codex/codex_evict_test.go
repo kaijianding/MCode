@@ -188,46 +188,47 @@ func TestTransientTurnRetiresProcess(t *testing.T) {
 	}
 }
 
-func TestTransientTurnRetiresReusedIdleProcess(t *testing.T) {
+type argumentSandbox struct {
+	args [][]string
+}
+
+func (s *argumentSandbox) Command(ctx context.Context, workDir string, mode harness.PermissionMode, name string, args ...string) (*exec.Cmd, func(), error) {
+	s.args = append(s.args, append([]string(nil), args...))
+	return codexAppServerCommand(ctx, appServerPong, ""), nil, nil
+}
+
+func TestTransientTurnDisablesMultiAgent(t *testing.T) {
 	h := newEvictHarness(t)
-
-	// 两轮共用同一个沙箱实例与工作目录，才能命中同一个 (workDir, sandbox) 分组复用空闲进程。
-	sb := evictSandbox(appServerPong)
-	workDir := t.TempDir()
-
+	sb := &argumentSandbox{}
+	turn := harness.Turn{WorkDir: t.TempDir(), Mode: harness.ModeAgent, Prompt: "Ping", Sandbox: sb}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 先跑一轮普通对话，池里留下一个可复用的空闲进程
-	if err := h.Run(ctx, harness.Turn{
-		WorkDir: workDir,
-		Mode:    harness.ModeAgent,
-		Prompt:  "Ping",
-		Sandbox: sb,
-	}, nil); err != nil {
-		t.Fatalf("Run failed: %v", err)
+	if err := h.Run(ctx, turn, nil); err != nil {
+		t.Fatalf("normal Run failed: %v", err)
 	}
-	procs := h.poolProcs()
-	if len(procs) != 1 {
-		t.Fatalf("expected 1 idle process, got %d", len(procs))
-	}
-	idle := procs[0]
-
-	// 一次性轮次复用该空闲进程，收尾时直接关闭它，不留在池里
-	if err := h.Run(ctx, harness.Turn{
-		WorkDir:   workDir,
-		Mode:      harness.ModeAgent,
-		Prompt:    "Ping",
-		Sandbox:   sb,
-		Transient: true,
-	}, nil); err != nil {
+	idle := h.poolProcs()[0]
+	turn.Transient = true
+	if err := h.Run(ctx, turn, nil); err != nil {
 		t.Fatalf("transient Run failed: %v", err)
 	}
-
-	if got := len(h.poolProcs()); got != 0 {
-		t.Fatalf("expected the transient turn's process to be retired, pool has %d", got)
+	if procs := h.poolProcs(); len(procs) != 1 || procs[0] != idle || idle.isDead() {
+		t.Fatal("transient turn must leave the normal idle process intact")
 	}
-	if !idle.isDead() {
-		t.Fatal("expected the reused process to be closed after the transient turn")
+	if len(sb.args) != 2 {
+		t.Fatalf("expected two process starts, got %d", len(sb.args))
+	}
+	for i, args := range sb.args {
+		for _, flag := range []string{"features.multi_agent=false", "features.multi_agent_v2=false"} {
+			found := false
+			for j := 1; j < len(args); j++ {
+				if args[j-1] == "-c" && args[j] == flag {
+					found = true
+				}
+			}
+			if found != (i == 1) {
+				t.Errorf("start %d: flag %q present = %v, args = %v", i, flag, found, args)
+			}
+		}
 	}
 }
