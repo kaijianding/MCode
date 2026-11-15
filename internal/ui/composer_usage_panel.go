@@ -1443,9 +1443,10 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 						if inner != nil && inner.used > used {
 							used = inner.used
 						}
-						ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(used)))).
-							FontFeatures("tnum").FontSize(uiFont(FontSizeProjectName)).FontWeight(500).
-							TextColor(ThemeSecondaryText(c)).SingleLine()
+						ui.Row(c.Key("composer-quota-ring-percent-" + keySuffix)).Label(fmt.Sprintf("%d%%", int(math.Round(used)))).FontSize(uiFont(FontSizeProjectName)).FontWeight(500).TextColor(ThemeSecondaryText(c)).Children(func() {
+							rollingNumber(c, "composer-quota-ring-number-"+keySuffix, int(math.Round(used)))
+							ui.Text(c, "%")
+						})
 					}
 					return
 				}
@@ -1473,12 +1474,10 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 									renderComposerQuotaMiniGauge(c, keySuffix+"-"+r.label, r.used, r.resetsAt, r.minutes)
 								}
 							}
-							ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(r.used)))).
-								FontFeatures("tnum").
-								FontSize(uiFont(FontSizeProjectName)).
-								FontWeight(500).
-								TextColor(ThemeSecondaryText(c)).
-								SingleLine()
+							ui.Row(c.Key("composer-quota-percent-" + keySuffix + "-" + r.label)).Label(fmt.Sprintf("%d%%", int(math.Round(r.used)))).FontSize(uiFont(FontSizeProjectName)).FontWeight(500).TextColor(ThemeSecondaryText(c)).Children(func() {
+								rollingNumber(c, "composer-quota-number-"+keySuffix+"-"+r.label, int(math.Round(r.used)))
+								ui.Text(c, "%")
+							})
 						})
 				}
 			})
@@ -1536,9 +1535,12 @@ func renderComposerQuotaMiniGauge(c *ui.Context, key string, used float64, reset
 		Children(func() {
 			if !hasElapsed {
 				// 零填充也保留一个等高的空盒，保证进度条元素始终存在。
-				ui.Box(c.Key("composer-quota-gauge-"+key+"-fill")).
-					Size(width*ratio, height).
-					Background(fill)
+				box := ui.Box(c.Key("composer-quota-gauge-" + key + "-fill"))
+				if reduceMotion(c) {
+					box.Jump("ratio", ratio)
+				}
+				ratio = box.AnimateTo("ratio", ratio, ui.Animation{Duration: animateDuration(c, DurBase), Ease: ui.EaseOut})
+				box.Size(width*ratio, height).Background(fill)
 				return
 			}
 			usedRatio := float64(used) / 100
@@ -1553,8 +1555,12 @@ func renderComposerQuotaMiniGauge(c *ui.Context, key string, used float64, reset
 						Background(ThemePrimaryText(c))
 					continue
 				}
-				box := ui.Box(c.Key(segKey)).
-					Size(contentWidth*seg.grow, height)
+				box := ui.Box(c.Key(segKey))
+				if reduceMotion(c) {
+					box.Jump("grow", seg.grow)
+				}
+				grow := box.AnimateTo("grow", seg.grow, ui.Animation{Duration: animateDuration(c, DurBase), Ease: ui.EaseOut})
+				box.Size(contentWidth*grow, height)
 				switch seg.kind {
 				case quotaBarSegmentNormal, quotaBarSegmentOver:
 					box.Background(fill)

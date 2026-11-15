@@ -1262,23 +1262,8 @@ func renderModelPickerMenuBody(c *ui.Context, p ModelPickerProps, state *ModelPi
 				})
 		}
 
-		// 二级页换页时内容横向滑入 + 淡入（进入与返回反向）。
-		// 深度在卡片页与列表页之间统一计算，换页那一帧由 modelPickerPageTransition 记录方向。
-		depth := modelPickerPageDepth(p, state, side)
-		if depth > 0 {
-			wrap := ui.Box(c.Key(p.KeyPrefix + "model-list-wrap")).Padding(Space2)
-			modelPickerPageTransition(c, wrap, state, depth)
-			wrap.Children(func() {
-				renderModelPickerListPage(c, p, state, side)
-			})
-			return
-		}
-
-		wrap := ui.Column(c.Key(p.KeyPrefix + "model-slider-wrap"))
-		modelPickerPageTransition(c, wrap, state, depth)
-		wrap.Children(func() {
-			renderModelPickerCard(c, p, state, side)
-		})
+		wrap := ui.Box(c.Key(p.KeyPrefix + "model-list-wrap")).Padding(Space2)
+		wrap.Children(func() { renderModelPickerListPage(c, p, state, side) })
 	})
 }
 
@@ -1905,7 +1890,7 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		if isMoreOpen {
 			setModelPanelMoreOpen(scopeKey, sideKey, false)
 		} else {
-			state.setListOpen(scopeKey, side, false)
+			state.MenuOpen = false
 			clearModelPanelMoreOpen(scopeKey, sideKey)
 		}
 		if state != nil {
@@ -1976,36 +1961,15 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 					ui.Text(c, pageTitle).
 						FontSize(uiFont(TypeBody)).
 						TextColor(modelPickerTextSecondary)
-				})
-
-			// 搜索框：外观对齐设置页“搜索模型”框，尺寸更紧凑；输入变化后重绘列表。
-			ui.Row(c.Key(p.KeyPrefix+"model-list-search")).
-				Radius(RadiusMD).
-				Background(ThemeSurface(c)).
-				Border(1, ThemeBorder(c)).
-				Padding(Space2, Space3).
-				Gap(Space3).
-				AlignItems(ui.Center).
-				Margin(0, Space3, Space2, Space3).
-				FillWidth().
-				Children(func() {
-					ui.Icon(c, IconSearch()).
-						Size(12, 12).
-						TextColor(modelPickerTextSecondary)
-					searchIn := ui.TextInput(c.Key(p.KeyPrefix+"model-list-search-input"), &state.searchQuery).
-						Label("model-list-search-input").
-						Placeholder("搜索模型").
-						FontSize(uiFont(TypeBody)).
-						TextColor(modelPickerTextPrimary).
-						BorderWidth(0).
-						Background(ui.Transparent).
-						Padding(0).
-						Grow(1).
-						AutoFocus()
-					if searchIn.Changed() {
-						modelPickerInvalidate(p)
+					if side == ModelPickerSideBees && p.Mode == ModelPickerSwarm {
+						ui.Spacer(c)
+						renderModelPickerMaxBeesCapsule(c, p, state)
 					}
 				})
+
+			ui.Box(c.Key(p.KeyPrefix+"model-list-search-wrap")).Margin(0, Space3, Space2, Space3).FillWidth().Children(func() {
+				SearchField(c, TextFieldProps{Key: p.KeyPrefix + "model-list-search", Value: &state.searchQuery, Label: "model-list-search-input", Placeholder: "搜索模型", FillWidth: true, AutoFocus: true, OnChange: func(string) { modelPickerInvalidate(p) }})
+			})
 
 			var list ui.Element
 			if isAppFlyoutServices(c.Services()) && p.NativeMenu == nil {
@@ -2289,12 +2253,42 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 					}
 				}
 
-				if modelItem.SupportsFast {
+				if modelItem.SupportsFast && !opt.IsChecked {
 					ui.Icon(c, IconByName("zap")).
 						Size(10, 10).
 						TextColor(modelPickerTextSecondary)
 				}
 
+				if opt.IsChecked && p.OnReset != nil {
+					side := ModelPickerSideLead
+					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
+						side = ModelPickerSideBees
+					}
+					btn := ui.ButtonBase(c.Key(rowKey+"-reset")).Label("重置").Size(ControlXS, ControlXS).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn.OnClick(func() { p.OnReset(side); modelPickerInvalidate(p) })
+					btn.Children(func() { ui.Icon(c, iconRotateCcw).Size(10, 10).TextColor(modelPickerTextSecondary) })
+				}
+				if opt.IsChecked && modelItem.SupportsFast && p.OnToggleFast != nil {
+					side := ModelPickerSideLead
+					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
+						side = ModelPickerSideBees
+					}
+					btn := ui.ButtonBase(c.Key(rowKey+"-fast")).Label("快速模式").Size(ControlXS, ControlXS).Center().Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn.OnClick(func() { p.OnToggleFast(side); modelPickerInvalidate(p) })
+					btn.Children(func() { ui.Icon(c, IconByName("zap")).Size(10, 10).TextColor(modelPickerTextSecondary) })
+				}
+				if opt.IsChecked && len(modelItem.Efforts) > 0 && p.OnEffort != nil {
+					side := ModelPickerSideLead
+					if strings.HasPrefix(opt.KeyPrefix, "bees-") {
+						side = ModelPickerSideBees
+					}
+					current := modelPickerSideInfo(p, side)
+					idx := effortIndex(modelItem.Efforts, current.Selection.Effort, modelItem.DefaultEffort)
+					label := effortLabel(modelItem.Efforts[idx])
+					btn := ui.ButtonBase(c.Key(rowKey+"-effort")).Label("推理强度 "+label).Padding(Space1, Space2).Radius(RadiusSM).Disabled(opt.IsLocked || effortCardLockedReason(p, side) != "")
+					btn.OnClick(func() { p.OnEffort(side, modelItem.Efforts[(idx+1)%len(modelItem.Efforts)]); modelPickerInvalidate(p) })
+					btn.Children(func() { ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(modelPickerTextSecondary) })
+				}
 				if opt.IsChecked {
 					ui.Icon(c, IconCheck()).
 						Size(13, 13).

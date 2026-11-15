@@ -130,6 +130,12 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 										Width(0).
 										MinWidth(ControlSM)
 								}
+								if !win.hasElapsed {
+									if reduceMotion(c) {
+										bar.Jump("ratio", ratio)
+									}
+									ratio = bar.AnimateTo("ratio", ratio, ui.Animation{Duration: animateDuration(c, DurBase), Ease: ui.EaseOut})
+								}
 								bar.Children(func() {
 									if !win.hasElapsed {
 										// 没有重置时间：按已用比例单色填充。
@@ -236,12 +242,10 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 
 											renderBar(win, winKey, projected, 120)
 
-											ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(win.UsedPercent)))).
-												FontSize(uiFont(TypeBody)).
-												FontWeight(600).
-												TextColor(quotaPercentColor(c, win.UsedPercent)).
-												Width(40).
-												TextAlign(ui.End)
+											ui.Row(c.Key(winKey + "-percent")).Label(fmt.Sprintf("%d%%", int(math.Round(win.UsedPercent)))).Width(40).Justify(ui.End).AlignItems(ui.Center).FontSize(uiFont(TypeBody)).FontWeight(600).TextColor(quotaPercentColor(c, win.UsedPercent)).Children(func() {
+												rollingNumber(c, winKey+"-number", int(math.Round(win.UsedPercent)))
+												ui.Text(c, "%")
+											})
 										})
 								})
 							}
@@ -282,12 +286,10 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 
 									renderBar(win, winKey, projected, 0)
 
-									ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(win.UsedPercent)))).
-										FontSize(uiFont(TypeBody)).
-										FontWeight(600).
-										TextColor(quotaPercentColor(c, win.UsedPercent)).
-										Width(36).
-										TextAlign(ui.End)
+									ui.Row(c.Key(winKey + "-percent")).Label(fmt.Sprintf("%d%%", int(math.Round(win.UsedPercent)))).Width(36).Justify(ui.End).AlignItems(ui.Center).FontSize(uiFont(TypeBody)).FontWeight(600).TextColor(quotaPercentColor(c, win.UsedPercent)).Children(func() {
+										rollingNumber(c, winKey+"-number", int(math.Round(win.UsedPercent)))
+										ui.Text(c, "%")
+									})
 								})
 							}
 
@@ -387,6 +389,20 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 														}
 													})
 											})
+									}
+
+									for wIdx, win := range curAcc.Windows {
+										if win.UsedPercent < 95 {
+											continue
+										}
+										warning := "即将用尽"
+										if !win.resetsAt.IsZero() {
+											warning += " · 重置于 " + win.resetsAt.Local().Format("15:04")
+										}
+										ui.Row(c.Key(fmt.Sprintf("%s-warning-%d", accKey, wIdx))).FillWidth().Children(func() {
+											ui.Box(c.Key(fmt.Sprintf("%s-warning-indent-%d", accKey, wIdx))).Width(rowIndent)
+											ui.Text(c, warning).FontSize(uiFont(TypeFootnote)).TextColor(quotaLevelColor(c, win.UsedPercent)).SingleLine()
+										})
 									}
 
 									// 相邻画条窗口两两并排，宽窗口独占整行。

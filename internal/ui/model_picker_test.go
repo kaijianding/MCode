@@ -301,7 +301,10 @@ func TestModelPickerFlyoutSelection(t *testing.T) {
 	if !fast || !state.MenuOpen {
 		t.Fatal("快速模式应保持浮层打开")
 	}
-	if err := menu.Click("选择其他模型"); err != nil {
+	if !menu.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("打开后应直接显示模型列表: %v", menu.Texts())
+	}
+	if err := menu.Click("model-list-search-input"); err != nil {
 		t.Fatal(err)
 	}
 	menu.Type("Sonnet")
@@ -310,6 +313,9 @@ func TestModelPickerFlyoutSelection(t *testing.T) {
 	}
 	if !menu.HasText("Claude 3.7 Sonnet") {
 		t.Fatalf("缺少模型: %v", menu.Texts())
+	}
+	if menu.HasText("Claude 3.5 Haiku") {
+		t.Fatalf("搜索结果不应包含未匹配的模型: %v", menu.Texts())
 	}
 	if err := menu.Click("Claude 3.7 Sonnet"); err != nil {
 		t.Fatal(err)
@@ -941,5 +947,27 @@ func TestModelPickerKeepsEndpointAndOldThreadLabel(t *testing.T) {
 	}
 	if name := modelPickerDisplayName(providers, "mcode", "old"); name != "旧模型" {
 		t.Fatalf("旧线程名称错误: %s", name)
+	}
+}
+
+func TestModelPickerSelectedRowChangesEffort(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[0].Models[0].Efforts = []string{"low", "high"}
+	selected := ""
+	picked := false
+	props := ModelPickerProps{KeyPrefix: "effort-test-", ScopeKey: "effort-test", State: &ModelPickerState{}, Providers: providers,
+		Selection:   ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet", Effort: "low"},
+		OnEffort:    func(_ ModelPickerSide, effort string) { selected = effort },
+		OnPickModel: func(ModelPickerSide, ProviderInfo, ModelInfo) { picked = true },
+	}
+	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerMenuBody(c, props, props.State) }, 330, 600)
+	if !tt.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("缺少模型列表: %v", tt.Texts())
+	}
+	if err := tt.Click("推理强度 低"); err != nil {
+		t.Fatal(err)
+	}
+	if selected != "high" || picked {
+		t.Fatalf("强度=%q, 选模型=%v", selected, picked)
 	}
 }

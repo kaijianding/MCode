@@ -1,0 +1,56 @@
+package mcodeui
+
+import (
+	"fmt"
+	"github.com/egoist/mygo/ui"
+	"testing"
+	"time"
+)
+
+func TestQuotaWarningThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		used  float64
+		reset time.Time
+		want  string
+	}{
+		{94.9, time.Time{}, ""},
+		{95, time.Time{}, "即将用尽"},
+		{100, time.Date(2026, 1, 1, 13, 45, 0, 0, time.Local), "即将用尽 · 重置于 13:45"},
+	} {
+		groups := []trayQuotaGroupModel{{Title: "测试", Accounts: []trayQuotaAccountModel{{Windows: []trayQuotaWindowModel{{ShortLabel: "5h", UsedPercent: tc.used, resetsAt: tc.reset}}}}}}
+		tt := ui.NewTester(func(c *ui.Context) { renderQuotaGroupList(c, "test-", groups, quotaGroupListOptions{}) }, 500, 300)
+		tt.Frame()
+		if tc.want == "" {
+			if tt.HasText("即将用尽") {
+				t.Fatalf("%.1f 不应显示提示", tc.used)
+			}
+		} else if !tt.HasText(tc.want) {
+			t.Fatalf("%.1f 缺少 %q: %v", tc.used, tc.want, tt.Texts())
+		}
+	}
+}
+
+func TestQuotaBarMotion(t *testing.T) {
+	for _, reduced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reduced=%v", reduced), func(t *testing.T) {
+			setAppReduceMotion(t, reduced)
+			used := 0.2
+			tt := ui.NewTesterWith(func(c *ui.Context) {
+				ui.Row(c.Key("bar")).Width(200).Height(4).Children(func() {
+					renderQuotaBarSegments(c, "motion-quota", quotaBarSegments(used, 0.5, false, false), ThemeAccent(c), "marker")
+				})
+			}, 220, 50, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced}})
+			tt.Frame()
+			used = 0.4
+			tt.Frame()
+			if tt.FramePending() == reduced {
+				t.Fatalf("减少动效=%v 时帧排队状态不正确", reduced)
+			}
+			tt.Advance(DurBase + time.Second)
+			tt.Frame()
+			if tt.FramePending() {
+				t.Fatal("动效应结束")
+			}
+		})
+	}
+}

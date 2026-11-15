@@ -21,10 +21,12 @@ func renderQuotaBarSegments(c *ui.Context, keyPrefix string, segs []quotaBarSegm
 				Background(ThemePrimaryText(c))
 			continue
 		}
-		box := ui.Box(c.Key(key)).
-			Width(0).
-			Grow(seg.grow).
-			FillHeight()
+		box := ui.Box(c.Key(key)).Width(0).FillHeight()
+		if reduceMotion(c) {
+			box.Jump("grow", seg.grow)
+		}
+		grow := box.AnimateTo("grow", seg.grow, ui.Animation{Duration: animateDuration(c, DurBase), Ease: ui.EaseOut})
+		box.Grow(grow)
 		switch seg.kind {
 		case quotaBarSegmentNormal, quotaBarSegmentOver:
 			box.Background(fill)
