@@ -1024,6 +1024,7 @@ func (s *SettingsState) switchSettingsPageLocked(id string) (bool, func()) {
 		disposeEditor = detachSwarmTierEditorLocked(s)
 	}
 	if s.currentPage != target {
+		s.noteError("")
 		s.endpoints.failedAt = time.Time{}
 	}
 	loadProviders := false
@@ -1161,10 +1162,6 @@ resolved:
 	s.jumpToItemID = hit.Item.ID
 	s.highlightItemID = hit.Item.ID
 	s.highlightStartedAt = time.Now()
-	// 命中项被收在页底高级区里时先展开，否则跳过去也看不到那一行。
-	if hit.Item.Advanced {
-		s.setSettingsAdvancedOpenLocked(normalizeSettingsPageID(hit.Item.Page), true)
-	}
 	if providerID != "" {
 		s.providerRows.currentProvider = providerID
 		s.providerRows.currentProviderKind = "cli"
@@ -1523,108 +1520,114 @@ func renderSettingsDetail(c *ui.Context, st *SettingsState) {
 		st.ensureAgentConfCurrent()
 	}
 
-	detailScroll := ui.Scroll(c.Key("settings-detail-scroll")).Fill().Background(ThemeWindowBg(c))
-	setSwarmTierEditorViewport(c, st, detailScroll.Bounds())
-	detailScroll.Children(func() {
-		ui.Row(c.Key("settings-detail-outer")).FillWidth().Justify(ui.Center).Padding(0, Space7).Children(func() {
-			ui.Column(c.Key("settings-detail-container")).
-				Label("设置详情列").
-				MaxWidth(settingsContentMaxWidth).
-				FillWidth().
-				Padding(Space5, Space6, Space8, Space6).
-				Gap(settingsSectionGap).
-				Children(func() {
-					title := "通用"
-					for _, p := range settingsPages() {
-						if p.id == normalizeSettingsPageID(st.currentPage) {
-							title = p.title
-							break
-						}
-					}
-
-					// 顶部标题及支持刷新的页面操作。
-					ui.Row(c.Key("settings-detail-title-row")).
-						AlignItems(ui.Center).
-						Children(func() {
-							ui.Text(c, title).
-								FontSize(uiFont(TypePageTitle)).
-								FontWeight(500).
-								TextColor(ThemePrimaryText(c)).
-								Grow(1)
-
-							if st.currentPage == "extensions" || st.currentPage == "models" {
-								st.mu.Lock()
-								refreshing := (st.currentPage == "models" && st.modelsRefreshing) || (st.currentPage == "extensions" && st.agentConfLoading)
-								st.mu.Unlock()
-								refreshLabel := "刷新"
-								if refreshing {
-									refreshLabel = "刷新中…"
-								}
-								refreshBtn := ui.ButtonBase(c.Key("settings-refresh-btn")).
-									Label(refreshLabel).
-									Disabled(refreshing).
-									Radius(RadiusSM).
-									Padding(Space1, Space3)
-								scale := motionPressScale(c, refreshBtn, "button-press-scale", !refreshing && refreshBtn.Pressed())
-								refreshBtn.Scale(scale, scale)
-								if refreshBtn.Hovered() {
-									refreshBtn.Background(ThemeHover(c))
-								}
-								if refreshBtn.Clicked() {
-									if st.currentPage == "models" {
-										// 合并页同时刷新模型库与供应商目录。
-										st.refreshModels()
-										st.loadAgy(true)
-										st.loadProviderRows()
-										loadCustomEndpoints(st)
-										st.loadPiMagpieEndpoints()
-									} else {
-										st.loadAgentConf(st.currentProjectDir())
-									}
-								}
-								refreshBtn.Children(func() {
-									ui.Text(c, refreshLabel).
-										FontSize(uiFont(TypeBody)).
-										TextColor(ThemeAccent(c))
-								})
+	ui.Column(c.Key("settings-detail-root")).Fill().Children(func() {
+		if st.errorMessage != "" {
+			ui.Row(c.Key("settings-error-outer")).FillWidth().Justify(ui.Center).Padding(Space5, Space7, settingsVerticalPadding, Space7).Children(func() {
+				ui.Row(c.Key("settings-error-banner")).
+					Label("设置错误").
+					MaxWidth(settingsContentMaxWidth).
+					FillWidth().
+					Padding(Space3, Space4).
+					Radius(RadiusMD).
+					Background(ThemeDanger(c).Alpha(0.15)).
+					Children(func() {
+						ui.Text(c, st.errorMessage).
+							TextColor(ThemeDanger(c)).
+							FontSize(uiFont(TypeBody))
+					})
+			})
+		}
+		detailScroll := ui.Scroll(c.Key("settings-detail-scroll")).FillWidth().Grow(1).MinHeight(0).Background(ThemeWindowBg(c))
+		setSwarmTierEditorViewport(c, st, detailScroll.Bounds())
+		detailScroll.Children(func() {
+			ui.Row(c.Key("settings-detail-outer")).FillWidth().Justify(ui.Center).Padding(0, Space7).Children(func() {
+				ui.Column(c.Key("settings-detail-container")).
+					Label("设置详情列").
+					MaxWidth(settingsContentMaxWidth).
+					FillWidth().
+					Padding(Space5, Space6, Space8, Space6).
+					Gap(settingsSectionGap).
+					Children(func() {
+						title := "通用"
+						for _, p := range settingsPages() {
+							if p.id == normalizeSettingsPageID(st.currentPage) {
+								title = p.title
+								break
 							}
-						})
+						}
 
-					if st.errorMessage != "" {
-						ui.Row(c.Key("settings-error-banner")).
-							Padding(Space3, Space4).
-							Radius(RadiusMD).
-							Background(ThemeDanger(c).Alpha(0.15)).
+						// 顶部标题及支持刷新的页面操作。
+						ui.Row(c.Key("settings-detail-title-row")).
+							AlignItems(ui.Center).
 							Children(func() {
-								ui.Text(c, st.errorMessage).
-									TextColor(ThemeDanger(c)).
-									FontSize(uiFont(TypeBody))
-							})
-					}
+								ui.Text(c, title).
+									FontSize(uiFont(TypePageTitle)).
+									FontWeight(500).
+									TextColor(ThemePrimaryText(c)).
+									Grow(1)
 
-					// 非法值已被重置，不是错误：只在错误条下面补一条黄色提示，保存照常进行（E-07）。
-					if st.configWarning != "" {
-						ui.Row(c.Key("settings-warning-banner")).
-							Padding(Space3, Space4).
-							Radius(RadiusMD).
-							Background(ThemeWarning(c).Alpha(0.15)).
-							Children(func() {
-								ui.Text(c, st.configWarning).
-									TextColor(ThemeWarning(c)).
-									FontSize(uiFont(TypeBody))
+								if st.currentPage == "extensions" || st.currentPage == "models" {
+									st.mu.Lock()
+									refreshing := (st.currentPage == "models" && st.modelsRefreshing) || (st.currentPage == "extensions" && st.agentConfLoading)
+									st.mu.Unlock()
+									refreshLabel := "刷新"
+									if refreshing {
+										refreshLabel = "刷新中…"
+									}
+									refreshBtn := ui.ButtonBase(c.Key("settings-refresh-btn")).
+										Label(refreshLabel).
+										Disabled(refreshing).
+										Radius(RadiusSM).
+										Padding(Space1, Space3)
+									scale := motionPressScale(c, refreshBtn, "button-press-scale", !refreshing && refreshBtn.Pressed())
+									refreshBtn.Scale(scale, scale)
+									if refreshBtn.Hovered() {
+										refreshBtn.Background(ThemeHover(c))
+									}
+									if refreshBtn.Clicked() {
+										if st.currentPage == "models" {
+											// 合并页同时刷新模型库与供应商目录。
+											st.refreshModels()
+											st.loadAgy(true)
+											st.loadProviderRows()
+											loadCustomEndpoints(st)
+											st.loadPiMagpieEndpoints()
+										} else {
+											st.loadAgentConf(st.currentProjectDir())
+										}
+									}
+									refreshBtn.Children(func() {
+										ui.Text(c, refreshLabel).
+											FontSize(uiFont(TypeBody)).
+											TextColor(ThemeAccent(c))
+									})
+								}
 							})
-					}
 
-					// 页面树里的页面由声明式渲染器画，重置也按行派生；其余页面走原有实现。
-					page := normalizeSettingsPageID(st.currentPage)
-					if treePage, ok := settingsTreePageOf(page); ok {
-						renderSettingsTreePage(c, st, treePage)
-						renderSettingsResetArea(c, st, treePage.ID)
-					}
-				})
+						// 非法值已被重置，不是错误：只在错误条下面补一条黄色提示，保存照常进行（E-07）。
+						if st.configWarning != "" {
+							ui.Row(c.Key("settings-warning-banner")).
+								Padding(Space3, Space4).
+								Radius(RadiusMD).
+								Background(ThemeWarning(c).Alpha(0.15)).
+								Children(func() {
+									ui.Text(c, st.configWarning).
+										TextColor(ThemeWarning(c)).
+										FontSize(uiFont(TypeBody))
+								})
+						}
+
+						// 页面树里的页面由声明式渲染器画，重置也按行派生；其余页面走原有实现。
+						page := normalizeSettingsPageID(st.currentPage)
+						if treePage, ok := settingsTreePageOf(page); ok {
+							renderSettingsTreePage(c, st, treePage)
+							renderSettingsResetArea(c, st, treePage.ID)
+						}
+					})
+			})
 		})
-	})
 
+	})
 }
 
 const settingsVerticalPadding = 0

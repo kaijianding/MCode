@@ -573,6 +573,7 @@ func TestSettingsNav_SearchPageKeywords(t *testing.T) {
 		query, want, unwanted string
 	}{
 		{"快捷回复", "会话", "工作台"},
+		{"reply", "会话", "工作台"},
 		{"commit", "版本控制", "工作台"},
 		{"nmem", "记忆", "扩展"},
 	} {
@@ -941,5 +942,59 @@ func TestSettings_ExtensionsRefreshLoading(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) { renderSettingsDetail(c, st) }, 1200, 1600)
 	if !tt.HasText("刷新中…") {
 		t.Fatalf("未显示刷新状态：%v", tt.Texts())
+	}
+}
+
+func TestSettingsErrorClearedOnPageSwitch(t *testing.T) {
+	st := NewSettingsState(settingsTestDir(t), nil, nil)
+	st.currentPage = "general"
+	st.noteError("保存失败")
+	st.selectSettingsPage("general")
+	if st.errorMessage == "" {
+		t.Fatal("停留在同一页面时不应清除错误")
+	}
+	st.selectSettingsPage("conversation")
+	if st.errorMessage != "" {
+		t.Fatalf("切页后错误未清除: %q", st.errorMessage)
+	}
+}
+
+func TestSettingsErrorBannerStaysOutsideScroll(t *testing.T) {
+	st := NewSettingsState(settingsTestDir(t), nil, nil)
+	st.currentPage = "general"
+	st.noteError("保存失败")
+	tt := ui.NewTester(func(c *ui.Context) { renderSettingsDetail(c, st) }, 800, 350)
+	tt.Frame()
+	banner, ok := tt.Find("设置错误")
+	if !ok {
+		t.Fatal("缺少错误条")
+	}
+	before, ok := tt.Find("默认权限")
+	if !ok {
+		t.Fatal("缺少设置行")
+	}
+	tt.Scroll(400, 250, 0, 1000)
+	tt.Frame()
+	afterBanner, ok := tt.Find("设置错误")
+	if !ok || afterBanner.Y != banner.Y {
+		t.Fatalf("滚动时错误条移动: %+v -> %+v", banner, afterBanner)
+	}
+	after, ok := tt.Find("默认权限")
+	if !ok || after.Y >= before.Y {
+		t.Fatalf("详情未滚动: %+v -> %+v", before, after)
+	}
+}
+
+func TestSettingsQuickReplySearchAliases(t *testing.T) {
+	for _, query := range []string{"quick", "reply", "replies", "canned", "snippet", "template", "快捷回复", "常用语", "短语"} {
+		found := false
+		for _, hit := range matchSettingsItems(query) {
+			if hit.Item.ID == "row-quick-replies" && hit.Item.Page == "conversation" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("搜索 %q 未命中会话的快捷回复", query)
+		}
 	}
 }

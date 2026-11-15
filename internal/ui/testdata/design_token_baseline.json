@@ -849,14 +849,6 @@
       "heights": 0,
       "raw_white": 0
     },
-    "internal/ui/settings_page_advanced.go": {
-      "colors": 0,
-      "font_sizes": 0,
-      "radii": 0,
-      "paddings": 0,
-      "heights": 0,
-      "raw_white": 0
-    },
     "internal/ui/settings_page_appearance.go": {
       "colors": 0,
       "font_sizes": 0,

@@ -71,7 +71,7 @@ var pageConversation = settingsPage{
 				{
 					ID:      "row-quick-replies",
 					Title:   "快捷回复",
-					Aliases: []string{"快捷回复", "常用回复"},
+					Aliases: []string{"快捷回复", "常用回复", "常用语", "短语", "quick", "reply", "replies", "canned", "snippet", "template"},
 					Control: link(func(st *SettingsState) string {
 						return fmt.Sprintf("%d 个", len(st.cfg.QuickReplies))
 					}, "quick-replies"),

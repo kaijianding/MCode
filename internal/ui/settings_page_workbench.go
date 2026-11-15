@@ -48,8 +48,7 @@ var pageWorkbench = settingsPage{
 		"font", "size", "工作台", "看板", "任务",
 		"open in", "editors", "apps", "applications", "finder", "vscode",
 		"cursor", "zed", "xcode", "iterm", "terminal", "shell", "qspace", "打开方式", "编辑器", "应用",
-		"quick", "reply", "replies", "canned", "snippet", "template",
-		"快捷回复", "常用语", "短语", "文件树",
+		"文件树",
 	},
 	Sections: []settingsSection{
 		{

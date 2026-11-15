@@ -930,7 +930,7 @@ func renderPinnedModelRow(c *ui.Context, st *SettingsState, ps *modelsPageState,
 	if ps.dragFrom < 0 {
 		row.Jump("models-pin-offset", 0)
 		offset = 0
-	} else if idx == ps.dragFrom {
+	} else if idx == ps.dragFrom || reduceMotion(c) {
 		row.Jump("models-pin-offset", offset)
 	} else {
 		offset = row.AnimateTo("models-pin-offset", offset, springSnappy)

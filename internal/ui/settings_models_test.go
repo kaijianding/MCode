@@ -1617,3 +1617,27 @@ func TestSettings_ModelsPage_EmptyCatalogUnavailableStaysHidden(t *testing.T) {
 		t.Fatalf("未登录的空目录供应商不应显示模型区: %v", tt.Texts())
 	}
 }
+
+func TestSettingsModelsPinDragReduceMotion(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	for _, id := range []string{"first", "second"} {
+		if _, err := fake.AddModelToList(context.Background(), ModelPin{Provider: "claude", ModelID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tt, st := modelsPageTester(t, fake, nil)
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tt.Frame()
+	before, ok := tt.Find("Claude Second")
+	if !ok {
+		t.Fatal("缺少第二个收藏模型")
+	}
+	st.modelsPage.dragFrom = 0
+	st.modelsPage.dragDy = 59
+	tt.Frame()
+	after, ok := tt.Find("Claude Second")
+	if !ok || before.Y-after.Y < 58 || before.Y-after.Y > 60 {
+		t.Fatalf("减少动效时相邻行应立即移动 59: %+v -> %+v", before, after)
+	}
+}

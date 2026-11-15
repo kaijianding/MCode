@@ -12,13 +12,12 @@ import (
 // Page 是新版设置页的 id（与 settingsPages() 一致）；Block 表示区块级条目（列表区而非单行控件），
 // Dynamic 表示按数据循环生成的模板行，此时 ID 只登记固定前缀。
 type settingsItem struct {
-	ID       string
-	Page     string
-	Sheet    string
-	Section  string
-	Title    string
-	Aliases  []string
-	Advanced bool
+	ID      string
+	Page    string
+	Sheet   string
+	Section string
+	Title   string
+	Aliases []string
 	// NmemOnly 表示只在 Nowledge Mem 后端渲染的行：本地记忆后端下这类行不渲染，
 	// 逐项搜索也必须过滤掉，否则点进去会落到一个不存在的行。
 	NmemOnly bool
