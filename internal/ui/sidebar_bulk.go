@@ -602,17 +602,25 @@ func (s *chatState) undoLastBulk() {
 				s.mu.Lock()
 				installed := s.lastBulk == nil
 				if installed {
-					copy := *lb
-					copy.undo = retry
-					copy.count = len(retry)
-					s.lastBulk = &copy
+					next := *lb
+					next.undo = retry
+					next.count = len(retry)
+					s.lastBulk = &next
 				}
 				s.mu.Unlock()
 				if installed {
 					s.scheduleLastBulkExpiry()
 				}
 			}
-			s.setToast(fmt.Sprintf("已撤销 %d 项，%d 项失败：%s", len(ops)-len(failed), len(failed), errMsg))
+			if len(failed) == len(ops) {
+				if strings.Contains(strings.ToLower(errMsg), "expire") || strings.Contains(errMsg, "过期") {
+					s.setToast("撤销已过期")
+				} else {
+					s.setToast("撤销失败: " + errMsg)
+				}
+			} else {
+				s.setToast(fmt.Sprintf("已撤销 %d 项，%d 项失败：%s", len(ops)-len(failed), len(failed), errMsg))
+			}
 		}
 		s.invalidate()
 	}()

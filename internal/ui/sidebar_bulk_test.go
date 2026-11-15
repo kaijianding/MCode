@@ -58,6 +58,20 @@ func TestSidebarBulk_PartialUndo(t *testing.T) {
 	}
 }
 
+func TestSidebarBulk_SingleUndoExpired(t *testing.T) {
+	fake := &bulkUndoTestClient{FakeClient: NewFakeClient(), errorsByProject: map[string]error{"p1": errors.New("token expired")}}
+	s := newChatState(fake)
+	s.lastBulk = &lastBulkInfo{kind: "dormant", count: 1, at: time.Now(), undo: []bulkUndoOp{{"p1", "a"}}}
+	s.undoLastBulk()
+	waitUntil(t, "撤销结果", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.toastMessage != "" })
+	s.mu.Lock()
+	message := s.toastMessage
+	s.mu.Unlock()
+	if message != "撤销已过期" {
+		t.Fatalf("toast = %q", message)
+	}
+}
+
 func TestArchiveStopsStewardTaskWatch(t *testing.T) {
 	for _, bulk := range []bool{false, true} {
 		t.Run(map[bool]string{false: "单条", true: "批量"}[bulk], func(t *testing.T) {
