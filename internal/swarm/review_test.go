@@ -260,10 +260,13 @@ func TestPollReviews_TimeoutStopsSession(t *testing.T) {
 }
 
 func TestPollReviews_L3BudgetIndependentOfAcceptance(t *testing.T) {
+	if defaultReviewTimeout != 10*time.Minute {
+		t.Fatalf("L3 timeout = %s, want 10m", defaultReviewTimeout)
+	}
 	for _, commands := range []int{0, 1, 8} {
 		t.Run(strconv.Itoa(commands), func(t *testing.T) {
 			started := time.Now()
-			now := started.Add(time.Second + reviewCheckBudgetMargin)
+			now := started.Add(defaultReviewTimeout - time.Nanosecond)
 			driver := newFakeDriver()
 			driver.setSessionState("review", kanban.SessionState{Running: true})
 			stopped, reports := 0, 0
@@ -284,12 +287,17 @@ func TestPollReviews_L3BudgetIndependentOfAcceptance(t *testing.T) {
 			}}}
 			m.pollReviews(context.Background())
 			if got := m.State("lead").Bees[0]; got.ReviewState != ReviewRunning || stopped != 0 {
+				t.Fatalf("timed out before budget boundary: %+v stopped=%d", got, stopped)
+			}
+			now = now.Add(time.Nanosecond)
+			m.pollReviews(context.Background())
+			if got := m.State("lead").Bees[0]; got.ReviewState != ReviewRunning || stopped != 0 {
 				t.Fatalf("timed out at budget boundary: %+v stopped=%d", got, stopped)
 			}
 			now = now.Add(time.Nanosecond)
 			m.pollReviews(context.Background())
 			if got := m.State("lead").Bees[0]; got.ReviewState != ReviewNeedsHuman || stopped != 1 {
-				t.Fatalf("L3 did not use base budget: %+v stopped=%d", got, stopped)
+				t.Fatalf("L3 did not use fixed timeout: %+v stopped=%d", got, stopped)
 			}
 			m.checkReports(context.Background())
 			if reports != 0 {
