@@ -1,10 +1,29 @@
 package mcodeui
 
 import (
+	"context"
+	"errors"
 	"github.com/egoist/mygo/ui"
 	"testing"
 	"time"
 )
+
+type failingAutomationPreviewClient struct{ *FakeClient }
+
+func (c *failingAutomationPreviewClient) PreviewAutomationSchedule(context.Context, AutomationSchedule, time.Time, int) (AutomationSchedulePreview, error) {
+	return AutomationSchedulePreview{}, errors.New("预览失败")
+}
+
+func TestAutomationSchedulePreviewError(t *testing.T) {
+	s := &chatState{client: &failingAutomationPreviewClient{NewFakeClient()}}
+	as := &automationState{scheduleType: "daily", timeOfDay: "09:00"}
+	defer as.stopSchedulePreview()
+	tt := ui.NewTester(func(c *ui.Context) {
+		s.applyWorkspaceUpdates()
+		ui.Column(c).Fill().Children(func() { renderAutomationScheduleFields(c, s, as) })
+	}, 660, 600)
+	waitFor(t, tt, func() bool { return tt.HasText("预览失败") })
+}
 
 func TestAutomationScheduleVisualAllTypes(t *testing.T) {
 	for _, width := range []int{360, 660} {

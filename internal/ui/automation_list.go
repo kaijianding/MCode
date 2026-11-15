@@ -22,6 +22,25 @@ type automationListProps struct {
 	OnEdit          func(Automation)
 }
 
+func automationListIcon(c *ui.Context, fields automationVisualRow) (*ui.SVG, ui.Color) {
+	switch {
+	case fields.Kind == "running":
+		return IconLoader(), ThemeAccent(c)
+	case fields.Kind == "failed":
+		return IconCircleX(), ThemeDanger(c)
+	case fields.Plan == "已完成":
+		return IconCircleCheck(), ThemeSuccess(c)
+	case fields.Plan != "":
+		return IconCircleSmall(), ThemeSecondaryText(c)
+	case fields.Kind == "succeeded":
+		return IconCircleCheck(), ThemeSuccess(c)
+	case fields.Kind == "stopped":
+		return IconCircleStop(), ThemeSecondaryText(c)
+	default:
+		return IconCalendarClock(), ThemeTertiaryText(c)
+	}
+}
+
 func renderAutomationList(c *ui.Context, p automationListProps) {
 	scroll := ui.Scroll(c.Key("automation-scroll-list")).Grow(1).FillWidth()
 	if p.Scroll != nil {
@@ -65,21 +84,7 @@ func renderAutomationList(c *ui.Context, p automationListProps) {
 				}
 				row.Children(func() {
 					ui.Row(c.Key("automation-item-row1-" + a.ID)).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(Space2).Children(func() {
-						icon, color := IconCalendarClock(), ThemeTertiaryText(c)
-						switch {
-						case fields.Kind == "running":
-							icon, color = IconLoader(), ThemeAccent(c)
-						case fields.Plan == "已完成":
-							icon, color = IconCheck(), ThemeSecondaryText(c)
-						case fields.Plan != "":
-							icon, color = IconCircleSmall(), ThemeSecondaryText(c)
-						case fields.Kind == "failed":
-							icon, color = IconCircleX(), ThemeDanger(c)
-						case fields.Kind == "succeeded":
-							icon, color = IconCircleCheck(), ThemeSuccess(c)
-						case fields.Kind == "stopped":
-							icon, color = IconCircleStop(), ThemeSecondaryText(c)
-						}
+						icon, color := automationListIcon(c, fields)
 						ui.Icon(c, icon).Size(IconSM, IconSM).TextColor(color).Shrink(0)
 						weight := 400
 						if a.ID == p.SelectedID || p.Unread[a.ID] > 0 {

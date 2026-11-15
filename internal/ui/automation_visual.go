@@ -48,7 +48,9 @@ func automationVisualRowFields(a Automation, projectName, scopeID string, runnin
 		row.Kind = kind
 		switch kind {
 		case "succeeded":
-			row.Result = "上次成功"
+			if row.Plan != "已完成" {
+				row.Result = "上次成功"
+			}
 		case "failed":
 			row.Result = "上次失败"
 		default:

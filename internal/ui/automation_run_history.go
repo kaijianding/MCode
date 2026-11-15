@@ -192,7 +192,7 @@ func renderAutomationRunHistory(c *ui.Context, s *chatState, as *automationState
 						Button(c.Key("automation-runs-filter-"+f.label), ButtonOpts{Text: f.label, Label: "筛选" + f.label, OnClick: func() { automationMu.Lock(); f.click(); automationMu.Unlock(); s.invalidate() }, Variant: variant, Size: ControlXS})
 					}
 					value := includeArchived
-					ui.Switch(c.Key("automation-runs-include-archived"), &value).Label("显示已归档运行记录")
+					ui.Switch(c.Key("automation-runs-include-archived"), &value).Label("显示已归档")
 					ui.Text(c, "显示已归档").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 					if value != includeArchived {
 						automationMu.Lock()
@@ -219,6 +219,7 @@ func renderAutomationRunHistory(c *ui.Context, s *chatState, as *automationState
 		}
 		if runsErr != "" {
 			ui.Text(c, "加载记录失败: "+runsErr).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c))
+			Button(c.Key("automation-runs-retry"), ButtonOpts{Text: "重试", OnClick: func() { s.loadAutomationRuns(selectedID) }, Variant: ButtonSecondary, Size: ControlXS})
 			return
 		}
 		if len(runs) == 0 {
@@ -328,7 +329,7 @@ func renderAutomationRunHistory(c *ui.Context, s *chatState, as *automationState
 				})
 			}
 			if shown == 0 {
-				ui.Text(c, "最近 100 条中无匹配").FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c))
+				ui.Text(c, "无匹配").FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c))
 			}
 			if len(runs) >= 100 {
 				ui.Text(c, "仅显示最近 100 条").FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c))

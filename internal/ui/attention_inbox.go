@@ -658,12 +658,16 @@ func renderAttentionInboxItem(c *ui.Context, s *chatState, item AttentionItem) {
 
 	row := ui.Row(c.Key("attention-item-"+item.ID)).
 		FillWidth().
+		Focusable().
+		Transition(motionListItem(c)).
 		Padding(Space1, Space2).
 		Radius(RadiusSM).
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Label("待处理事项 " + title)
-	if row.Hovered() {
+	rowHovered := row.Hovered()
+	showRowActions := rowHovered || row.FocusWithin()
+	if rowHovered {
 		row.Background(ThemeHover(c))
 	}
 	if row.Clicked() {
@@ -700,14 +704,16 @@ func renderAttentionInboxItem(c *ui.Context, s *chatState, item AttentionItem) {
 					})
 			})
 
-		id := item.ID
-		Button(c.Key("attention-resolve-"+id), ButtonOpts{
-			Text:     "标记已处理",
-			Label:    "标记已处理 " + title,
-			Size:     ControlXS,
-			Variant:  ButtonSecondary,
-			OnClick:  func() { s.resolveAttentionItem(id) },
-			Disabled: false,
-		})
+		if showRowActions {
+			id := item.ID
+			Button(c.Key("attention-resolve-"+id), ButtonOpts{
+				Text:     "标记已处理",
+				Label:    "标记已处理 " + title,
+				Size:     ControlXS,
+				Variant:  ButtonSecondary,
+				OnClick:  func() { s.resolveAttentionItem(id) },
+				Disabled: false,
+			})
+		}
 	})
 }

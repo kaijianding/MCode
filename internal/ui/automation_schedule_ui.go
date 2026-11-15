@@ -91,6 +91,7 @@ func (as *automationState) cancelSchedulePreview() {
 	as.previewID++
 	as.previewValid = false
 	as.previewVisible = false
+	as.previewErr = ""
 }
 
 func (as *automationState) stopSchedulePreview() {
@@ -132,6 +133,11 @@ func (as *automationState) updateSchedulePreview(s *chatState) {
 				return
 			}
 			as.preview = result
+			if err != nil {
+				as.previewErr = err.Error()
+			} else {
+				as.previewErr = ""
+			}
 			as.previewVisible = err == nil && (len(result.Times) > 0 || result.Exhausted)
 			s.invalidate()
 		})
@@ -404,6 +410,9 @@ func renderAutomationScheduleFields(c *ui.Context, s *chatState, as *automationS
 		ui.Text(c, msg).TextColor(ThemeDanger(c)).FontSize(uiFont(TypeFootnote))
 	}
 	as.updateSchedulePreview(s)
+	if as.previewErr != "" {
+		ui.Text(c, as.previewErr).TextColor(ThemeDanger(c)).FontSize(uiFont(TypeFootnote))
+	}
 	if as.previewVisible {
 		ui.Column(c.Key("automation-preview")).Gap(Space1).Transition(motionTransition(c, ui.ElementTransition{Duration: DurBase, Enter: &ui.Motion{Opacity: 0}})).Children(func() {
 			ui.Text(c, "预计运行").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))

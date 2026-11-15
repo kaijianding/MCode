@@ -327,7 +327,6 @@ func renderAutomationEditor(c *ui.Context, s *chatState, as *automationState, is
 							choice = "创建为暂停"
 						}
 						ui.Row(c.Key("automation-create-mode-row")).Gap(Space2).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "创建状态").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 							if ui.Select(c.Key("automation-create-mode"), &choice, []string{"创建并启用", "创建为暂停"}).Label("创建状态").Width(140).Changed() {
 								as.enabled = choice != "创建为暂停"
 							}

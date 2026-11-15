@@ -179,6 +179,54 @@ func attentionItem(id, kind, subjectType, threadID, title string, age time.Durat
 	}
 }
 
+func hoverAttentionItem(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	r, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("找不到条目 %s", label)
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	waitFor(t, tt, func() bool { return tt.HasText("标记已处理") })
+}
+
+func TestAttentionInboxRowActions(t *testing.T) {
+	s := &chatState{client: newAttentionFakeClient()}
+	item := attentionItem("a", "thread_failed", "thread", "t1", "测试事项", time.Minute)
+	tt := ui.NewTesterWith(func(c *ui.Context) { renderAttentionInboxItem(c, s, item) }, 500, 200, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+	tt.Move(490, 190)
+	tt.Frame()
+	if tt.HasText("标记已处理") {
+		t.Fatal("未悬停时显示操作")
+	}
+	hoverAttentionItem(t, tt, "待处理事项 测试事项")
+	tt.Move(490, 190)
+	tt.Frame()
+	if tt.HasText("标记已处理") {
+		t.Fatal("离开后仍显示操作")
+	}
+	tt.Key(0, ui.KeyTab)
+	waitFor(t, tt, func() bool { return tt.HasText("标记已处理") })
+}
+
+func TestAttentionInboxReducedMotionRemoval(t *testing.T) {
+	s := &chatState{client: newAttentionFakeClient()}
+	item := attentionItem("a", "thread_failed", "thread", "t1", "测试事项", time.Minute)
+	visible := true
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		ui.Column(c.Key("attention-test-list")).Children(func() {
+			if visible {
+				renderAttentionInboxItem(c, s, item)
+			}
+		})
+	}, 500, 200, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+	tt.Frame()
+	visible = false
+	tt.Frame()
+	if tt.FramePending() {
+		t.Fatal("减少动效时移除条目不应请求后续帧")
+	}
+}
+
 // textIndex 返回文本在上一帧中的位置，找不到时返回 -1。
 func textIndex(tt *ui.Tester, want string) int {
 	for i, text := range tt.Texts() {
@@ -300,6 +348,7 @@ func TestAttentionInboxResolveRefreshesList(t *testing.T) {
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
 
+	hoverAttentionItem(t, tt, "待处理事项 会话1出错")
 	if err := tt.Click("标记已处理"); err != nil {
 		t.Fatalf("点击标记已处理失败: %v", err)
 	}
@@ -488,6 +537,7 @@ func TestAttentionInboxResolveFailureRollsBack(t *testing.T) {
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
 
+	hoverAttentionItem(t, tt, "待处理事项 会话1出错")
 	if err := tt.Click("标记已处理"); err != nil {
 		t.Fatalf("点击标记已处理失败: %v", err)
 	}

@@ -20,6 +20,15 @@ func TestAutomationListVisualHierarchy(t *testing.T) {
 	}
 }
 
+func TestAutomationListPausedFailureIcon(t *testing.T) {
+	fields := automationVisualRowFields(Automation{LastRunStatus: "failed"}, "", "", false, time.Now())
+	var icon *ui.SVG
+	ui.NewTester(func(c *ui.Context) { icon, _ = automationListIcon(c, fields) }, 100, 100).Frame()
+	if fields.Plan != "已暂停" || icon != IconCircleX() {
+		t.Fatal("暂停且失败时应显示失败图标")
+	}
+}
+
 func TestAutomationListVisualBounds(t *testing.T) {
 	for _, width := range []float32{320, 620} {
 		name := strings.Repeat("很长的中文自动化名称", 20)

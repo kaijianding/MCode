@@ -30,7 +30,7 @@ func TestAutomationVisualStatusIndependence(t *testing.T) {
 	a.Status = "completed"
 	a.LastRunStatus = "succeeded"
 	row = automationVisualRowFields(a, "", "", false, now)
-	if row.Plan != "已完成" || row.Result != "上次成功" {
+	if row.Plan != "已完成" || row.Result != "" {
 		t.Fatal(row)
 	}
 	a.Enabled = true

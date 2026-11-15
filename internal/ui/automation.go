@@ -90,6 +90,7 @@ type automationState struct {
 	previewTimer     *time.Timer
 	preview          AutomationSchedulePreview
 	previewVisible   bool
+	previewErr       string
 
 	// 每次运行新建会话使用的模型与权限：空串表示跟随默认
 	provider    string

@@ -70,7 +70,22 @@ func TestAutomationHistoryVisualEmptyAndLimit(t *testing.T) {
 	if err := tt.Click("筛选失败"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("最近 100 条中无匹配") })
+	waitFor(t, tt, func() bool { return tt.HasText("无匹配") })
+}
+
+func TestAutomationHistoryRetry(t *testing.T) {
+	client := &queuedAutomationRunsClient{automationRunsTestClient: &automationRunsTestClient{FakeClient: NewFakeClient()}, result: AutomationRunsState{Runs: []AutomationRun{{ID: "retry"}}}}
+	s := &chatState{client: client}
+	as := getAutomationState(s)
+	as.projectID, as.selectedID, as.runsErr = "p1", "auto-1", "读取失败"
+	tt := ui.NewTester(func(c *ui.Context) {
+		s.applyWorkspaceUpdates()
+		renderAutomationRunHistory(c, s, as, false, "auto-1", 0, false, as.runsLoading, as.runsErr, as.runs, as.runRead, as.runArchived, "")
+	}, 620, 800)
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, func() bool { return len(as.runs) == 1 && as.runs[0].ID == "retry" })
 }
 
 func TestAutomationHistoryKeyboardOpen(t *testing.T) {
