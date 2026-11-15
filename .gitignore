@@ -41,3 +41,6 @@ internal/webassets/dist/*
 /docs/t3code-parts/
 /docs/t3code-ste-parts/
 /docs/tailscale-*
+
+# graphify 生成的知识图谱与缓存（任意层级）
+graphify-out/
