@@ -10,6 +10,26 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestModelPickerFlyoutRisesFromBelow(t *testing.T) {
+	for _, reduced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reduced=%t", reduced), func(t *testing.T) {
+			setAppReduceMotion(t, reduced)
+			var transition ui.ElementTransition
+			tester := ui.NewTesterWith(func(c *ui.Context) {
+				transition = appFlyoutTransition(c, Space4)
+			}, 330, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced}})
+			tester.Frame()
+			if reduced {
+				if transition.Enter != nil {
+					t.Fatal("减少动效时不应有入场位移")
+				}
+			} else if transition.Enter == nil || transition.Enter.Y != Space4 || transition.Enter.Opacity != 0 {
+				t.Fatalf("入场动效错误: %+v", transition.Enter)
+			}
+		})
+	}
+}
+
 func TestAppFlyoutLifecycle(t *testing.T) {
 	oldRun, oldNew, oldDestroy, oldAnchor := flyoutRunOnMain, flyoutNew, flyoutDestroy, flyoutSetAnchor
 	t.Cleanup(func() {

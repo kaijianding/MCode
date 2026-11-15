@@ -212,6 +212,7 @@ type appFlyoutProps struct {
 	Width      int
 	Placement  mygo.Placement
 	Background *ui.Color
+	RiseY      float32 // 入场时内容从下方抬起的距离，0 表示只淡入。
 }
 
 type appFlyoutPopoverKey struct {
@@ -348,7 +349,7 @@ func appFlyoutPopover(c *ui.Context, key string, anchor ui.Element, open *bool, 
 				}
 				appFlyoutPopoverMu.Unlock()
 				if active {
-					renderAppFlyout(fc, key+"-root", key+"-scroll", float32(p.Width), p.Background, func() { view(fc) })
+					renderAppFlyout(fc, key+"-root", key+"-scroll", float32(p.Width), p.Background, p.RiseY, func() { view(fc) })
 				}
 			}
 			appFlyoutPopoverMu.Lock()
@@ -387,9 +388,13 @@ func appFlyoutPopover(c *ui.Context, key string, anchor ui.Element, open *bool, 
 	}
 }
 
-func renderAppFlyout(c *ui.Context, rootKey, scrollKey string, width float32, background *ui.Color, body func()) {
+func appFlyoutTransition(c *ui.Context, riseY float32) ui.ElementTransition {
+	return motionTransition(c, ui.ElementTransition{Duration: DurBase, Ease: EaseSnap, Enter: &ui.Motion{Y: riseY, Opacity: 0}})
+}
+
+func renderAppFlyout(c *ui.Context, rootKey, scrollKey string, width float32, background *ui.Color, riseY float32, body func()) {
 	applyAppTheme(c)
-	transition := motionTransition(c, ui.ElementTransition{Duration: DurBase, Ease: EaseSnap, Enter: &ui.Motion{Opacity: 0}})
+	transition := appFlyoutTransition(c, riseY)
 	root := ui.Column(c.Key(rootKey)).MaxWidth(width).FillWidth().FillHeight().Transition(transition)
 	if background != nil {
 		root = root.Background(*background).Radius(RadiusMD)

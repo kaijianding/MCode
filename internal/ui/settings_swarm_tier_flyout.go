@@ -131,7 +131,7 @@ func createSwarmTierModelFlyout(st *SettingsState, state *swarmTiersUIState, ses
 			pick(side, provider, item)
 			closeSwarmTierModel(st, state, session, model, true)
 		}
-		renderAppFlyout(c, "swarm-tier-model-flyout-root", "swarm-tier-model-flyout-scroll", 330, &modelPickerPanelBg, func() {
+		renderAppFlyout(c, "swarm-tier-model-flyout-root", "swarm-tier-model-flyout-scroll", 330, &modelPickerPanelBg, 0, func() {
 			renderModelPickerMenuBody(c, props, props.State)
 		})
 	}
@@ -241,7 +241,7 @@ func createSwarmTierEditor(st *SettingsState, state *swarmTiersUIState, session 
 		if !active {
 			return
 		}
-		renderAppFlyout(c, "swarm-tier-flyout-root", "swarm-tier-editor-scroll-"+session.key, 360, nil, func() {
+		renderAppFlyout(c, "swarm-tier-flyout-root", "swarm-tier-editor-scroll-"+session.key, 360, nil, 0, func() {
 			renderSwarmTierEditorForm(c, st, state, session.key)
 		})
 	}

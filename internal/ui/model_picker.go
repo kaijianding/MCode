@@ -1165,7 +1165,7 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 				return
 			}
 			if flyoutHostWindow(c.Services()) != nil {
-				appFlyoutPopover(c, p.KeyPrefix+"model-popover", anchor, &state.MenuOpen, nil, appFlyoutProps{Width: 330, Placement: mygo.PlacementTopStart, Background: &modelPickerPanelBg}, func(fc *ui.Context) {
+				appFlyoutPopover(c, p.KeyPrefix+"model-popover", anchor, &state.MenuOpen, nil, appFlyoutProps{Width: 330, Placement: mygo.PlacementTopStart, Background: &modelPickerPanelBg, RiseY: Space4}, func(fc *ui.Context) {
 					renderModelPickerMenuBody(fc, p, state)
 				})
 				return
@@ -1177,6 +1177,7 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 				// 固定深色面一致的 ElevDialog，不再写死一档 rgba 阴影。
 				panel = applyElevation(c, panel, ElevDialog)
 				panel.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).
+					Transition(motionPopover(c, Space4)).
 					Margin(0, 0, Space3, 0).
 					Radius(modelPickerPanelRadius).
 					Background(panelBg).
