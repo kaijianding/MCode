@@ -2827,7 +2827,6 @@ func (m *Manager) checkReports(ctx context.Context) {
 
 	// 检查每个 lead 是否有已结束但未汇报的 bee；只要还在派发、还有排队任务或还有 bee
 	// 在跑，整批就都算「仍在工作中」，等全部落定后再一次性汇报，避免局部汇报抢跑。
-	reviewEnabled := m.reviewEnabled()
 	m.mu.Lock()
 	for leadID, lead := range m.leads {
 		if lead.stoppedByUser {
@@ -2851,15 +2850,12 @@ func (m *Manager) checkReports(ctx context.Context) {
 			}
 		}
 		if !hasRunning {
-			// 审查未出结论前整批都不汇报，也不回调 OnBeesIdle：只要名下还有 bee 在审查或
-			// 等人工决定，就等结论落地后一次性汇报，避免局部汇报抢跑、跟进消息越过审查结论。
+			// 验收、审查或人工决定未落定前，整批不汇报也不回调 OnBeesIdle；off 档同样等待。
 			reviewPending := false
-			if reviewEnabled {
-				for i := range lead.bees {
-					if lead.bees[i].ReviewState == ReviewRunning || lead.bees[i].PendingMerge {
-						reviewPending = true
-						break
-					}
+			for i := range lead.bees {
+				if lead.bees[i].ReviewState == ReviewRunning || lead.bees[i].PendingMerge {
+					reviewPending = true
+					break
 				}
 			}
 			if reviewPending {

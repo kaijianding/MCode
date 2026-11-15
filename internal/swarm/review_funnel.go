@@ -457,7 +457,13 @@ func (m *Manager) reviewProjectRuntime(ctx context.Context, leadThreadID, beeWor
 	}
 }
 
-// reviewCheckBudget 为项目检查和逐条验收预留各自超时，再加 30 秒余量。
+// reviewSessionBudget 使用项目基础超时，L3 不再执行验收命令。
+func (m *Manager) reviewSessionBudget(leadThreadID string) time.Duration {
+	rt := m.reviewProjectRuntime(context.Background(), leadThreadID, "")
+	return rt.timeout + reviewCheckBudgetMargin
+}
+
+// reviewCheckBudget 为 L0 项目检查和逐条验收预留各自超时，再加 30 秒余量。
 func (m *Manager) reviewCheckBudget(leadThreadID string, h Bee) time.Duration {
 	rt := m.reviewProjectRuntime(context.Background(), leadThreadID, "")
 	return rt.timeout*time.Duration(1+len(h.Acceptance)) + reviewCheckBudgetMargin

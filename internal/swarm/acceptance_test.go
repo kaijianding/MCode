@@ -298,6 +298,96 @@ func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestAcceptanceOffReportsAfterSettlement(t *testing.T) {
+	for _, result := range []string{"false", "true"} {
+		t.Run(result, func(t *testing.T) {
+			m, dir := newFunnelManager(t, &funnelFake{})
+			settings := m.Settings()
+			settings.ReviewMode = "off"
+			m.SetSettingsFunc(func() Settings { return settings })
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer func() { cancel(); m.wg.Wait() }()
+			var reports []string
+			idle := 0
+			m.opts.OnReport = func(leadID, report string) error {
+				h := m.State(leadID).Bees[0]
+				if h.PendingMerge || h.ReviewState == ReviewRunning {
+					t.Errorf("reported before settlement: %+v", h)
+				}
+				if result == "true" {
+					if !h.Merged {
+						t.Error("reported success before merge")
+					}
+					if _, err := os.Stat(filepath.Join(dir, "internal/feature.go")); err != nil {
+						t.Errorf("reported success before file landed: %v", err)
+					}
+				} else if h.Status != StatusFailed {
+					t.Errorf("reported failure before failed status: %+v", h)
+				}
+				reports = append(reports, report)
+				return nil
+			}
+			m.opts.OnBeesIdle = func(context.Context, string) { idle++ }
+			command := "touch started; while ! test -f release; do sleep 0.02; done; printf 'acceptance result'; " + result
+			bees, err := m.Dispatch(ctx, DispatchRequest{
+				LeadThreadID: "lead-report-acceptance", LeadWorkDir: dir,
+				Bees: []BeeSpec{
+					{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{command}},
+					{Name: "Birch", Task: "修改 internal/other.go"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "完成")
+			writeBeeFile(t, bees[1], "internal/other.go", "package feature\n")
+			completeBee(t, m, bees[1], "完成")
+			m.Tick(ctx)
+			for {
+				if _, err := os.Stat(filepath.Join(bee.WorktreePath, "started")); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("acceptance did not start")
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+			for range 3 {
+				m.Tick(ctx)
+			}
+			if h := beeByThread(t, m, "lead-report-acceptance", bee.ThreadID); len(reports) != 0 || idle != 0 || h.Reported {
+				t.Fatalf("acceptance still running: reports=%v idle=%d reported=%v", reports, idle, h.Reported)
+			}
+			if h := beeByThread(t, m, "lead-report-acceptance", bees[1].ThreadID); !h.Merged || h.Reported {
+				t.Fatalf("completed sibling must wait for acceptance: %+v", h)
+			}
+			if err := os.WriteFile(filepath.Join(bee.WorktreePath, "release"), nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+			m.wg.Wait()
+			for range 3 {
+				m.Tick(ctx)
+			}
+			if len(reports) != 1 || !beeByThread(t, m, "lead-report-acceptance", bee.ThreadID).Reported {
+				t.Fatalf("expected one final report: %v", reports)
+			}
+			if !strings.Contains(reports[0], "Birch") || !beeByThread(t, m, "lead-report-acceptance", bees[1].ThreadID).Reported {
+				t.Fatalf("missing sibling in batch report: %v", reports)
+			}
+			if result == "true" {
+				if !strings.Contains(reports[0], "合并结果：已合入") {
+					t.Fatalf("missing merge result: %s", reports[0])
+				}
+			} else if !strings.Contains(reports[0], "合并结果：失败") || !strings.Contains(reports[0], "验收命令失败："+command+"（退出码 1）") || !strings.Contains(reports[0], "acceptance result") {
+				t.Fatalf("missing acceptance failure: %s", reports[0])
+			}
+		})
+	}
+}
+
 func TestAcceptanceOffStoppedBeeDoesNotMerge(t *testing.T) {
 	for _, action := range []string{"stop", "stop-all", "delete"} {
 		for _, result := range []string{"true", "false"} {

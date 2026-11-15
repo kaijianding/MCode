@@ -16,9 +16,6 @@ import (
 	"mcode/internal/kanban"
 )
 
-// defaultReviewTimeout 是合并审查会话的最长等待时间；超时后停止会话并转人工裁决。
-const defaultReviewTimeout = 10 * time.Minute
-
 // reviewStartGracePeriod 是审查会话迟迟没有线程 ID 时转人工的宽限时间。
 const reviewStartGracePeriod = 2 * time.Minute
 
@@ -436,7 +433,7 @@ func (m *Manager) pollReview(ctx context.Context, leadThreadID string, h Bee, no
 		return
 	}
 	if st.Running {
-		if h.ReviewStartedAt != nil && now.Sub(*h.ReviewStartedAt) > defaultReviewTimeout {
+		if h.ReviewStartedAt != nil && now.Sub(*h.ReviewStartedAt) > m.reviewSessionBudget(leadThreadID) {
 			if m.opts.StopSession != nil {
 				_ = m.opts.StopSession(ctx, h.ReviewThreadID)
 			}

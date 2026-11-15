@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"mcode/internal/kanban"
+	"mcode/internal/reviewcheck"
 )
 
 const testReviewFence = "```" + "swarm-review"
@@ -254,6 +256,54 @@ func TestPollReviews_TimeoutStopsSession(t *testing.T) {
 	}
 	if bee.ReviewReason != "审查超时" {
 		t.Fatalf("原因不符: %q", bee.ReviewReason)
+	}
+}
+
+func TestPollReviews_L3BudgetIndependentOfAcceptance(t *testing.T) {
+	for _, commands := range []int{0, 1, 8} {
+		t.Run(strconv.Itoa(commands), func(t *testing.T) {
+			started := time.Now()
+			now := started.Add(time.Second + reviewCheckBudgetMargin)
+			driver := newFakeDriver()
+			driver.setSessionState("review", kanban.SessionState{Running: true})
+			stopped, reports := 0, 0
+			m := NewManager(Options{
+				Driver: driver, Now: func() time.Time { return now },
+				ReviewProjectConfig: func(string, string) (reviewcheck.ProjectConfig, error) {
+					return reviewcheck.ProjectConfig{TimeoutSeconds: 1}, nil
+				},
+				StopSession: func(context.Context, string) error { stopped++; return nil },
+				OnReport:    func(string, string) error { reports++; return nil },
+			})
+			m.SetSettingsFunc(func() Settings { return Settings{ReviewMode: "off"} })
+			m.leads["lead"] = &leadState{bees: []Bee{{
+				ThreadID: "bee", Status: StatusCompleted, PendingMerge: true,
+				ReviewState: ReviewRunning, ReviewStage: ReviewStageL3,
+				ReviewThreadID: "review", ReviewStartedAt: &started,
+				Acceptance: make([]string, commands),
+			}}}
+			m.pollReviews(context.Background())
+			if got := m.State("lead").Bees[0]; got.ReviewState != ReviewRunning || stopped != 0 {
+				t.Fatalf("timed out at budget boundary: %+v stopped=%d", got, stopped)
+			}
+			now = now.Add(time.Nanosecond)
+			m.pollReviews(context.Background())
+			if got := m.State("lead").Bees[0]; got.ReviewState != ReviewNeedsHuman || stopped != 1 {
+				t.Fatalf("L3 did not use base budget: %+v stopped=%d", got, stopped)
+			}
+			m.checkReports(context.Background())
+			if reports != 0 {
+				t.Fatal("off reported a legacy review before human decision")
+			}
+			if err := m.DiscardMerge(context.Background(), "lead", "bee"); err != nil {
+				t.Fatal(err)
+			}
+			m.checkReports(context.Background())
+			m.checkReports(context.Background())
+			if reports != 1 {
+				t.Fatalf("legacy review did not settle once: reports=%d", reports)
+			}
+		})
 	}
 }
 
