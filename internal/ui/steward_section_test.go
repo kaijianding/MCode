@@ -149,11 +149,11 @@ func TestSidebarStewardSectionFallsBackToAttentionRow(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
 	if tt.HasText("总管") {
 		t.Fatalf("没有总管会话时不应渲染总管段，当前文本: %q", tt.Texts())
 	}
-	if err := tt.Click("待处理"); err != nil {
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击待处理行失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })

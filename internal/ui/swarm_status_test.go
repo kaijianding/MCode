@@ -91,6 +91,39 @@ func TestSwarmStatusLabelAndTone(t *testing.T) {
 	tt.Frame()
 }
 
+func TestSemanticStatusColors(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		for _, tc := range []struct {
+			name string
+			in   string
+			want ui.Color
+		}{
+			{"cancelled", "cancelled", ThemeSecondaryText(c)},
+			{"stopped", "stopped", ThemeSecondaryText(c)},
+			{"review", swarmStatusWaitingReview, ThemeWarning(c)},
+			{"failed", swarmStatusErrored, ThemeDanger(c)},
+		} {
+			_, got := swarmStatusTone(c, tc.in)
+			if got != tc.want {
+				t.Errorf("%s color = %v, 期望 %v", tc.name, got, tc.want)
+			}
+		}
+		if got := automationCardStatusColor(c, "stopped"); got != ThemeSecondaryText(c) {
+			t.Errorf("automation stopped color = %v", got)
+		}
+		if got := kanbanStatusColor(c, "todo"); got != ThemeSecondaryText(c) {
+			t.Errorf("kanban todo color = %v", got)
+		}
+		if got := kanbanStatusColor(c, "in_progress"); got != ThemeAccent(c) {
+			t.Errorf("kanban in_progress color = %v", got)
+		}
+		if got := kanbanStatusColor(c, "cancelled"); got != ThemeSecondaryText(c) {
+			t.Errorf("kanban cancelled color = %v", got)
+		}
+	}, 200, 200)
+	tt.Frame()
+}
+
 // TestSwarmReportStatusText 验证汇报条目匹配仍使用历史状态文案。
 func TestSwarmReportStatusText(t *testing.T) {
 	cases := map[string]string{

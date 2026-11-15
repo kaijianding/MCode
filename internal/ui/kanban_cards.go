@@ -348,16 +348,20 @@ func projectNameFor(s *chatState, projectID string) string {
 	return ""
 }
 
-// kanbanToneBadge 渲染使用指定颜色的小胶囊。
+// kanbanToneBadge 渲染看板与总管任务共用的状态徽标。
 func kanbanToneBadge(c *ui.Context, key, label string, color ui.Color) {
-	ui.Row(c.Key(key)).
-		Label(key).
-		Padding(Space0, Space2).
-		Radius(RadiusMD).
-		Background(color.Alpha(0.15)).
-		Children(func() {
-			ui.Text(c, label).FontSize(uiFont(TypeCaption)).FontWeight(600).TextColor(color)
-		})
+	tone := ToneNeutral
+	switch color {
+	case ThemeAccent(c):
+		tone = ToneAccent
+	case ThemeSuccess(c):
+		tone = ToneSuccess
+	case ThemeWarning(c), ThemeCaution(c):
+		tone = ToneWarning
+	case ThemeDanger(c):
+		tone = ToneDanger
+	}
+	Badge(c, key, label, tone).Label(key)
 }
 
 // renderTaskCard 渲染标题、一条信号和按需显示的操作。
@@ -780,15 +784,7 @@ func kanbanColumnCountBadge(c *ui.Context, key string, filtered, total int, sear
 	if searching {
 		text = fmt.Sprintf("%d/%d", filtered, total)
 	}
-	ui.Row(c.Key(key)).
-		Label(key + "-" + text).
-		Center().
-		Children(func() {
-			ui.Text(c, text).
-				FontSize(uiFont(TypeCaption)).
-				FontWeight(700).
-				TextColor(ThemeSecondaryText(c))
-		})
+	Badge(c, key+"-badge", text, ToneNeutral).Label(key + "-" + text)
 }
 
 // kanbanBoardColumnWidth 计算看板单列宽度：至少 270，窗口够宽时五列均分内容区。

@@ -1121,8 +1121,12 @@ func renderSwarmHeaderBadge(c *ui.Context, key string, count int, bg ui.Color) {
 	if key == "chat-header-swarm-failed-badge" {
 		right = 18
 	}
-	ui.Row(c.Key(key)).
-		Absolute().
+	tone := ToneAccent
+	if key == "chat-header-swarm-waiting-badge" || key == "chat-header-swarm-failed-badge" {
+		tone = ToneDanger
+	}
+	badge := Badge(c, key, text, tone)
+	badge.Absolute().
 		Top(-4).
 		Right(right).
 		Height(IconSM).
@@ -1130,33 +1134,18 @@ func renderSwarmHeaderBadge(c *ui.Context, key string, count int, bg ui.Color) {
 		Padding(0, Space1).
 		Radius(CapsuleRadius).
 		Center().
-		Background(bg).
-		Children(func() {
-			ui.Text(c, text).
-				FontSize(uiFont(TypeCaption)).
-				FontWeight(600).
-				TextColor(ThemeOnAccent(c)).
-				SingleLine()
-		})
+		Background(bg)
 }
 
 // renderSwarmReviewBadge 在编排按钮左侧显示「待审查 N」：配色与 bee 行内的「待审查」标签一致，
 // 只提示待审查数量，不改变运行中/排队中数字角标的语义。
 func renderSwarmReviewBadge(c *ui.Context, count int) {
-	ui.Row(c.Key("chat-header-swarm-review-badge")).
+	Badge(c, "chat-header-swarm-review-badge", fmt.Sprintf("待审查 %d", count), ToneWarning).
 		Height(IconMD).
 		Padding(0, Space1).
 		Margin(0, Space1, 0, 0).
 		Radius(CapsuleRadius).
-		Center().
-		Background(ThemeAccent(c).Alpha(0.15)).
-		Children(func() {
-			ui.Text(c, fmt.Sprintf("待审查 %d", count)).
-				FontSize(uiFont(TypeCaption)).
-				FontWeight(600).
-				TextColor(ThemeAccent(c)).
-				SingleLine()
-		})
+		Center()
 }
 
 // reviewBeeStatusTag 计算 bee 在审查器中的状态标签文本与语义颜色。
@@ -1170,10 +1159,10 @@ func reviewBeeStatusTag(c *ui.Context, h SwarmBee) (string, ui.Color) {
 	case "rejected":
 		return "审查未通过", ThemeDanger(c)
 	case "needs_human":
-		return "待审查", ThemeAccent(c)
+		return "待审查", semanticStatusColor(c, semanticWarning)
 	}
 	if h.PendingMerge {
-		return "待审查", ThemeAccent(c)
+		return "待审查", semanticStatusColor(c, semanticWarning)
 	}
 	if h.MergeError != "" {
 		return "合并失败", ThemeDanger(c)

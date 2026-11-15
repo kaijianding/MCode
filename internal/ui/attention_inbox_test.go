@@ -263,7 +263,7 @@ func TestAttentionInboxHiddenWithoutAttentionClient(t *testing.T) {
 	tt := ui.NewTester(view, 1000, 700)
 
 	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
-	if tt.HasText("待处理") {
+	if tt.HasText("待你处理") {
 		t.Fatalf("未实现 AttentionClient 时不应渲染入口，当前文本: %q", tt.Texts())
 	}
 }
@@ -279,7 +279,7 @@ func TestAttentionInboxShowsUnresolvedCount(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 3 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 3 条") })
 	// 订阅只建立一次：多帧之后仍然只有一个 watcher。
 	waitFor(t, tt, func() bool { return fake.watchCount() == 1 })
 	for i := 0; i < 5; i++ {
@@ -302,8 +302,8 @@ func TestAttentionInboxPopoverGroupsAndOrder(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 4 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 4 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话出错") })
@@ -342,8 +342,8 @@ func TestAttentionInboxResolveRefreshesList(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 2 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 2 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
@@ -356,7 +356,7 @@ func TestAttentionInboxResolveRefreshesList(t *testing.T) {
 		ids := fake.resolvedIDs()
 		return len(ids) == 1 && ids[0] == "a1"
 	})
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
 	waitFor(t, tt, func() bool { return !tt.HasText("会话1出错") })
 	if !tt.HasText("会话1再次出错") {
 		t.Fatalf("未消解的事项应保留，当前文本: %q", tt.Texts())
@@ -371,10 +371,10 @@ func TestAttentionInboxEmptyState(t *testing.T) {
 	tt := ui.NewTester(view, 1000, 700)
 
 	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
-	if tt.HasText("待处理 0 条") {
+	if tt.HasText("待你处理 0 条") {
 		t.Fatalf("数量为 0 时不应显示胶囊，当前文本: %q", tt.Texts())
 	}
-	if err := tt.Click("待处理"); err != nil {
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText(attentionInboxEmptyText) })
@@ -399,8 +399,8 @@ func TestAttentionInboxClickItemRevealsThread(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1卡住") })
@@ -428,8 +428,8 @@ func TestAttentionInboxKanbanPlanFailedOpensTasks(t *testing.T) {
 	state.openTasksWindowFn = func(view string) { opened <- view }
 	t.Cleanup(func() { state.openTasksWindowFn = nil })
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("收件箱重构目标") })
@@ -463,10 +463,10 @@ func TestAttentionInboxWatchRefreshesCount(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
 	fake.addItems(attentionItem("a2", "bee_failed", "bee", "t1", "子代理失败", 0))
 	fake.triggerAttentionChange()
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 2 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 2 条") })
 }
 
 // 子代理失败分组在收件箱里以「子代理失败」为标题，标题与条目都不出现内部术语。
@@ -478,8 +478,8 @@ func TestAttentionInboxBeeFailedGroupTitle(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("子代理执行出错") })
@@ -503,8 +503,8 @@ func TestAttentionInboxStewardEntry(t *testing.T) {
 	tt := ui.NewTester(view, 1000, 700)
 
 	// 总管会话存在时侧栏只有合并行，浮层要靠行内右侧的未处理数徽标打开。
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理 1 条"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理 1 条"); err != nil {
 		t.Fatalf("点击默认段徽标失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("打开与总管的对话") })
@@ -531,8 +531,8 @@ func TestAttentionInboxResolveFailureRollsBack(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 2 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 2 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })
@@ -542,7 +542,7 @@ func TestAttentionInboxResolveFailureRollsBack(t *testing.T) {
 		t.Fatalf("点击标记已处理失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("标记没成功，请重试") })
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 2 条") })
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 2 条") })
 
 	st := getAttentionInboxState(state)
 	st.mu.Lock()
@@ -576,8 +576,8 @@ func TestAttentionInboxGroupsThreadNoProgress(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1长时间无进展") })
@@ -598,8 +598,8 @@ func TestAttentionInboxShowsLoadErrorAndRetry(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理") })
-	if err := tt.Click("待处理"); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理") })
+	if err := tt.Click("待你处理"); err != nil {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("加载收件箱失败：收件箱坏了") })

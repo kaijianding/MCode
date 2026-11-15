@@ -63,15 +63,15 @@ func swarmStatusLabel(status string) string {
 func swarmStatusTone(c *ui.Context, status string) (Status, ui.Color) {
 	switch normalizeSwarmStatus(status) {
 	case swarmStatusRunning:
-		return StatusRunning, ThemeAccent(c)
+		return StatusRunning, semanticStatusColor(c, semanticAccent)
 	case swarmStatusWaitingReview:
-		return StatusAttention, ThemeWarning(c)
+		return StatusAttention, semanticStatusColor(c, semanticWarning)
 	case swarmStatusCompleted:
-		return StatusIdle, ThemeSuccess(c)
+		return StatusIdle, semanticStatusColor(c, semanticSuccess)
 	case swarmStatusErrored:
-		return StatusError, ThemeDanger(c)
+		return StatusError, semanticStatusColor(c, semanticDanger)
 	default:
-		return StatusIdle, ThemeTertiaryText(c)
+		return StatusIdle, semanticStatusColor(c, semanticNeutral)
 	}
 }
 

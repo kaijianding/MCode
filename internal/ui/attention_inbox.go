@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -442,18 +443,8 @@ func renderAttentionCountBadge(c *ui.Context, key, label string, count int) ui.E
 	if count <= 0 {
 		return ui.Element{}
 	}
-	return ui.Row(c.Key(key)).
-		Label(label).
-		Padding(Space0, Space2).
-		Radius(RadiusMD).
-		AlignItems(ui.Center).
-		Background(ThemeAccent(c)).
-		Children(func() {
-			ui.Text(c, strconv.Itoa(count)).
-				FontSize(scaledFont(TypeCaption)).
-				FontWeight(600).
-				TextColor(ThemeOnAccent(c))
-		})
+	label = strings.Replace(label, "待处理", "待你处理", 1)
+	return Badge(c, key, strconv.Itoa(count), ToneAccent).Label(label)
 }
 
 // renderAttentionInboxEntry 渲染侧栏「待处理」固定入口行：图标、文字与未处理数量胶囊，
@@ -481,7 +472,7 @@ func renderAttentionInboxEntry(c *ui.Context, s *chatState) {
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
-		Label("待处理")
+		Label("待你处理")
 
 	if st.open {
 		row.Background(ThemeSelected(c))
@@ -496,12 +487,12 @@ func renderAttentionInboxEntry(c *ui.Context, s *chatState) {
 
 	row.Children(func() {
 		ui.Icon(c, IconTray()).Size(IconSM, IconSM).TextColor(ThemeSecondaryText(c))
-		ui.Text(c, "待处理").
+		ui.Text(c, "待你处理").
 			FontSize(scaledFont(TypeBody)).
 			TextColor(ThemePrimaryText(c).Alpha(0.92)).
 			Grow(1).
 			SingleLine()
-		renderAttentionCountBadge(c, "sidebar-attention-inbox-count", fmt.Sprintf("待处理 %d 条", count), count)
+		renderAttentionCountBadge(c, "sidebar-attention-inbox-count", fmt.Sprintf("待你处理 %d 条", count), count)
 	})
 
 	appPopover(c.Key("sidebar-attention-inbox-popover"), row, &st.open, func() {
@@ -537,7 +528,7 @@ func renderAttentionInboxPopover(c *ui.Context, s *chatState) {
 				AlignItems(ui.Center).
 				Padding(Space0, Space2, Space1, Space2).
 				Children(func() {
-					ui.Text(c, "待处理").
+					ui.Text(c, "待你处理").
 						FontSize(scaledFont(TypeBody)).
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c)).

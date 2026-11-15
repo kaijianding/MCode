@@ -70,7 +70,7 @@ func renderTasksWindowSidebar(c *ui.Context, s *chatState, ks *kanbanState, p ka
 					kanbanMu.Unlock()
 					s.invalidate()
 				})
-				tasksSidebarRow(c, "tasks-sidebar-attention", "待你处理", tasksAttentionCount(p.board), viewFilter == "attention", nil, func() {
+				tasksSidebarRow(c, "tasks-sidebar-attention", "待你处理的任务", tasksAttentionCount(p.board), viewFilter == "attention", nil, func() {
 					kanbanMu.Lock()
 					ks.goalID, ks.viewFilter = "", "attention"
 					kanbanMu.Unlock()

@@ -63,12 +63,12 @@ func TestSidebarStewardDecisionAndAttentionBadges(t *testing.T) {
 	tt := ui.NewTester(view, 1000, 700)
 
 	waitFor(t, tt, func() bool {
-		return tt.HasText("未答决策 2 张") && tt.HasText("待处理 1 条")
+		return tt.HasText("未答决策 2 张") && tt.HasText("待你处理 1 条")
 	})
-	if !tt.HasText("未答决策 2 张") || !tt.HasText("待处理 1 条") {
+	if !tt.HasText("未答决策 2 张") || !tt.HasText("待你处理 1 条") {
 		t.Fatalf("决策与待处理徽标都应显示，当前文本: %q", tt.Texts())
 	}
-	if err := tt.Click("待处理 1 条"); err != nil {
+	if err := tt.Click("待你处理 1 条"); err != nil {
 		t.Fatalf("点击待处理徽标失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("会话1出错") })

@@ -17,9 +17,9 @@ func TestAttentionInboxShowsNotificationTitle(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(view, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("待处理 1 条") })
-	if err := tt.Click("待处理"); err != nil {
-		t.Fatalf("点击待处理入口失败: %v", err)
+	waitFor(t, tt, func() bool { return tt.HasText("待你处理 1 条") })
+	if err := tt.Click("待你处理"); err != nil {
+		t.Fatalf("点击待你处理入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("构建失败：超时") })
 }

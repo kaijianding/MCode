@@ -998,19 +998,20 @@ func automationCardStatus(auto Automation, running bool) (text string, kind stri
 
 // automationCardStatusColor 按胶囊类别返回配色。
 func automationCardStatusColor(c *ui.Context, kind string) ui.Color {
+	semantic := semanticNeutral
 	switch kind {
 	case "running":
-		return ThemeAccent(c)
+		semantic = semanticAccent
 	case "succeeded":
-		return ThemeSuccess(c)
+		semantic = semanticSuccess
 	case "failed":
-		return ThemeDanger(c)
+		semantic = semanticDanger
 	case "paused":
-		return ThemeWarning(c)
+		semantic = semanticWarning
 	case "stopped":
-		return ThemePlan(c)
+		semantic = semanticNeutral
 	}
-	return ThemeSecondaryText(c)
+	return semanticStatusColor(c, semantic)
 }
 
 // automationSchedulerHint 把调度锁状态转成页面提示；active 或未知状态返回空串。

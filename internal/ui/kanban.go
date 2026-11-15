@@ -85,24 +85,48 @@ func kanbanPriorityStyle(c *ui.Context, p string) (label string, icon *ui.SVG, c
 	}
 }
 
-// kanbanStatusColor 返回看板列对应的状态色。
-func kanbanStatusColor(c *ui.Context, col string) ui.Color {
-	switch col {
-	case "todo":
+type semanticStatus int
+
+const (
+	semanticNeutral semanticStatus = iota
+	semanticAccent
+	semanticSuccess
+	semanticWarning
+	semanticDanger
+)
+
+// semanticStatusColor 将跨模块共用的状态语义映射到主题色。
+func semanticStatusColor(c *ui.Context, status semanticStatus) ui.Color {
+	switch status {
+	case semanticAccent:
 		return ThemeAccent(c)
-	case "in_progress", "waiting":
-		return ThemeWarning(c)
-	case "needs_you":
-		return ThemePlan(c)
-	case "review":
-		return ThemeCaution(c)
-	case "done", "cancelled":
+	case semanticSuccess:
 		return ThemeSuccess(c)
-	case "rejected", "failed":
+	case semanticWarning:
+		return ThemeWarning(c)
+	case semanticDanger:
 		return ThemeDanger(c)
 	default:
 		return ThemeSecondaryText(c)
 	}
+}
+
+// kanbanStatusColor 返回看板列对应的状态色。
+func kanbanStatusColor(c *ui.Context, col string) ui.Color {
+	semantic := semanticNeutral
+	switch col {
+	case "todo":
+		semantic = semanticNeutral
+	case "in_progress":
+		semantic = semanticAccent
+	case "waiting", "needs_you", "review", "needs_approval":
+		semantic = semanticWarning
+	case "done":
+		semantic = semanticSuccess
+	case "rejected", "failed":
+		semantic = semanticDanger
+	}
+	return semanticStatusColor(c, semantic)
 }
 
 // kanbanDisplayColumn 返回任务所在的展示列：优先服务端派生的 Column，
