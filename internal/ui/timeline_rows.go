@@ -237,6 +237,9 @@ type timelineItem struct {
 	// workHeaderID 打在折叠项之后那条负责收尾的答复上：非空表示回合完成信息已由折叠头承载，
 	// 这条消息不再单独画完成行，只保留改动文件卡片。
 	workHeaderID string
+	// workTaskSpan 只承载跨报告任务的整体显示跨度（原始请求起点到最后报告完成）；
+	// workElapsed / finishedAt 仍是本轮口径，行排序与统计不受它影响。无关联任务时为零值。
+	workTaskSpan taskTimingSpan
 	// msgLastIndex 是该项覆盖的最后一条消息下标（回合折叠项覆盖被收起的整段，组头项覆盖整组）；
 	// 未设置（0）时按 itemLastMsgIndex 回退到 msgIndex。
 	msgLastIndex int

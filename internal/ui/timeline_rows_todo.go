@@ -87,13 +87,17 @@ func isToolBlockedByHook(m Message) bool {
 	return false
 }
 
-// isToolFailed 判断工具执行是否失败。m.ToolStatus == "failed" 时视为失败，与现有 [failed] 判断取或；
-// 被 PreToolUse hook 拦截/改道的结果虽以 [failed] 结尾，但它不是故障，不算失败。
+// isToolFailed 判断工具执行是否失败：显式 ToolStatus 非空时以它是否等于 failed 为准，
+// 避免 session_get 等工具返回的历史正文里旧 [failed] 标记误报失败；空状态的老消息仍按正文 [failed] 兜底。
+// 被 PreToolUse hook 拦截/改道的结果不是故障，不算失败。
 func isToolFailed(m Message) bool {
 	if isToolBlockedByHook(m) {
 		return false
 	}
-	return m.ToolStatus == "failed" || strings.Contains(m.Text, "[failed]")
+	if m.ToolStatus != "" {
+		return m.ToolStatus == "failed"
+	}
+	return strings.Contains(m.Text, "[failed]")
 }
 
 // isCommandTool 判断消息是否属于命令执行类工具。

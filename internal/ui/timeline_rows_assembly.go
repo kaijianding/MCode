@@ -636,9 +636,9 @@ func inlineRunningTurnHeader(segment []timelineItem) []timelineItem {
 }
 
 // runningTurnHeaderItem 为运行中的回合造一个临时折叠头：把用户消息之后、第一条助手正文之前的
-// 思考与工具调用收进头里，只留一行「已处理 Ns」实时计时；回合结束后这个头会被摘掉，再由
-// applyTurnWorkFold 正常折叠整段。segment 里可能已经有一个上一帧的运行态头，先摊平再重建，
-// 保证重复调用得到同样的结果。
+// 思考与工具调用收进头里，只留一行「已处理 Ns」实时计时；没有可折叠的活动时折叠区为空，
+// 头只负责计时。回合结束后这个头会被摘掉，再由 applyTurnWorkFold 正常折叠整段。
+// segment 里可能已经有一个上一帧的运行态头，先摊平再重建，保证重复调用得到同样的结果。
 func runningTurnHeaderItem(s *chatState, threadID string, segment []timelineItem) (timelineItem, []timelineItem, bool) {
 	segment = inlineRunningTurnHeader(segment)
 	if len(segment) == 0 || segment[0].kind != timelineItemSingle || segment[0].msg.Role != "user" {
@@ -652,9 +652,6 @@ func runningTurnHeaderItem(s *chatState, threadID string, segment []timelineItem
 			stop = i
 			break
 		}
-	}
-	if stop <= 1 {
-		return timelineItem{}, segment, false
 	}
 	region := segment[1:stop]
 	msgs := make([]Message, 0, len(region))
@@ -678,13 +675,24 @@ func runningTurnHeaderItem(s *chatState, threadID string, segment []timelineItem
 		}
 	}
 	if !activity {
-		return timelineItem{}, segment, false
+		// 没有可折叠的活动（仅用户消息，或正文直接跟在用户消息后）：头只计时，
+		// 折叠区清空，stop 之后的提示、正文与工具全部留在 rest，不能误吞非活动条目。
+		region = nil
+		msgs = nil
+		stop = 1
 	}
 	// rest 只保留用户消息与运行态头之外的条目（首条助手正文及其后的内容）：
 	// 被头收住的过程条目已经在 workItems 里，不能再追加一次，否则同一条消息会渲染两遍。
 	rest := make([]timelineItem, 0, 1+len(segment)-stop)
 	rest = append(rest, segment[0])
 	rest = append(rest, segment[stop:]...)
+	// 下标覆盖被收起的那段过程（不含用户消息）：增量切点落在过程内部时整段重建，
+	// 用户消息留在已复用的前缀里，重建后再在它后面接上新的运行态头。
+	// 折叠区为空时只覆盖用户消息自身的下标，后续追加的消息仍从头之后重建。
+	msgIndex, msgLastIndex := segment[0].msgIndex, segment[0].msgIndex
+	if len(region) > 0 {
+		msgIndex, msgLastIndex = region[0].msgIndex, itemLastMsgIndex(region[len(region)-1])
+	}
 	return timelineItem{
 		kind:          timelineItemTurnWork,
 		id:            turnWorkFoldID(segment[0].msg.ID),
@@ -694,10 +702,8 @@ func runningTurnHeaderItem(s *chatState, threadID string, segment []timelineItem
 		workStartedAt: turnStartTimeFor(s, segment[0].turnIndex),
 		tools:         msgs,
 		workItems:     append([]timelineItem(nil), region...),
-		// 下标覆盖被收起的那段过程（不含用户消息）：增量切点落在过程内部时整段重建，
-		// 用户消息留在已复用的前缀里，重建后再在它后面接上新的运行态头。
-		msgIndex:     region[0].msgIndex,
-		msgLastIndex: itemLastMsgIndex(region[len(region)-1]),
+		msgIndex:      msgIndex,
+		msgLastIndex:  msgLastIndex,
 	}, rest, true
 }
 
@@ -708,8 +714,24 @@ func applyTurnWorkFold(s *chatState, threadID string, items []timelineItem) []ti
 		return items
 	}
 	runningTurn := -1
+	backendRunningTurn := -1
 	if running, turn := s.runningTurn(threadID); running {
 		runningTurn = turn
+		backendRunningTurn = turn
+	}
+	// 自动汇报续跑任务的索引：只在本次重建生成一次，无报告历史时不分配。
+	taskIndex := taskTimingIndexFor(s)
+	// backend 的最新运行回合是报告续跑时，把运行态映射回原始请求回合：
+	// 等待子代理、报告续跑、再次等待都维持同一个原头，从原请求起点一直读秒。
+	// raw 运行回合不变（增量缓存 key 仍按 backend 回合），无关联时保留原逻辑。
+	// 等待阶段 backend 回合就是 root 自己，同样算接管：首轮答复已完成，不该再冒完成行。
+	rootTakenOver := false
+	for originTurn, entry := range taskIndex {
+		if entry.lastReportTurn == backendRunningTurn || originTurn == backendRunningTurn {
+			runningTurn = originTurn
+			rootTakenOver = true
+			break
+		}
 	}
 	lastAssistant := turnWorkLastAnswers(items)
 	skipIDs := s.turnWorkFoldSkipIDs(threadID)
@@ -733,6 +755,18 @@ func applyTurnWorkFold(s *chatState, threadID string, items []timelineItem) []ti
 			// 运行中的回合不折叠整段，只在用户消息之后放一行计时头，收住已经跑过的过程消息。
 			// 已经出现的答复或中途正文留在头外，仍在生成的文字不能被藏起来。
 			if header, rest, ok := runningTurnHeaderItem(s, threadID, segment); ok {
+				// 原 root 被报告续跑接管时，它的首轮收尾答复在 backend 眼里已不是运行回合：
+				// 打上折叠头 ID 压掉提前的「已完成 用时…」摘要，只保留正文与改动文件卡片。
+				// 普通运行回合不压：最后一段正文可能还在流式输出，完成行仍由渲染层按运行态压制。
+				if rootTakenOver {
+					if answerID := lastAssistant[runningTurn]; answerID != "" {
+						for j := range rest {
+							if rest[j].kind == timelineItemSingle && rest[j].msg.ID == answerID {
+								rest[j].workHeaderID = header.id
+							}
+						}
+					}
+				}
 				out = append(out, rest[0])
 				out = append(out, header)
 				out = append(out, rest[1:]...)
@@ -756,6 +790,20 @@ func applyTurnWorkFold(s *chatState, threadID string, items []timelineItem) []ti
 			out = append(out, segment...)
 		}
 		i = end
+	}
+	// 任务跨度统一在最后赋给各回合折叠头（含已复用的折叠前缀）：任务后来追加报告或
+	// 更新完成端点时，完成头也跟着刷新；无关联时清零，全量与增量结果幂等且相等。
+	if len(taskIndex) > 0 {
+		for i := range out {
+			if out[i].kind != timelineItemTurnWork {
+				continue
+			}
+			span := taskTimingSpan{}
+			if entry, ok := taskIndex[out[i].turnIndex]; ok {
+				span = entry.span
+			}
+			out[i].workTaskSpan = span
+		}
 	}
 	return out
 }

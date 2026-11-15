@@ -1676,6 +1676,8 @@ func TestTodoCardExpandedDefault(t *testing.T) {
 // TestAssistantMetaText 验证助手头部元信息的拼装与省略规则。
 func TestAssistantMetaText(t *testing.T) {
 	at := time.Date(2026, 10, 18, 9, 5, 0, 0, time.Local)
+	_, offset := at.Zone()
+	otherZone := time.FixedZone("UTC+1", offset+3600)
 	cases := []struct {
 		name     string
 		model    string
@@ -1684,6 +1686,8 @@ func TestAssistantMetaText(t *testing.T) {
 		want     string
 	}{
 		{"全部字段", "claude-opus-4", 12 * time.Second, at, "claude-opus-4 · 12s · 09:05"},
+		{"UTC 输入", "claude-opus-4", 12 * time.Second, at.UTC(), "claude-opus-4 · 12s · 09:05"},
+		{"非本地时区输入", "claude-opus-4", 12 * time.Second, at.In(otherZone), "claude-opus-4 · 12s · 09:05"},
 		{"亚秒耗时", "gpt-5", 1200 * time.Millisecond, time.Time{}, "gpt-5 · 1.2s"},
 		{"分钟耗时", "gpt-5", 150 * time.Second, time.Time{}, "gpt-5 · 2m30s"},
 		{"只有模型", "gpt-5", 0, time.Time{}, "gpt-5"},
@@ -2278,7 +2282,7 @@ func TestTurnFinishedDurationUsesWallClock(t *testing.T) {
 	}
 	// 展开体尾部：用时与结束时钟同源，速度同样回退到 DurationMs。
 	wantFooter := wantBlock + " · 结束 " + end.Local().Format("01-02 15:04:05")
-	if got := turnWorkFooterText(s, 0, usage); got != wantFooter {
+	if got := turnWorkFooterText(s, 0, usage, taskTimingSpan{}); got != wantFooter {
 		t.Fatalf("展开体尾部 = %q, want %q", got, wantFooter)
 	}
 }
