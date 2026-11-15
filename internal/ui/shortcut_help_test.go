@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -161,5 +162,37 @@ func TestShowShortcutsDefaultBindingIsConflictFree(t *testing.T) {
 	parsedMods, parsedKey, err := parseShortcutSpec("Cmd+/")
 	if err != nil || parsedMods != ui.Cmd || parsedKey != ui.KeySlash {
 		t.Fatalf("解析 Cmd+/ 应得到 ⌘/，实际 mods=%v key=%v err=%v", parsedMods, parsedKey, err)
+	}
+}
+
+func TestInspectorDefaultShortcut(t *testing.T) {
+	setShortcutOverrides(nil)
+	t.Cleanup(func() { setShortcutOverrides(nil) })
+	mods, key, ok := shortcutBindingFor("toggle-inspector")
+	if !ok || mods != ui.Cmd|ui.Alt || key != ui.KeyB || len(shortcutConflicts(effectiveShortcutBindings())["toggle-inspector"]) != 0 {
+		t.Fatalf("右栏默认键或冲突错误：%v %v %v", mods, key, ok)
+	}
+	if got := shortcutTitleWithKey("toggle-inspector", "关闭"); got != "关闭（"+formatShortcutKeys(mods, key)+"）" {
+		t.Fatalf("右栏提示错误：%q", got)
+	}
+	if got := shortcutTitleWithKey("missing", "标题"); got != "标题" {
+		t.Fatalf("未绑定的提示错误：%q", got)
+	}
+}
+
+func TestShortcutHelpRowWithoutKey(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderShortcutHelpRow(c, appShortcut{id: "unbound", title: "无绑定"}, nil)
+	}, 400, 50)
+	if _, ok := tt.Find("无绑定"); !ok {
+		t.Fatal("未渲染标题")
+	}
+	baseline := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c.Key("baseline")).FillWidth().Height(ControlMD).Gap(Space3).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "无绑定").FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).Grow(1).SingleLine()
+		})
+	}, 400, 50)
+	if !bytes.Equal(tt.Image().Pix, baseline.Image().Pix) {
+		t.Fatal("无绑定时不应渲染空键帽")
 	}
 }

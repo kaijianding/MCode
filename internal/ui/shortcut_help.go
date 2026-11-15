@@ -312,6 +312,8 @@ func renderShortcutHelpRow(c *ui.Context, sc appShortcut, conflicts []string) {
 							TextColor(ThemeDanger(c))
 					})
 			}
-			Kbd(c, "shortcut-help-kbd-"+sc.id, sc.keys)
+			if sc.keys != "" {
+				Kbd(c, "shortcut-help-kbd-"+sc.id, sc.keys)
+			}
 		})
 }

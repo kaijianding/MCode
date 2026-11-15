@@ -60,12 +60,13 @@ func getPaletteState(s *chatState) *paletteState {
 // paletteItem 表示命令面板中的单个匹配候选条目。
 // keywords 是只参与搜索、不显示的关键词（别名、别称），用来让「总管」「话题」这类说法也能命中。
 type paletteItem struct {
-	id       string
-	kind     string
-	title    string
-	subtitle string
-	keywords string
-	run      func(s *chatState)
+	id         string
+	kind       string
+	title      string
+	subtitle   string
+	keywords   string
+	shortcutID string
+	run        func(s *chatState)
 }
 
 // sidePanePaletteItems 由 side_pane.go 的注册表生成右侧分栏面板的命令面板开关项。
@@ -80,9 +81,10 @@ func sidePanePaletteItems() []paletteItem {
 			title = p.paletteTitle
 		}
 		items = append(items, paletteItem{
-			id:    p.paletteID,
-			kind:  "command",
-			title: title,
+			id:         p.paletteID,
+			shortcutID: p.actionID,
+			kind:       "command",
+			title:      title,
 			run: func(cs *chatState) {
 				if toggle != nil {
 					toggle(cs)
@@ -90,7 +92,7 @@ func sidePanePaletteItems() []paletteItem {
 			},
 		})
 	}
-	items = append(items, paletteItem{id: "cmd-toggle-inspector", kind: "command", title: "显示/隐藏右栏", run: toggleInspector})
+	items = append(items, paletteItem{id: "cmd-toggle-inspector", shortcutID: "toggle-inspector", kind: "command", title: "显示/隐藏右栏", run: toggleInspector})
 	return items
 }
 
@@ -155,26 +157,29 @@ func buildPaletteItems(s *chatState) []paletteItem {
 	// 1. 命令优先
 	items = append(items,
 		paletteItem{
-			id:    "cmd-new-thread",
-			kind:  "command",
-			title: "新建会话",
+			id:         "cmd-new-thread",
+			shortcutID: "new-thread",
+			kind:       "command",
+			title:      "新建会话",
 			run: func(cs *chatState) {
 				cs.closeWorkspace()
 				cs.createNewThread()
 			},
 		},
 		paletteItem{
-			id:    "cmd-add-project",
-			kind:  "command",
-			title: "添加项目",
+			id:         "cmd-add-project",
+			shortcutID: "add-project",
+			kind:       "command",
+			title:      "添加项目",
 			run: func(cs *chatState) {
 				cs.promptAddProject()
 			},
 		},
 		paletteItem{
-			id:    "cmd-open-settings",
-			kind:  "command",
-			title: "打开设置",
+			id:         "cmd-open-settings",
+			shortcutID: "open-settings",
+			kind:       "command",
+			title:      "打开设置",
 			run: func(cs *chatState) {
 				openSettingsWindow(cs, "")
 			},
@@ -236,13 +241,19 @@ func buildPaletteItems(s *chatState) []paletteItem {
 			},
 		},
 		paletteItem{
-			id:    "cmd-toggle-terminal",
-			kind:  "command",
-			title: "切换终端",
+			id:         "cmd-toggle-terminal",
+			shortcutID: "toggle-terminal",
+			kind:       "command",
+			title:      "切换终端",
 			run: func(cs *chatState) {
 				toggleTerminal(cs)
 			},
 		},
+	)
+	items = append(items,
+		paletteItem{id: "cmd-toggle-sidebar", shortcutID: "toggle-sidebar", kind: "command", title: "显示/隐藏侧边栏", run: toggleSidebarPersisted},
+		paletteItem{id: "cmd-toggle-activity", shortcutID: "toggle-activity", kind: "command", title: "动态视图", run: func(cs *chatState) { cs.toggleActivityView() }},
+		paletteItem{id: "cmd-show-shortcuts", shortcutID: "show-shortcuts", kind: "command", title: "显示快捷键", run: func(cs *chatState) { cs.toggleShortcutHelp() }},
 	)
 	items = append(items,
 		paletteItem{id: "cmd-new-task", kind: "command", title: "新建任务", run: func(cs *chatState) {
@@ -322,7 +333,35 @@ func buildPaletteItems(s *chatState) []paletteItem {
 
 	s.mu.Lock()
 	selectedTID := s.selectedThreadID
+	var selectedThread Thread
+	for _, th := range s.threads {
+		if th.ID == selectedTID {
+			selectedThread = th
+			break
+		}
+	}
 	s.mu.Unlock()
+	if selectedTID != "" {
+		pinTitle, dormantTitle := "置顶会话", "休眠会话"
+		if selectedThread.Pinned {
+			pinTitle = "取消置顶会话"
+		}
+		if selectedThread.Dormant {
+			dormantTitle = "重新激活会话"
+		}
+		items = append(items,
+			paletteItem{id: "cmd-pin-thread", kind: "command", title: pinTitle, run: func(cs *chatState) { cs.setThreadPinned(selectedTID, !selectedThread.Pinned) }},
+			paletteItem{id: "cmd-archive-thread", shortcutID: "archive-thread", kind: "command", title: "归档会话", run: func(cs *chatState) { cs.archiveThreadWithUndo(selectedThread.ProjectID, selectedTID) }},
+			paletteItem{id: "cmd-dormant-thread", shortcutID: "dormant-thread", kind: "command", title: dormantTitle, run: func(cs *chatState) {
+				if selectedThread.Dormant {
+					cs.setThreadDormant(selectedTID, false)
+				} else {
+					cs.markDormantWithUndo(selectedThread.ProjectID, selectedTID)
+				}
+			}},
+			paletteItem{id: "cmd-rename-thread", kind: "command", title: "重命名会话", run: func(cs *chatState) { cs.openRenameModal(selectedTID, selectedThread.Title) }},
+		)
+	}
 
 	if s.openThreadWindow != nil && selectedTID != "" {
 		items = append(items, paletteItem{
@@ -343,11 +382,12 @@ func buildPaletteItems(s *chatState) []paletteItem {
 	// 会话转发：选中会话时才出现，与右键菜单、⇧⌘D 共用 forwardSelectedThread。
 	if selectedTID != "" {
 		items = append(items, paletteItem{
-			id:       "cmd-forward-thread",
-			kind:     "command",
-			title:    "转发到新会话",
-			subtitle: "把当前会话的上下文带入新会话",
-			keywords: "转发 继续 新会话 forward continue",
+			id:         "cmd-forward-thread",
+			shortcutID: "forward-thread",
+			kind:       "command",
+			title:      "转发到新会话",
+			subtitle:   "把当前会话的上下文带入新会话",
+			keywords:   "转发 继续 新会话 forward continue",
 			run: func(cs *chatState) {
 				cs.forwardSelectedThread()
 			},
@@ -773,13 +813,17 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 											ui.Text(c, item.title).
 												SingleLine().
 												FontSize(uiFont(TypeFootnote)).
-												TextColor(ThemePrimaryText(c))
+												TextColor(ThemePrimaryText(c)).
+												Grow(1)
 
 											if item.subtitle != "" {
 												ui.Text(c, item.subtitle).
 													SingleLine().
 													FontSize(uiFont(TypeCaption)).
 													TextColor(ThemeSecondaryText(c))
+											}
+											if mods, key, ok := shortcutBindingFor(item.shortcutID); ok {
+												Kbd(c, "palette-kbd-"+item.id, formatShortcutKeys(mods, key))
 											}
 										})
 									}

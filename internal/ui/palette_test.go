@@ -19,6 +19,52 @@ func TestPaletteGitCommands(t *testing.T) {
 	}
 }
 
+func TestPaletteCommandsAndBindings(t *testing.T) {
+	setShortcutOverrides(nil)
+	t.Cleanup(func() { setShortcutOverrides(nil) })
+	s := newChatState(NewFakeClient())
+	global := []string{"cmd-toggle-sidebar", "cmd-toggle-activity", "cmd-show-shortcuts"}
+	thread := []string{"cmd-pin-thread", "cmd-archive-thread", "cmd-dormant-thread", "cmd-rename-thread"}
+	items := buildPaletteItems(s)
+	for _, id := range global {
+		if item := paletteItemByID(items, id); item == nil || item.run == nil {
+			t.Fatalf("缺少命令 %s", id)
+		}
+	}
+	for _, id := range thread {
+		if paletteItemByID(items, id) != nil {
+			t.Fatalf("无选中会话时出现 %s", id)
+		}
+	}
+	s.selectedThreadID = "t1"
+	s.threads = []Thread{{ID: "t1", ProjectID: "p1", Title: "会话", Pinned: true, Dormant: true}}
+	items = buildPaletteItems(s)
+	for _, id := range thread {
+		if item := paletteItemByID(items, id); item == nil || item.run == nil {
+			t.Fatalf("缺少命令 %s", id)
+		}
+	}
+	if paletteItemByID(items, "cmd-pin-thread").title != "取消置顶会话" || paletteItemByID(items, "cmd-dormant-thread").title != "重新激活会话" {
+		t.Fatal("会话动作标题错误")
+	}
+	paletteItemByID(items, "cmd-rename-thread").run(s)
+	if !s.renameModalOpen || s.renameThreadID != "t1" || s.renameThreadTitle != "会话" {
+		t.Fatal("重命名动作错误")
+	}
+
+	openPalette(s)
+	getPaletteState(s).query = "显示/隐藏右栏"
+	tt := ui.NewTester(func(c *ui.Context) { renderCommandPalette(c, s) }, 1000, 700)
+	if _, ok := tt.Find(formatShortcutKeys(ui.Cmd|ui.Alt, ui.KeyB)); !ok {
+		t.Fatalf("未显示默认键位：%v", tt.Texts())
+	}
+	setShortcutOverrides(map[string]string{"toggle-inspector": "Cmd+Shift+Y"})
+	tt.Frame()
+	if _, ok := tt.Find(formatShortcutKeys(ui.Cmd|ui.Shift, ui.KeyY)); !ok {
+		t.Fatalf("未显示自定义键位：%v", tt.Texts())
+	}
+}
+
 func TestPaletteTaskCommands(t *testing.T) {
 	s := newChatState(NewFakeClient())
 	s.openTasksWindowFn = func(string) {}
