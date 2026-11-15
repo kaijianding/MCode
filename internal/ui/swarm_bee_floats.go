@@ -466,6 +466,11 @@ func trackSwarmAutoHide(s *chatState, leadID string, bees []SwarmBee, precompute
 			}
 			continue
 		}
+		// 启动前就已失败的子线程和其他启动前结束的一样直接收起；本次运行中失败的仍常驻。
+		if h.Status == "failed" && !keptOpen[id] && !seenActive[id] && !swarmFloatForced[leadID] && !swarmFloatDismissedBees[leadID][id] {
+			hideNow = append(hideNow, id)
+			continue
+		}
 		if h.Status == "failed" || keptOpen[id] {
 			// 用户明确点开的子线程一直留在浮窗里：不收起、不重新计时，也不排到期唤醒；
 			// 只有用户关闭浮窗、编排按钮整体重开，或它重新开始运行才会解除。

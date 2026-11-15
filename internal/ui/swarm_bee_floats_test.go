@@ -377,13 +377,50 @@ func TestTrackSwarmAutoHideHidesAlreadyDoneAtStartup(t *testing.T) {
 	}
 
 	trackSwarmAutoHide(s, leadID, bees)
-	if got := swarmVisibleBees(leadID, bees); len(got) != 1 || got[0].Status != "failed" {
-		t.Fatalf("失败的子线程应保持可见：%v", got)
+	if got := swarmVisibleBees(leadID, bees); len(got) != 0 {
+		t.Fatalf("启动前结束的子线程应全部收起：%v", got)
 	}
-	advanceSwarmAutoHideDone(leadID, bees)
-	trackSwarmAutoHide(s, leadID, bees)
-	if got := swarmVisibleBees(leadID, bees); len(got) != 1 || got[0].Status != "failed" {
-		t.Fatalf("失败的子线程应持续可见：%v", got)
+	swarmFloatMu.Lock()
+	dismissed := swarmFloatDismissedBees[leadID]["h-isle"]
+	panelDismissed := swarmFloatPanelDismissed[leadID]
+	swarmFloatMu.Unlock()
+	if !dismissed || !panelDismissed {
+		t.Fatal("失败的子线程和整个浮窗都应标记为已收起")
+	}
+}
+
+func TestTrackSwarmAutoHideKeepsFailedBee(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		seenActive bool
+		forced     bool
+	}{
+		{name: "seen running", seenActive: true},
+		{name: "forced", forced: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leadID := "lead-failed-" + tc.name
+			resetSwarmAutoHideFor(leadID)
+			s := newChatState(NewFakeClient())
+			t.Cleanup(func() {
+				closeEmbeddedBees(s)
+				resetSwarmAutoHideFor(leadID)
+			})
+			bees := []SwarmBee{{ThreadID: "h-bee", Name: "Bee", Status: "running"}}
+			if tc.seenActive {
+				trackSwarmAutoHide(s, leadID, bees)
+			}
+			if tc.forced {
+				swarmFloatMu.Lock()
+				swarmFloatForced[leadID] = true
+				swarmFloatMu.Unlock()
+			}
+			bees[0].Status = "failed"
+			trackSwarmAutoHide(s, leadID, bees)
+			if got := swarmVisibleBees(leadID, bees); len(got) != 1 {
+				t.Fatalf("失败的子线程应保持可见：%v", got)
+			}
+		})
 	}
 }
 
