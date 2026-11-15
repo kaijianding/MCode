@@ -449,7 +449,7 @@ func TestLeadPolicyAcceptance(t *testing.T) {
 	for _, tool := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(false, mode, tool)
-			for _, want := range []string{"acceptance", "attach acceptance shell commands that prove the change works, with timeout flags", "merges only if every command exits 0"} {
+			for _, want := range []string{"acceptance", "attach acceptance shell commands that prove the change works, with timeout flags", "At least one must fail on the code before the change", "merges only if every command exits 0"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("tool=%v mode=%s missing %q", tool, mode, want)
 				}
