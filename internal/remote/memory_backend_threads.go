@@ -497,7 +497,19 @@ func (b *MemoryBackend) CanDiscardEmptyProvisional(threadID string) bool {
 	}
 	b.ensureMessagesLoadedLocked(td)
 	b.touchThreadLocked(td)
-	if len(td.messages) > 0 {
+	if !td.messagesLoaded || len(td.messages) > 0 {
+		return false
+	}
+	if b.store != nil {
+		ctx, cancel := persistCtx()
+		messages, _, err := b.store.ListMessages(ctx, threadID, 0, 1)
+		cancel()
+		if err != nil || len(messages) > 0 {
+			return false
+		}
+	}
+	// DeleteThread 会级联删除子会话，不能仅凭父会话为空就删除整个家族。
+	if len(b.familyThreadIDsLocked(threadID)) > 1 {
 		return false
 	}
 	if td.summary.IsRunning {

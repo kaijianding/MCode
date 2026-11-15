@@ -17,6 +17,51 @@ import (
 	"modernc.org/sqlite"
 )
 
+func TestAttachStoreCleansEmptyProvisionalThreads(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "mcode.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	if err := s.UpsertProject(ctx, store.Project{ID: "p1", Name: "项目", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []store.Thread{
+		{ID: "empty", IsProvisional: true},
+		{ID: "with-message", IsProvisional: true},
+		{ID: "normal"},
+	} {
+		thread.ProjectID, thread.Title, thread.Provider = "p1", thread.ID, "memory"
+		thread.CreatedAt, thread.UpdatedAt = now, now
+		if err := s.CreateThread(ctx, thread); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AppendMessage(ctx, store.Message{ID: "msg", ThreadID: "with-message", Role: "user", Kind: "text", Text: "内容", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	if err := b.AttachStore(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"empty", "with-message", "normal"} {
+		_, memoryErr := b.GetThread(ctx, id)
+		_, storeErr := s.GetThread(ctx, id)
+		if id == "empty" {
+			if memoryErr == nil || !errors.Is(storeErr, store.ErrNotFound) {
+				t.Fatalf("空临时会话未完全删除: memory=%v store=%v", memoryErr, storeErr)
+			}
+		} else if memoryErr != nil || storeErr != nil {
+			t.Fatalf("会话 %s 应保留: memory=%v store=%v", id, memoryErr, storeErr)
+		}
+	}
+}
+
 func TestPersist_SimulateAndReload(t *testing.T) {
 	ctx := context.Background()
 	dbDir := t.TempDir()

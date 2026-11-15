@@ -499,6 +499,16 @@ func (b *MemoryBackend) AttachStore(ctx context.Context, s *store.Store) error {
 	// 必须在 store 与内存线程表挂载之后调用：提示走 appendSystemNotice，依赖 b.threads 定位会话。
 	b.reconcileBoot(ctx, s)
 	startuptrace.Mark("AttachStore reconcileBoot")
+	// 仅主宿主清理上次退出遗留的临时会话，避免删除其他宿主正在使用的会话。
+	if s.IsPrimary() {
+		for _, thread := range threads {
+			if thread.IsProvisional && b.CanDiscardEmptyProvisional(thread.ID) {
+				if err := b.DeleteThread(ctx, thread.ID); err != nil {
+					log.Printf("store cleanup provisional thread %s error: %v", thread.ID, err)
+				}
+			}
+		}
+	}
 	return nil
 }
 
