@@ -223,9 +223,9 @@ func fallbackContextLimit(provider, modelID string) int {
 	return providerContextLimits[provider]
 }
 
-// modelContextLimit 返回会话用的上下文上限：先取模型目录里的值（CLI 上报或
+// modelContextLimit 返回会话摘要回退用的上下文上限：先取模型目录里的值（CLI 上报或
 // models.dev 的真实窗口），目录里没有该模型或没给出上限时才回退静态表。
-// 界面圆环、会话摘要里的窗口一律走这里，避免 CLI 报了 1M 窗口却被静态表压成 128K。
+// 目录真实窗口优先于静态表，避免 CLI 报了 1M 窗口却被静态表压成 128K。
 func modelContextLimit(provider, modelID string) int {
 	return contextLimitFor(ProviderModels(provider), provider, modelID)
 }

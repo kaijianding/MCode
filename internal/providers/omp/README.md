@@ -48,7 +48,7 @@ omp CLI（oh-my-pi，可执行文件 `omp`，Pi 的分支）的 harness 适配�
 - **窗口的 detail、planName 与窗口 id**（`$x.xx / $y.yy` 一类文案与 notes 拼接，
   以及 `planName` 的 "Codex Pro 20x" 一类文案）：`credits.Window` 只有 `Label` / `UsedPercent` /
   `ResetsAt`，没有承载这三项的字段。
-- **context 窗口上报**（`get_state` 的 `model.contextWindow` 与用量面板占比）：`harness.Usage` 没有窗口字段。
+- **context 窗口上报**（`get_state` 当轮 `model.contextWindow` 与用量面板占比）：`omp models --json` 的目录窗口已进 `ProviderModel.ContextLimit`；`get_state` 当轮 `model.contextWindow` 仍未映射到 `harness.Usage.ContextWindow`。
 - **notice 类帧**（`notice`、`auto_retry_*`、`extension_error`）：不映射为错误事件，避免把可重试的
   notice 当成当轮失败。
 - **tool_execution_update 的部分输出**、`command_output`、`session_info_update`、

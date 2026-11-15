@@ -825,7 +825,7 @@ type ProviderModel struct {
 	IsDefault       bool     `json:"isDefault"`
 	SupportsFast    bool     `json:"supportsFast"`
 	PreferredEffort *string  `json:"preferredEffort"`
-	// ContextLimit 是模型上下文窗口上限（tokens），0 表示未知；来自 models.dev。
+	// ContextLimit 是模型上下文窗口上限（tokens），来自 CLI 目录或 models.dev，0 表示未知。
 	ContextLimit int `json:"contextLimit,omitempty"`
 	// Secondary 表示模型不属于当前登录渠道，界面默认折叠在分组底部的更多模型里。
 	Secondary bool `json:"secondary,omitempty"`
