@@ -214,6 +214,9 @@ type Service struct {
 	optimistic   map[string]time.Time
 	// receipts 保存执行会话的回执、追问与求助状态，由独立互斥锁保护
 	receipts receiptState
+	// acceptanceMu 同时保护在跑集合和验收 goroutine 的启动/关闭。
+	acceptanceMu      sync.Mutex
+	acceptanceRunning map[string]bool
 }
 
 // SetOnResult 设置执行结果落库后的回调。
@@ -282,9 +285,11 @@ func (s *Service) notifyChange() {
 // NotifyChanged 供绕过 Service 直接写库的调用方触发刷新。
 func (s *Service) NotifyChanged() { s.notifyChange() }
 
-// Close 取消内部上下文并等待所有后台规划任务平稳退出。
+// Close 取消内部上下文并等待所有后台任务平稳退出。
 func (s *Service) Close() {
+	s.acceptanceMu.Lock()
 	s.cancel()
+	s.acceptanceMu.Unlock()
 	s.wg.Wait()
 }
 

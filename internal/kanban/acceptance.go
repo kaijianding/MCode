@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -84,15 +85,113 @@ func ParseAcceptanceCommands(criteria string) []string {
 	return commands
 }
 
-// hasGatedAcceptance 判断验收标准里是否有需要宿主执行或需要用户确认的条目（[命令]、[你验]）。
-// 这类任务不能自动接受，必须走评审与验收流程。
-func hasGatedAcceptance(task store.Task) bool {
-	for _, line := range strings.Split(task.AcceptanceCriteria, "\n") {
-		if strings.Contains(line, acceptanceCommandTag) || strings.Contains(line, acceptanceUserVerifyTag) {
-			return true
+// hasUserVerify 判断任务是否需要用户确认，不能自动接受。
+func hasUserVerify(task store.Task) bool {
+	return strings.Contains(task.AcceptanceCriteria, acceptanceUserVerifyTag)
+}
+
+// startAcceptanceCommands 只在完成落库后调用，命令执行不阻塞调度循环。
+// shortcut: 验收状态仅存于进程内，重启恢复需另行持久化执行记录。
+func (s *Service) startAcceptanceCommands(task store.Task, autoAccept bool) {
+	s.acceptanceMu.Lock()
+	if s.ctx.Err() != nil || s.acceptanceRunning[task.ID] {
+		s.acceptanceMu.Unlock()
+		return
+	}
+	s.mu.Lock()
+	latest, err := s.opts.Store.GetTask(s.ctx, task.ID)
+	if err == nil && latest.Status == string(TaskStatusReview) && latest.Revision == task.Revision {
+		text := "正在跑验收命令…"
+		latest.LastActivityText = &text
+		_, err = s.opts.Store.UpdateTask(s.ctx, latest, latest.Revision)
+		if err == nil {
+			s.revision.Add(1)
+		}
+	} else if err == nil {
+		err = store.ErrRevisionConflict
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.acceptanceMu.Unlock()
+		log.Printf("kanban: 启动任务 %s 验收失败: %v", task.ID, err)
+		return
+	}
+	if s.acceptanceRunning == nil {
+		s.acceptanceRunning = make(map[string]bool)
+	}
+	s.acceptanceRunning[task.ID] = true
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer func() {
+			s.acceptanceMu.Lock()
+			delete(s.acceptanceRunning, task.ID)
+			s.acceptanceMu.Unlock()
+		}()
+		s.finishAcceptanceCommands(task, autoAccept)
+	}()
+	s.acceptanceMu.Unlock()
+	s.notifyChange()
+}
+
+func acceptanceFailureFeedback(commands []string, results []AcceptanceCommandResult, err error) string {
+	var failures []string
+	if err != nil {
+		failures = append(failures, fmt.Sprintf("验收命令执行失败（%s）：%v", strings.Join(commands, "；"), err))
+	}
+	for _, result := range results {
+		if result.ExitCode == 0 && !result.TimedOut && result.Err == "" {
+			continue
+		}
+		status := fmt.Sprintf("退出码 %d", result.ExitCode)
+		if result.TimedOut {
+			status = "超时"
+		}
+		failures = append(failures, fmt.Sprintf("命令 `%s` 失败（%s）：%s\n%s", result.Command, status, result.Err, result.Output))
+	}
+	return strings.Join(failures, "\n\n")
+}
+
+func (s *Service) finishAcceptanceCommands(original store.Task, autoAccept bool) {
+	results, runErr := s.RunAcceptanceCommands(s.ctx, original.ID)
+	// 服务退出不算验收失败，保留 review 交给人工。
+	if s.ctx.Err() != nil {
+		return
+	}
+	feedback := acceptanceFailureFeedback(ParseAcceptanceCommands(original.AcceptanceCriteria), results, runErr)
+	defer s.notifyChange()
+	s.mu.Lock()
+	task, err := s.opts.Store.GetTask(s.ctx, original.ID)
+	if err != nil || task.Status != string(TaskStatusReview) {
+		s.mu.Unlock()
+		return
+	}
+	var decision ReviewDecision
+	if feedback != "" && task.RejectCount == 0 {
+		decision = ReviewReject
+	} else if feedback == "" && autoAccept && !hasUserVerify(task) {
+		decision = ReviewAccept
+	} else {
+		text := feedback
+		if text == "" {
+			text = "验收命令全部通过"
+			if original.LastActivityText != nil && *original.LastActivityText != "" {
+				text += "\n" + *original.LastActivityText
+			}
+		}
+		task.LastActivityText = &text
+		_, err = s.opts.Store.UpdateTask(s.ctx, task, task.Revision)
+		if err == nil {
+			s.revision.Add(1)
 		}
 	}
-	return false
+	s.mu.Unlock()
+	if decision != "" {
+		_, err = s.ReviewTask(s.ctx, task.ID, decision, feedback, task.Revision)
+	}
+	if err != nil {
+		log.Printf("kanban: 更新任务 %s 验收结果失败: %v", task.ID, err)
+	}
 }
 
 // RunAcceptanceCommands 在任务 worktree 里依次执行验收标准里的 [命令] 条目。

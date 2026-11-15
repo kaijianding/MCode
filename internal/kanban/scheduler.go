@@ -463,8 +463,8 @@ func (g *GoalScheduler) tickGoal(ctx context.Context, goal store.Goal) error {
 					break
 				}
 				// 完成：按目标策略自动接受、送审，两个开关都关闭时交给人工处理。
-				// 含 [命令] 或 [你验] 的验收标准必须先走验收，自动接受不生效。
-				autoAcceptNow = autoAccept && !hasGatedAcceptance(t)
+				// 命令异步验收通过后才能自动接受；[你验] 始终等用户确认。
+				autoAcceptNow = autoAccept && !hasUserVerify(t) && len(ParseAcceptanceCommands(t.AcceptanceCriteria)) == 0
 				if autoAcceptNow {
 					// 先落到 review 写库，再走与人工接受完全相同的评审接受路径触发合并
 					t.Status = string(TaskStatusReview)
@@ -488,7 +488,9 @@ func (g *GoalScheduler) tickGoal(ctx context.Context, goal store.Goal) error {
 				}
 				tasks[i] = up
 				goalChanged = true
-				if autoAcceptNow {
+				if up.Status == string(TaskStatusReview) && len(ParseAcceptanceCommands(up.AcceptanceCriteria)) > 0 {
+					g.svc.startAcceptanceCommands(up, autoAccept)
+				} else if autoAcceptNow {
 					// ReviewTask 失败（典型是合并失败）时任务留在 review，原因已写入卡片。
 					accepted, reviewErr := g.svc.ReviewTask(ctx, up.ID, ReviewAccept, "", up.Revision)
 					if reviewErr != nil {

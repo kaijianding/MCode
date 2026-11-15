@@ -319,6 +319,9 @@ func (w *Watchdog) Check(ctx context.Context) error {
 					changed = true
 				}
 				w.svc.mu.Unlock()
+				if updateErr == nil && up.Status == string(TaskStatusReview) && len(ParseAcceptanceCommands(up.AcceptanceCriteria)) > 0 {
+					w.svc.startAcceptanceCommands(up, w.autoAcceptEnabled(ctx, up))
+				}
 				if updateErr == nil && !(up.Status == string(TaskStatusTodo) && decision.result.Status == ResultFailed) {
 					w.svc.notifyResult(ctx, up, decision.result)
 				}
