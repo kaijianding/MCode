@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// finishTurnEarly 收尾轮末早退分支：仅当该线程没有其他轮次在跑时恢复空闲、发布空闲摘要，
+// finishTurnEarly 收尾轮末早退分支：仅当该线程没有其他轮次在跑时恢复空闲，
 // 并按正常路径的条件启动下一条排队消息，避免 IsRunning 永久卡在 true、跟进队列永不出队。
 func (b *MemoryBackend) finishTurnEarly(td *memoryThread, threadID, turnID string, turnIndex int, isNormal, isInterrupted bool) {
 	status := "failed"
@@ -28,6 +28,7 @@ func (b *MemoryBackend) finishTurnEarly(td *memoryThread, threadID, turnID strin
 		status = "completed"
 	}
 	b.updateTurnFinish(threadID, turnID, turnIndex, status, "")
+	hasBees := b.hasWorkingSwarmBees(threadID)
 	b.mu.Lock()
 	if td == nil || b.threads[threadID] != td {
 		b.mu.Unlock()
@@ -72,12 +73,6 @@ func (b *MemoryBackend) finishTurnEarly(td *memoryThread, threadID, turnID strin
 			finalMsgs = append(finalMsgs, msg)
 		}
 	}
-	b.mu.Unlock()
-	b.hub.Publish(threadID, finalMsgs, nil, finalSummary)
-	b.hub.Flush(threadID)
-
-	hasBees := b.hasWorkingSwarmBees(threadID)
-	b.mu.Lock()
 	var (
 		nextStarted  *startedTurn
 		nextText     string
@@ -87,10 +82,15 @@ func (b *MemoryBackend) finishTurnEarly(td *memoryThread, threadID, turnID strin
 	if b.threads[threadID] == td && b.ctx.Err() == nil {
 		nextStarted, nextText, queueChanged = b.startNextQueuedTurnLocked(td, isNormal && !hasBees, isNormal)
 	}
+	if nextStarted != nil {
+		// 摘要不能为 nil；用续跑摘要携带末尾消息，避免暴露空闲状态。
+		finalSummary = nextStarted.currentSummary
+	}
 	b.mu.Unlock()
+	b.hub.Publish(threadID, finalMsgs, nil, finalSummary)
+	b.hub.Flush(threadID)
 
 	if nextStarted != nil {
-		b.hub.Flush(threadID)
 		// 正文先落库再删队列行，崩溃时最多重复出现一条已写正文的排队项，不会丢消息。
 		b.persistMessages(threadID, []wire.ThreadMessage{nextStarted.userMsg})
 		b.recordDispatchingForTurn(threadID, nextStarted)
@@ -1728,8 +1728,8 @@ loop:
 	}
 	b.mu.Unlock()
 
-	b.hub.Publish(threadID, nil, nil, finalSummary)
 	if nextStarted != nil {
+		// 立即续跑时只刷出上一轮增量，避免中间的空闲摘要误报会话完成。
 		b.hub.Flush(threadID)
 		// 正文先落库再删队列行，崩溃时最多重复出现一条已写正文的排队项，不会丢消息。
 		b.persistMessages(threadID, []wire.ThreadMessage{nextStarted.userMsg})

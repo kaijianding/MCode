@@ -246,6 +246,139 @@ func TestFinishTurnQueuedNextNoIdleGap(t *testing.T) {
 	}
 }
 
+func TestSimulatedReplyQueuedNextNoIdleGap(t *testing.T) {
+	testReplyQueuedNextNoIdleGap(t, false)
+}
+
+func TestFinishTurnEarlyQueuedNextNoIdleGap(t *testing.T) {
+	testReplyQueuedNextNoIdleGap(t, true)
+}
+
+func testReplyQueuedNextNoIdleGap(t *testing.T, early bool) {
+	t.Helper()
+	for _, swarmReport := range []bool{true, false} {
+		name := "普通排队消息"
+		if swarmReport {
+			name = "Swarm汇报"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			startedCh := make(chan struct{}, 2)
+			releaseCh := make(chan struct{}, 2)
+			b, _, threadID := newDequeueOrderBackend(t, &controlledTestHarness{
+				startedCh: startedCh, releaseCh: releaseCh,
+			})
+			if !early {
+				b.UnregisterHarness("controlled")
+				b.mu.Lock()
+				b.threads[threadID].summary.Provider = "memory"
+				b.mu.Unlock()
+				b.SetAssistantStreamHook(func(id, _ string, reset bool, _ string) {
+					if id == threadID && reset {
+						startedCh <- struct{}{}
+						select {
+						case <-releaseCh:
+						case <-b.ctx.Done():
+						}
+					}
+				})
+			}
+			detector := NewSessionAlertDetector()
+			doneCh := make(chan SessionAlert, 8)
+			remove := b.hub.AddObserver(func(id, method string, params any) {
+				if id == threadID {
+					if alert, ok := detector.Observe(id, method, params); ok && alert.Kind == SessionAlertDone {
+						doneCh <- alert
+					}
+				}
+			})
+			t.Cleanup(remove)
+			conn := newMockStreamConn()
+			b.hub.Subscribe(conn, threadID)
+			if _, err := b.SendMessage(ctx, wire.SendMessageParams{
+				ThreadID: threadID, Text: "turn 1", ActionID: newUUID(),
+			}); err != nil {
+				t.Fatalf("首轮 SendMessage 失败: %v", err)
+			}
+			select {
+			case <-startedCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("首轮未在预期时间内启动")
+			}
+			if swarmReport {
+				if err := b.SendSwarmReport(ctx, threadID, "queued report"); err != nil {
+					t.Fatalf("SendSwarmReport 失败: %v", err)
+				}
+			} else {
+				res, err := b.SendMessage(ctx, wire.SendMessageParams{
+					ThreadID: threadID, Text: "queued text", WhenRunning: "queue", ActionID: newUUID(),
+				})
+				if err != nil || res.Queued == nil || !*res.Queued {
+					t.Fatalf("消息未进入队列: result=%+v, err=%v", res, err)
+				}
+			}
+			if early {
+				b.mu.Lock()
+				td := b.threads[threadID]
+				// 与切换 Provider 一样递增 epoch，让 runHarness 走 finishTurnEarly。
+				td.sessionEpoch++
+				turnID := td.runTurnID
+				// 此消息此前未发布，必须由早退收尾刷出，不能被 BeginRun 清掉。
+				td.messages = append(td.messages, wire.ThreadMessage{
+					ID: "early-final", Role: "assistant", Text: "末尾消息", TurnID: &turnID,
+				})
+				b.mu.Unlock()
+			}
+			releaseCh <- struct{}{}
+			select {
+			case <-startedCh:
+			case <-time.After(3 * time.Second):
+				t.Fatal("排队轮未在预期时间内启动")
+			}
+			select {
+			case alert := <-doneCh:
+				t.Errorf("排队轮启动前误报会话完成: %+v", alert)
+			default:
+			}
+			if early {
+				b.hub.Flush(threadID)
+				events := conn.getEvents()
+				terminalIndex, nextIndex := -1, -1
+				for i, event := range events {
+					for _, msg := range event.Payload.Messages {
+						if msg.ID == "early-final" && msg.TurnStatus != nil && *msg.TurnStatus == "completed" && msg.TurnCompletedAt != nil {
+							terminalIndex = i
+						}
+						if msg.Role == "user" && msg.Text != "turn 1" {
+							nextIndex = i
+						}
+					}
+				}
+				if terminalIndex < 0 || nextIndex <= terminalIndex || events[terminalIndex].RunID == events[nextIndex].RunID {
+					t.Errorf("末尾消息未在下一轮前刷出: %+v", events)
+				}
+				// 最后一轮也走早退收尾，覆盖没有排队项时的完成提醒。
+				b.mu.Lock()
+				b.threads[threadID].sessionEpoch++
+				b.mu.Unlock()
+			}
+			releaseCh <- struct{}{}
+			select {
+			case <-doneCh:
+			case <-time.After(3 * time.Second):
+				t.Fatal("排队轮结束后未收到会话完成提醒")
+			}
+			b.Close()
+			b.hub.Flush(threadID)
+			select {
+			case alert := <-doneCh:
+				t.Fatalf("排队轮结束后重复提醒会话完成: %+v", alert)
+			default:
+			}
+		})
+	}
+}
+
 // TestDequeueOrder_DrainQueuedFollowUps 覆盖 DrainQueuedFollowUps 这条同步出队路径。
 func TestDequeueOrder_DrainQueuedFollowUps(t *testing.T) {
 	ctx := context.Background()
