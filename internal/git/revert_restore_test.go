@@ -412,3 +412,32 @@ func TestRestoreFilesKeepsFileTypes(t *testing.T) {
 		t.Errorf("检查点不可读时不应删除工作区文件: %v", err)
 	}
 }
+
+func TestRevertSymlinkFallbackWritesFile(t *testing.T) {
+	testenv.TempHome(t)
+	runner, dir := newRevertTestRepo(t)
+	const target = "scripts/run.sh"
+	writeTestFile(t, dir, "current", target)
+	blob := runTestGit(t, dir, "hash-object", "-w", "current")
+	runTestGit(t, dir, "update-index", "--add", "--cacheinfo", "120000,"+blob+",current")
+	runTestGit(t, dir, "commit", "-q", "-m", "add symlink")
+	commit := runTestGit(t, dir, "rev-parse", "HEAD")
+
+	originalSymlink := symlink
+	symlink = func(string, string) error { return fmt.Errorf("symlink unavailable") }
+	t.Cleanup(func() { symlink = originalSymlink })
+
+	if err := runner.RestoreFiles(context.Background(), dir, commit, []string{"current"}); err != nil {
+		t.Fatalf("RestoreFiles: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(dir, "current"))
+	if err != nil {
+		t.Fatalf("lstat: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("应为普通文件，实际 %v", info.Mode())
+	}
+	if got := readTestFile(t, dir, "current"); got != target {
+		t.Errorf("文件内容 = %q, want %q", got, target)
+	}
+}

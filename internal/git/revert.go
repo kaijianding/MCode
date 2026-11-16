@@ -15,6 +15,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+var symlink = os.Symlink
+
 // cleanAndVerifyPath 检查并规范化路径，确保其严格位于仓库根目录 root 内，
 // 防止通过 ".."、绝对路径越界或非法路径逃逸出仓库，返回规范化后的仓库相对路径。
 func cleanAndVerifyPath(root, p string) (string, error) {
@@ -94,7 +96,7 @@ func (r *Runner) RestoreFiles(ctx context.Context, root, commit string, paths []
 			log.Printf("git: 跳过检查点中的目录条目 %s", relPath)
 			continue
 		case "120000":
-			// 符号链接：blob 内容是链接目标，重建链接而不是写普通文件
+			// 符号链接：blob 内容是链接目标
 			target, showErr := r.run(ctx, cleanRoot, nil, "show", fmt.Sprintf("%s:%s", commit, relPath))
 			if showErr != nil {
 				return fmt.Errorf("restore read symlink %s from commit %s: %w", relPath, commit, showErr)
@@ -105,8 +107,12 @@ func (r *Runner) RestoreFiles(ctx context.Context, root, commit string, paths []
 			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("restore replace %s with symlink: %w", relPath, err)
 			}
-			if err := os.Symlink(strings.TrimSuffix(string(target), "\n"), fullPath); err != nil {
-				return fmt.Errorf("restore symlink %s: %w", relPath, err)
+			target = []byte(strings.TrimSuffix(string(target), "\n"))
+			if err := symlink(string(target), fullPath); err != nil {
+				// 与 git 在 core.symlinks=false 时的检出行为一致。
+				if err := os.WriteFile(fullPath, target, 0o644); err != nil {
+					return fmt.Errorf("restore symlink %s: %w", relPath, err)
+				}
 			}
 			continue
 		}
