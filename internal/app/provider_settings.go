@@ -26,6 +26,7 @@ type providerSettingSpec struct {
 // ACP Agent（droid/cline/cursor/opencode/grok/devin）与 CLI 家族按 Kind=cli，
 // Anthropic 与 OpenAI 兼容预设按 Kind=api。
 var providerSettingSpecs = []providerSettingSpec{
+	{id: "agy", name: "Antigravity", kind: "native"},
 	{id: "copilot", name: "GitHub Copilot", kind: "cli"},
 	{id: "pi", name: "Pi", kind: "cli"},
 	{id: "omp", name: "Omp", kind: "cli"},
@@ -106,6 +107,10 @@ func buildProviderSetting(cfg config.Config, secrets config.SecretStore, spec pr
 	}
 
 	switch spec.id {
+	case "agy":
+		s.Enabled = cfg.Providers.Agy.Enabled
+		s.Bin = cfg.Providers.Agy.Bin
+		s.AgyChannel = cfg.Providers.Agy.AgyChannel
 	case "copilot":
 		s.Enabled = cfg.Providers.Copilot.Enabled
 		s.Bin = cfg.Providers.Copilot.Bin
@@ -158,6 +163,8 @@ func buildProviderSetting(cfg config.Config, secrets config.SecretStore, spec pr
 // applyProviderSetting 把设置页提交的单个 Provider 配置写回配置结构体。
 func applyProviderSetting(cfg *config.Config, id string, s mcodeui.ProviderSetting) {
 	switch id {
+	case "agy":
+		cfg.Providers.Agy.AgyChannel = s.AgyChannel
 	case "copilot":
 		cfg.Providers.Copilot.Enabled = s.Enabled
 		cfg.Providers.Copilot.Bin = strings.TrimSpace(s.Bin)
@@ -292,7 +299,7 @@ func (c *Client) SaveProviderSetting(ctx context.Context, s mcodeui.ProviderSett
 	// 热更新运行时注册：先注销旧 harness，启用时按新配置重建并注册。
 	// ACP（droid/cline/cursor/opencode/grok/devin）的 harness 由启动时的 ACP 循环构造（含 droid 认证环境变量），
 	// 此处只写配置，启用/停用与 Bin、Auth 变更均需重启后生效。
-	if c.backend != nil && !providerSettingIsACP(spec.id) {
+	if c.backend != nil && spec.id != "agy" && !providerSettingIsACP(spec.id) {
 		c.releaseReplacedHarness(spec.id)
 		if spec.id == "anthropic" {
 			// 先注销后重建：保存了新 Key 时按最新来源重新注册，没有 Key 时保持注销。

@@ -2157,6 +2157,7 @@ func registerExtraProviders(backend *remote.MemoryBackend, cfg config.Config, da
 		}
 
 		agyHarness = agy.New(agy.Options{
+			Channel:     agyChannelReader(dataDir),
 			Binary:      bin,
 			Router:      r,
 			BuiltinMCP:  mcpInjection.Builtin,
@@ -2323,4 +2324,15 @@ func derefDraftString(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+func agyChannelReader(dataDir string) func() string {
+	client := &Client{dataDir: dataDir}
+	return func() string {
+		cfg, ok := client.loadConfig()
+		if !ok {
+			return ""
+		}
+		return cfg.Providers.Agy.AgyChannel
+	}
 }

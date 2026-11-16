@@ -172,7 +172,7 @@ func TestProviderSettings_ListOrderAndDefaults(t *testing.T) {
 	}
 
 	wantIDs := []string{
-		"copilot", "pi", "omp", "commandcode", "droid", "cline",
+		"agy", "copilot", "pi", "omp", "commandcode", "droid", "cline",
 		"cursor", "opencode", "grok", "devin",
 		"anthropic", "openai", "deepseek", "zai", "meta",
 	}
@@ -553,5 +553,65 @@ func TestRegisterExtraProviders_McodeAlias(t *testing.T) {
 	}
 	if providers := backend.Providers(); len(providers) == 0 || providers[0] == "mcode" {
 		t.Fatalf("默认来源不能是 mcode: %v", providers)
+	}
+}
+
+func TestAgyChannelSettingRoundTrip(t *testing.T) {
+	spec, ok := providerSettingSpecByID("agy")
+	if !ok {
+		t.Fatal("agy spec missing")
+	}
+	for _, channel := range []string{"acp", "printmode", ""} {
+		cfg := config.Config{}
+		cfg.Providers.Agy.Enabled = true
+		cfg.Providers.Agy.Bin = "agy-custom"
+		applyProviderSetting(&cfg, "agy", mcodeui.ProviderSetting{AgyChannel: channel})
+		got := buildProviderSetting(cfg, nil, spec)
+		if got.AgyChannel != channel || !got.Enabled || got.Bin != "agy-custom" {
+			t.Fatalf("setting = %+v", got)
+		}
+	}
+}
+
+func TestAgyChannelReaderUsesCurrentConfig(t *testing.T) {
+	dir := t.TempDir()
+	read := agyChannelReader(dir)
+	for _, channel := range []string{"acp", "printmode", ""} {
+		if err := config.Update(dir, func(cfg *config.Config) error { cfg.Providers.Agy.AgyChannel = channel; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(); got != channel {
+			t.Fatalf("got %q, want %q", got, channel)
+		}
+	}
+}
+
+func TestAgyChannelReaderConfigFailure(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := agyChannelReader(file)(); got != "" {
+		t.Fatalf("got %q, want automatic channel", got)
+	}
+}
+
+type agyCacheResetHarness struct {
+	harness.Harness
+	resets int
+}
+
+func (*agyCacheResetHarness) Kind() harness.Kind   { return harness.Kind("agy") }
+func (h *agyCacheResetHarness) ResetVersionCache() { h.resets++ }
+
+func TestAgyChannelUpdateResetsVersionCache(t *testing.T) {
+	backend := remote.NewMemoryBackend(nil)
+	h := &agyCacheResetHarness{}
+	backend.RegisterHarness(h)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = (&Client{backend: backend, dataDir: t.TempDir()}).CheckProviderUpdate(ctx, "agy")
+	if h.resets != 1 {
+		t.Fatalf("version cache resets = %d, want 1", h.resets)
 	}
 }

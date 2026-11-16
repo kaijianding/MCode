@@ -42,6 +42,11 @@ func (c *Client) ProviderVersion(ctx context.Context, provider string) (mcodeui.
 
 // CheckProviderUpdate 检查指定提供方的版本更新。
 func (c *Client) CheckProviderUpdate(ctx context.Context, provider string) (mcodeui.ProviderVersionInfo, error) {
+	if strings.EqualFold(strings.TrimSpace(provider), "agy") && c.backend != nil {
+		if h, ok := c.backend.RegisteredHarness("agy").(interface{ ResetVersionCache() }); ok {
+			h.ResetVersionCache()
+		}
+	}
 	executable, err := c.providerExecutable(provider)
 	if err != nil {
 		return mcodeui.ProviderVersionInfo{}, err

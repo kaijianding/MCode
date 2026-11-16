@@ -15,7 +15,9 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"mcode/internal/fsutil"
+	"mcode/internal/providers/agy"
 	"mcode/internal/providers/agy/accounts"
+	"mcode/internal/providers/cliupdate"
 )
 
 type providerListEntry struct {
@@ -397,6 +399,10 @@ func (st *SettingsState) loadProviderRows() {
 		var cliIDs []string
 		if errSettings == nil {
 			for _, s := range settingsList {
+				if s.ID == "agy" {
+					cliSettings[s.ID] = s
+					continue
+				}
 				// 内置 mcode 引擎不再作为供应商出现，只为老 mcode 会话保留。
 				if s.Kind != "cli" || s.ID == "mcode" {
 					continue
@@ -413,7 +419,7 @@ func (st *SettingsState) loadProviderRows() {
 		quotaErrs := make(map[string]string)
 		credits := make(map[string]ProviderCredits)
 
-		for _, id := range append([]string{"claude", "codex"}, cliIDs...) {
+		for _, id := range append([]string{"claude", "codex", "agy"}, cliIDs...) {
 			// 已安装版本始终探测并展示（一次本地 --version）；更新监控只影响远程 latest 的
 			// 检查，由 checkProviderUpdate 按需触发。
 			ver, errVer := client.ProviderVersion(ctx, id)
@@ -2064,6 +2070,7 @@ func renderProviderAccountTab(c *ui.Context, st *SettingsState, id string, view 
 // renderProviderAdvancedTab 渲染「高级」页签：检查更新、可执行文件路径与 Magpie 全局配置。
 func renderProviderAdvancedTab(c *ui.Context, st *SettingsState, id string, view providerDetailState, locked bool) {
 	if id == "agy" {
+		renderAgyChannelRow(c, st, locked)
 		// (e) 默认收起的「账号调度」子区
 		renderAgyRowAdvancedSections(c, st)
 		return
@@ -2170,4 +2177,48 @@ func renderNativeProviderBinInput(c *ui.Context, st *SettingsState, bin *string,
 			st.save()
 		},
 	})
+}
+
+func agyChannelNeedsUpdate(setting, installed string) bool {
+	if setting != agy.ChannelAuto && setting != agy.ChannelACP {
+		return false
+	}
+	version := cliupdate.ParseVersion(installed)
+	return version != "" && cliupdate.CompareVersions(version, agy.MinACPVersion) < 0
+}
+
+func renderAgyChannelRow(c *ui.Context, st *SettingsState, locked bool) {
+	st.mu.Lock()
+	setting := st.providerRows.settings["agy"]
+	_, loaded := st.providerRows.settings["agy"]
+	saving := st.providerRows.saving["agy"]
+	version := st.providerRows.versions["agy"].Installed
+	saveErr := st.providerRows.saveErr["agy"]
+	st.mu.Unlock()
+	values := []string{agy.ChannelAuto, agy.ChannelACP, agy.ChannelPrintMode}
+	selected := 0
+	for i, value := range values {
+		if setting.AgyChannel == value {
+			selected = i
+		}
+	}
+	disabled := locked || saving || !loaded
+	renderSettingRow(c, "row-agy-channel", "通道", func() {
+		Segmented(c, "agy-channel", &selected, []Segment{{Label: "自动", Disabled: disabled}, {Label: "ACP", Disabled: disabled}, {Label: "PrintMode", Disabled: disabled}}, func(i int) {
+			saveProviderRowSetting(st, "agy", func(s *ProviderSetting) { s.AgyChannel = values[i] })
+		})
+	})
+	if agyChannelNeedsUpdate(setting.AgyChannel, version) {
+		renderSettingRow(c, "row-agy-channel-update", "需要 1.5.8 以上", func() {
+			_, available := providerTerminalCommand(st, "agy", "update")
+			btn := ui.ButtonBase(c.Key("btn-agy-channel-update")).Label("更新").Disabled(!available).Radius(RadiusSM).Padding(settingsPillPadX, Space4).Background(ThemeHover(c))
+			if btn.Clicked() && available {
+				launchProviderTerminalAction(st, "agy", "update")
+			}
+			btn.Children(func() { ui.Text(c, "更新").FontSize(uiFont(TypeBody)).TextColor(ThemeAccent(c)) })
+		})
+	}
+	if saveErr != "" {
+		ui.Text(c, saveErr).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
+	}
 }

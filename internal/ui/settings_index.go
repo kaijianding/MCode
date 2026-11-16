@@ -116,6 +116,8 @@ func settingsLegacyItems() []settingsItem {
 		{ID: "row-provider-balance", Page: "models", Sheet: "provider", Section: "供应商", Title: "余额", Aliases: []string{"供应商", "额度"}},
 		{ID: "row-provider-tray-quota", Page: "models", Sheet: "provider", Section: "供应商", Title: "菜单栏额度", Aliases: []string{"供应商", "额度", "菜单栏", "托盘", "quota"}},
 		{ID: "row-provider-bin", Page: "models", Sheet: "provider", Section: "供应商", Title: "可执行文件路径", Aliases: []string{"供应商", "路径"}},
+		{ID: "row-agy-channel", Page: "models", Sheet: "provider", Section: "供应商", Title: "通道", Aliases: []string{"agy", "ACP", "PrintMode"}},
+		{ID: "row-agy-channel-update", Page: "models", Sheet: "provider", Section: "供应商", Title: "需要 1.5.8 以上", Aliases: []string{"agy", "更新"}},
 		{ID: "row-provider-pi-cache", Page: "models", Sheet: "provider", Section: "供应商", Title: "长缓存", Aliases: []string{"pi", "缓存", "PI_CACHE_RETENTION"}},
 		{ID: "row-provider-pi-vision", Page: "models", Sheet: "provider", Section: "供应商", Title: "视觉模型", Aliases: []string{"pi", "图片"}},
 		{ID: "row-provider-version", Page: "models", Sheet: "provider", Section: "供应商", Title: "版本信息", Aliases: []string{"供应商", "版本"}},

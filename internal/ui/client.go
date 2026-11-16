@@ -784,6 +784,7 @@ type ProviderSetting struct {
 	// PiCacheLong 仅 pi 使用：开启后给 pi 子进程设 PI_CACHE_RETENTION=long，
 	// 支持的服务商（如 Anthropic）改用更长的 prompt 缓存。
 	PiCacheLong bool
+	AgyChannel  string
 	// PiVisionModel 仅 pi 使用：格式为 provider/model，填了以后当前模型看不了图片时
 	// 由它描述图片；留空则不启用。
 	PiVisionModel string
