@@ -260,63 +260,63 @@ func TestBuildEnv(t *testing.T) {
 			base:    []string{"PATH=/bin", "PWD=/old/path", "USER=alice"},
 			workDir: "/new/path",
 			extra:   nil,
-			want:    []string{"PATH=/bin", "USER=alice", "PWD=/new/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
+			want:    []string{"PATH=/bin", "USER=alice", "PWD=/new/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h"},
 		},
 		{
 			name:    "去掉多个旧的PWD项",
 			base:    []string{"PWD=/old1", "A=1", "PWD=/old2", "B=2"},
 			workDir: "/target/path",
 			extra:   []string{"C=3"},
-			want:    []string{"A=1", "B=2", "PWD=/target/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "C=3"},
+			want:    []string{"A=1", "B=2", "PWD=/target/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "C=3"},
 		},
 		{
 			name:    "workDir为空时不加PWD",
 			base:    []string{"PATH=/bin", "PWD=/old/path", "USER=bob"},
 			workDir: "",
 			extra:   []string{"EXTRA=1"},
-			want:    []string{"PATH=/bin", "USER=bob", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "EXTRA=1"},
+			want:    []string{"PATH=/bin", "USER=bob", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "EXTRA=1"},
 		},
 		{
 			name:    "extra里的PWD排在最后",
 			base:    []string{"PATH=/usr/bin", "PWD=/old/path"},
 			workDir: "/work/path",
 			extra:   []string{"EXTRA_VAR=1", "PWD=/override/pwd"},
-			want:    []string{"PATH=/usr/bin", "PWD=/work/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "EXTRA_VAR=1", "PWD=/override/pwd"},
+			want:    []string{"PATH=/usr/bin", "PWD=/work/path", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "EXTRA_VAR=1", "PWD=/override/pwd"},
 		},
 		{
 			name:    "base为空时不设置子代理模型",
 			base:    nil,
 			workDir: "",
 			extra:   nil,
-			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
+			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h"},
 		},
 		{
 			name:    "base已设置子代理模型时不重复追加",
 			base:    []string{"PATH=/bin", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet"},
 			workDir: "",
 			extra:   nil,
-			want:    []string{"PATH=/bin", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
+			want:    []string{"PATH=/bin", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h"},
 		},
 		{
 			name:    "extra里的子代理模型排在最后并生效",
 			base:    []string{"PATH=/bin"},
 			workDir: "",
 			extra:   []string{"CLAUDE_CODE_SUBAGENT_MODEL=opus"},
-			want:    []string{"PATH=/bin", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_SUBAGENT_MODEL=opus"},
+			want:    []string{"PATH=/bin", "CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "CLAUDE_CODE_SUBAGENT_MODEL=opus"},
 		},
 		{
 			name:    "base已禁用待办工具时保留设置且不重复追加",
 			base:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=0"},
 			workDir: "",
 			extra:   nil,
-			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=0"},
+			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=0", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h"},
 		},
 		{
 			name:    "extra里的待办工具设置排在最后并生效",
 			base:    nil,
 			workDir: "",
 			extra:   []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=0"},
-			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_ENABLE_TODO_TOOLS=0"},
+			want:    []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "CLAUDE_CODE_ENABLE_TODO_TOOLS=0"},
 		},
 	}
 
@@ -328,6 +328,34 @@ func TestBuildEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildEnvPromptCacheTTL(t *testing.T) {
+	has := func(env []string, want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("默认启用1小时缓存", func(t *testing.T) {
+		got := buildEnv([]string{"PATH=/bin"}, "", nil)
+		if !has(got, "CLAUDE_CODE_PROMPT_CACHE_TTL=1h") {
+			t.Fatalf("buildEnv() = %v, want 包含 CLAUDE_CODE_PROMPT_CACHE_TTL=1h", got)
+		}
+	})
+
+	t.Run("用户已设置时不覆盖", func(t *testing.T) {
+		got := buildEnv([]string{"CLAUDE_CODE_PROMPT_CACHE_TTL=5m"}, "", nil)
+		if !has(got, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m") {
+			t.Fatalf("buildEnv() = %v, want 包含 CLAUDE_CODE_PROMPT_CACHE_TTL=5m", got)
+		}
+		if has(got, "CLAUDE_CODE_PROMPT_CACHE_TTL=1h") {
+			t.Fatalf("buildEnv() = %v, want 不含 CLAUDE_CODE_PROMPT_CACHE_TTL=1h", got)
+		}
+	})
 }
 
 func TestParser_Deduplication(t *testing.T) {

@@ -433,6 +433,10 @@ func buildEnv(base []string, workDir string, extra []string) []string {
 	if !hasEnvKey(env, "CLAUDE_CODE_ENABLE_TODO_TOOLS=") {
 		env = append(env, "CLAUDE_CODE_ENABLE_TODO_TOOLS=1")
 	}
+	// 主会话等子代理常超过 5 分钟，用 1 小时缓存避免整段重写；用户已设置时不覆盖。
+	if !hasEnvKey(env, "CLAUDE_CODE_PROMPT_CACHE_TTL=") {
+		env = append(env, "CLAUDE_CODE_PROMPT_CACHE_TTL=1h")
+	}
 	env = append(env, extra...)
 	return env
 }
