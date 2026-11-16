@@ -516,3 +516,32 @@ func TestRemoteSettingsReviewMaxChangedLinesRejectsOutOfRange(t *testing.T) {
 		t.Fatalf("越界写入后行数上限 = %d, 期望保持 %d", cfg.Orchestration.ReviewMaxChangedLines, config.DefaultReviewMaxChangedLines)
 	}
 }
+
+func TestRemoteSettingsAgyChannel(t *testing.T) {
+	client := newRemoteSettingsTestClient(t, nil)
+	svc := remoteSettingsService{client: client}
+	key := remote.SettingsKeyProvidersAgyChannel
+	snapshot, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if got, ok := snapshot.Values[key]; !ok || string(got) != `""` {
+		t.Fatalf("默认通道快照 = %s, 存在 = %v", got, ok)
+	}
+	for _, value := range []string{"acp", "printmode", ""} {
+		written, err := svc.Set(context.Background(), remoteSettingsValues(t, map[string]any{key: value}))
+		if err != nil {
+			t.Fatalf("写入 %q 失败: %v", value, err)
+		}
+		if got := loadRemoteSettingsTestConfig(t, client.dataDir).Providers.Agy.AgyChannel; got != value {
+			t.Fatalf("通道 = %q, 期望 %q", got, value)
+		}
+		var got string
+		if err := json.Unmarshal(written.Values[key], &got); err != nil || got != value {
+			t.Fatalf("通道快照 = %s, 期望 %q", written.Values[key], value)
+		}
+	}
+	if _, err := svc.Set(context.Background(), remoteSettingsValues(t, map[string]any{key: "invalid"})); err == nil {
+		t.Fatal("非法通道应报错")
+	}
+}

@@ -118,6 +118,7 @@ func settingsSnapshotFromConfig(cfg config.Config) (wire.SettingsSnapshot, error
 	values := map[string]any{
 		remote.SettingsKeyModelsProvider:                     cfg.Models.Provider,
 		remote.SettingsKeyPermissionsMode:                    cfg.Permissions.Mode,
+		remote.SettingsKeyProvidersAgyChannel:                cfg.Providers.Agy.AgyChannel,
 		remote.SettingsKeySessionAutoCollapseReasoning:       cfg.Session.AutoCollapseReasoningEnabled(),
 		remote.SettingsKeySessionPinSentMessage:              cfg.Session.PinSentMessageEnabled(),
 		remote.SettingsKeySessionConciseRepliesEnabled:       cfg.Session.ConciseReplies(),
@@ -231,6 +232,17 @@ func applySettingsValue(cfg *config.Config, key string, raw json.RawMessage) err
 			return settingsValueError(key, "可选 "+strings.Join(settingsPermissionModes, "、")+"，收到 "+strconv.Quote(value))
 		}
 		cfg.Permissions.Mode = value
+		return nil
+
+	case remote.SettingsKeyProvidersAgyChannel:
+		value, err := decodeSettingsString(key, raw)
+		if err != nil {
+			return err
+		}
+		if value != "" && value != "acp" && value != "printmode" {
+			return settingsValueError(key, "可选空字符串、acp、printmode，收到 "+strconv.Quote(value))
+		}
+		cfg.Providers.Agy.AgyChannel = value
 		return nil
 
 	case remote.SettingsKeySessionAutoCollapseReasoning:

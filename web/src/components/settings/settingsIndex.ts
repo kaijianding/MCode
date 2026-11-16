@@ -410,6 +410,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
   },
 
   {
+    id: 'row-agy-channel',
+    page: 'general',
+    section: 'Agent',
+    title: 'Antigravity 通道',
+    settingsKey: 'providers.agy.channel'
+  },
+  {
     id: 'row-tray-quota-hidden',
     page: 'general',
     section: '启动与托盘',

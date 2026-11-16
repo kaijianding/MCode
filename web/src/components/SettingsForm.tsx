@@ -38,6 +38,12 @@ const PERMISSION_MODES: SelectOption[] = [
   { value: 'fullAccess', label: '完全访问' }
 ];
 
+const AGY_CHANNEL_OPTIONS: SelectOption[] = [
+  { value: '', label: '自动' },
+  { value: 'acp', label: 'ACP' },
+  { value: 'printmode', label: 'PrintMode' }
+];
+
 // 自动休眠天数选项照抄桌面端（internal/ui/settings_page_archive.go:395）。
 const AUTO_DORMANT_DAYS: SelectOption[] = [
   { value: '0', label: '关闭 (0)' },
@@ -813,6 +819,19 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
           onChange={(next) => void commit('permissions.mode', next)}
         />
       </SettingsSection>
+      {hasKey('providers.agy.channel') && (
+        <SettingsSection title="Agent">
+          <ChoiceField
+            itemID="row-agy-channel"
+            label="Antigravity 通道"
+            value={asString(values['providers.agy.channel'])}
+            options={AGY_CHANNEL_OPTIONS}
+            disabled={busy}
+            error={errors['providers.agy.channel']}
+            onChange={(next) => void commit('providers.agy.channel', next)}
+          />
+        </SettingsSection>
+      )}
       {hasKey('startup.tray_quota_hidden') && (
         <SettingsSection title="启动与托盘">
           <SettingsStackedRow

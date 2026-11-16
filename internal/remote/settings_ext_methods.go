@@ -28,6 +28,7 @@ const (
 const (
 	SettingsKeyModelsProvider                     = "models.provider"
 	SettingsKeyPermissionsMode                    = "permissions.mode"
+	SettingsKeyProvidersAgyChannel                = "providers.agy.channel"
 	SettingsKeySessionAutoCollapseReasoning       = "session.auto_collapse_reasoning"
 	SettingsKeySessionPinSentMessage              = "session.pin_sent_message"
 	SettingsKeySessionConciseRepliesEnabled       = "session.concise_replies_enabled"
@@ -75,6 +76,7 @@ const (
 var SettingsWritableKeys = []string{
 	SettingsKeyModelsProvider,
 	SettingsKeyPermissionsMode,
+	SettingsKeyProvidersAgyChannel,
 	SettingsKeySessionAutoCollapseReasoning,
 	SettingsKeySessionPinSentMessage,
 	SettingsKeySessionConciseRepliesEnabled,
