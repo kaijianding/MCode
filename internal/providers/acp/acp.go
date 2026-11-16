@@ -472,6 +472,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		return sessionID
 	}
 
+	var toolsMu sync.Mutex
+	type pendingTool struct {
+		readPath string
+	}
+	pendingTools := make(map[string]pendingTool)
+	pendingOrder := make([]string, 0)
+	earlyReads := make(map[string]int)
+	servedReads := make(map[string]bool)
+	toolsFinished := false
+
 	// 注册对端发来的请求处理器
 	conn.SetRequestHandler(func(method string, params json.RawMessage) (any, error) {
 		switch method {
@@ -492,6 +502,31 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			content, err := os.ReadFile(target)
 			if err != nil {
 				return nil, err
+			}
+			if h.opts.Agent == AgentAgy {
+				toolsMu.Lock()
+				defer toolsMu.Unlock()
+				if toolsFinished {
+					return map[string]any{"content": string(content)}, nil
+				}
+				matched := false
+				for i, id := range pendingOrder {
+					pending, exists := pendingTools[id]
+					if !exists {
+						continue
+					}
+					if pending.readPath == p.Path {
+						matched = true
+						servedReads[id] = true
+						delete(pendingTools, id)
+						pendingOrder = append(pendingOrder[:i], pendingOrder[i+1:]...)
+						_ = harness.Emit(emit, harness.Event{Type: harness.EventToolEnd, ToolID: id})
+						break
+					}
+				}
+				if !matched {
+					earlyReads[p.Path]++
+				}
 			}
 			return map[string]any{"content": string(content)}, nil
 
@@ -538,6 +573,50 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			}
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, err
+			}
+			if h.opts.Agent == AgentAgy && strings.HasPrefix(p.ToolCall.ToolCallID, "interaction_") && len(p.Options) > 0 {
+				interactor, ok := turn.Approver.(harness.Interactor)
+				if !ok {
+					return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
+				}
+				prompt := p.ToolCall.Title
+				if prompt == "" {
+					prompt = "请选择"
+				}
+				req := harness.ApprovalRequest{Kind: harness.RequestKindQuestion, ToolName: "ask_question", ToolID: p.ToolCall.ToolCallID, Summary: p.ToolCall.Title,
+					Questions: []harness.Question{{ID: p.ToolCall.ToolCallID, Prompt: prompt}}}
+				for _, option := range p.Options {
+					label := option.Name
+					if label == "" {
+						label = option.OptionID
+					}
+					req.Questions[0].Choices = append(req.Questions[0].Choices, harness.QuestionChoice{Label: label})
+				}
+				response, interactErr := interactor.Interact(ctx, req)
+				if interactErr != nil {
+					harness.AckDelivery(turn.Approver, req, interactErr)
+					return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
+				}
+				var selected string
+				if !response.Skipped && len(response.Answers[p.ToolCall.ToolCallID]) > 0 {
+					answer := response.Answers[p.ToolCall.ToolCallID][0]
+					for _, option := range p.Options {
+						label := option.Name
+						if label == "" {
+							label = option.OptionID
+						}
+						if answer == label || answer == option.OptionID {
+							selected = option.OptionID
+							break
+						}
+					}
+				}
+				if selected == "" {
+					payload := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+					return acpApprovalResponse{payload: payload, onAck: func(err error) { harness.AckDelivery(turn.Approver, req, err) }}, nil
+				}
+				payload := map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": selected}}
+				return acpApprovalResponse{payload: payload, onAck: func(err error) { harness.AckDelivery(turn.Approver, req, err) }}, nil
 			}
 
 			toolID := p.ToolCall.ToolCallID
@@ -603,8 +682,13 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 					arg := ""
 					var values map[string]any
 					_ = json.Unmarshal(input, &values)
-					if p.ToolCall.Kind == "execute" || name == "bash" || name == "shell_command" || name == "run_command" {
-						command, _ := values["command"].(string)
+					command := ""
+					if h.opts.Agent == AgentAgy {
+						command = agyCommand(input)
+					} else {
+						command, _ = values["command"].(string)
+					}
+					if p.ToolCall.Kind == "execute" || (h.opts.Agent == AgentAgy && p.ToolCall.Kind == "" && command != "") || name == "bash" || name == "shell_command" || name == "run_command" {
 						name, arg = "bash", command
 					} else if p.ToolCall.Kind == "edit" {
 						name = "edit_file"
@@ -701,10 +785,6 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}
 	})
 
-	var toolsMu sync.Mutex
-	pendingTools := make(map[string]struct{})
-	toolsFinished := false
-
 	// 注册通知分发处理器
 	conn.SetNotificationHandler(func(method string, params json.RawMessage) {
 		if method != "session/update" {
@@ -721,20 +801,31 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				Title         string          `json:"title"`
 				RawInput      json.RawMessage `json:"rawInput"`
 				Input         json.RawMessage `json:"input"`
-				Status        string          `json:"status"`
-				Output        string          `json:"output"`
-				Error         any             `json:"error"`
-				Diff          string          `json:"diff"`
-				Path          string          `json:"path"`
-				Patch         string          `json:"patch"`
-				Used          int64           `json:"used"`
-				Size          int64           `json:"size"`
+				Locations     []struct {
+					Path string `json:"path"`
+				} `json:"locations"`
+				Status string `json:"status"`
+				Output string `json:"output"`
+				Error  any    `json:"error"`
+				Diff   string `json:"diff"`
+				Path   string `json:"path"`
+				Patch  string `json:"patch"`
+				Used   int64  `json:"used"`
+				Size   int64  `json:"size"`
 			} `json:"update"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return
 		}
 		u := p.Update
+		if u.SessionUpdate == "tool_call_update" {
+			toolsMu.Lock()
+			served := servedReads[u.ToolCallID]
+			toolsMu.Unlock()
+			if served {
+				return
+			}
+		}
 
 		switch u.SessionUpdate {
 		case "agent_message_chunk":
@@ -778,13 +869,32 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				toolsMu.Unlock()
 				break
 			}
-			pendingTools[u.ToolCallID] = struct{}{}
+			readPath := ""
+			if h.opts.Agent == AgentAgy {
+				readPath = agyReadPath(u.Title, u.Locations, input)
+			}
+			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath}
+			if readPath != "" {
+				pendingOrder = append(pendingOrder, u.ToolCallID)
+			}
 			_ = harness.Emit(emit, harness.Event{
 				Type:     harness.EventToolStart,
 				ToolID:   u.ToolCallID,
 				ToolName: toolName,
 				Input:    input,
 			})
+			if readPath != "" && earlyReads[readPath] > 0 {
+				servedReads[u.ToolCallID] = true
+				delete(pendingTools, u.ToolCallID)
+				for i, id := range pendingOrder {
+					if id == u.ToolCallID {
+						pendingOrder = append(pendingOrder[:i], pendingOrder[i+1:]...)
+						break
+					}
+				}
+				earlyReads[readPath]--
+				_ = harness.Emit(emit, harness.Event{Type: harness.EventToolEnd, ToolID: u.ToolCallID})
+			}
 			toolsMu.Unlock()
 
 		case "tool_call_update":
@@ -822,7 +932,17 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				toolsMu.Unlock()
 				break
 			}
+			if servedReads[u.ToolCallID] {
+				toolsMu.Unlock()
+				return
+			}
 			delete(pendingTools, u.ToolCallID)
+			for i, id := range pendingOrder {
+				if id == u.ToolCallID {
+					pendingOrder = append(pendingOrder[:i], pendingOrder[i+1:]...)
+					break
+				}
+			}
 			isErr := u.Status == "failed" || u.Status == "error" || u.Error != nil
 			_ = harness.Emit(emit, harness.Event{
 				Type:    harness.EventToolEnd,
@@ -1103,6 +1223,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			})
 		}
 	}
+	var agyDBPath string
+	agyStepStart := int64(-1)
+	if h.opts.Agent == AgentAgy {
+		agyDBPath = agySessionDB(agyGeminiDir(allArgs, cmd.Env), sid)
+		if start, ok := agyStepIndex(agyDBPath); ok {
+			agyStepStart = start
+		} else {
+			agyDBPath = ""
+		}
+	}
 
 	var promptResult struct {
 		StopReason string `json:"stopReason"`
@@ -1135,7 +1265,11 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 	toolsMu.Unlock()
 
-	if promptErr == nil {
+	var agyErr error
+	if promptErr == nil && h.opts.Agent == AgentAgy {
+		agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
+	}
+	if promptErr == nil && agyErr == nil {
 		u := promptResult.Usage
 		if u.InputTokens != 0 || u.OutputTokens != 0 || u.ThoughtTokens != 0 || u.CachedReadTokens != 0 {
 			_ = harness.Emit(emit, harness.Event{Type: harness.EventUsage, Usage: &harness.Usage{
@@ -1172,6 +1306,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			return fmt.Errorf("acp prompt failed: %w (stderr: %s)", promptErr, tail)
 		}
 		return fmt.Errorf("acp prompt failed: %w", promptErr)
+	}
+	if agyErr != nil {
+		return agyErr
 	}
 	if waitErr != nil {
 		tail := strings.TrimSpace(stderrBuf.String())

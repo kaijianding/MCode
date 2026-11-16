@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"mcode/internal/harness"
 	"mcode/internal/providers/loginenv"
+	_ "modernc.org/sqlite"
 )
 
 const fakeACPEnv = "MCODE_TEST_FAKE_ACP"
@@ -714,6 +716,79 @@ func runFakeACPFeatures(mode string) {
 			}
 			result["configOptions"] = options
 		case "session/prompt":
+			if strings.HasPrefix(mode, "feature_agy_outcome_") {
+				dbPath := agySessionDB(agyGeminiDir(os.Args[1:], os.Environ()), "feature-session")
+				if mode == "feature_agy_outcome_skip" {
+					_ = os.Remove(dbPath)
+				}
+				db, err := sql.Open("sqlite", dbPath)
+				if err != nil {
+					panic(err)
+				}
+				if _, err := db.Exec("CREATE TABLE IF NOT EXISTS steps (idx INTEGER, step_type INTEGER, step_payload BLOB)"); err != nil {
+					panic(err)
+				}
+				if mode != "feature_agy_outcome_old" {
+					kind := 1
+					if mode == "feature_agy_outcome_error" || mode == "feature_agy_outcome_skip" {
+						kind = 17
+					}
+					if _, err := db.Exec("INSERT INTO steps VALUES (2, ?, ?)", kind, []byte("Error 429, Message: quota, Status: RESOURCE_EXHAUSTED quotaResetTimeStamp:2026-11-17T00:00:00Z\nstack")); err != nil {
+						panic(err)
+					}
+				}
+				if err := db.Close(); err != nil {
+					panic(err)
+				}
+			}
+			if mode == "feature_agy_interaction" {
+				write(map[string]any{"jsonrpc": "2.0", "id": 9100, "method": "session/request_permission", "params": map[string]any{
+					"toolCall": map[string]any{"toolCallId": "interaction_test", "title": "Choose"},
+					"options":  []any{map[string]any{"optionId": "one", "name": "One"}, map[string]any{"optionId": "two", "name": "Two"}},
+				}})
+				read()
+			}
+			if strings.HasPrefix(mode, "feature_agy_client_read") {
+				workDir, _ := os.Getwd()
+				path := filepath.Join(workDir, "agy-read.txt")
+				_ = os.WriteFile(path, []byte("read"), 0600)
+				notify := func(update map[string]any) {
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
+				}
+				if mode == "feature_agy_client_read_early" {
+					write(map[string]any{"jsonrpc": "2.0", "id": 9102, "method": "fs/read_text_file", "params": map[string]any{"path": path}})
+					read()
+				}
+				call := map[string]any{"sessionUpdate": "tool_call", "toolCallId": "client-read", "title": "Running client_view_file", "locations": []any{map[string]any{"path": path}}}
+				if mode == "feature_agy_client_read_early" {
+					call["title"] = "Run client_view_file?"
+					delete(call, "locations")
+					call["rawInput"] = map[string]any{"absolute_path": path}
+				}
+				notify(call)
+				if mode == "feature_agy_client_read_multiple" {
+					call["toolCallId"] = "client-read-second"
+					notify(call)
+				}
+				if mode != "feature_agy_client_read_early" {
+					if mode == "feature_agy_client_read_missing" {
+						_ = os.Remove(path)
+					}
+					write(map[string]any{"jsonrpc": "2.0", "id": 9102, "method": "fs/read_text_file", "params": map[string]any{"path": path}})
+					read()
+				}
+				notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "client-read", "status": "failed"})
+				if mode == "feature_agy_client_read_multiple" {
+					notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "client-read-second", "status": "failed"})
+				}
+			}
+			if mode == "feature_agy_command" {
+				write(map[string]any{"jsonrpc": "2.0", "id": 9101, "method": "session/request_permission", "params": map[string]any{
+					"toolCall": map[string]any{"toolCallId": "command_test", "name": "run", "rawInput": map[string]any{"CommandLine": "cat README.md"}},
+					"options":  []any{map[string]any{"optionId": "allow", "kind": "allow_once"}, map[string]any{"optionId": "deny", "kind": "reject_once"}},
+				}})
+				read()
+			}
 			if strings.HasPrefix(mode, "feature_tool_") {
 				notify := func(update map[string]any) {
 					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
@@ -770,6 +845,9 @@ func runFakeACPFeatures(mode string) {
 				result["usage"] = map[string]any{"inputTokens": 500, "outputTokens": 20, "thoughtTokens": 5, "cachedReadTokens": 100}
 			}
 			result["stopReason"] = "end_turn"
+			if mode == "feature_agy_outcome_refusal" {
+				result["stopReason"] = "refusal"
+			}
 		case "session/close":
 			write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": result})
 			return
@@ -778,10 +856,13 @@ func runFakeACPFeatures(mode string) {
 	}
 }
 
-func runACPFeature(t *testing.T, mode string, agent Agent, turn harness.Turn) ([]map[string]any, []harness.Event, error) {
+func runACPFeature(t *testing.T, mode string, agent Agent, turn harness.Turn, configure ...func(*Options)) ([]map[string]any, []harness.Event, error) {
 	t.Helper()
 	trace := filepath.Join(t.TempDir(), "trace.jsonl")
 	h := New(Options{Agent: agent, Binary: os.Args[0], ExtraArgs: []string{"--extra"}, Env: []string{fakeACPEnv + "=" + mode, "MCODE_TEST_ACP_TRACE=" + trace}, TurnArgs: func(harness.Turn) []string { return []string{"--gemini_dir", "routed-account"} }})
+	for _, apply := range configure {
+		apply(&h.opts)
+	}
 	if mode == "feature_mcp_http" {
 		h.opts.BuiltinMCP = harness.BuiltinMCP{URL: "http://127.0.0.1:9000/mcp"}
 	}
@@ -933,6 +1014,171 @@ func TestACPElicitationForm(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+}
+
+func fakeResponse(messages []map[string]any, id float64) map[string]any {
+	for _, message := range messages {
+		if message["id"] == id {
+			return message
+		}
+	}
+	return nil
+}
+
+func TestAgyInteractionQuestion(t *testing.T) {
+	for _, tc := range []struct {
+		name, option string
+		response     harness.ApprovalResponse
+		err          error
+		noInteractor bool
+	}{
+		{name: "selected", option: "two", response: harness.ApprovalResponse{Answers: map[string][]string{"interaction_test": {"Two"}}}},
+		{name: "option id", option: "two", response: harness.ApprovalResponse{Answers: map[string][]string{"interaction_test": {"two"}}}},
+		{name: "skipped", response: harness.ApprovalResponse{Skipped: true}},
+		{name: "no answer"},
+		{name: "error", err: errors.New("cancelled")},
+		{name: "no interactor", noInteractor: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			approver := &elicitationApprover{response: tc.response, err: tc.err}
+			var turnApprover harness.Approver = approver
+			if tc.noInteractor {
+				turnApprover = &mockApprover{decision: harness.DecisionAllow}
+			}
+			messages, _, err := runACPFeature(t, "feature_agy_interaction", AgentAgy, harness.Turn{Mode: harness.ModeAuto, Approver: turnApprover})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, _ := fakeResponse(messages, 9100)["result"].(map[string]any)
+			outcome, _ := result["outcome"].(map[string]any)
+			if tc.option == "" {
+				if outcome["outcome"] != "cancelled" {
+					t.Fatalf("outcome = %v", outcome)
+				}
+			} else if outcome["outcome"] != "selected" || outcome["optionId"] != tc.option {
+				t.Fatalf("outcome = %v", outcome)
+			}
+			if !tc.noInteractor {
+				approver.mu.Lock()
+				defer approver.mu.Unlock()
+				req := approver.req
+				if req.Kind != harness.RequestKindQuestion || req.ToolName != "ask_question" || req.ToolID != "interaction_test" || req.Summary != "Choose" || len(req.Questions) != 1 || req.Questions[0].AllowsOther || req.Questions[0].AllowsMultiple || !reflect.DeepEqual(req.Questions[0].Choices, []harness.QuestionChoice{{Label: "One"}, {Label: "Two"}}) {
+					t.Fatalf("request = %+v", req)
+				}
+				if !approver.acked || !errors.Is(approver.ackErr, tc.err) {
+					t.Fatalf("ack = %v, %v", approver.acked, approver.ackErr)
+				}
+			}
+		})
+	}
+}
+
+func TestAgyNativeCommandField(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_agy_command", AgentAgy, harness.Turn{Mode: harness.ModeAuto})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := fakeResponse(messages, 9101)["result"].(map[string]any)
+	outcome, _ := result["outcome"].(map[string]any)
+	if outcome["optionId"] != "allow" {
+		t.Fatalf("optionId = %v", outcome["optionId"])
+	}
+}
+
+func TestAgyClientViewFileRepair(t *testing.T) {
+	for _, mode := range []string{"feature_agy_client_read", "feature_agy_client_read_early", "feature_agy_client_read_multiple", "feature_agy_client_read_missing"} {
+		t.Run(mode, func(t *testing.T) {
+			_, events, err := runACPFeature(t, mode, AgentAgy, harness.Turn{Mode: harness.ModeAuto})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ends []harness.Event
+			for _, event := range events {
+				if event.Type == harness.EventToolEnd && event.ToolID == "client-read" {
+					ends = append(ends, event)
+				}
+			}
+			if len(ends) != 1 || ends[0].IsError != (mode == "feature_agy_client_read_missing") || ends[0].Output != "" {
+				t.Fatalf("%s tool ends = %+v", mode, ends)
+			}
+			if mode == "feature_agy_client_read_multiple" {
+				var second []harness.Event
+				for _, event := range events {
+					if event.Type == harness.EventToolEnd && event.ToolID == "client-read-second" {
+						second = append(second, event)
+					}
+				}
+				if len(second) != 1 || !second[0].IsError {
+					t.Fatalf("second tool ends = %+v", second)
+				}
+			}
+		})
+	}
+}
+
+func TestAgyTurnOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name, wantError  string
+		missing, corrupt bool
+	}{
+		{name: "error", wantError: "Error 429, Message: quota, Status: RESOURCE_EXHAUSTED quotaResetTimeStamp:2026-11-17T00:00:00Z"},
+		{name: "normal"},
+		{name: "old"},
+		{name: "error", missing: true, wantError: "RESOURCE_EXHAUSTED"},
+		{name: "skip", corrupt: true},
+		{name: "refusal", wantError: "agy quota exhausted (stopReason refusal)"},
+	} {
+		t.Run(fmt.Sprintf("%s/missing=%v", tc.name, tc.missing), func(t *testing.T) {
+			geminiDir := filepath.Join(t.TempDir(), "gemini # account")
+			dbPath := agySessionDB(geminiDir, "feature-session")
+			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.corrupt {
+				if err := os.WriteFile(dbPath, []byte("invalid sqlite"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else if !tc.missing {
+				db, err := sql.Open("sqlite", dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				if _, err := db.Exec("CREATE TABLE steps (idx INTEGER, step_type INTEGER, step_payload BLOB)"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("INSERT INTO steps VALUES (1, 17, ?)", []byte("Error 429, Message: old quota, Status: RESOURCE_EXHAUSTED")); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, events, err := runACPFeature(t, "feature_agy_outcome_"+tc.name, AgentAgy, harness.Turn{}, func(opts *Options) {
+				opts.TurnArgs = func(harness.Turn) []string { return []string{"--gemini_dir=" + geminiDir} }
+			})
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("error = %v, want %q", err, tc.wantError)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			done := 0
+			for _, event := range events {
+				if event.Type == harness.EventDone {
+					done++
+				}
+			}
+			wantDone := 1
+			if tc.wantError != "" {
+				wantDone = 0
+			}
+			if done != wantDone {
+				t.Fatalf("EventDone count = %d, want %d", done, wantDone)
+			}
+		})
+	}
 }
 
 func TestACPResumeAndClose(t *testing.T) {
