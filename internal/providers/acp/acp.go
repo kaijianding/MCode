@@ -142,7 +142,7 @@ func (h *Harness) HostToolsAvailable() bool {
 	if !h.opts.BuiltinMCP.Enabled() {
 		return false
 	}
-	if h.mcpHTTP.Load() {
+	if h.opts.Agent == AgentAgy || h.mcpHTTP.Load() {
 		return true
 	}
 	return h.npxAvailable()
@@ -701,6 +701,10 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}
 	})
 
+	var toolsMu sync.Mutex
+	pendingTools := make(map[string]struct{})
+	toolsFinished := false
+
 	// 注册通知分发处理器
 	conn.SetNotificationHandler(func(method string, params json.RawMessage) {
 		if method != "session/update" {
@@ -708,24 +712,23 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}
 		var p struct {
 			Update struct {
-				SessionUpdate string `json:"sessionUpdate"`
-				Content       struct {
-					Text string `json:"text"`
-				} `json:"content"`
-				ToolCallID string          `json:"toolCallId"`
-				Name       string          `json:"name"`
-				ToolName   string          `json:"toolName"`
-				Title      string          `json:"title"`
-				RawInput   json.RawMessage `json:"rawInput"`
-				Input      json.RawMessage `json:"input"`
-				Status     string          `json:"status"`
-				Output     string          `json:"output"`
-				Error      any             `json:"error"`
-				Diff       string          `json:"diff"`
-				Path       string          `json:"path"`
-				Patch      string          `json:"patch"`
-				Used       int64           `json:"used"`
-				Size       int64           `json:"size"`
+				SessionUpdate string          `json:"sessionUpdate"`
+				Content       json.RawMessage `json:"content"`
+				RawOutput     json.RawMessage `json:"rawOutput"`
+				ToolCallID    string          `json:"toolCallId"`
+				Name          string          `json:"name"`
+				ToolName      string          `json:"toolName"`
+				Title         string          `json:"title"`
+				RawInput      json.RawMessage `json:"rawInput"`
+				Input         json.RawMessage `json:"input"`
+				Status        string          `json:"status"`
+				Output        string          `json:"output"`
+				Error         any             `json:"error"`
+				Diff          string          `json:"diff"`
+				Path          string          `json:"path"`
+				Patch         string          `json:"patch"`
+				Used          int64           `json:"used"`
+				Size          int64           `json:"size"`
 			} `json:"update"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -735,18 +738,26 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 		switch u.SessionUpdate {
 		case "agent_message_chunk":
-			if u.Content.Text != "" {
+			var content struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(u.Content, &content)
+			if content.Text != "" {
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventText,
-					Text: u.Content.Text,
+					Text: content.Text,
 				})
 			}
 
 		case "agent_thought_chunk":
-			if u.Content.Text != "" {
+			var content struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(u.Content, &content)
+			if content.Text != "" {
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventReasoning,
-					Text: u.Content.Text,
+					Text: content.Text,
 				})
 			}
 
@@ -762,21 +773,64 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			if len(input) == 0 {
 				input = u.RawInput
 			}
+			toolsMu.Lock()
+			if toolsFinished {
+				toolsMu.Unlock()
+				break
+			}
+			pendingTools[u.ToolCallID] = struct{}{}
 			_ = harness.Emit(emit, harness.Event{
 				Type:     harness.EventToolStart,
 				ToolID:   u.ToolCallID,
 				ToolName: toolName,
 				Input:    input,
 			})
+			toolsMu.Unlock()
 
 		case "tool_call_update":
+			if u.Status == "pending" || u.Status == "in_progress" {
+				break
+			}
+			output := ""
+			var content []struct {
+				Text    string `json:"text"`
+				Content struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			}
+			if json.Unmarshal(u.Content, &content) == nil {
+				for _, item := range content {
+					if item.Content.Text != "" {
+						output += item.Content.Text
+					} else {
+						output += item.Text
+					}
+				}
+			}
+			if output == "" {
+				var raw struct {
+					Output string `json:"output"`
+				}
+				_ = json.Unmarshal(u.RawOutput, &raw)
+				output = raw.Output
+			}
+			if output == "" {
+				output = u.Output
+			}
+			toolsMu.Lock()
+			if toolsFinished {
+				toolsMu.Unlock()
+				break
+			}
+			delete(pendingTools, u.ToolCallID)
 			isErr := u.Status == "failed" || u.Status == "error" || u.Error != nil
 			_ = harness.Emit(emit, harness.Event{
 				Type:    harness.EventToolEnd,
 				ToolID:  u.ToolCallID,
-				Output:  u.Output,
+				Output:  output,
 				IsError: isErr,
 			})
+			toolsMu.Unlock()
 
 		case "usage_update":
 			contextUsed.Store(u.Used)
@@ -890,7 +944,8 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	canClose := initResp.AgentCapabilities.SessionCapabilities.Close != nil
 	authMethods := initResp.AuthMethods
 	// 会话级的 MCP 服务列表：Agent 声明支持 HTTP MCP 时直连，否则退化为 npx mcp-remote。
-	allowsHTTP := initResp.AgentCapabilities.MCPCapabilities.HTTP
+	// shortcut: agy 1.5.9 未声明 mcpCapabilities.http 但实测支持直连，agy 开始声明后可删
+	allowsHTTP := h.opts.Agent == AgentAgy || initResp.AgentCapabilities.MCPCapabilities.HTTP
 	// 记下能力，供 HostToolsAvailable 判断是否真的需要 npx。
 	h.mcpHTTP.Store(allowsHTTP)
 	servers := h.mcpServers(turn, allowsHTTP)
@@ -1062,6 +1117,23 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		"sessionId": sid,
 		"prompt":    promptItems,
 	}, &promptResult)
+
+	toolsMu.Lock()
+	toolsFinished = true
+	ids := make([]string, 0, len(pendingTools))
+	for id := range pendingTools {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	interrupted := promptErr != nil || ctx.Err() != nil
+	for _, id := range ids {
+		event := harness.Event{Type: harness.EventToolEnd, ToolID: id, IsError: interrupted}
+		if interrupted {
+			event.Output = "本轮中断，工具未完成"
+		}
+		_ = harness.Emit(emit, event)
+	}
+	toolsMu.Unlock()
 
 	if promptErr == nil {
 		u := promptResult.Usage

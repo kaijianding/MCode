@@ -33,6 +33,10 @@ func TestHostToolsAvailableRequiresNpxForFallback(t *testing.T) {
 		t.Fatal("Agent 支持 HTTP MCP 时不应依赖 npx")
 	}
 
+	if !New(Options{Agent: AgentAgy, BuiltinMCP: builtin}).HostToolsAvailable() {
+		t.Fatal("agy 直连 HTTP MCP 时不应依赖 npx")
+	}
+
 	// 没有配置内置 MCP 时根本没有可注入的工具。
 	if New(Options{Agent: AgentOpenCode}).HostToolsAvailable() {
 		t.Fatal("未配置内置 MCP 时应报告没有宿主工具")

@@ -714,6 +714,24 @@ func runFakeACPFeatures(mode string) {
 			}
 			result["configOptions"] = options
 		case "session/prompt":
+			if strings.HasPrefix(mode, "feature_tool_") {
+				notify := func(update map[string]any) {
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
+				}
+				for _, id := range []string{"z", "a"} {
+					notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "name": "test"})
+				}
+				if mode == "feature_tool_array" {
+					notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "a", "status": "pending"})
+					notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "a", "status": "in_progress"})
+					notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "a", "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "第一段"}}, map[string]any{"type": "text", "text": "第二段"}}, "rawOutput": map[string]any{"output": "备用"}})
+					notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "z", "content": "无法解析", "rawOutput": map[string]any{"output": "备用"}})
+				}
+				if mode == "feature_tool_error" {
+					write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": -32603, "message": "失败"}})
+					continue
+				}
+			}
 			if mode == "feature_cancel" {
 				write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "cancel"}}}})
 				for read() != nil {
@@ -764,6 +782,9 @@ func runACPFeature(t *testing.T, mode string, agent Agent, turn harness.Turn) ([
 	t.Helper()
 	trace := filepath.Join(t.TempDir(), "trace.jsonl")
 	h := New(Options{Agent: agent, Binary: os.Args[0], ExtraArgs: []string{"--extra"}, Env: []string{fakeACPEnv + "=" + mode, "MCODE_TEST_ACP_TRACE=" + trace}, TurnArgs: func(harness.Turn) []string { return []string{"--gemini_dir", "routed-account"} }})
+	if mode == "feature_mcp_http" {
+		h.opts.BuiltinMCP = harness.BuiltinMCP{URL: "http://127.0.0.1:9000/mcp"}
+	}
 	if turn.WorkDir == "" {
 		turn.WorkDir = t.TempDir()
 	}
@@ -1062,5 +1083,73 @@ func TestACPAgyPermissionOptions(t *testing.T) {
 			}
 			t.Fatal("missing permission reply")
 		})
+	}
+}
+
+func TestACPToolCallUpdateContentArray(t *testing.T) {
+	_, events, err := runACPFeature(t, "feature_tool_array", AgentAgy, harness.Turn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ends := map[string][]harness.Event{}
+	for _, event := range events {
+		if event.Type == harness.EventToolEnd {
+			ends[event.ToolID] = append(ends[event.ToolID], event)
+		}
+	}
+	if len(ends["a"]) != 1 || ends["a"][0].Output != "第一段第二段" || len(ends["z"]) != 1 || ends["z"][0].Output != "备用" {
+		t.Fatalf("工具结束事件 = %+v", ends)
+	}
+}
+
+func TestACPFinishesOpenToolsAtTurnEnd(t *testing.T) {
+	for _, mode := range []string{"feature_tool_open", "feature_tool_error"} {
+		t.Run(mode, func(t *testing.T) {
+			_, events, err := runACPFeature(t, mode, AgentAgy, harness.Turn{})
+			failed := mode == "feature_tool_error"
+			if (err != nil) != failed {
+				t.Fatalf("错误 = %v", err)
+			}
+			var ends []harness.Event
+			done := false
+			for _, event := range events {
+				if event.Type == harness.EventDone {
+					done = true
+				}
+				if event.Type == harness.EventToolEnd {
+					if done {
+						t.Fatal("工具结束事件出现在回合结束后")
+					}
+					ends = append(ends, event)
+				}
+			}
+			if done == failed || len(ends) != 2 || ends[0].ToolID != "a" || ends[1].ToolID != "z" {
+				t.Fatalf("事件 = %+v", events)
+			}
+			for _, end := range ends {
+				if end.IsError != failed || (failed && end.Output != "本轮中断，工具未完成") {
+					t.Fatalf("工具结束事件 = %+v", end)
+				}
+			}
+		})
+	}
+}
+
+func TestACPAgyMCPUsesHTTPWithoutCapability(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_mcp_http", AgentAgy, harness.Turn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := featureParams(messages, "session/new")
+	if len(params) != 1 {
+		t.Fatalf("会话参数 = %v", params)
+	}
+	servers, ok := params[0]["mcpServers"].([]any)
+	if !ok || len(servers) != 1 {
+		t.Fatalf("MCP 服务 = %v", params[0]["mcpServers"])
+	}
+	server, ok := servers[0].(map[string]any)
+	if !ok || server["type"] != "http" || server["command"] != nil {
+		t.Fatalf("MCP 服务 = %v", servers[0])
 	}
 }
