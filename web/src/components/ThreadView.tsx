@@ -47,6 +47,7 @@ import type { ThreadMenuPage, ThreadMenuPageHandle, ThreadMenuPageSpec } from '.
 import type { SaveTaskBodyProps } from './thread/SaveTaskForm';
 import { QueuedFollowUpSection } from './thread/QueuedFollowUpSection';
 import { shouldTakeOverComposer } from './thread/composerTakeover';
+import { shouldAutoLoadOlder } from './thread/autoLoadOlder';
 import { useThreadQueue } from './thread/useThreadQueue';
 import { ContinueTurnPill } from './thread/ContinueTurnPill';
 import { QuestionMinimap, buildQuestionMinimapData } from './thread/QuestionMinimap';
@@ -790,6 +791,21 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   const { loadPage, loadEarlierHistory, refreshLatestPage, applyStreamSnapshot, applyStreamProjection } = useThreadStreamHistory({
     stream, thread, endPin, getThreadHistory, scrollRef, mountedRef, setPollError, setLatestSummary
   });
+
+  const olderSentinelRef = useRef<HTMLDivElement | null>(null);
+  const olderFailed = Boolean(errorMessage && lastFailedRequestRef.current?.append);
+  useEffect(() => {
+    const sentinel = olderSentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (shouldAutoLoadOlder({ intersecting: entry.isIntersecting, hasMore: hasMore && Boolean(nextCursor), loading: isLoadingMore, failed: olderFailed })) {
+        void loadEarlierHistory();
+      }
+    }, { root });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, nextCursor, isLoadingMore, olderFailed, loadEarlierHistory]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2301,6 +2317,18 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
 
   const takeOverComposer = canSend && !(swarmSupported && swarmError && swarmState === null) &&
     shouldTakeOverComposer(requestSnapshot?.requests ?? []);
+  const previousTakeOverRef = useRef(takeOverComposer);
+  useLayoutEffect(() => {
+    const wasTakenOver = previousTakeOverRef.current;
+    previousTakeOverRef.current = takeOverComposer;
+    if (!wasTakenOver || takeOverComposer) return;
+    const active = document.activeElement;
+    if (active !== document.body && !requestPanelRef.current?.contains(active)) return;
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === active || document.activeElement === document.body) composerRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [takeOverComposer]);
   const requestPanel = requestSnapshot && (
           <div
             ref={requestPanelRef}
@@ -2605,7 +2633,8 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
           )}
 
           {/* 更早历史入口：历史按最新页优先，翻页向上取更早的消息 */}
-          {hasMore && (
+          {hasMore && <div ref={olderSentinelRef} className="h-px" aria-hidden="true" />}
+          {hasMore && (isLoadingMore || olderFailed || typeof IntersectionObserver === 'undefined') && (
             <button
               type="button"
               disabled={isLoadingMore || !nextCursor}
@@ -2620,7 +2649,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
               ) : (
                 <>
                   <ArrowPathIcon className="w-4 h-4" />
-                  <span>加载更早的消息</span>
+                  <span>{olderFailed ? '重试' : '加载更早的消息'}</span>
                 </>
               )}
             </button>

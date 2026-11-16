@@ -104,6 +104,7 @@ function quoteForDraft(text: string): string {
 
 /** 输入区对外的命令式入口：时间线「引用到回复」用它把引用块写进草稿 */
 export interface ThreadComposerHandle {
+  focus: () => void;
   /** 把引用块追加到草稿末尾并聚焦输入框（对应 internal/ui/timeline_menu.go:35 的 quoteIntoDraft） */
   insertDraft: (text: string) => void;
 }
@@ -731,13 +732,11 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
 
   // 快捷回复点击后聚焦输入框并定位到末尾（桌面端 applyQuickReply 同义：只填草稿、不发送）
   const focusComposer = useCallback(() => {
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      const end = el.value.length;
-      el.setSelectionRange(end, end);
-    });
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
   }, []);
 
   // 引用到回复：空草稿直接置为引用块，否则去掉草稿尾部换行后用空行分隔追加，然后聚焦输入框。
@@ -748,12 +747,12 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
       if (!quoted) return;
       const base = draft.replace(/\n+$/, '');
       onDraftChange(base ? `${base}\n\n${quoted}` : quoted);
-      focusComposer();
+      requestAnimationFrame(focusComposer);
     },
     [draft, onDraftChange, focusComposer]
   );
 
-  useImperativeHandle(ref, () => ({ insertDraft }), [insertDraft]);
+  useImperativeHandle(ref, () => ({ insertDraft, focus: focusComposer }), [insertDraft, focusComposer]);
 
   const provider = providers.find((candidate) => candidate.id === composerOptions?.provider) ??
     providers.find((candidate) => candidate.models.some((model) => model.isDefault)) ??
