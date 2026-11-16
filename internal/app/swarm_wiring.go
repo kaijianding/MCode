@@ -1340,6 +1340,7 @@ func wireSwarmWithModes(ctx context.Context, mgr *swarm.Manager, backend *remote
 
 		if mgr.Settings().Enabled && mgr.State(threadID).Enabled {
 			if !isBeeThread(threadID) {
+				mgr.NoteLeadTurn(threadID)
 				// 宿主规则统一由 harness/policy 渲染：版本标记 + 固定顺序的启用段。
 				// 「主导只规划」时在策略末尾追加只规划规则（swarm.LeadPolicy 复用已有文案）；
 				// 轮次上限取 maxRounds()，与派发器实际执行的拦截口径一致。
@@ -1385,6 +1386,9 @@ func wireSwarmWithModes(ctx context.Context, mgr *swarm.Manager, backend *remote
 	})
 
 	backend.SetTurnFinishedHook(func(threadID, projectID, assistantText string, completed bool) {
+		if !isBeeThread(threadID) {
+			mgr.NoteLeadTurn(threadID)
+		}
 		if !completed {
 			dispatcher.clear(threadID)
 			return

@@ -48,6 +48,9 @@ const defaultMaxBees = 8
 // defaultDescribeTimeout 是 DescribeTimeout 为零值时单次提交说明生成的超时时间。
 const defaultDescribeTimeout = 30 * time.Second
 
+// Claude 主会话缓存为 1 小时，保活留 10 分钟余量。
+const leadCacheKeepaliveAfter = 50 * time.Minute
+
 // IsNotice 判断文本是否为 mcode 下发的系统通知（含汇报），兼容旧前缀。
 func IsNotice(text string) bool {
 	return strings.HasPrefix(text, strings.TrimSpace(NoticePrefix)) || strings.HasPrefix(text, legacyNoticePrefix)
@@ -77,6 +80,8 @@ type leadState struct {
 	delegationRounds int
 	// requestStartedAt 记录本次用户请求的起始时间；零值表示尚未标记请求开始。
 	requestStartedAt time.Time
+	// lastLeadTurnAt 只在内存中记录 lead 最近一次回合开始或结束的时间，不影响请求预算。
+	lastLeadTurnAt time.Time
 	// reportsHeld 表示 lead 最近一轮被用户中断、汇报暂扣到用户下一句话时取 true。
 	// 只存在内存里，不持久化，重启后由下一次 checkReports 重新算出来。
 	reportsHeld bool
@@ -1050,6 +1055,15 @@ func (m *Manager) BeginLeadRequest(leadThreadID string) {
 	m.mu.Unlock()
 
 	m.notifyChange(leadThreadID)
+}
+
+// NoteLeadTurn 标记 lead 回合开始或结束，不重置用户请求的计时与预算。
+func (m *Manager) NoteLeadTurn(threadID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if lead := m.leads[threadID]; lead != nil {
+		lead.lastLeadTurnAt = m.now()
+	}
 }
 
 // DelegationRounds 返回本次请求已使用的委派轮次数。
@@ -2162,10 +2176,19 @@ func (m *Manager) Tick(ctx context.Context) {
 		threadIDs    []string
 	}
 	var timedOut []timedOutLead
+	var keepaliveLeads []string
 	now := m.now()
 	m.mu.Lock()
 	for leadID, lead := range m.leads {
 		if lead.requestStartedAt.IsZero() || now.Sub(lead.requestStartedAt) < requestTimeout {
+			if m.opts.OnReport != nil && !lead.dispatching && !lead.stoppedByUser && !lead.lastLeadTurnAt.IsZero() && now.Sub(lead.lastLeadTurnAt) >= leadCacheKeepaliveAfter {
+				for _, bee := range lead.bees {
+					if bee.Status == StatusRunning {
+						keepaliveLeads = append(keepaliveLeads, leadID)
+						break
+					}
+				}
+			}
 			continue
 		}
 		var threadIDs []string
@@ -2188,6 +2211,35 @@ func (m *Manager) Tick(ctx context.Context) {
 		}
 	}
 	m.mu.Unlock()
+	for _, leadID := range keepaliveLeads {
+		// 驱动可能回调 Manager，必须在 m.mu 外确认主会话空闲。
+		if st, ok := m.leadSessionState(ctx, leadID); ok && (st.Running || st.AwaitingApproval || st.AwaitingInput || st.Interrupted) {
+			continue
+		}
+		m.deliverMu.Lock()
+		m.mu.Lock()
+		lead := m.leads[leadID]
+		hasRunning := false
+		if lead != nil {
+			for _, bee := range lead.bees {
+				if bee.Status == StatusRunning {
+					hasRunning = true
+					break
+				}
+			}
+		}
+		if lead == nil || !hasRunning || lead.dispatching || lead.stoppedByUser || lead.lastLeadTurnAt.IsZero() || now.Sub(lead.lastLeadTurnAt) < leadCacheKeepaliveAfter {
+			m.mu.Unlock()
+			m.deliverMu.Unlock()
+			continue
+		}
+		lead.lastLeadTurnAt = now
+		m.mu.Unlock()
+		if err := m.opts.OnReport(leadID, NoticePrefix+"缓存保活：子代理仍在运行，无需任何操作，只回复「继续等待」后结束本轮。"); err != nil {
+			log.Printf("swarm: cache keepalive to %s failed: %v", leadID, err)
+		}
+		m.deliverMu.Unlock()
+	}
 	for _, t := range timedOut {
 		if m.opts.StopSession != nil {
 			for _, id := range t.threadIDs {
