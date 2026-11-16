@@ -6,7 +6,7 @@ import { createPortal, flushSync } from 'react-dom';
 import type { RemoteThreadSummary } from '../types/contract';
 import { useRemote } from '../context/RemoteContext';
 import { useRemoteCall } from '../context/useRemoteCall';
-import { searchMessages, type RemoteMessageSearchHit } from '../context/remoteMessageSearchApi';
+import { formatHitCount, MESSAGE_SEARCH_LIMIT, searchMessages, type RemoteMessageSearchHit } from '../context/remoteMessageSearchApi';
 import { isThreadBusy } from '../context/remoteGuards';
 import { dampOffset, SWIPE_OPEN_THRESHOLD } from '../hooks/threadSwipe';
 import { haptic, shouldHapticOnCross } from '../utils/haptic';
@@ -1291,7 +1291,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     let cancelled = false;
     setMessageHitsLoading(true);
     const timer = window.setTimeout(() => {
-      void searchMessages(remoteCall, messageNeedle, 20)
+      void searchMessages(remoteCall, messageNeedle, MESSAGE_SEARCH_LIMIT)
         .then((hits) => {
           if (cancelled) return;
           setMessageHits(hits);
@@ -1668,7 +1668,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
             <div className="flex items-center gap-2 pb-1 text-label font-medium text-muted">
               <span className="shrink-0">消息内容</span>
               <span className="shrink-0 text-mc-caption">
-                {messageHitsLoading ? '搜索中…' : `${messageHits.length} 条`}
+                {messageHitsLoading ? '搜索中…' : formatHitCount(messageHits.length)}
               </span>
               <span className="h-px flex-1 bg-border-subtle" aria-hidden="true" />
             </div>

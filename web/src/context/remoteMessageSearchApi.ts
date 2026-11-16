@@ -14,6 +14,13 @@ export type {
 
 export const MESSAGES_SEARCH_METHOD = 'messages.search';
 
+// 宿主默认返回条数；结果达到该数量时列表显示 N+，提示可能还有更多。
+export const MESSAGE_SEARCH_LIMIT = 30;
+
+export function formatHitCount(n: number): string {
+  return n >= MESSAGE_SEARCH_LIMIT ? `${n}+ 条` : `${n} 条`;
+}
+
 /**
  * 跨未归档会话搜索消息正文；query 只有空白时不发请求。
  * 宿主默认返回 30 条、上限 100 条，limit 省略时用宿主默认值。
