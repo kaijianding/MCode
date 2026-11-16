@@ -75,6 +75,10 @@ func TestMain(m *testing.M) {
 }
 
 func runFakeAgy(mode string) {
+	if mode == "acp_transport" {
+		runFakeAgyACP()
+		return
+	}
 	writeMsg := func(v any) {
 		data, _ := json.Marshal(v)
 		data = append(data, '\n')

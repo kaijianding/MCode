@@ -16,6 +16,7 @@ const (
 	AgentGrok     Agent = "grok"
 	AgentDevin    Agent = "devin"
 	AgentDroid    Agent = "droid"
+	AgentAgy      Agent = "agy"
 )
 
 // Agents 返回所有已支持的 ACP Agent 列表。
@@ -65,6 +66,8 @@ func DisplayName(a Agent) string {
 		return "Grok"
 	case AgentDevin:
 		return "Devin"
+	case AgentAgy:
+		return "Antigravity"
 	case AgentDroid:
 		return "Factory Droid"
 	default:
@@ -96,6 +99,12 @@ func LaunchArgs(a Agent, mode harness.PermissionMode) []string {
 	}
 
 	switch a {
+	case AgentAgy:
+		args := []string{"acp"}
+		if mode == harness.ModeFullAccess {
+			args = append(args, "--dangerously-skip-permissions")
+		}
+		return args
 	case AgentCline:
 		return []string{"--acp"}
 

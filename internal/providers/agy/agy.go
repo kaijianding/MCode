@@ -13,12 +13,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"mcode/internal/harness"
 	"mcode/internal/procattr"
 	"mcode/internal/procutil"
+	"mcode/internal/providers/acp"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/redact"
 )
@@ -65,8 +67,9 @@ type Router interface {
 }
 
 type Options struct {
-	Binary string
-	Router Router
+	Channel func() string
+	Binary  string
+	Router  Router
 	// BuiltinMCP 是本轮要注入的内置 MCP 端点（mcode），未配置时为空。
 	BuiltinMCP harness.BuiltinMCP
 	// ExternalMCP 按工作目录返回用户配置的外部 MCP 端点。
@@ -74,7 +77,11 @@ type Options struct {
 }
 
 type Harness struct {
-	opts Options
+	opts      Options
+	acp       *acp.Harness
+	acpArgs   sync.Map
+	versionMu sync.Mutex
+	versions  map[string]string
 	// roots 按会话记录本轮正在运行的 agent 进程 PID，供 ProcessRootPIDs 使用。
 	roots harness.ProcessRoots
 	// now 返回当前时间；nil 时用 time.Now，测试可注入假时钟。
@@ -85,7 +92,18 @@ func New(opts Options) *Harness {
 	if opts.Binary == "" {
 		opts.Binary = DefaultBinary
 	}
-	return &Harness{opts: opts}
+	h := &Harness{opts: opts}
+	h.acp = acp.New(acp.Options{
+		Agent: acp.AgentAgy, Binary: resolveBinary(opts.Binary), BuiltinMCP: opts.BuiltinMCP, ExternalMCP: opts.ExternalMCP,
+		TurnArgs: func(turn harness.Turn) []string {
+			args, _ := h.acpArgs.Load(turn.ID)
+			if args == nil {
+				return nil
+			}
+			return args.([]string)
+		},
+	})
+	return h
 }
 
 func (h *Harness) Kind() harness.Kind {
@@ -94,7 +112,22 @@ func (h *Harness) Kind() harness.Kind {
 
 // ProcessRootPIDs 返回指定会话当前运行的 agent 进程 PID，未在运行时返回 nil。
 func (h *Harness) ProcessRootPIDs(threadID string) []int {
-	return h.roots.PIDs(threadID)
+	pids := h.roots.PIDs(threadID)
+	if h.acp != nil {
+		for _, pid := range h.acp.ProcessRootPIDs(threadID) {
+			found := false
+			for _, own := range pids {
+				if own == pid {
+					found = true
+					break
+				}
+			}
+			if !found {
+				pids = append(pids, pid)
+			}
+		}
+	}
+	return pids
 }
 
 // ConfirmsApprovalDelivery 返回 true，表示该 Provider 对每次 Approve/Interact 的答复都会调用 DeliveryAcker.AckDelivery。
@@ -412,6 +445,9 @@ type resultPayload struct {
 }
 
 func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+	if h.channel(ctx) == ChannelACP {
+		return h.runACP(ctx, turn, emit)
+	}
 	bin := h.opts.Binary
 	if bin == "" {
 		bin = DefaultBinary

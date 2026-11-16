@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -32,6 +33,10 @@ func TestMain(m *testing.M) {
 
 // runFakeACP 实现模拟的 ACP CLI 子进程。
 func runFakeACP(mode string) {
+	if strings.HasPrefix(mode, "feature_") {
+		runFakeACPFeatures(mode)
+		return
+	}
 	reader := bufio.NewReader(os.Stdin)
 
 	readMsg := func() (map[string]any, error) {
@@ -650,5 +655,412 @@ func TestResolveWorkDirPathRejectsSymlinkEscape(t *testing.T) {
 	content, err := os.ReadFile(target)
 	if err != nil || string(content) != "ok" {
 		t.Fatalf("read resolved target %q: content=%q err=%v", target, content, err)
+	}
+}
+
+func runFakeACPFeatures(mode string) {
+	reader := bufio.NewReader(os.Stdin)
+	trace, _ := os.OpenFile(os.Getenv("MCODE_TEST_ACP_TRACE"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	defer trace.Close()
+	read := func() map[string]any {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return nil
+		}
+		_, _ = trace.Write(line)
+		var msg map[string]any
+		_ = json.Unmarshal(line, &msg)
+		return msg
+	}
+	write := func(v any) { _ = json.NewEncoder(os.Stdout).Encode(v) }
+	_ = json.NewEncoder(trace).Encode(map[string]any{"args": os.Args[1:]})
+	options := []map[string]any{
+		{"id": "model", "category": "model", "currentValue": "old"},
+		{"id": "thought_level", "category": "model_config", "currentValue": "low", "options": []any{map[string]any{"value": "low"}, map[string]any{"value": "high"}}},
+	}
+	for {
+		msg := read()
+		if msg == nil {
+			return
+		}
+		params, _ := msg["params"].(map[string]any)
+		result := map[string]any{}
+		switch msg["method"] {
+		case "initialize":
+			caps := map[string]any{"loadSession": mode == "feature_load"}
+			sessionCaps := map[string]any{"close": map[string]any{}}
+			if mode != "feature_load" {
+				sessionCaps["resume"] = map[string]any{}
+			}
+			caps["sessionCapabilities"] = sessionCaps
+			result["agentCapabilities"] = caps
+		case "session/new", "session/load", "session/resume":
+			result["sessionId"] = "feature-session"
+			result["configOptions"] = options
+			current := "default"
+			if mode == "feature_agy_current_auto" {
+				current = "auto"
+			}
+			available := []any{map[string]any{"id": "default"}, map[string]any{"id": "plan"}, map[string]any{"id": "accept-edits"}, map[string]any{"id": "auto"}}
+			if mode == "feature_agy_unadvertised" {
+				available = nil
+			}
+			result["modes"] = map[string]any{"currentModeId": current, "availableModes": available}
+		case "session/set_config_option":
+			for _, option := range options {
+				if option["id"] == params["configId"] && !(mode == "feature_agy_model_mismatch" && option["id"] == "model") && !(mode == "feature_agy_effort_mismatch" && option["id"] == "thought_level") {
+					option["currentValue"] = params["value"]
+				}
+			}
+			result["configOptions"] = options
+		case "session/prompt":
+			if mode == "feature_cancel" {
+				write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "cancel"}}}})
+				for read() != nil {
+				}
+				return
+			}
+			if mode == "feature_elicitation" {
+				write(map[string]any{"jsonrpc": "2.0", "id": 9001, "method": "elicitation/create", "params": map[string]any{
+					"mode": "form", "message": "Choose", "requestedSchema": map[string]any{"properties": map[string]any{
+						"single": map[string]any{"type": "string", "title": "Single", "description": "Select one", "enum": []string{"a", "b"}},
+						"multi":  map[string]any{"type": "array", "title": "Multi", "items": map[string]any{"enum": []string{"x", "y"}}},
+						"text":   map[string]any{"type": "string"},
+						"bool":   map[string]any{"type": "boolean"},
+						"oneof":  map[string]any{"type": "string", "oneOf": []any{map[string]any{"const": "v", "title": "Visible"}}},
+						"anyof":  map[string]any{"type": "array", "items": map[string]any{"anyOf": []any{map[string]any{"const": "z", "title": "Zed"}}}},
+					}},
+				}})
+				if read() == nil {
+					return
+				}
+			}
+			if strings.HasPrefix(mode, "feature_permission") {
+				opts := []any{map[string]any{"optionId": "deny", "kind": "reject_once"}, map[string]any{"optionId": "session", "kind": "allow_session"}}
+				if mode == "feature_permission_once" {
+					opts = append(opts, map[string]any{"optionId": "once", "kind": "allow_once"})
+				}
+				write(map[string]any{"jsonrpc": "2.0", "id": 9010, "method": "session/request_permission", "params": map[string]any{"toolCall": map[string]any{"toolCallId": "permission-test", "name": "read_file"}, "options": opts}})
+				if read() == nil {
+					return
+				}
+			}
+			if mode == "feature_usage" {
+				for _, used := range []int{100, 200} {
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "usage_update", "used": used, "size": 2000}}})
+				}
+				result["usage"] = map[string]any{"inputTokens": 500, "outputTokens": 20, "thoughtTokens": 5, "cachedReadTokens": 100}
+			}
+			result["stopReason"] = "end_turn"
+		case "session/close":
+			write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": result})
+			return
+		}
+		write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": result})
+	}
+}
+
+func runACPFeature(t *testing.T, mode string, agent Agent, turn harness.Turn) ([]map[string]any, []harness.Event, error) {
+	t.Helper()
+	trace := filepath.Join(t.TempDir(), "trace.jsonl")
+	h := New(Options{Agent: agent, Binary: os.Args[0], ExtraArgs: []string{"--extra"}, Env: []string{fakeACPEnv + "=" + mode, "MCODE_TEST_ACP_TRACE=" + trace}, TurnArgs: func(harness.Turn) []string { return []string{"--gemini_dir", "routed-account"} }})
+	if turn.WorkDir == "" {
+		turn.WorkDir = t.TempDir()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var events []harness.Event
+	var mu sync.Mutex
+	err := h.Run(ctx, turn, func(e harness.Event) { mu.Lock(); defer mu.Unlock(); events = append(events, e) })
+	data, readErr := os.ReadFile(trace)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var messages []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var msg map[string]any
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, msg)
+	}
+	if roots := h.ProcessRootPIDs(turn.ThreadID); len(roots) != 0 {
+		t.Fatalf("leaked process roots: %v", roots)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return messages, append([]harness.Event(nil), events...), err
+}
+
+func featureParams(messages []map[string]any, method string) []map[string]any {
+	var params []map[string]any
+	for _, msg := range messages {
+		if msg["method"] == method {
+			p, _ := msg["params"].(map[string]any)
+			params = append(params, p)
+		}
+	}
+	return params
+}
+
+type elicitationApprover struct {
+	mu       sync.Mutex
+	req      harness.ApprovalRequest
+	response harness.ApprovalResponse
+	err      error
+	acked    bool
+	ackErr   error
+}
+
+func (a *elicitationApprover) Approve(context.Context, harness.ApprovalRequest) (harness.Decision, error) {
+	return harness.DecisionDeny, nil
+}
+func (a *elicitationApprover) Interact(_ context.Context, req harness.ApprovalRequest) (harness.ApprovalResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.req = req
+	return a.response, a.err
+}
+func (a *elicitationApprover) AckDelivery(_ harness.ApprovalRequest, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.acked = true
+	a.ackErr = err
+}
+
+func TestACPElicitationForm(t *testing.T) {
+	for _, tc := range []struct {
+		name, action string
+		response     harness.ApprovalResponse
+		noInteractor bool
+		err          error
+	}{
+		{name: "answers", action: "accept", response: harness.ApprovalResponse{Answers: map[string][]string{"single": {"b"}, "multi": {"x", "y"}, "text": {"hello"}, "bool": {"true"}, "oneof": {"Visible"}, "anyof": {"Zed"}}}},
+		{name: "skipped", action: "decline", response: harness.ApprovalResponse{Skipped: true}},
+		{name: "no interactor", action: "cancel", noInteractor: true},
+		{name: "error", action: "cancel", err: errors.New("cancelled")},
+		{name: "no answers", action: "cancel"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &elicitationApprover{response: tc.response, err: tc.err}
+			var approver harness.Approver = a
+			if tc.noInteractor {
+				approver = &mockApprover{}
+			}
+			messages, _, err := runACPFeature(t, "feature_elicitation", AgentAgy, harness.Turn{Approver: approver})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reply map[string]any
+			for _, msg := range messages {
+				if msg["id"] == float64(9001) {
+					reply, _ = msg["result"].(map[string]any)
+				}
+			}
+			if reply["action"] != tc.action {
+				t.Fatalf("reply = %v", reply)
+			}
+			if tc.noInteractor {
+				return
+			}
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if !a.acked || (tc.err == nil && a.ackErr != nil) {
+				t.Fatalf("delivery = %v, %v", a.acked, a.ackErr)
+			}
+			if a.req.Kind != harness.RequestKindQuestion || a.req.ToolName != "ask_question" || !strings.HasPrefix(a.req.ToolID, "acp-q-") {
+				t.Fatalf("request = %+v", a.req)
+			}
+			if tc.action != "accept" {
+				return
+			}
+			questions := map[string]harness.Question{}
+			for _, q := range a.req.Questions {
+				questions[q.ID] = q
+			}
+			if len(questions) != 6 {
+				t.Fatalf("questions = %+v", questions)
+			}
+			if q := questions["single"]; q.Header != "Single" || q.Prompt != "Select one" || !reflect.DeepEqual(q.Choices, []harness.QuestionChoice{{Label: "a"}, {Label: "b"}}) {
+				t.Fatalf("single = %+v", q)
+			}
+			if q := questions["multi"]; !q.AllowsMultiple || q.Prompt != "Multi" || len(q.Choices) != 2 {
+				t.Fatalf("multi = %+v", q)
+			}
+			if q := questions["text"]; !q.AllowsOther || len(q.Choices) != 0 || q.Prompt != "Choose" {
+				t.Fatalf("text = %+v", q)
+			}
+			if !reflect.DeepEqual(questions["bool"].Choices, []harness.QuestionChoice{{Label: "true"}, {Label: "false"}}) {
+				t.Fatal(questions["bool"])
+			}
+			want := map[string]any{"single": "b", "multi": []any{"x", "y"}, "text": "hello", "bool": true, "oneof": "v", "anyof": []any{"z"}}
+			if !reflect.DeepEqual(reply["content"], want) {
+				t.Fatalf("content = %#v, want %#v", reply["content"], want)
+			}
+			init := featureParams(messages, "initialize")[0]
+			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--extra", "--gemini_dir", "routed-account"}) {
+				t.Fatalf("args order = %v", got)
+			}
+			caps := init["clientCapabilities"].(map[string]any)
+			if _, ok := caps["elicitation"].(map[string]any)["form"]; !ok {
+				t.Fatal("form capability missing")
+			}
+		})
+	}
+	t.Run("unsupported mode", func(t *testing.T) {
+		if _, err := handleElicitation(context.Background(), nil, json.RawMessage(`{"mode":"url"}`)); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestACPResumeAndClose(t *testing.T) {
+	for _, tc := range []struct{ mode, session, method string }{{"feature_resume", "existing", "session/resume"}, {"feature_load", "existing", "session/load"}, {"feature_new", "", "session/new"}} {
+		t.Run(tc.method, func(t *testing.T) {
+			dir := t.TempDir()
+			messages, _, err := runACPFeature(t, tc.mode, AgentAgy, harness.Turn{SessionID: tc.session, AdditionalDirs: []string{dir}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			params := featureParams(messages, tc.method)
+			if len(params) != 1 || !reflect.DeepEqual(params[0]["additionalDirectories"], []any{dir}) {
+				t.Fatalf("setup = %v", params)
+			}
+			if tc.method == "session/resume" && len(featureParams(messages, "session/load")) != 0 {
+				t.Fatal("used load instead of resume")
+			}
+			if close := featureParams(messages, "session/close"); len(close) != 1 {
+				t.Fatal("missing close")
+			} else if tc.session != "" && close[0]["sessionId"] != tc.session {
+				t.Fatal(close)
+			}
+		})
+	}
+}
+
+func TestACPPromptUsage(t *testing.T) {
+	_, events, err := runACPFeature(t, "feature_usage", AgentAgy, harness.Turn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usages []harness.Usage
+	for i, e := range events {
+		if e.Type == harness.EventUsage {
+			usages = append(usages, *e.Usage)
+			if i+1 == len(events) {
+				t.Fatal("usage after done")
+			}
+		}
+	}
+	if len(usages) != 3 {
+		t.Fatalf("usages = %v", usages)
+	}
+	if want := (harness.Usage{InputTokens: 200, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[1], want) {
+		t.Fatalf("update = %+v", usages[1])
+	}
+	if want := (harness.Usage{InputTokens: 500, OutputTokens: 25, CachedTokens: 100, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[2], want) {
+		t.Fatalf("final = %+v", usages[2])
+	}
+	if events[len(events)-1].Type != harness.EventDone {
+		t.Fatal("done must be last")
+	}
+}
+
+func TestACPAgyModeAndModel(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		mode                harness.PermissionMode
+		interaction, wanted string
+	}{
+		{"plan", harness.ModeSupervised, "plan", "plan"}, {"edits", harness.ModeAutoAcceptEdits, "", "accept-edits"}, {"auto", harness.ModeAuto, "", "auto"}, {"supervised", harness.ModeSupervised, "", ""}, {"readonly", harness.ModeReadOnly, "", ""}, {"full", harness.ModeFullAccess, "plan", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages, _, err := runACPFeature(t, "feature_agy", AgentAgy, harness.Turn{Mode: tc.mode, InteractionMode: tc.interaction, Model: "requested", Effort: "high"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			modes := featureParams(messages, "session/set_mode")
+			if tc.wanted == "" {
+				if len(modes) != 0 {
+					t.Fatal(modes)
+				}
+			} else if len(modes) != 1 || modes[0]["modeId"] != tc.wanted {
+				t.Fatal(modes)
+			}
+			if len(featureParams(messages, "session/set_model")) != 0 {
+				t.Fatal("agy used set_model")
+			}
+			if config := featureParams(messages, "session/set_config_option"); len(config) != 2 || config[0]["configId"] != "model" || config[1]["configId"] != "thought_level" {
+				t.Fatal(config)
+			}
+		})
+	}
+	for _, mode := range []string{"feature_agy_current_auto", "feature_agy_unadvertised"} {
+		t.Run(mode, func(t *testing.T) {
+			messages, _, err := runACPFeature(t, mode, AgentAgy, harness.Turn{Mode: harness.ModeAuto})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(featureParams(messages, "session/set_mode")) != 0 {
+				t.Fatal("unnecessary set_mode")
+			}
+		})
+	}
+	for _, name := range []string{"model", "effort"} {
+		t.Run(name+" mismatch", func(t *testing.T) {
+			messages, _, err := runACPFeature(t, "feature_agy_"+name+"_mismatch", AgentAgy, harness.Turn{Model: "requested", Effort: "high"})
+			if err == nil || !strings.Contains(err.Error(), "agy did not apply "+name) {
+				t.Fatalf("err = %v", err)
+			}
+			if len(featureParams(messages, "session/prompt")) != 0 {
+				t.Fatal("sent prompt after config failure")
+			}
+		})
+	}
+}
+
+func TestACPCancelDoesNotCloseSession(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace.jsonl")
+	h := New(Options{Agent: AgentAgy, Binary: os.Args[0], Env: []string{fakeACPEnv + "=feature_cancel", "MCODE_TEST_ACP_TRACE=" + trace}})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := h.Run(ctx, harness.Turn{WorkDir: t.TempDir(), ThreadID: "cancel"}, func(event harness.Event) {
+		if event.Type == harness.EventText {
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "session/close") {
+		t.Fatal("closed cancelled session")
+	}
+	if roots := h.ProcessRootPIDs("cancel"); len(roots) != 0 {
+		t.Fatalf("leaked roots %v", roots)
+	}
+}
+
+func TestACPAgyPermissionOptions(t *testing.T) {
+	for _, wanted := range []string{"session", "once"} {
+		t.Run(wanted, func(t *testing.T) {
+			messages, _, err := runACPFeature(t, "feature_permission_"+wanted, AgentAgy, harness.Turn{Approver: &mockApprover{decision: harness.DecisionAllow}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, msg := range messages {
+				if msg["id"] == float64(9010) {
+					result := msg["result"].(map[string]any)
+					if result["outcome"].(map[string]any)["optionId"] != wanted {
+						t.Fatal(result)
+					}
+					return
+				}
+			}
+			t.Fatal("missing permission reply")
+		})
 	}
 }

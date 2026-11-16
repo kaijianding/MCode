@@ -11,11 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 
 	"mcode/internal/agent/tools"
 	"mcode/internal/harness"
@@ -32,6 +36,7 @@ type Options struct {
 	Agent       Agent
 	Binary      string
 	ExtraArgs   []string
+	TurnArgs    func(turn harness.Turn) []string
 	Env         []string
 	DroidAuth   DroidAuthMode
 	DroidAPIKey func() string
@@ -386,6 +391,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	launchArgs := LaunchArgs(h.opts.Agent, turn.Mode)
 	allArgs := append(append([]string{}, launchArgs...), h.opts.ExtraArgs...)
+	if h.opts.TurnArgs != nil {
+		allArgs = append(allArgs, h.opts.TurnArgs(turn)...)
+	}
 
 	var cmd *exec.Cmd
 	var cleanup func()
@@ -440,9 +448,18 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	conn := NewConn(stdoutPipe, stdinPipe)
 	defer conn.Close()
+	waited := false
+	defer func() {
+		if !waited {
+			_ = conn.Close()
+			_ = killProcessGroup(cmd, syscall.SIGKILL)
+			_ = cmd.Wait()
+		}
+	}()
 
 	var sessionID string
 	var sessionMu sync.Mutex
+	var contextUsed, contextSize atomic.Int64
 
 	setSessionID := func(id string) {
 		sessionMu.Lock()
@@ -458,6 +475,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	// 注册对端发来的请求处理器
 	conn.SetRequestHandler(func(method string, params json.RawMessage) (any, error) {
 		switch method {
+		case "elicitation/create":
+			return handleElicitation(ctx, turn.Approver, params)
+
 		case "fs/read_text_file":
 			var p struct {
 				Path string `json:"path"`
@@ -609,7 +629,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				}
 			} else if decision == harness.DecisionAllow {
 				for _, opt := range p.Options {
-					if opt.Kind == "allow_once" || opt.Kind == "allow_always" ||
+					if opt.Kind == "allow_once" {
+						selectedID = opt.OptionID
+						break
+					}
+				}
+				for _, opt := range p.Options {
+					if selectedID != "" {
+						break
+					}
+					if opt.Kind == "allow_once" || opt.Kind == "allow_always" || opt.Kind == "allow_session" ||
 						strings.Contains(strings.ToLower(opt.Name), "allow") ||
 						strings.Contains(strings.ToLower(opt.Name), "proceed") {
 						selectedID = opt.OptionID
@@ -750,11 +779,15 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			})
 
 		case "usage_update":
-			if u.Used > 0 {
+			contextUsed.Store(u.Used)
+			contextSize.Store(u.Size)
+			if u.Used > 0 || u.Size > 0 {
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventUsage,
 					Usage: &harness.Usage{
-						InputTokens: u.Used,
+						InputTokens:   u.Used,
+						ContextTokens: u.Used,
+						ContextWindow: u.Size,
 					},
 				})
 			}
@@ -791,15 +824,25 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			// 2. 向进程组发送 SIGTERM
 			_ = killProcessGroup(cmd, syscall.SIGTERM)
 			// 3. 超时 3 秒后强制 SIGKILL 兜底
-			time.Sleep(3 * time.Second)
-			_ = killProcessGroup(cmd, syscall.SIGKILL)
+			timer := time.NewTimer(3 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-shutdownCh:
+				return
+			case <-timer.C:
+				_ = killProcessGroup(cmd, syscall.SIGKILL)
+			}
 		}
 	}()
 
 	// 步骤 1: initialize
 	var initResp struct {
 		AgentCapabilities struct {
-			LoadSession bool `json:"loadSession"`
+			LoadSession         bool `json:"loadSession"`
+			SessionCapabilities struct {
+				Resume *struct{} `json:"resume"`
+				Close  *struct{} `json:"close"`
+			} `json:"sessionCapabilities"`
 			// MCPCapabilities 声明 Agent 是否直接支持 HTTP MCP；不支持时退化为 mcp-remote。
 			MCPCapabilities struct {
 				HTTP bool `json:"http"`
@@ -816,7 +859,8 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				"readTextFile":  true,
 				"writeTextFile": true,
 			},
-			"terminal": false,
+			"terminal":    false,
+			"elicitation": map[string]any{"form": map[string]any{}},
 		},
 		"clientInfo": map[string]any{
 			"name":    "mcode",
@@ -842,6 +886,8 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	// 步骤 2 & 3: session/load 或 session/new
 	canLoad := initResp.AgentCapabilities.LoadSession
+	canResume := initResp.AgentCapabilities.SessionCapabilities.Resume != nil
+	canClose := initResp.AgentCapabilities.SessionCapabilities.Close != nil
 	authMethods := initResp.AuthMethods
 	// 会话级的 MCP 服务列表：Agent 声明支持 HTTP MCP 时直连，否则退化为 npx mcp-remote。
 	allowsHTTP := initResp.AgentCapabilities.MCPCapabilities.HTTP
@@ -861,18 +907,23 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			Modes         acpSessionModes  `json:"modes"`
 		}
 
+		params := map[string]any{"cwd": turn.WorkDir, "mcpServers": servers}
+		if h.opts.Agent == AgentAgy && len(turn.AdditionalDirs) > 0 {
+			params["additionalDirectories"] = turn.AdditionalDirs
+		}
 		if turn.SessionID != "" {
-			if !canLoad {
+			if !canLoad && !canResume {
 				// Agent 不支持 session/load 时明确报错，
 				// 而不是静默开一个丢失上下文的新会话。
 				return "", fmt.Errorf("this ACP agent (%s) cannot resume the original session", DisplayName(h.opts.Agent))
 			}
 			var res sessionSetupResult
-			err := conn.Call(ctx, "session/load", map[string]any{
-				"sessionId":  turn.SessionID,
-				"cwd":        turn.WorkDir,
-				"mcpServers": servers,
-			}, &res)
+			method := "session/load"
+			if canResume {
+				method = "session/resume"
+			}
+			params["sessionId"] = turn.SessionID
+			err := conn.Call(ctx, method, params, &res)
 			if err != nil {
 				return "", err
 			}
@@ -882,10 +933,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}
 
 		var res sessionSetupResult
-		err := conn.Call(ctx, "session/new", map[string]any{
-			"cwd":        turn.WorkDir,
-			"mcpServers": servers,
-		}, &res)
+		err := conn.Call(ctx, "session/new", params, &res)
 		if err != nil {
 			return "", err
 		}
@@ -921,7 +969,11 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	// 步骤 5: 设置模型
 	// "default" 是模型目录的占位行，交给 Agent 自己的默认模型，不发 set_model。
-	if turn.Model != "" && turn.Model != "default" {
+	if h.opts.Agent == AgentAgy {
+		if err := configureAgy(ctx, conn, sid, turn, sessionModes, sessionOptions); err != nil {
+			return err
+		}
+	} else if turn.Model != "" && turn.Model != "default" {
 		_ = conn.Call(ctx, "session/set_model", map[string]any{
 			"sessionId": sid,
 			"modelId":   turn.Model,
@@ -945,7 +997,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	// 二者都通过会话广告的配置项下发（session/set_config_option）；Agent 未广告对应配置项时不传。
 	// effort 与当前值相同则跳过；除 droid 外下发失败忽略。
 	effortConfigID, currentEffort, fastConfigID, currentFast := selectACPConfigOptions(sessionOptions)
-	if turn.Effort != "" && effortConfigID != "" && turn.Effort != currentEffort {
+	if h.opts.Agent != AgentAgy && turn.Effort != "" && effortConfigID != "" && turn.Effort != currentEffort {
 		err := conn.Call(ctx, "session/set_config_option", map[string]any{
 			"sessionId": sid,
 			"configId":  effortConfigID,
@@ -999,6 +1051,12 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	var promptResult struct {
 		StopReason string `json:"stopReason"`
+		Usage      struct {
+			InputTokens      int64 `json:"inputTokens"`
+			OutputTokens     int64 `json:"outputTokens"`
+			ThoughtTokens    int64 `json:"thoughtTokens"`
+			CachedReadTokens int64 `json:"cachedReadTokens"`
+		} `json:"usage"`
 	}
 	promptErr := conn.Call(ctx, "session/prompt", map[string]any{
 		"sessionId": sid,
@@ -1006,12 +1064,24 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}, &promptResult)
 
 	if promptErr == nil {
+		u := promptResult.Usage
+		if u.InputTokens != 0 || u.OutputTokens != 0 || u.ThoughtTokens != 0 || u.CachedReadTokens != 0 {
+			_ = harness.Emit(emit, harness.Event{Type: harness.EventUsage, Usage: &harness.Usage{
+				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens + u.ThoughtTokens, CachedTokens: u.CachedReadTokens,
+				ContextTokens: contextUsed.Load(), ContextWindow: contextSize.Load(),
+			}})
+		}
 		_ = harness.Emit(emit, harness.Event{
 			Type:       harness.EventDone,
 			StopReason: promptResult.StopReason,
 		})
 	}
 
+	if promptErr == nil && ctx.Err() == nil && canClose {
+		closeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_ = conn.Call(closeCtx, "session/close", map[string]any{"sessionId": sid}, nil)
+		cancel()
+	}
 	_ = conn.Close()
 
 	if ctx.Err() != nil {
@@ -1019,6 +1089,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 
 	waitErr := cmd.Wait()
+	waited = true
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -1052,7 +1123,7 @@ func selectACPConfigOptions(options []map[string]any) (effortConfigID, currentEf
 			continue
 		}
 		key, _ := option["category"].(string)
-		if key == "" {
+		if key == "" || id == "thought_level" {
 			key = id
 		}
 		current, _ := option["currentValue"].(string)
@@ -1114,4 +1185,191 @@ func (a acpApprovalResponse) Ack(err error) {
 	if a.onAck != nil {
 		a.onAck(err)
 	}
+}
+
+type elicitationProperty struct {
+	Type        string                `json:"type"`
+	Title       string                `json:"title"`
+	Description string                `json:"description"`
+	Enum        []string              `json:"enum"`
+	Const       string                `json:"const"`
+	OneOf       []elicitationProperty `json:"oneOf"`
+	AnyOf       []elicitationProperty `json:"anyOf"`
+	Items       *elicitationProperty  `json:"items"`
+}
+
+func handleElicitation(ctx context.Context, approver harness.Approver, params json.RawMessage) (any, error) {
+	var p struct {
+		Mode            string `json:"mode"`
+		Message         string `json:"message"`
+		RequestedSchema struct {
+			Properties map[string]elicitationProperty `json:"properties"`
+		} `json:"requestedSchema"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+	if p.Mode != "form" {
+		return nil, fmt.Errorf("unsupported elicitation mode %q", p.Mode)
+	}
+	cancel := map[string]any{"action": "cancel"}
+	interactor, ok := approver.(harness.Interactor)
+	if !ok {
+		return cancel, nil
+	}
+	req := harness.ApprovalRequest{Kind: harness.RequestKindQuestion, ToolName: "ask_question", ToolID: "acp-q-" + uuid.NewString()[:8], Summary: p.Message}
+	ids := make([]string, 0, len(p.RequestedSchema.Properties))
+	for id := range p.RequestedSchema.Properties {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	values := make(map[string]map[string]string)
+	for _, id := range ids {
+		prop := p.RequestedSchema.Properties[id]
+		prompt := prop.Description
+		if prompt == "" {
+			prompt = prop.Title
+		}
+		if prompt == "" {
+			prompt = p.Message
+		}
+		q := harness.Question{ID: id, Header: prop.Title, Prompt: prompt}
+		choices := prop
+		switch prop.Type {
+		case "array":
+			q.AllowsMultiple = true
+			if prop.Items != nil {
+				choices = *prop.Items
+			}
+		case "boolean":
+			choices.Enum = []string{"true", "false"}
+		case "string":
+		default:
+			return nil, fmt.Errorf("unsupported elicitation property type %q", prop.Type)
+		}
+		values[id] = map[string]string{}
+		add := func(value, label string) {
+			if label == "" {
+				label = value
+			}
+			q.Choices = append(q.Choices, harness.QuestionChoice{Label: label})
+			values[id][label] = value
+		}
+		for _, value := range choices.Enum {
+			add(value, value)
+		}
+		for _, choice := range append(choices.OneOf, choices.AnyOf...) {
+			value := choice.Const
+			if len(choice.Enum) > 0 {
+				value = choice.Enum[0]
+			}
+			add(value, choice.Title)
+		}
+		q.AllowsOther = prop.Type == "string" && len(q.Choices) == 0
+		req.Questions = append(req.Questions, q)
+	}
+	response, err := interactor.Interact(ctx, req)
+	if err != nil {
+		harness.AckDelivery(approver, req, err)
+		return cancel, nil
+	}
+	payload := cancel
+	if response.Skipped {
+		payload = map[string]any{"action": "decline"}
+	} else if len(response.Answers) > 0 {
+		content := map[string]any{}
+		for _, q := range req.Questions {
+			answers, ok := response.Answers[q.ID]
+			if !ok {
+				continue
+			}
+			mapped := make([]string, 0, len(answers))
+			for _, answer := range answers {
+				if value, ok := values[q.ID][answer]; ok {
+					answer = value
+				}
+				mapped = append(mapped, answer)
+			}
+			if q.AllowsMultiple {
+				content[q.ID] = mapped
+			} else if len(mapped) > 0 {
+				if p.RequestedSchema.Properties[q.ID].Type == "boolean" {
+					value, err := strconv.ParseBool(mapped[0])
+					if err != nil {
+						return acpApprovalResponse{payload: cancel, onAck: func(err error) { harness.AckDelivery(approver, req, err) }}, nil
+					}
+					content[q.ID] = value
+				} else {
+					content[q.ID] = mapped[0]
+				}
+			}
+		}
+		if len(content) > 0 {
+			payload = map[string]any{"action": "accept", "content": content}
+		}
+	}
+	return acpApprovalResponse{payload: payload, onAck: func(err error) { harness.AckDelivery(approver, req, err) }}, nil
+}
+
+func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn, modes acpSessionModes, options []map[string]any) error {
+	wanted := "default"
+	switch turn.Mode {
+	case harness.ModeAutoAcceptEdits:
+		wanted = "accept-edits"
+	case harness.ModeAuto:
+		wanted = "auto"
+	}
+	if turn.InteractionMode == "plan" {
+		wanted = "plan"
+	}
+	if turn.Mode != harness.ModeFullAccess && wanted != modes.CurrentModeID {
+		for _, id := range modes.IDs() {
+			if id == wanted {
+				if err := conn.Call(ctx, "session/set_mode", map[string]any{"sessionId": sid, "modeId": wanted}, nil); err != nil {
+					return fmt.Errorf("acp set mode: %w", err)
+				}
+				break
+			}
+		}
+	}
+	apply := func(id, value, name string) error {
+		var result struct {
+			ConfigOptions []map[string]any `json:"configOptions"`
+		}
+		if err := conn.Call(ctx, "session/set_config_option", map[string]any{"sessionId": sid, "configId": id, "value": value}, &result); err != nil {
+			return fmt.Errorf("acp set %s: %w", name, err)
+		}
+		for _, option := range result.ConfigOptions {
+			if option["id"] == id && option["currentValue"] == value {
+				options = result.ConfigOptions
+				return nil
+			}
+		}
+		return fmt.Errorf("agy did not apply %s %s", name, value)
+	}
+	if turn.Model != "" && turn.Model != "default" {
+		modelID := ""
+		for _, option := range options {
+			if option["id"] == "model" || option["category"] == "model" {
+				modelID, _ = option["id"].(string)
+				break
+			}
+		}
+		if modelID == "" {
+			return fmt.Errorf("agy did not apply model %s", turn.Model)
+		}
+		if err := apply(modelID, turn.Model, "model"); err != nil {
+			return err
+		}
+	}
+	if turn.Effort != "" {
+		id, current, _, _ := selectACPConfigOptions(options)
+		if id == "" {
+			return fmt.Errorf("agy did not apply effort %s", turn.Effort)
+		}
+		if current != turn.Effort {
+			return apply(id, turn.Effort, "effort")
+		}
+	}
+	return nil
 }
