@@ -4,13 +4,11 @@ import { createPortal } from 'react-dom';
 import type {
   RemoteAttachmentUploadResult,
   RemoteComposerOptions,
-  RemoteFileEntry,
   RemoteSwarmPair,
   RemoteProjectSummary,
   RemoteProvider
 } from '../types/contract';
 import { useRemoteStatic, useRemote } from '../context/RemoteContext';
-import { isImageFile } from '../context/remoteImages';
 import { makeActionID } from '../context/remoteGuards';
 import type { RemoteProviderListWithCatalog } from '../context/remoteTypes';
 import type { ComposerQuotaScope } from '../types/quota';
@@ -20,20 +18,16 @@ import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerQuotaBar } from './ComposerQuotaBar';
 import { QuickReplyBar } from './QuickReplyBar';
 import { ThreadMentionChips } from './composer/ThreadMentionChips';
-import { useThreadMentionCandidates, useThreadMentionSendText } from '../hooks/useThreadMentionCandidates';
+import { useComposerCompletions } from './composer/useComposerCompletions';
+import { fileDragIntent, useComposerAttachments } from './composer/useComposerAttachments';
+import { ComposerAttachButton, ComposerAttachmentStrip } from './composer/ComposerAttachments';
+export { composerAttachmentLimit, fileDragIntent } from './composer/useComposerAttachments';
+export { AttachmentPreviewOverlay, ComposerAttachButton, ComposerAttachmentStrip } from './composer/ComposerAttachments';
+export type { ComposerAttachButtonProps, ComposerAttachmentStripProps } from './composer/ComposerAttachments';
+import { useThreadMentionSendText } from '../hooks/useThreadMentionCandidates';
 import type { DraftThreadMention } from '../utils/threadMention';
-import {
-  commandScopeKey,
-  commandToSuggestion,
-  extractTriggerQuery,
-  fileEntryToSuggestion,
-  filterSkillCommands,
-  filterSlashCommands,
-  localCommandName,
-  modelSuggestions,
-  skillCommandToSuggestion
-} from '../utils/slashCommands';
-import type { CommandScope, SuggestionItem, TriggerQueryInfo } from '../utils/slashCommands';
+import { localCommandName } from '../utils/slashCommands';
+import type { CommandScope } from '../utils/slashCommands';
 import { modelDisplayName } from '../utils/modelLabel';
 import { isImeComposing } from '../utils/ime';
 import {
@@ -67,19 +61,9 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  PlusIcon,
   XMarkIcon
 } from './Icons';
 import '../styles/send-morph.css';
-
-/**
- * 附件数量上限：宿主未声明 attachmentLimit 时按旧版约定的 4 处理；
- * 非正整数视为非法，同样退回 4。
- */
-export function composerAttachmentLimit(limit?: number): number {
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) return 4;
-  return limit;
-}
 
 // 按下时保持输入框焦点，避免键盘收起引起布局移位导致点击落空。
 function keepComposerFocus(event: React.MouseEvent): void {
@@ -92,15 +76,6 @@ export type ModelSheetPage = 'summary' | 'lead' | 'bees';
 /** Esc：二级页先退回摘要页（返回 'summary'），已在摘要页才关整个浮层（返回 null）。 */
 export function modelSheetPageOnEscape(page: ModelSheetPage): ModelSheetPage | null {
   return page === 'summary' ? null : 'summary';
-}
-
-/** 拖拽意图：命中 Files 就先拦浏览器默认行为，附件可用才接收文件。 */
-export function fileDragIntent(types: Iterable<string>, attachmentsAvailable: boolean): {
-  preventDefault: boolean;
-  acceptsFiles: boolean;
-} {
-  const hasFiles = Array.from(types).includes('Files');
-  return { preventDefault: hasFiles, acceptsFiles: hasFiles && attachmentsAvailable };
 }
 
 /**
@@ -229,161 +204,6 @@ function modeLabel(mode?: RemoteComposerOptions['interactionMode']): string {
   if (mode === 'plan') return '计划模式';
   if (mode === 'build') return '执行模式';
   return '默认模式';
-}
-
-function formatByteCount(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** 输入区图片缩略图的全屏预览：点遮罩或按 Esc 关闭，与时间线大图同款黑底 */
-export function AttachmentPreviewOverlay({ url, name, onClose }: {
-  url: string;
-  name: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onClose]);
-
-  const dialog = (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`图片预览 ${name}`}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <img src={url} alt={name} draggable={false} className="max-h-full max-w-full object-contain" />
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="关闭图片预览"
-        className="absolute flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur hover:bg-white/25"
-        style={{
-          top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
-          right: 'calc(env(safe-area-inset-right, 0px) + 12px)'
-        }}
-      >
-        <XMarkIcon className="w-5 h-5" />
-      </button>
-    </div>
-  );
-  // 输入区容器带 backdrop-blur，会成为 fixed 的包含块，必须挂到 body 才能全屏
-  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
-}
-
-export interface ComposerAttachmentStripProps {
-  attachments: RemoteAttachmentUploadResult[];
-  attachmentPreviews?: Record<string, string>;
-  onRemoveAttachment: (attachmentID: string) => void;
-}
-
-/** 已添加的附件：图片显示缩略图（可点开大图），其余显示文件名与大小 */
-export function ComposerAttachmentStrip({
-  attachments,
-  attachmentPreviews,
-  onRemoveAttachment
-}: ComposerAttachmentStripProps) {
-  const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
-  if (attachments.length === 0) return null;
-  return (
-    <>
-      <div className="flex gap-2 overflow-x-auto pb-2 px-1" aria-label="已添加附件">
-        {attachments.map((attachment) => {
-          const previewURL = attachmentPreviews?.[attachment.attachmentID];
-          const size = formatByteCount(attachment.byteCount);
-          return (
-            <div
-              key={attachment.attachmentID}
-              title={size ? `${attachment.name}（${size}）` : attachment.name}
-              className="relative shrink-0 rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--user-bubble)] flex items-center justify-center group"
-              style={previewURL ? { width: 48, height: 48 } : { minWidth: 56, maxWidth: 168, height: 48 }}
-            >
-              {previewURL ? (
-                <button
-                  type="button"
-                  onClick={() => setPreview({ url: previewURL, name: attachment.name })}
-                  aria-label={`预览附件 ${attachment.name}`}
-                  className="h-full w-full"
-                >
-                  <img
-                    src={previewURL}
-                    alt={attachment.name}
-                    draggable={false}
-                    className="h-full w-full object-cover"
-                  />
-                </button>
-              ) : (
-                <span className="min-w-0 px-1.5 py-1 text-left">
-                  <span className="block truncate text-mc-caption leading-[14px] text-[var(--foreground)]">
-                    {attachment.name || '附件'}
-                  </span>
-                  <span className="block truncate text-mc-caption leading-[13px] text-[var(--foreground-muted)]">
-                    {size || '附件'}
-                  </span>
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={(event) => {
-                  // 移除按钮叠在缩略图上方，点击不能穿透成「打开大图」
-                  event.stopPropagation();
-                  onRemoveAttachment(attachment.attachmentID);
-                }}
-                aria-label={`移除附件 ${attachment.name}`}
-                className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center text-mc-caption hover:bg-black"
-              >
-                ×
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      {preview && (
-        <AttachmentPreviewOverlay url={preview.url} name={preview.name} onClose={() => setPreview(null)} />
-      )}
-    </>
-  );
-}
-
-export interface ComposerAttachButtonProps {
-  disabled: boolean;
-  title: string;
-  onPicked: (files: FileList | null) => void;
-}
-
-/** 附件入口：只留加号的正方形图标按钮，文字说明交给 title 与 aria-label */
-export function ComposerAttachButton({ disabled, title, onPicked }: ComposerAttachButtonProps) {
-  return (
-    <label
-      title={title}
-      className="h-[30px] w-[30px] rounded-full inline-flex items-center justify-center shrink-0 border border-[var(--border)] bg-[var(--card)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-alt,var(--card))] cursor-pointer active:scale-95 transition"
-    >
-      <PlusIcon className="w-4 h-4" />
-      <input
-        type="file"
-        multiple
-        disabled={disabled}
-        aria-label="添加附件"
-        onChange={(event) => {
-          onPicked(event.target.files);
-          event.currentTarget.value = '';
-        }}
-        className="sr-only"
-      />
-    </label>
-  );
 }
 
 /** 上下文 token 数：小数值按 k/M 缩写，避免徽标被撑宽 */
@@ -690,36 +510,10 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   historyEntries
 }: ThreadComposerProps, ref) {
   const {
-    capabilities,
-    searchThreadFiles,
-    listThreadFiles,
     swarm,
-    commandSnapshots,
-    loadThreadCommands,
     getSwarmTiers,
     setThreadSwarmBeeTiers: setBeeTiersRpc
   } = useRemoteStatic();
-  const canMention = Boolean(
-    threadID &&
-    capabilities?.features?.includes('files.read') &&
-    capabilities?.methods?.includes('files.search')
-  );
-  // `/` 命令与 `#模型` 委派都由宿主 feature `threads.commands` 管；旧宿主不弹，也不请求。
-  const commandsSupported = Boolean(
-    capabilities?.features?.includes('threads.commands') &&
-    capabilities.methods.includes('threads.commands')
-  );
-  const canSlash = commandsSupported && Boolean(commandScope);
-  // `$` 技能候选同样来自 threads.commands，取数范围与 `/` 相同（草稿页用项目 + Provider）。
-  const canSkill = commandsSupported && Boolean(commandScope);
-  // 委派只对已有会话有意义；运行中宿主拒绝委派，不弹候选（发送侧另有提示）。
-  const canDelegate = commandsSupported && Boolean(commandScope && 'threadID' in commandScope) && !isRunning;
-  const scopeKey = commandScope ? commandScopeKey(commandScope) : null;
-  const commandSnapshot = scopeKey ? commandSnapshots[scopeKey] : undefined;
-  // 草稿阶段 scope 随 provider 变化：key 变了就重新拉。
-  const scopeRef = useRef(commandScope);
-  scopeRef.current = commandScope;
-
   const [activeSheet, setActiveSheet] = useState<ActiveSheetType>(null);
   const [modelSheetPage, setModelSheetPage] = useState<ModelSheetPage>('summary');
   const [modelQuery, setModelQuery] = useState('');
@@ -743,9 +537,6 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   const [isSavingTiers, setIsSavingTiers] = useState(false);
   const [tierError, setTierError] = useState<string | null>(null);
   const [tierNotice, setTierNotice] = useState<string | null>(null);
-  const [attachNotice, setAttachNotice] = useState<string | null>(null);
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const dragDepthRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // 方向键历史导航状态（对应 internal/ui/composer_history.go:7 的 composerHistoryState）
@@ -925,267 +716,10 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
 
   const tierDirty = serializeBeeTiers(tierDraft) !== tierBaseline;
 
-  // 补全状态：@ 文件（异步搜索）、/ 命令与 # 模型（本地过滤）共用一个弹层
-  const [triggerInfo, setTriggerInfo] = useState<TriggerQueryInfo | null>(null);
-  const [fileSuggestions, setFileSuggestions] = useState<SuggestionItem[]>([]);
-  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(0);
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState<boolean>(false);
-  const mentionDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mentionGenRef = useRef<number>(0);
-  const triggerInfoRef = useRef<TriggerQueryInfo | null>(null);
-
-  // `@` 补全里的会话候选：与文件候选共用一个菜单，会话排在文件之前，最多 5 条
-  // （对应 internal/ui/composer_complete.go:303 的 mentionCompletionItems 顺序与 composer_complete.go:490 的上限）。
-  const threadMentionCandidates = useThreadMentionCandidates({
-    query: triggerInfo?.trigger === '@' ? triggerInfo.query : '',
-    limit: 5,
-    excludeThreadID: threadID,
-    projectID: selectedProjectID
-  });
-  // 会话候选的 SuggestionItem 用 key 区分，选中时再取回 threadID / 标题
-  const threadMentionPicks = useMemo(() => {
-    if (!triggerInfo || triggerInfo.trigger !== '@') {
-      return [] as { item: SuggestionItem; mention: DraftThreadMention }[];
-    }
-    return threadMentionCandidates.slice(0, 5).map((candidate) => ({
-      item: {
-        key: `thread:${candidate.threadID}`,
-        title: candidate.insert,
-        detail: candidate.detail ? `会话 · ${candidate.detail}` : '会话',
-        icon: 'link' as const,
-        kind: 'command' as const,
-        insertText: ''
-      },
-      mention: { threadID: candidate.threadID, title: candidate.title } as DraftThreadMention
-    }));
-  }, [threadMentionCandidates, triggerInfo]);
-
-  // 进入输入区拉一次命令清单（已有新鲜缓存时直接复用）；scope 变化（草稿切 Provider/项目）重新拉。
-  const [commandsFailed, setCommandsFailed] = useState(false);
-  const hasCommandSnapshot = Boolean(commandSnapshot);
-  const hasCommandSnapshotRef = useRef(hasCommandSnapshot);
-  hasCommandSnapshotRef.current = hasCommandSnapshot;
-  const requestCommands = useCallback(() => {
-    const scope = scopeRef.current;
-    if (!scope) return;
-    loadThreadCommands(scope).then(
-      () => setCommandsFailed(false),
-      () => setCommandsFailed(true)
-    );
-  }, [loadThreadCommands]);
-  // 每个 scope 进入时请求一次；快照被清掉（重连重置）后再补拉一次，已有快照时不重复请求。
-  const requestedScopeKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!canSlash) {
-      requestedScopeKeyRef.current = null;
-      return;
-    }
-    if (requestedScopeKeyRef.current === scopeKey && hasCommandSnapshot) return;
-    requestedScopeKeyRef.current = scopeKey;
-    requestCommands();
-  }, [canSlash, hasCommandSnapshot, requestCommands, scopeKey]);
-
-  const resetTrigger = useCallback(() => {
-    if (mentionDebounceTimerRef.current) {
-      clearTimeout(mentionDebounceTimerRef.current);
-      mentionDebounceTimerRef.current = null;
-    }
-    mentionGenRef.current++;
-    triggerInfoRef.current = null;
-    setTriggerInfo(null);
-    setFileSuggestions([]);
-    setIsLoadingSuggestions(false);
-  }, []);
-
-  // 侦测光标处是否正在输入 @ / / / $ / # 片段；@ 防抖搜索文件，其余直接本地过滤
-  const checkTrigger = useCallback(
-    (text: string, cursor: number) => {
-      const candidates: TriggerQueryInfo[] = [];
-      if (canMention) {
-        const info = extractTriggerQuery(text, cursor, '@');
-        if (info) candidates.push(info);
-      }
-      if (canSlash) {
-        const info = extractTriggerQuery(text, cursor, '/');
-        if (info) candidates.push(info);
-      }
-      if (canSkill) {
-        const info = extractTriggerQuery(text, cursor, '$');
-        if (info) candidates.push(info);
-      }
-      if (canDelegate) {
-        const info = extractTriggerQuery(text, cursor, '#');
-        if (info) candidates.push(info);
-      }
-      // 多个触发符同时满足时取离光标最近的一个
-      const info = candidates.sort((lhs, rhs) => rhs.startIndex - lhs.startIndex)[0] ?? null;
-      if (!info) {
-        resetTrigger();
-        return;
-      }
-
-      const previousInfo = triggerInfoRef.current;
-      if (!previousInfo || previousInfo.trigger !== info.trigger || previousInfo.query !== info.query) {
-        setSelectedSuggestionIndex(0);
-      }
-      triggerInfoRef.current = info;
-      setTriggerInfo(info);
-      if ((info.trigger === '/' || info.trigger === '$') && !hasCommandSnapshotRef.current) requestCommands();
-      if (info.trigger !== '@') {
-        // 本地过滤：丢弃在途的文件搜索
-        if (mentionDebounceTimerRef.current) {
-          clearTimeout(mentionDebounceTimerRef.current);
-          mentionDebounceTimerRef.current = null;
-        }
-        mentionGenRef.current++;
-        setFileSuggestions([]);
-        setIsLoadingSuggestions(false);
-        return;
-      }
-
-      if (mentionDebounceTimerRef.current) {
-        clearTimeout(mentionDebounceTimerRef.current);
-      }
-
-      const currentGen = ++mentionGenRef.current;
-      setIsLoadingSuggestions(true);
-
-      mentionDebounceTimerRef.current = setTimeout(async () => {
-        try {
-          let entries: RemoteFileEntry[] = [];
-          const trimmed = info.query.trim();
-          if (trimmed.length > 0) {
-            const res = await searchThreadFiles(threadID!, trimmed);
-            entries = res.entries;
-          } else {
-            // 查询词为空（仅输入了 @）：若具备 list 能力则优先拉取根目录，否则走搜索空串
-            if (capabilities?.methods?.includes('files.list')) {
-              const res = await listThreadFiles(threadID!, '');
-              entries = res.entries;
-            } else {
-              const res = await searchThreadFiles(threadID!, '');
-              entries = res.entries;
-            }
-          }
-
-          if (mentionGenRef.current !== currentGen) return;
-          // 受保护项不得补全，并限制建议项数量
-          const filtered = entries.filter((entry) => !entry.protected).slice(0, 8);
-          setFileSuggestions(filtered.map(fileEntryToSuggestion));
-          setSelectedSuggestionIndex(0);
-        } catch {
-          if (mentionGenRef.current === currentGen) {
-            setFileSuggestions([]);
-          }
-        } finally {
-          if (mentionGenRef.current === currentGen) {
-            setIsLoadingSuggestions(false);
-          }
-        }
-      }, 180);
-    },
-    [canDelegate, canMention, canSkill, canSlash, capabilities, listThreadFiles, requestCommands, resetTrigger, searchThreadFiles, threadID]
-  );
-
-  // 清理补全定时器及在途代际
-  useEffect(() => {
-    return () => {
-      if (mentionDebounceTimerRef.current) {
-        clearTimeout(mentionDebounceTimerRef.current);
-        mentionDebounceTimerRef.current = null;
-      }
-      mentionGenRef.current++;
-    };
-  }, []);
-
-  // 会话切换或对应能力消失时清理补全状态（运行中开始后 # 候选也随之收起）
-  useEffect(() => {
-    if (!triggerInfo) return;
-    const stillAllowed =
-      (triggerInfo.trigger === '@' && canMention) ||
-      (triggerInfo.trigger === '/' && canSlash) ||
-      (triggerInfo.trigger === '$' && canSkill) ||
-      (triggerInfo.trigger === '#' && canDelegate);
-    if (!stillAllowed) resetTrigger();
-  }, [canDelegate, canMention, canSkill, canSlash, resetTrigger, triggerInfo]);
-  useEffect(() => {
-    resetTrigger();
-  }, [resetTrigger, scopeKey, threadID]);
-
-  // `/` 与 `$` 共用同一份命令快照，未就绪时弹层显示加载中
-  const commandTriggerLoading =
-    (triggerInfo?.trigger === '/' || triggerInfo?.trigger === '$') &&
-    !commandsFailed &&
-    (!commandSnapshot || commandSnapshot.loading);
-  const suggestionItems = useMemo<SuggestionItem[]>(() => {
-    if (!triggerInfo) return [];
-    if (triggerInfo.trigger === '@') return [...threadMentionPicks.map((pick) => pick.item), ...fileSuggestions];
-    if (triggerInfo.trigger === '$') {
-      if (!commandSnapshot) return [];
-      return filterSkillCommands(commandSnapshot.commands, triggerInfo.query).slice(0, 30).map(skillCommandToSuggestion);
-    }
-    if (triggerInfo.trigger === '/') {
-      if (!commandSnapshot) return [];
-      return filterSlashCommands(commandSnapshot.commands, triggerInfo.query, commandSnapshot.recent)
-        .slice(0, 30)
-        .map(commandToSuggestion);
-    }
-    return modelSuggestions(providers, triggerInfo.query);
-  }, [commandSnapshot, fileSuggestions, providers, threadMentionPicks, triggerInfo]);
-  const suggestionIndex = Math.min(selectedSuggestionIndex, Math.max(suggestionItems.length - 1, 0));
-  const showSuggestions = Boolean(triggerInfo) && (suggestionItems.length > 0 || Boolean(commandTriggerLoading));
-  const suggestionFootnote = (triggerInfo?.trigger === '/' || triggerInfo?.trigger === '$') && commandSnapshot
-    ? commandSnapshot.loading
-      ? 'Mac 正在读取命令列表，稍后会自动补全'
-      : commandSnapshot.error
-      ? '命令列表读取失败，仅显示内置命令'
-      : null
-    : null;
-
-  // 选择建议项，精准替换触发片段，保留光标前后内容
-  const handleSelectSuggestion = useCallback(
-    (item: SuggestionItem) => {
-      if (!triggerInfo) return;
-      const pick = threadMentionPicks.find((entry) => entry.item.key === item.key);
-      const before = draft.slice(0, triggerInfo.startIndex);
-      const after = draft.slice(triggerInfo.endIndex);
-      if (pick) {
-        // 会话引用：草稿里只删掉 `@查询` 片段，再在草稿上方挂一颗引用胶囊
-        // （对应 internal/ui/composer_complete.go:612 与 addDraftThreadMention 的去重规则）。
-        onDraftChange(before + after);
-        setDraftThreadMentions((previous) =>
-          previous.some((mention) => mention.threadID === pick.mention.threadID)
-            ? previous.map((mention) =>
-                mention.threadID === pick.mention.threadID ? pick.mention : mention
-              )
-            : [...previous, pick.mention]
-        );
-        resetTrigger();
-        requestAnimationFrame(() => {
-          if (textareaRef.current) {
-            const nextCursor = before.length;
-            textareaRef.current.setSelectionRange(nextCursor, nextCursor);
-            textareaRef.current.focus();
-          }
-        });
-        return;
-      }
-      const replacement = item.insertText;
-      const nextDraft = before + replacement + after;
-      onDraftChange(nextDraft);
-
-      resetTrigger();
-
-      requestAnimationFrame(() => {
-        if (textareaRef.current) {
-          const nextCursor = before.length + replacement.length;
-          textareaRef.current.setSelectionRange(nextCursor, nextCursor);
-          textareaRef.current.focus();
-        }
-      });
-    },
-    [draft, onDraftChange, resetTrigger, threadMentionPicks, triggerInfo]
-  );
+  const { triggerInfo, suggestionItems, suggestionIndex, showSuggestions, suggestionFootnote, commandTriggerLoading,
+    isLoadingSuggestions, handleSelectSuggestion, resetTrigger, checkTrigger, setSelectedSuggestionIndex, commandsSupported } =
+    useComposerCompletions({ draft, threadID, selectedProjectID, commandScope, providers, isRunning,
+      textareaRef, onDraftChange, setDraftThreadMentions });
 
   // Auto-grow textarea height
   useEffect(() => {
@@ -1231,33 +765,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   const effort = composerOptions?.effort ?? model?.preferredEffort ?? '';
   const fastMode = composerOptions?.fastMode ?? false;
 
-  // 附件不再限于图片：任意文件都可附加，图片由宿主压缩；当前模型不支持图片时只跳过图片
   const imagesUnsupported = provider?.supportsImages === false;
-  const handlePickedAttachments = useCallback(
-    (files: FileList | null) => {
-      if (!files || files.length === 0) return;
-      if (!imagesUnsupported) {
-        setAttachNotice(null);
-        onAddAttachments(files);
-        return;
-      }
-      const picked = Array.from(files);
-      const images = picked.filter(isImageFile);
-      const others = picked.filter((file) => !isImageFile(file));
-      setAttachNotice(images.length > 0 ? '当前模型不支持图片，已跳过选中的图片' : null);
-      if (others.length === 0) return;
-      try {
-        // FileList 不能直接构造，用 DataTransfer 把非图片文件重新打包交给上传
-        const transfer = new DataTransfer();
-        others.forEach((file) => transfer.items.add(file));
-        onAddAttachments(transfer.files);
-      } catch {
-        setAttachNotice('当前浏览器不支持筛选附件，请只选择非图片文件');
-      }
-    },
-    [imagesUnsupported, onAddAttachments]
-  );
-
   const swarmPairs = swarmPairsAllowed && swarm?.enabled ? swarm.pairs : [];
   const activePair = swarmPairs.find((pair) => pair.id === composerOptions?.swarmPairID);
   // 组合标题与桌面 swarmPairTitle 一致：主导显示名 + 执行显示名，未指定时写占位词
@@ -1600,14 +1108,8 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   // 运行中且没有草稿/附件时，「主按钮」本身就是停止键；否则主按钮是发送键，
   // 运行中再在旁边显示一个独立的停止键（与改版前的布局一致）。
   const primaryActionStops = Boolean(isRunning && !isSteward && !draft.trim() && attachments.length === 0);
-  const attachmentsAvailable =
-    attachmentsSupported && !isUploadingAttachment && attachments.length < composerAttachmentLimit(attachmentLimit);
-  useEffect(() => {
-    if (!attachmentsAvailable) {
-      dragDepthRef.current = 0;
-      setIsDraggingFiles(false);
-    }
-  }, [attachmentsAvailable]);
+  const { attachmentsAvailable, attachNotice, isDraggingFiles, dragDepthRef, setIsDraggingFiles, handlePickedAttachments } =
+    useComposerAttachments({ attachmentsSupported, isUploadingAttachment, attachments, attachmentLimit, imagesUnsupported, onAddAttachments });
 
   return (
     <div
