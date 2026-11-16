@@ -236,7 +236,7 @@ type numberControl struct {
 	min, max int
 }
 
-// number 声明一个数值行：输入框加单位后缀，默认值作占位，提交时 clamp。
+// number 声明一个数值行：输入框加单位后缀，默认值作占位。
 func number(b bind[int], unit string, minV, maxV int) numberControl {
 	return numberControl{b: b, unit: unit, min: minV, max: maxV}
 }
@@ -246,37 +246,93 @@ func (n numberControl) render(c *ui.Context, st *SettingsState, s setting) {
 }
 
 func (n numberControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
-	// 越界的存量值（例如 0 表示未设置）按默认值显示，默认值同时是输入框的占位。
-	cur := n.b.value(&st.cfg)
-	if cur < n.min || cur > n.max {
-		cur = n.b.def
+	if disabled {
+		st.clearNumberDraft(s.ID)
 	}
-	txt := strconv.Itoa(cur)
+	txt, editing := st.numberDraft(s.ID)
+	if disabled || !editing {
+		txt = n.displayText(st)
+	}
 	oldTxt := txt
+	gen := st.numberGeneration(s.ID)
 	ui.Row(c.Key(s.ID + "-value")).AlignItems(ui.Center).Gap(Space2).Children(func() {
 		TextField(c, TextFieldProps{
-			Key:         s.ID + "-input",
+			// 定稿时换一个键重建输入框：原生输入框只在没有未消化的输入时才跟随外部值，
+			// 重建能保证显示立刻回到配置值，不依赖它自己什么时候同步。
+			Key:         s.ID + "-input-" + strconv.Itoa(gen),
 			Value:       &txt,
 			Placeholder: strconv.Itoa(n.b.def),
 			Width:       90,
 			Disabled:    disabled,
+			OnSubmit:    func(string) { n.commit(c, st, s) },
+			OnFocusChange: func(f bool) {
+				if !f {
+					n.commit(c, st, s)
+				}
+			},
 		})
 		if n.unit != "" {
 			ui.Text(c, n.unit).FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
 		}
 	})
-	if disabled || txt == oldTxt {
+	if disabled || st.numberGeneration(s.ID) != gen {
+		// 这一帧输入的还是定稿前的输入框，它报回来的文本已经作废。
 		return
 	}
-	parsed, err := strconv.Atoi(strings.TrimSpace(txt))
+	if txt == oldTxt {
+		// 没有新文本：已经显示配置值就收掉草稿，否则留着草稿等下一帧。
+		if txt == n.displayText(st) {
+			st.clearNumberDraft(s.ID)
+		}
+		return
+	}
+	// 还没定稿的输入只留在草稿里：中间值可能是「90」这种区间内但不完整的值，
+	// 边打边写会把用户还在敲的数字当成结果。
+	st.setNumberDraft(s.ID, txt)
+}
+
+// commit 在失焦或回车时定稿：区间内的值写进配置，其余丢掉输入框里的内容，
+// 显示回到配置当前值——不替用户改成边界值。
+func (n numberControl) commit(c *ui.Context, st *SettingsState, s setting) {
+	txt, ok := st.numberDraft(s.ID)
+	if !ok {
+		return
+	}
+	if parsed, valid := parseNumber(txt); valid && parsed >= n.min && parsed <= n.max {
+		n.write(st, parsed)
+	}
+	st.clearNumberDraft(s.ID)
+	if strings.TrimSpace(txt) == n.displayText(st) {
+		return
+	}
+	// 显示要变（越界被丢弃，或写法不同），重建输入框并补一帧让它立刻画出来。
+	st.bumpNumberGeneration(s.ID)
+	c.Invalidate()
+}
+
+// displayText 是输入框在编辑之外显示的值：越界的存量值（例如 0 表示未设置）按默认值显示。
+func (n numberControl) displayText(st *SettingsState) string {
+	cur := n.b.value(&st.cfg)
+	if cur < n.min || cur > n.max {
+		cur = n.b.def
+	}
+	return strconv.Itoa(cur)
+}
+
+// write 只在值真的变了时落盘，避免同一帧重复 save。
+func (n numberControl) write(st *SettingsState, v int) {
+	if n.b.value(&st.cfg) == v {
+		return
+	}
+	commitSettingsControl(st, func(cfg *config.Config) { n.b.write(cfg, v) })
+}
+
+func parseNumber(txt string) (int, bool) {
+	v, err := strconv.Atoi(strings.TrimSpace(txt))
 	if err != nil {
-		return
+		return 0, false
 	}
-	parsed = min(max(parsed, n.min), n.max)
-	if parsed == cur {
-		return
-	}
-	commitSettingsControl(st, func(cfg *config.Config) { n.b.write(cfg, parsed) })
+	return v, true
 }
 
 func (n numberControl) reset(cfg *config.Config) { n.b.reset(cfg) }

@@ -74,6 +74,35 @@ func setChatSettings(s *chatState, st *SettingsState) {
 	settingsList[s] = st
 }
 
+// numberDraft 返回数值行正在输入的草稿文本。
+func (st *SettingsState) numberDraft(id string) (string, bool) {
+	text, ok := st.numberDrafts[id]
+	return text, ok
+}
+
+func (st *SettingsState) setNumberDraft(id, text string) {
+	if st.numberDrafts == nil {
+		st.numberDrafts = make(map[string]string)
+	}
+	st.numberDrafts[id] = text
+}
+
+func (st *SettingsState) clearNumberDraft(id string) {
+	delete(st.numberDrafts, id)
+}
+
+// numberGeneration 是数值行输入框的键序号；定稿后换序号等于重建输入框。
+func (st *SettingsState) numberGeneration(id string) int {
+	return st.numberGens[id]
+}
+
+func (st *SettingsState) bumpNumberGeneration(id string) {
+	if st.numberGens == nil {
+		st.numberGens = make(map[string]int)
+	}
+	st.numberGens[id]++
+}
+
 // SettingsState 维护桌面端设置面板的交互状态。
 type SettingsState struct {
 	updateDotVisible bool
@@ -116,6 +145,14 @@ type SettingsState struct {
 
 	// advancedOpen 记录各页底部「高级」折叠区是否展开（键为页 id），默认收起。
 	advancedOpen map[string]bool
+
+	// numberDrafts 按行 id 保存数值行还没提交的输入文本（只在界面线程读写）。
+	// 逐位输入时中间值会越出区间（60..100 输入「7」），每帧按配置回填会把输入框
+	// 跳到下限，后续按键就拼到钳制后的数字上，所以编辑期间以草稿为准。
+	numberDrafts map[string]string
+	// numberGens 按行 id 记录输入框重建次数：定稿时显示要和输入框里的内容不一致，
+	// 就换一个控件键把它重建出来，不去等原生输入框自己同步。
+	numberGens map[string]int
 
 	// jumpToItemID 是逐项搜索点了某条命中后要滚动到可视区的那一行 key，渲染到该行后立即清空。
 	jumpToItemID string
