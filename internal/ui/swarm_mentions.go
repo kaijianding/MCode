@@ -903,17 +903,18 @@ func renderLiveMarkdown(c *ui.Context, s *chatState, m Message, o *markdown.Opti
 // 四处文本都包一层 findHighlightSource：查找条打开且本条命中时它会在源码层注入 <mark>，
 // 查找条关闭时原样返回、不扫描（字级高亮的来源见 chat_find.go）。
 func renderAssistantMarkdownDefault(c *ui.Context, s *chatState, m Message, isStreamingNow bool, lastLiveID string) bool {
+	key := "msg-body-" + m.ID
 	if isStreamingNow {
 		// takeStreamReveal 会推进基线，每帧只调用一次。
 		if s.takeStreamReveal(m) {
-			return markdown.Revealed(markdown.Stream(c, findHighlightSource(s, m.ID, m.Text+streamingCursor), &s.mdOpts))
+			return markdown.Revealed(markdown.Stream(c.Key(key), findHighlightSource(s, m.ID, m.Text+streamingCursor), &s.mdOpts))
 		}
-		return markdown.Revealed(markdown.View(c, findHighlightSource(s, m.ID, m.Text+streamingCursor), &s.mdStaticOpts))
+		return markdown.Revealed(markdown.View(c.Key(key), findHighlightSource(s, m.ID, m.Text+streamingCursor), &s.mdStaticOpts))
 	}
 	switch {
 	case lastLiveID != "" && m.ID == lastLiveID:
-		return markdown.Revealed(markdown.View(c, findHighlightSource(s, m.ID, linkifyMessageText(s, m.Text)), &s.mdOpts))
+		return markdown.Revealed(markdown.View(c.Key(key), findHighlightSource(s, m.ID, linkifyMessageText(s, m.Text)), &s.mdOpts))
 	default:
-		return markdown.Revealed(markdown.View(c, findHighlightSource(s, m.ID, linkifyMessageText(s, m.Text)), &s.mdStaticOpts))
+		return markdown.Revealed(markdown.View(c.Key(key), findHighlightSource(s, m.ID, linkifyMessageText(s, m.Text)), &s.mdStaticOpts))
 	}
 }
