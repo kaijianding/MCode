@@ -20,6 +20,9 @@ omp CLI（oh-my-pi，可执行文件 `omp`，Pi 的分支）的 harness 适配�
 - 计划模式（`turn.InteractionMode == "plan"`）把只读规则追加进 `--append-system-prompt`。
 - 额度：`omp usage --json --no-extensions` 的 `reports[].limits[]` 归一化为
   `credits.Window`；断网时的 last-good 报告超过 6 小时即丢弃。
+- 模型目录：`omp models --json --no-extensions` 的 `contextWindow` 解析为
+  `omp.Model.ContextWindow`，随目录行进 `wire.ProviderModel.ContextLimit`，
+  会话窗口上限直接用 CLI 报的真实值（1M 模型不再被静态兜底表压成 128K）。
 
 ## 实现落点
 
@@ -45,7 +48,7 @@ omp CLI（oh-my-pi，可执行文件 `omp`，Pi 的分支）的 harness 适配�
 - **窗口的 detail、planName 与窗口 id**（`$x.xx / $y.yy` 一类文案与 notes 拼接，
   以及 `planName` 的 "Codex Pro 20x" 一类文案）：`credits.Window` 只有 `Label` / `UsedPercent` /
   `ResetsAt`，没有承载这三项的字段。
-- **context 窗口上报**（`get_state` 的 `model.contextWindow` 与用量面板占比）：`harness.Usage` 没有窗口字段。
+- **context 窗口上报**（`get_state` 当轮 `model.contextWindow` 与用量面板占比）：`omp models --json` 的目录窗口已进 `ProviderModel.ContextLimit`；`get_state` 当轮 `model.contextWindow` 仍未映射到 `harness.Usage.ContextWindow`。
 - **notice 类帧**（`notice`、`auto_retry_*`、`extension_error`）：不映射为错误事件，避免把可重试的
   notice 当成当轮失败。
 - **tool_execution_update 的部分输出**、`command_output`、`session_info_update`、

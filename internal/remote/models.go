@@ -223,6 +223,26 @@ func fallbackContextLimit(provider, modelID string) int {
 	return providerContextLimits[provider]
 }
 
+// modelContextLimit 返回会话摘要回退用的上下文上限：先取模型目录里的值（CLI 上报或
+// models.dev 的真实窗口），目录里没有该模型或没给出上限时才回退静态表。
+// 目录真实窗口优先于静态表，避免 CLI 报了 1M 窗口却被静态表压成 128K。
+func modelContextLimit(provider, modelID string) int {
+	return contextLimitFor(ProviderModels(provider), provider, modelID)
+}
+
+// contextLimitFor 在给定的模型目录里找 modelID 的上限，找不到时回退静态表。
+// 单独拆出来是为了不依赖 CLI 探测就能测优先级。
+func contextLimitFor(models []wire.ProviderModel, provider, modelID string) int {
+	if modelID != "" {
+		for _, m := range models {
+			if m.ID == modelID && m.ContextLimit > 0 {
+				return m.ContextLimit
+			}
+		}
+	}
+	return fallbackContextLimit(provider, modelID)
+}
+
 // claudeAliasFamilies 把 claude CLI 的模型别名映射到 models.dev 的 family，
 // 别名随 CLI 指向该 family 最新的模型，因此能力取该 family 最新条目。
 // Default 行（ID "default"）无法确定账号实际使用的模型，取 sonnet 作为参照。

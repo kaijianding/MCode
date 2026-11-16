@@ -1793,7 +1793,7 @@ func TestMemoryBackend_SummaryContextAndCost(t *testing.T) {
 		t.Errorf("threads.get summary 缺少本轮费用，得到 %v", got.LastTurnCostUSD)
 	}
 
-	// CLI 既没上报单次请求大小也没上报窗口上限：回退「输入 + 输出」与静态模型表。
+	// CLI 既没上报单次请求大小也没上报窗口上限：回退「输入 + 输出」与模型目录/静态表的上限。
 	backend.mu.Lock()
 	td.summary.Provider = "claude"
 	td.summary.Model = strPtr("claude-sonnet-4-5")
@@ -1803,8 +1803,64 @@ func TestMemoryBackend_SummaryContextAndCost(t *testing.T) {
 	if fallback.ContextUsedTokens != 1250 {
 		t.Errorf("expected fallback contextUsedTokens 1250 (input+output), got %d", fallback.ContextUsedTokens)
 	}
-	if want := int64(fallbackContextLimit("claude", "claude-sonnet-4-5")); fallback.ContextWindow != want {
-		t.Errorf("expected fallback contextWindow %d, got %d", want, fallback.ContextWindow)
+	if fallback.ContextWindow != 200000 {
+		t.Errorf("expected fallback contextWindow 200000 (claude 静态表), got %d", fallback.ContextWindow)
+	}
+}
+
+func TestMemoryBackend_SummaryPrefersCatalogContextWindow(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: time.Hour})
+	defer hub.Close()
+
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.SetDataDir(t.TempDir())
+
+	projID := newUUID()
+	backend.AddProject(wire.ProjectSummary{ID: projID, Name: "proj", Path: t.TempDir()})
+	created, err := backend.CreateThread(context.Background(), wire.ThreadCreateParams{
+		ProjectID: projID,
+		ActionID:  newUUID(),
+	})
+	if err != nil {
+		t.Fatalf("create thread failed: %v", err)
+	}
+	threadID := created.ThreadID
+
+	backend.mu.Lock()
+	td := backend.threads[threadID]
+	backend.mu.Unlock()
+	if td == nil {
+		t.Fatalf("thread %s not registered", threadID)
+	}
+
+	ompCatalog.mu.Lock()
+	prevModels, prevFetchedAt := ompCatalog.models, ompCatalog.fetchedAt
+	ompCatalog.models = []wire.ProviderModel{{
+		ID:           "dewuopenai/deepseek-v4.1-flash",
+		ContextLimit: 1_000_000,
+	}}
+	ompCatalog.fetchedAt = time.Now()
+	ompCatalog.mu.Unlock()
+	t.Cleanup(func() {
+		ompCatalog.mu.Lock()
+		ompCatalog.models, ompCatalog.fetchedAt = prevModels, prevFetchedAt
+		ompCatalog.mu.Unlock()
+	})
+
+	backend.mu.Lock()
+	td.summary.Provider = "omp"
+	td.summary.Model = strPtr("dewuopenai/deepseek-v4.1-flash")
+	backend.usage = map[string]map[int]harness.Usage{
+		threadID: {
+			0: {ContextTokens: 4100, ContextWindow: 0},
+		},
+	}
+	backend.usageSummaryLocked(&td.summary)
+	got := td.summary.ContextWindow
+	backend.mu.Unlock()
+	if got != 1_000_000 {
+		t.Fatalf("目录窗口应优先于 deepseek 静态表 128K，got %d", got)
 	}
 }
 

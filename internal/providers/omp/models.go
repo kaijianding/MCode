@@ -22,6 +22,8 @@ type Model struct {
 	// Efforts 是模型自带的推理档位，不会推理的模型为空。
 	Efforts       []string
 	DefaultEffort string
+	// ContextWindow 是模型的上下文窗口（tokens），CLI 没给出时为 0。
+	ContextWindow int
 }
 
 // ListModels 运行 `omp models --json --no-extensions` 取当前可用的模型目录：
@@ -55,10 +57,11 @@ func ListModels(ctx context.Context, binary string) ([]Model, error) {
 func ParseModels(raw []byte) ([]Model, error) {
 	var doc struct {
 		Models []struct {
-			ID       string   `json:"id"`
-			Name     string   `json:"name"`
-			Provider string   `json:"provider"`
-			Thinking []string `json:"thinking"`
+			ID            string   `json:"id"`
+			Name          string   `json:"name"`
+			Provider      string   `json:"provider"`
+			Thinking      []string `json:"thinking"`
+			ContextWindow int      `json:"contextWindow"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -85,7 +88,7 @@ func ParseModels(raw []byte) ([]Model, error) {
 		}
 		out = append(out, Model{
 			ID: m.Provider + "/" + m.ID, Name: name, Provider: m.Provider,
-			Efforts: m.Thinking, DefaultEffort: def,
+			Efforts: m.Thinking, DefaultEffort: def, ContextWindow: m.ContextWindow,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {

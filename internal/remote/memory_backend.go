@@ -529,7 +529,8 @@ func (b *MemoryBackend) summaryForPublishLocked(td *memoryThread) wire.ThreadSum
 
 // usageSummaryLocked 按该会话已记录的各轮用量刷新摘要里的上下文占用与本轮费用：
 // 上下文占用取最近一轮（turnIndex 最大）的 ContextTokens，缺失时回退「输入 + 输出」，
-// 口径与桌面端上下文用量圆环一致；窗口上限优先用 CLI 上报值，否则回退静态模型表；
+// 口径与桌面端上下文用量圆环一致；窗口上限优先用 CLI 上报值，否则按
+// modelContextLimit 取目录里的窗口，目录也没给出时才回退静态模型表；
 // 费用只取最近一轮的 CostUSD，不逐轮相加：CLI 的 total_cost_usd 可能是整次会话的累计值
 // （见 internal/harness/event.go 的 Usage.CostUSD 注释），相加会重复计费，桌面端用量面板
 // 同样只看最新一轮。没有任何用量时三个字段全为 0，靠 omitempty 不输出。
@@ -558,7 +559,7 @@ func (b *MemoryBackend) usageSummaryLocked(s *wire.ThreadSummary) {
 			if s.Model != nil {
 				modelID = *s.Model
 			}
-			window = int64(fallbackContextLimit(s.Provider, modelID))
+			window = int64(modelContextLimit(s.Provider, modelID))
 		}
 	}
 	s.ContextUsedTokens = used
