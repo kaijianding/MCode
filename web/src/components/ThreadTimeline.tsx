@@ -1,3 +1,5 @@
+import { useStableLabel } from './timeline/useStableLabel';
+import { previewToolOutput } from './timeline/previewLines';
 import { SheetFrame } from './sheet/SheetFrame';
 import { useCommandActivity } from '../hooks/useCommandActivity';
 import { CommandActivityView } from './timeline/CommandActivityView';
@@ -229,6 +231,15 @@ function messageLayoutClass(message: ThreadMessage): string {
 
 export const MarkdownContent: React.FC<{ text: string; prefix?: string }> = ({ text }) => {
   return <MarkdownView text={text} />;
+};
+
+const WorkEntryOutput: React.FC<{ text: string; highlight?: MarkdownHighlight; math: boolean; preview: boolean }> = ({ text, highlight, math, preview }) => {
+  const [expanded, setExpanded] = React.useState(false);
+  const result = previewToolOutput(text, expanded);
+  return <>
+    <MarkdownView text={preview ? result.text : text} highlight={highlight} math={math} />
+    {preview && result.hidden > 0 && <button type="button" onClick={() => setExpanded(!expanded)} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline">{expanded ? '收起' : `展开 ${result.hidden} 行`}</button>}
+  </>;
 };
 
 export { parseSwarmEntries } from './MarkdownView';
@@ -893,6 +904,8 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
   // B1 运行中计时：只有工作记录处于 running 时才每秒刷新
   const workRecordRunning = item.type === 'workRecord' && item.turnStatus === 'running';
   const workRecordNowMs = useRunningNowMs(workRecordRunning);
+  const rawWorkHeaderLabel = item.type === 'workRecord' ? turnWorkHeaderLabel(item.entries, workRecordRunning, workRecordNowMs, item.turnStartedAt, item.turnCompletedAt) : '';
+  const stableWorkHeaderLabel = useStableLabel(rawWorkHeaderLabel);
 
   if (item.type === 'turnFinished') {
     return (
@@ -905,7 +918,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
 
   if (item.type === 'workRecord') {
     const isExpanded = expanded;
-    const workHeaderLabel = turnWorkHeaderLabel(item.entries, workRecordRunning, workRecordNowMs, item.turnStartedAt, item.turnCompletedAt);
+    const workHeaderLabel = workRecordRunning ? stableWorkHeaderLabel : rawWorkHeaderLabel;
     const workSummary = workSummaryText(countWorkCategories(item.entries));
     const workStatusLabel =
       item.turnStatus === 'running'
@@ -1105,7 +1118,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
                               }`}
                             >
                               {entry.toolStatus === 'running' && classifyToolName(entry.toolName) === 'command' && <CommandActivityView activity={activity[entry.id]} />}
-                              <MarkdownView text={entry.text || ''} highlight={highlightFor(entry.id)} math={!isThinkingRow} />
+                              <WorkEntryOutput text={entry.text || ''} highlight={highlightFor(entry.id)} math={!isThinkingRow} preview={isToolEntry && ['read', 'search'].includes(classifyToolName(entry.toolName))} />
                               {diffFiles && <ToolEntryDiff files={diffFiles} />}
                               {readThreadMedia && entry.media && entry.media.length > 0 && (
                                 <MessageMedia

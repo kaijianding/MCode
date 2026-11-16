@@ -1,4 +1,7 @@
 import React from 'react';
+import { previewLines } from './previewLines';
+
+export const DIFF_PREVIEW_LINES = 9;
 
 // 工具步骤内嵌的行内 diff：把 Edit / MultiEdit / Write / apply_patch 这类文件修改工具的输入
 // 直接渲染成「文件路径 + 增删行」。解析失败就返回 null，由调用方回落到原有纯文本渲染。
@@ -259,10 +262,7 @@ const LINE_MARK: Record<ToolDiffLine['type'], string> = {
 
 const ToolEntryDiffFile: React.FC<{ file: ToolDiffFile }> = ({ file }) => {
   const [expanded, setExpanded] = React.useState(false);
-  const [showAll, setShowAll] = React.useState(false);
-  const fullLines = file.fullLines ?? file.lines;
-  const { lines, hidden } = toolDiffVisibleLines(file, expanded, showAll);
-  const remaining = fullLines.length - file.lines.length;
+  const { lines, hidden } = previewLines(file.fullLines ?? file.lines, DIFF_PREVIEW_LINES, expanded);
   return (
       <div
         className="min-w-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)]"
@@ -288,14 +288,9 @@ const ToolEntryDiffFile: React.FC<{ file: ToolDiffFile }> = ({ file }) => {
               </span>
             </div>
           ))}
-          {expanded && hidden > 0 && (
-            <button type="button" onClick={() => setShowAll(true)} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline">
-              +{hidden} 行
-            </button>
-          )}
-          {!expanded && remaining > 0 && (
-            <button type="button" onClick={() => setExpanded(true)} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline">
-              显示其余 {remaining} 行
+          {hidden > 0 && (
+            <button type="button" onClick={() => setExpanded(!expanded)} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline">
+              {expanded ? '收起' : `展开 ${hidden} 行`}
             </button>
           )}
           {file.truncated && !file.fullLines && (
