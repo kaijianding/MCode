@@ -8,5 +8,6 @@ export function previewToolOutput(text: string, expanded: boolean): { text: stri
   const lines = text.split('\n');
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
   const preview = previewLines(lines, TOOL_OUTPUT_PREVIEW_LINES, expanded);
-  return { text: expanded || !preview.hidden ? text : preview.lines.join('\n'), hidden: preview.hidden };
+  const head = Math.ceil(TOOL_OUTPUT_PREVIEW_LINES / 2);
+  return { text: expanded || !preview.hidden ? text : [...lines.slice(0, head), '…', ...lines.slice(-(TOOL_OUTPUT_PREVIEW_LINES - head))].join('\n'), hidden: preview.hidden };
 }

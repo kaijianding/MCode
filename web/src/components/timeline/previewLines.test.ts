@@ -13,8 +13,10 @@ for (const count of [9, 10]) {
   assert.equal(result.hidden, count - 9);
   assert.equal(result.lines.length, 9);
 }
-for (const count of [8, 9]) {
+for (const count of [8, 9, 20]) {
   const text = Array.from({ length: count }, (_, i) => String(i)).join('\n');
-  assert.equal(previewToolOutput(text, false).hidden, count - 8);
+  const result = previewToolOutput(text, false);
+  assert.equal(result.hidden, Math.max(0, count - 8));
+  assert.equal(result.text, count === 8 ? text : ['0', '1', '2', '3', '…', ...Array.from({ length: 4 }, (_, i) => String(count - 4 + i))].join('\n'));
   assert.equal(previewToolOutput(text, true).text, text);
 }
