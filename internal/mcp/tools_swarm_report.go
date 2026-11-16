@@ -35,6 +35,7 @@ type SwarmBeeSummary struct {
 func (r *Registry) registerSwarmReportTools(s *Server) {
 	r.Register(ToolDefinition{
 		Name: swarmReportGetToolName,
+		Meta: map[string]any{"anthropic/alwaysLoad": true},
 		Description: "Without bee_id, list every bee of the calling lead session with its status (running, completed, failed, stopped), " +
 			"so you can tell a bee still at work from one that failed. " +
 			"With bee_id, fetch the archived report, or the current status and latest output if it failed, stopped, or has not reported yet; " +

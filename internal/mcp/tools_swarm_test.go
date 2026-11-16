@@ -24,6 +24,54 @@ func callSwarmDelegate(t *testing.T, srv *Server, threadID string, args map[stri
 	return text, isError
 }
 
+func TestSwarmToolsAlwaysLoadMeta(t *testing.T) {
+	srv, st, _ := setupTestMCP(t)
+	registerThread(t, st, "lead-1", "proj-test-1")
+	srv.SetSwarm(&SwarmHooks{
+		Available: func(string) bool { return true },
+		Delegate:  func(context.Context, string, []map[string]any) (string, error) { return "ok", nil },
+	})
+	status, res := postThreadRPC(t, srv, "lead-1", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+	if status != 200 {
+		t.Fatalf("tools/list 状态码异常: %d", status)
+	}
+	result, ok := res["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list 结果异常: %v", res)
+	}
+	tools, ok := result["tools"].([]any)
+	if !ok {
+		t.Fatalf("tools/list 工具列表异常: %v", result)
+	}
+	want := map[string]bool{swarmDelegateToolName: false, swarmReportGetToolName: false}
+	other := false
+	for _, item := range tools {
+		tool := item.(map[string]any)
+		name := tool["name"].(string)
+		meta, exists := tool["_meta"]
+		if _, target := want[name]; target {
+			fields, ok := meta.(map[string]any)
+			if !ok || len(fields) != 1 || fields["anthropic/alwaysLoad"] != true {
+				t.Errorf("%s 的 _meta 异常: %v", name, meta)
+			}
+			want[name] = true
+		} else {
+			other = true
+			if exists {
+				t.Errorf("%s 不应包含 _meta: %v", name, meta)
+			}
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("tools/list 缺少 %s", name)
+		}
+	}
+	if !other {
+		t.Error("tools/list 缺少其他工具")
+	}
+}
+
 func TestSwarmDelegateHiddenUntilAvailable(t *testing.T) {
 	srv, st, projDir := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")

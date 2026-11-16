@@ -64,6 +64,8 @@ func (r *Registry) registerSwarmTools(s *Server) {
 	}
 	r.Register(ToolDefinition{
 		Name: swarmDelegateToolName,
+		// Claude Code 默认延迟加载 MCP 工具，lead 会误以为工具不可用而退回 swarm 代码块。
+		Meta: map[string]any{"anthropic/alwaysLoad": true},
 		Description: "Hand work to helper agents (bees). Each entry starts a bee right away, so call it as soon as a brief is ready and order entries by start time. " +
 			"Entries have the same fields as an entry of the ```swarm block, and unlike the block a prompt here may contain code fences. " +
 			"The result says how many bees were started and why any were not. " +

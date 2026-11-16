@@ -37,8 +37,10 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
-	IsWrite     bool           `json:"-"`
-	Handler     ToolHandler    `json:"-"`
+	// Meta 对应 MCP 工具的 _meta，例如 Claude Code 识别的 anthropic/alwaysLoad。
+	Meta    map[string]any `json:"_meta,omitempty"`
+	IsWrite bool           `json:"-"`
+	Handler ToolHandler    `json:"-"`
 	// Capability 为工具所属能力分组；空串表示无需能力校验。
 	Capability string `json:"-"`
 }
