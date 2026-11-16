@@ -47,7 +47,8 @@ import type { ThreadMenuPage, ThreadMenuPageHandle, ThreadMenuPageSpec } from '.
 import type { SaveTaskBodyProps } from './thread/SaveTaskForm';
 import { QueuedFollowUpSection } from './thread/QueuedFollowUpSection';
 import { shouldTakeOverComposer } from './thread/composerTakeover';
-import { runningSendParams } from './thread/runningSend';
+import { runningSendParams, runningSubmitLabel } from './thread/runningSend';
+import { useRemoteSettingsApi } from '../context/remoteSettingsApi';
 import { shouldAutoLoadOlder } from './thread/autoLoadOlder';
 import { useThreadQueue } from './thread/useThreadQueue';
 import { ContinueTurnPill } from './thread/ContinueTurnPill';
@@ -588,6 +589,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     sendAnchorHoldRef
   );
   const pinSentMessage = usePinSentMessage();
+  const { snapshot } = useRemoteSettingsApi();
   const anchorMissingRef = useRef<(messageID: string) => void>(() => {});
   const sendAnchor = useSendAnchor({
     threadID: thread.id,
@@ -1797,7 +1799,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     : null;
   // 空草稿只禁用发送键，不在输入框下方占一行提示。
   const sendDisabled = Boolean(sendBlockedReason) || (draft.trim().length === 0 && attachments.length === 0);
-  const submitLabel = latestSummary.isRunning && !isStewardThread ? '排队' : '发送';
+  const submitLabel = runningSubmitLabel(latestSummary.isRunning, isStewardThread, snapshot?.values['session.insert_into_running_turn'] === true);
   const interruptAndSendDisabled = Boolean(
     !interruptAndSendSupported ||
     !isConnected ||

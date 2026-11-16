@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -288,6 +289,33 @@ func TestRemoteSettingsSessionPinSentMessage(t *testing.T) {
 	}
 	if string(written.Values[remote.SettingsKeySessionPinSentMessage]) != `false` {
 		t.Fatalf("快照 = %s, 期望 false", written.Values[remote.SettingsKeySessionPinSentMessage])
+	}
+}
+
+func TestSettingsSnapshotInsertIntoRunningTurn(t *testing.T) {
+	for _, value := range []bool{false, true} {
+		cfg := config.Config{}
+		cfg.Session.InsertIntoRunningTurn = value
+		snapshot, err := settingsSnapshotFromConfig(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(snapshot.Values[remote.SettingsKeySessionInsertIntoRunningTurn]); got != strconv.FormatBool(value) {
+			t.Fatalf("快照 = %s, 期望 %t", got, value)
+		}
+	}
+	client := newRemoteSettingsTestClient(t, func(cfg *config.Config) {
+		cfg.Session.InsertIntoRunningTurn = true
+	})
+	svc := remoteSettingsService{client: client}
+	if _, err := svc.Set(context.Background(), remoteSettingsValues(t, map[string]any{
+		remote.SettingsKeySessionInsertIntoRunningTurn: false,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadRemoteSettingsTestConfig(t, client.dataDir)
+	if cfg.Session.InsertIntoRunningTurn {
+		t.Fatal("写入 false 后仍为开启")
 	}
 }
 

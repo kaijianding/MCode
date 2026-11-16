@@ -31,6 +31,7 @@ const (
 	SettingsKeyProvidersAgyChannel                = "providers.agy.channel"
 	SettingsKeySessionAutoCollapseReasoning       = "session.auto_collapse_reasoning"
 	SettingsKeySessionPinSentMessage              = "session.pin_sent_message"
+	SettingsKeySessionInsertIntoRunningTurn       = "session.insert_into_running_turn"
 	SettingsKeySessionConciseRepliesEnabled       = "session.concise_replies_enabled"
 	SettingsKeyOrchestrationEnabled               = "orchestration.enabled"
 	SettingsKeyOrchestrationAutoDelegate          = "orchestration.auto_delegate"
@@ -79,6 +80,7 @@ var SettingsWritableKeys = []string{
 	SettingsKeyProvidersAgyChannel,
 	SettingsKeySessionAutoCollapseReasoning,
 	SettingsKeySessionPinSentMessage,
+	SettingsKeySessionInsertIntoRunningTurn,
 	SettingsKeySessionConciseRepliesEnabled,
 	SettingsKeyOrchestrationEnabled,
 	SettingsKeyOrchestrationAutoDelegate,

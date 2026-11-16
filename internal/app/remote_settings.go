@@ -121,6 +121,7 @@ func settingsSnapshotFromConfig(cfg config.Config) (wire.SettingsSnapshot, error
 		remote.SettingsKeyProvidersAgyChannel:                cfg.Providers.Agy.AgyChannel,
 		remote.SettingsKeySessionAutoCollapseReasoning:       cfg.Session.AutoCollapseReasoningEnabled(),
 		remote.SettingsKeySessionPinSentMessage:              cfg.Session.PinSentMessageEnabled(),
+		remote.SettingsKeySessionInsertIntoRunningTurn:       cfg.Session.InsertIntoRunningTurn,
 		remote.SettingsKeySessionConciseRepliesEnabled:       cfg.Session.ConciseReplies(),
 		remote.SettingsKeyOrchestrationEnabled:               cfg.Orchestration.IsEnabled(),
 		remote.SettingsKeyOrchestrationAutoDelegate:          cfg.Orchestration.AutoDelegateEnabled(),
@@ -259,6 +260,14 @@ func applySettingsValue(cfg *config.Config, key string, raw json.RawMessage) err
 			return err
 		}
 		cfg.Session.PinSentMessage = &value
+		return nil
+
+	case remote.SettingsKeySessionInsertIntoRunningTurn:
+		value, err := decodeSettingsBool(key, raw)
+		if err != nil {
+			return err
+		}
+		cfg.Session.InsertIntoRunningTurn = value
 		return nil
 
 	case remote.SettingsKeySessionConciseRepliesEnabled:
