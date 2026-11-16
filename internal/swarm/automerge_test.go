@@ -478,6 +478,28 @@ func TestPipeline_RetryResumesFromFailedStage(t *testing.T) {
 	}
 }
 
+func TestRunBatchReadOnlyNoNotice(t *testing.T) {
+	for _, autoPush := range []bool{false, true} {
+		t.Run(fmt.Sprintf("AutoPush=%t", autoPush), func(t *testing.T) {
+			testenv.TempHome(t)
+			runner, dir := initTestRepo(t)
+			var notified []string
+			p := NewPipeline(PipelineOptions{
+				Git:      runner,
+				Settings: func() Settings { return Settings{AutoMerge: true, AutoPush: autoPush} },
+				Notify:   func(_, msg string) { notified = append(notified, msg) },
+			})
+			b := newPipelineFileBatch(dir, Bee{Name: "A", ReadOnly: true, Merged: true})
+			if err := p.RunBatch(context.Background(), b, false); err != nil {
+				t.Fatalf("RunBatch failed: %v", err)
+			}
+			if anyContains(notified, "没有需要提交的改动") {
+				t.Errorf("只读批次不应提示没有需要提交的改动: %v", notified)
+			}
+		})
+	}
+}
+
 // 手动触发且没有可提交改动时，仍然推送当前 HEAD。
 func TestPipeline_ManualTriggerWithoutCommitPushesBee(t *testing.T) {
 	testenv.TempHome(t)

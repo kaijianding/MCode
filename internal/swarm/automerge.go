@@ -189,12 +189,16 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 func (p *Pipeline) RunBatch(ctx context.Context, b LandedBatch, manual bool) error {
 	// 过滤掉 ShadowRepo 或 SharedNoGit 为 true 的 bee（非 git 项目不能提交或推送）
 	var validBees []Bee
+	hasChanges := false
 	for _, bee := range b.Bees {
 		if bee.ShadowRepo || bee.SharedNoGit {
 			log.Printf("swarm: 跳过非 git 项目的 bee: %s (thread: %s)", bee.Name, bee.ThreadID)
 			continue
 		}
 		validBees = append(validBees, bee)
+		if !bee.ReadOnly && len(bee.ChangedFiles) > 0 {
+			hasChanges = true
+		}
 	}
 	if len(validBees) == 0 {
 		p.runCleanup(ctx, b)
@@ -231,7 +235,7 @@ func (p *Pipeline) RunBatch(ctx context.Context, b LandedBatch, manual bool) err
 				shorts[i] = shortSHA(sha)
 			}
 			p.notifyf(b.LeadThreadID, NoticePrefix+"已在本地提交 %d 个提交（%s）%s；自动推送未开启，可在 Git 菜单手动推送", len(commits), strings.Join(shorts, "、"), extra)
-		} else {
+		} else if hasChanges {
 			p.notifyf(b.LeadThreadID, NoticePrefix+"合并：没有需要提交的改动")
 		}
 		p.runCleanup(ctx, b)
@@ -240,7 +244,9 @@ func (p *Pipeline) RunBatch(ctx context.Context, b LandedBatch, manual bool) err
 	}
 	if prep.sha == "" {
 		if !manual {
-			p.notifyf(b.LeadThreadID, NoticePrefix+"合并：没有需要提交的改动")
+			if hasChanges {
+				p.notifyf(b.LeadThreadID, NoticePrefix+"合并：没有需要提交的改动")
+			}
 			p.report(b, BatchResult{State: AutoMergeDone})
 			return nil
 		}
