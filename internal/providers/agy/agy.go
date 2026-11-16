@@ -29,6 +29,7 @@ var _ harness.Harness = (*Harness)(nil)
 var _ harness.HostToolsReporter = (*Harness)(nil)
 
 const DefaultBinary = "agy"
+const maxRetries = 3
 
 const (
 	planModePromptGuard = `[System Instruction: You are in Plan Mode. Formulate and present a comprehensive implementation plan directly in your text response.
@@ -458,10 +459,10 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 
 	conversationID := turn.SessionID
+	threadKey := threadAffinityKey(turn)
 	var exclude []string
 	var invalidArgRetried bool
 	var networkRetried bool
-	const maxRetries = 3
 
 	// 本轮每次模型请求的输出速度样本：重试仍属同一轮，样本继续累积。
 	// 计时器与样本以零值起步（未计时、空样本）。
@@ -492,9 +493,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 		if h.opts.Router != nil {
 			var err error
-			accountID, routeEnv, routeArgs, err = h.opts.Router.Route(conversationID, turn.Model, exclude)
+			routeKey := conversationID
+			if routeKey == "" {
+				routeKey = threadKey
+			}
+			accountID, routeEnv, routeArgs, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
 			if err != nil {
 				return err
+			}
+			if threadKey != "" {
+				h.opts.Router.Bind(threadKey, accountID)
 			}
 		}
 
