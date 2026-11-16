@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   RemoteAttachmentUploadResult,
@@ -535,18 +536,7 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
 
       {/* 工作区选择面板 */}
       {workspaceSheetOpen && (
-        <div
-          className="sheet-layer"
-          role="presentation"
-          onMouseDown={() => setWorkspaceSheetOpen(false)}
-        >
-          <section
-            className="settings-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="draft-workspace-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+        <SheetFrame onRequestClose={() => setWorkspaceSheetOpen(false)} size="bare" cardClassName="settings-sheet" labelledBy="draft-workspace-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-start justify-between gap-3 mb-4">
               <div className="min-w-0">
@@ -600,8 +590,7 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
                 );
               })}
             </div>
-          </section>
-        </div>
+          </SheetFrame>
       )}
     </div>
   );

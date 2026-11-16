@@ -1,3 +1,4 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 设置外壳：宽屏是左右两栏（左侧分组导航），窄屏是全屏页面（顶部分类 tab）。
 // 具体每页的内容由调用方通过 renderPage 提供，这里不认识任何设置项。
 
@@ -428,16 +429,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
   );
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        ref={shellRef}
-        className={`settings-sheet settings-shell${isWide ? ' settings-shell--wide' : ' mobile-page'}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="设置"
-        onMouseDown={(event) => event.stopPropagation()}
-        onFocus={handleFocus}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName={`settings-sheet settings-shell${isWide ? ' settings-shell--wide' : ' mobile-page'}`} cardRef={shellRef} ariaLabel="设置" onFocus={handleFocus}>
         <div ref={shellHandleRef} className={`settings-shell-head${scrolled ? ' is-scrolled' : ''}`}>{head}</div>
 
         <div className="settings-shell-body">
@@ -453,7 +445,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
             ) : null}
           </div>
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };

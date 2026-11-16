@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 移动首页会话列表：按宿主 section/orderKey 投影，交互动作同时提供可见按钮。
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -1760,8 +1761,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
       </div>
 
       {menuThread && (
-        <div className="sheet-layer" role="presentation" onMouseDown={() => setMenuThread(null)}>
-          <section ref={actionSheetRef} className="thread-action-sheet" role="dialog" aria-modal="true" aria-labelledby="thread-actions-title" onMouseDown={(event) => event.stopPropagation()}>
+        <SheetFrame onRequestClose={() => setMenuThread(null)} size="menu" cardRef={actionSheetRef} labelledBy="thread-actions-title">
             <div ref={actionSheetHandleRef} className="sheet-handle" aria-hidden="true" />
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1789,13 +1789,11 @@ export const ThreadList: React.FC<ThreadListProps> = ({
                 </>
               )}
             </div>
-          </section>
-        </div>
+          </SheetFrame>
       )}
 
       {createSheetOpen && (
-        <div className="sheet-layer" role="presentation" onMouseDown={() => setCreateSheetOpen(false)}>
-          <section className="create-sheet" role="dialog" aria-modal="true" aria-labelledby="create-thread-title" onMouseDown={(event) => event.stopPropagation()}>
+        <SheetFrame onRequestClose={() => setCreateSheetOpen(false)} size="bare" cardClassName="create-sheet" labelledBy="create-thread-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-center justify-between gap-3">
               <div><p className="eyebrow">新建</p><h2 id="create-thread-title" className="sheet-title">新会话</h2></div>
@@ -1810,8 +1808,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
               继续编辑
             </button>
             {!canCreate && <p className="settings-note">当前 Mac 未声明新建会话能力。</p>}
-          </section>
-        </div>
+          </SheetFrame>
       )}
 
       {automationOpen && projectID && (

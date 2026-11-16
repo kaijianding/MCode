@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 看板任务卡片操作：救援（催促 / 打断）与删除的菜单，以及待办列底部的行内快速添加。
 
 import React, { useRef, useState } from 'react';
@@ -45,14 +46,7 @@ export const KanbanTaskActionSheet: React.FC<KanbanTaskActionSheetProps> = ({
   const deletable = canDelete && (!needsInterrupt || canRescue);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="thread-action-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-actions-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="menu" labelledBy="task-actions-title">
         <div className="sheet-handle" aria-hidden="true" />
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -123,8 +117,7 @@ export const KanbanTaskActionSheet: React.FC<KanbanTaskActionSheetProps> = ({
             </button>
           )}
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };
 

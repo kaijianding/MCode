@@ -1,6 +1,7 @@
+import { SheetFrame as SharedSheetFrame } from './sheet/SheetFrame';
 // 任务与目标详情 sheet：所有写入都由宿主能力与 revision 约束。
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Goal, GoalStatus, TaskItem, TaskStatus } from '../types/contract';
 import { useRemoteStatic } from '../context/RemoteContext';
 import { DiffViewer } from './DiffViewer';
@@ -109,35 +110,10 @@ function SheetFrame({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  const sheetRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    sheetRef.current?.focus();
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   return (
-    <div
-      className="sheet-layer"
-      role="presentation"
-      onMouseDown={onClose}
-    >
-      <section
-        ref={sheetRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        className="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SharedSheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel={title}>
         <div className="sheet-handle shrink-0" aria-hidden="true" />
         <div className="flex shrink-0 items-start justify-between gap-3 min-w-0 w-full">
           <div className="min-w-0 flex-1">
@@ -150,8 +126,7 @@ function SheetFrame({
         </div>
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto overflow-x-hidden min-w-0 max-w-full w-full">{children}</div>
         {footer && <div className="mt-4 shrink-0 border-t border-border pt-3.5 pb-0 min-w-0 max-w-full w-full overflow-x-hidden">{footer}</div>}
-      </section>
-    </div>
+      </SharedSheetFrame>
   );
 }
 

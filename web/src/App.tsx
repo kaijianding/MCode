@@ -1,3 +1,4 @@
+import { SheetFrame } from './components/sheet/SheetFrame';
 // mcode 移动首页：默认会话视图，保留看板作为同一首页的第二个视图。
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -858,8 +859,7 @@ const AppContent: React.FC = () => {
         </>
       ) : sidebar}
       {createKind === 'thread' && (
-        <div className="sheet-layer" role="presentation" onMouseDown={() => setCreateKind(null)}>
-          <section ref={createSheetRef} className="create-sheet" role="dialog" aria-modal="true" aria-labelledby="create-thread-title" onMouseDown={(event) => event.stopPropagation()}>
+        <SheetFrame onRequestClose={() => setCreateKind(null)} size="bare" cardClassName="create-sheet" cardRef={createSheetRef} labelledBy="create-thread-title">
             <div ref={createSheetHandleRef} className="sheet-handle" aria-hidden="true" />
             <div className="flex items-center justify-between gap-3">
               <div><p className="eyebrow">新建</p><h2 id="create-thread-title" className="sheet-title">新会话</h2></div>
@@ -895,13 +895,11 @@ const AppContent: React.FC = () => {
             >
               继续编辑
             </button>
-          </section>
-        </div>
+          </SheetFrame>
       )}
 
       {(createKind === 'task' || createKind === 'goal') && (
-        <div className="sheet-layer" role="presentation" onMouseDown={() => !createBusy && setCreateKind(null)}>
-          <section className="create-sheet" role="dialog" aria-modal="true" aria-labelledby="create-kanban-title" onMouseDown={(event) => event.stopPropagation()}>
+        <SheetFrame onRequestClose={() => !createBusy && setCreateKind(null)} size="bare" cardClassName="create-sheet" labelledBy="create-kanban-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-center justify-between gap-3">
               <div><p className="eyebrow">看板</p><h2 id="create-kanban-title" className="sheet-title">{createKind === 'task' ? '新任务' : '新目标'}</h2></div>
@@ -932,8 +930,7 @@ const AppContent: React.FC = () => {
                 {createBusy ? '提交中…' : '创建'}
               </button>
             </form>
-          </section>
-        </div>
+          </SheetFrame>
       )}
 
       {addProjectOpen && canAddProject && (

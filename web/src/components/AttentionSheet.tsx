@@ -1,6 +1,7 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 待处理收件箱抽屉：把会话卡住、出错、额度用尽、等待审批、看板与自动化失败等
 // 需要用户处理的事项汇总成一张清单，按类型分组，逐条可跳转会话或标记已处理。
-// 外层结构照 MemoryProposalsSheet：sheet-layer + settings-sheet，点击遮罩关闭。
+// 外层结构照 MemoryProposalsSheet：遮罩和 settings-sheet，点击遮罩关闭。
 
 import React, { useState } from 'react';
 import {
@@ -124,14 +125,7 @@ const AttentionSheetBody: React.FC<AttentionSheetProps> = ({ onClose, projectID,
   };
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="settings-sheet max-h-[85dvh] overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="attention-sheet-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet max-h-[85dvh] overflow-y-auto" labelledBy="attention-sheet-title">
         <div className="sheet-handle" aria-hidden="true" />
 
         {/* 标题栏 */}
@@ -289,7 +283,6 @@ const AttentionSheetBody: React.FC<AttentionSheetProps> = ({ onClose, projectID,
             </div>
           ))}
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };

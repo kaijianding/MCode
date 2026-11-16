@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
+export const SHEET_LAYER_CLASS = 'sheet-layer';
 export const SHEET_MENU_CARD_CLASS = 'thread-action-sheet';
 export const SHEET_PANEL_CARD_CLASS =
   'settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden';
@@ -19,7 +20,12 @@ const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]
 export interface SheetFrameProps {
   onRequestClose: () => void;
   labelledBy?: string;
-  size?: 'menu' | 'panel';
+  ariaLabel?: string;
+  onFocus?: React.FocusEventHandler<HTMLElement>;
+  size?: 'menu' | 'panel' | 'bare';
+  cardRef?: React.Ref<HTMLElement>;
+  cardStyle?: React.CSSProperties;
+  layerStyle?: React.CSSProperties;
   cardClassName?: string;
   layerClassName?: string;
   role?: 'dialog' | 'alertdialog';
@@ -27,8 +33,8 @@ export interface SheetFrameProps {
   children: React.ReactNode;
 }
 
-export function SheetFrame({ onRequestClose, labelledBy, size = 'panel', cardClassName, layerClassName, role = 'dialog', closeOnEscape = true, children }: SheetFrameProps) {
-  const cardRef = useRef<HTMLElement>(null);
+export function SheetFrame({ onRequestClose, labelledBy, ariaLabel, onFocus, size = 'panel', cardClassName, cardRef: externalRef, cardStyle, layerStyle, layerClassName, role = 'dialog', closeOnEscape = true, children }: SheetFrameProps) {
+  const cardRef = useRef<HTMLElement | null>(null);
   const identity = useRef({});
   const closeRef = useRef(onRequestClose);
   const escapeRef = useRef(closeOnEscape);
@@ -63,10 +69,10 @@ export function SheetFrame({ onRequestClose, labelledBy, size = 'panel', cardCla
     };
   }, []);
 
-  const cardClass = [size === 'menu' ? SHEET_MENU_CARD_CLASS : SHEET_PANEL_CARD_CLASS, cardClassName].filter(Boolean).join(' ');
+  const cardClass = [size === 'bare' ? undefined : size === 'menu' ? SHEET_MENU_CARD_CLASS : SHEET_PANEL_CARD_CLASS, cardClassName].filter(Boolean).join(' ');
   return (
-    <div className={['sheet-layer', layerClassName].filter(Boolean).join(' ')} role="presentation" onMouseDown={onRequestClose}>
-      <section ref={cardRef} className={cardClass} role={role} aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+    <div className={[SHEET_LAYER_CLASS, layerClassName].filter(Boolean).join(' ')} style={layerStyle} role="presentation" onMouseDown={onRequestClose}>
+      <section ref={(node) => { cardRef.current = node; if (typeof externalRef === 'function') externalRef(node); else if (externalRef) (externalRef as React.MutableRefObject<HTMLElement | null>).current = node; }} className={cardClass} style={cardStyle} role={role} aria-modal="true" aria-labelledby={labelledBy} aria-label={ariaLabel} onFocus={onFocus} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         {children}
       </section>
     </div>

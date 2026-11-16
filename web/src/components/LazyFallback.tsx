@@ -81,7 +81,7 @@ function ThreadSkeleton() {
 }
 
 /**
- * 抽屉懒加载占位：按浮层出现（sheet-layer + 卡片），不占页面流，消息列表不会因首次打开抽屉被挤动。
+ * 抽屉懒加载占位：按浮层出现（遮罩和卡片），不占页面流，消息列表不会因首次打开抽屉被挤动。
  * onRequestClose 传空函数：占位期间点遮罩不做任何事，等真实抽屉挂载后接管。
  */
 export function LazySheetFallback({ label = '加载中…', size = 'panel' }: LazySheetFallbackProps) {

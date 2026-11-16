@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 看板首页：沿用会话列表的分区与行样式，展示宿主派生的五列。
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -425,16 +426,6 @@ const GoalPlanReviewDialog: React.FC<GoalPlanReviewDialogProps> = ({
   const planAwaitingReview = goal.status === 'plan_review';
   const canStart = planAwaitingReview && tasks.length > 0;
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   // 卡片换行与高度随内容变化，依赖连线按实际位置重算
   useLayoutEffect(() => {
@@ -470,14 +461,7 @@ const GoalPlanReviewDialog: React.FC<GoalPlanReviewDialogProps> = ({
   }, [tasks, layers]);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="审查规划"
-        className="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel="审查规划">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
         <div className="flex shrink-0 items-start justify-between gap-3 min-w-0 w-full">
           <div className="min-w-0 flex-1">
@@ -607,8 +591,7 @@ const GoalPlanReviewDialog: React.FC<GoalPlanReviewDialogProps> = ({
             </button>
           )}
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };
 
@@ -1062,14 +1045,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       </div>
 
       {menuGoal && (
-        <div className="sheet-layer" role="presentation" onMouseDown={() => setMenuGoalID(null)}>
-          <section
-            className="thread-action-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="goal-actions-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+        <SheetFrame onRequestClose={() => setMenuGoalID(null)} size="menu" labelledBy="goal-actions-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1143,8 +1119,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 </button>
               )}
             </div>
-          </section>
-        </div>
+          </SheetFrame>
       )}
 
 
