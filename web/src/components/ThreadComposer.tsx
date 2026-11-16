@@ -30,6 +30,7 @@ import { localCommandName } from '../utils/slashCommands';
 import type { CommandScope } from '../utils/slashCommands';
 import { modelDisplayName } from '../utils/modelLabel';
 import { isImeComposing } from '../utils/ime';
+import { nextStopPress } from './thread/stopSequence';
 import {
   caretOnFirstLine,
   caretOnLastLine,
@@ -539,6 +540,24 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   const [tierError, setTierError] = useState<string | null>(null);
   const [tierNotice, setTierNotice] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    let last: number | null = null;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.ctrlKey || event.metaKey ||
+          event.altKey || event.shiftKey || isImeComposing(event) || !isRunning || isSteward ||
+          !onStop || stopDisabled || document.querySelector('[role="dialog"]') ||
+          !textareaRef.current || textareaRef.current.offsetParent === null) {
+        last = null;
+        return;
+      }
+      const next = nextStopPress(last, Date.now());
+      last = next.last;
+      if (next.fire) onStop();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isRunning, isSteward, onStop, stopDisabled]);
 
   // 方向键历史导航状态（对应 internal/ui/composer_history.go:7 的 composerHistoryState）
   const [historyState, setHistoryState] = useState<ComposerHistoryState>(emptyComposerHistoryState);
