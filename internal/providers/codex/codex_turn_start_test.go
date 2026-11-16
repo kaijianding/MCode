@@ -112,8 +112,8 @@ func TestBuildTurnStartParamsBaseline(t *testing.T) {
 	if params["serviceTierForTurn"] != "priority" {
 		t.Fatalf("unexpected serviceTierForTurn: %v", params["serviceTierForTurn"])
 	}
-	if _, ok := params["collaborationMode"]; ok {
-		t.Fatalf("build 模式不应下发 collaborationMode: %+v", params)
+	if mode, ok := params["collaborationMode"].(map[string]any); !ok || mode["mode"] != "default" {
+		t.Fatalf("build 模式应下发 default collaborationMode: %+v", params)
 	}
 	input, ok := params["input"].([]map[string]any)
 	if !ok || len(input) != 1 {
@@ -143,14 +143,14 @@ func TestBuildCollaborationMode(t *testing.T) {
 		wantEff  string
 	}{
 		{
-			name:    "build 模式不下发",
-			turn:    harness.Turn{InteractionMode: "build", Model: "gpt-5-codex"},
-			wantNil: true,
+			name:     "build 模式显式下发 default",
+			turn:     harness.Turn{InteractionMode: "build", Model: "gpt-5-codex"},
+			wantMode: "default",
 		},
 		{
-			name:    "空模式等同 build",
-			turn:    harness.Turn{Model: "gpt-5-codex"},
-			wantNil: true,
+			name:     "空模式等同 build",
+			turn:     harness.Turn{Model: "gpt-5-codex"},
+			wantMode: "default",
 		},
 		{
 			// schema 要求 CollaborationMode.settings.model 必填，缺 model 时退化为普通回合

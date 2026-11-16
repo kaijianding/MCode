@@ -347,18 +347,26 @@ func (c *appClient) call(ctx context.Context, method string, params any) (json.R
 		return nil, fmt.Errorf("codex: send %s: %w", method, err)
 	}
 
+	var res *JSONRPCMessage
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res, ok := <-ch:
-		if !ok || res == nil {
+	case <-c.readerDoneCh:
+		// EOF 之前已入队的响应仍然有效。
+		select {
+		case res = <-ch:
+		default:
 			return nil, fmt.Errorf("codex: connection closed before %s answered", method)
 		}
-		if res.Error != nil {
-			return nil, fmt.Errorf("codex: %s error (code %d): %s", method, res.Error.Code, res.Error.Message)
-		}
-		return res.Result, nil
+	case res = <-ch:
 	}
+	if res == nil {
+		return nil, fmt.Errorf("codex: connection closed before %s answered", method)
+	}
+	if res.Error != nil {
+		return nil, fmt.Errorf("codex: %s error (code %d): %s", method, res.Error.Code, res.Error.Message)
+	}
+	return res.Result, nil
 }
 
 func (c *appClient) notify(method string, params any) error {
@@ -1304,95 +1312,187 @@ func (h *Harness) runTurnAttempt(ctx context.Context, turn harness.Turn, route *
 	// 原生斜杠请求：/compact 与 /review 不发 turn/start，改发对应的 app-server 请求；
 	// 其后的通知流（turn/started、item、turn/completed）仍由同一条常驻读取循环投递。
 	slashKind, reviewInstructions := planSlashRequest(turn.Prompt, threadID != "" && (turn.SessionID != "" || alreadyCached))
-	switch slashKind {
-	case slashRequestCompact:
-		if _, err := client.call(ctx, "thread/compact/start", buildCompactParams(threadID)); err != nil {
-			return h.failAttempt(proc, "thread/compact/start", err)
+	var planApproval *harness.ApprovalRequest
+	for {
+		if err := ctx.Err(); err != nil {
+			if planApproval != nil {
+				harness.AckDelivery(turn.Approver, *planApproval, err)
+			}
+			return false, err
 		}
-	case slashRequestReview:
-		reviewRes, err := client.call(ctx, "review/start", buildReviewParams(threadID, reviewInstructions))
-		if err != nil {
-			return h.failAttempt(proc, "review/start", err)
-		}
-		// inline 审阅的响应里带 turn，可直接拿到 turnId；拿不到时再等 turn/started 通知补齐。
-		var reviewStarted struct {
-			Turn struct {
-				ID string `json:"id"`
-			} `json:"turn"`
-		}
-		_ = json.Unmarshal(reviewRes, &reviewStarted)
-		activeTurn.setTurnID(reviewStarted.Turn.ID)
-	default:
-		turnRes, err := client.call(ctx, "turn/start", buildTurnStartParams(turn, threadID))
-		if err != nil {
-			return h.failAttempt(proc, "turn/start", err)
+		switch slashKind {
+		case slashRequestCompact:
+			if _, err := client.call(ctx, "thread/compact/start", buildCompactParams(threadID)); err != nil {
+				return h.failAttempt(proc, "thread/compact/start", err)
+			}
+		case slashRequestReview:
+			reviewRes, err := client.call(ctx, "review/start", buildReviewParams(threadID, reviewInstructions))
+			if err != nil {
+				return h.failAttempt(proc, "review/start", err)
+			}
+			// inline 审阅的响应里带 turn，可直接拿到 turnId；拿不到时再等 turn/started 通知补齐。
+			var reviewStarted struct {
+				Turn struct {
+					ID string `json:"id"`
+				} `json:"turn"`
+			}
+			_ = json.Unmarshal(reviewRes, &reviewStarted)
+			activeTurn.setTurnID(reviewStarted.Turn.ID)
+		default:
+			params := buildTurnStartParams(turn, threadID)
+			if planApproval != nil && strings.TrimSpace(turn.InteractionMode) != "plan" {
+				sandbox, approvalPolicy := hardLockedPermission(turn.Mode, turn.HardLocked, turn.HardLockOverride)
+				policy := map[string]any{}
+				switch sandbox {
+				case "danger-full-access":
+					policy["type"] = "dangerFullAccess"
+				case "workspace-write":
+					policy["type"] = "workspaceWrite"
+					if roots := writableRoots(turn); len(roots) > 0 {
+						policy["writableRoots"] = roots
+					}
+				default:
+					policy["type"] = "readOnly"
+				}
+				params["sandboxPolicy"] = policy
+				params["approvalPolicy"] = approvalPolicy
+				// turn/start 会更新线程权限；使缓存与实际生效的档位保持一致。
+				proc.cachedMu.Lock()
+				cacheMode := turn.Mode
+				if turn.Mode == harness.ModeFullAccess && sandbox == "workspace-write" {
+					cacheMode = harness.ModeAuto
+				}
+				proc.cachedThreads[threadID] = cacheMode
+				proc.cachedMu.Unlock()
+			}
+			turnRes, err := client.call(ctx, "turn/start", params)
+			if planApproval != nil {
+				harness.AckDelivery(turn.Approver, *planApproval, err)
+				planApproval = nil
+			}
+			if err != nil {
+				return h.failAttempt(proc, "turn/start", err)
+			}
+
+			var turnStarted struct {
+				Turn struct {
+					ID string `json:"id"`
+				} `json:"turn"`
+			}
+			_ = json.Unmarshal(turnRes, &turnStarted)
+			activeTurn.setTurnID(turnStarted.Turn.ID)
+			// turn/start 返回成功即 CLI 已收下本轮输入；若 turn/started 通知已经先到，这里会去重。
+			activeTurn.acceptStarted()
 		}
 
-		var turnStarted struct {
-			Turn struct {
-				ID string `json:"id"`
-			} `json:"turn"`
-		}
-		_ = json.Unmarshal(turnRes, &turnStarted)
-		activeTurn.setTurnID(turnStarted.Turn.ID)
-		// turn/start 返回成功即 CLI 已收下本轮输入；若 turn/started 通知已经先到，这里会去重。
-		activeTurn.acceptStarted()
-	}
-
-	// 等待回合结束或 ctx 取消
-	select {
-	case <-activeTurn.turnDoneCh:
-		if handler.IsTurnDone() {
-			return false, nil
-		}
-		if proc.isDead() && !emitter.emitted() {
-			// 进程在本轮还没向上发出任何事件前就退出：丢弃进程，交给调用方重建重试。
-			proc.kill()
-			h.dropProcess(proc)
-			return true, fmt.Errorf("codex: app-server exited before the turn produced any event")
-		}
-		tail := strings.TrimSpace(proc.stderrBuf.String())
-		if route != nil && route.APIKey != "" {
-			tail = strings.ReplaceAll(tail, route.APIKey, "[redacted]")
-		}
-		errMsg := tail
-		if errMsg == "" {
-			errMsg = "codex process closed connection unexpectedly"
-		}
-		emitter.emit(harness.Event{
-			Type: harness.EventError,
-			Err:  errMsg,
-		})
-		proc.kill()
-		h.dropProcess(proc)
-		return false, fmt.Errorf("codex turn incomplete (stderr: %s)", tail)
-
-	case <-ctx.Done():
-		_, turnID := activeTurn.ids()
-		if turnID != "" && threadID != "" {
-			interruptCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = client.call(interruptCtx, "turn/interrupt", map[string]any{
-				"threadId": threadID,
-				"turnId":   turnID,
-			})
-			cancel()
-
-			select {
-			case <-activeTurn.turnDoneCh:
-				return false, ctx.Err()
-			case <-time.After(1500 * time.Millisecond):
-				// 中断超时无响应，彻底杀死进程组并自愈重建
+		// 等待回合结束或 ctx 取消
+		select {
+		case <-activeTurn.turnDoneCh:
+			if handler.IsTurnDone() {
+				interactor, ok := turn.Approver.(harness.Interactor)
+				plan := handler.planForApproval()
+				if strings.TrimSpace(turn.InteractionMode) != "plan" || !ok || interactor == nil || strings.TrimSpace(plan) == "" {
+					return false, nil
+				}
+				if err := ctx.Err(); err != nil {
+					return false, err
+				}
+				if proc.isDead() {
+					return false, fmt.Errorf("codex: app-server exited before plan approval")
+				}
+				req := harness.ApprovalRequest{
+					ToolID: "exit_plan_mode", ToolName: "exit_plan_mode",
+					Kind: harness.RequestKindPlan, Summary: "Implement this plan", Plan: plan,
+				}
+				approvalCtx, cancel := context.WithCancel(ctx)
+				go func() {
+					select {
+					case <-proc.deadCh:
+						cancel()
+					case <-approvalCtx.Done():
+					}
+				}()
+				resp, approvalErr := interactor.Interact(approvalCtx, req)
+				if approvalErr == nil {
+					approvalErr = approvalCtx.Err()
+				}
+				if approvalErr == nil && proc.isDead() {
+					approvalErr = fmt.Errorf("codex: app-server exited during plan approval")
+				}
+				cancel()
+				if approvalErr != nil {
+					harness.AckDelivery(turn.Approver, req, approvalErr)
+					return false, fmt.Errorf("codex: plan approval failed: %w", approvalErr)
+				}
+				if resp.Decision == harness.DecisionAllow {
+					turn.Mode, turn.InteractionMode = turn.PlanExitMode, ""
+					turn.Prompt = "Implement the plan."
+				} else if strings.TrimSpace(resp.Feedback) != "" {
+					turn.Prompt = resp.Feedback
+				} else {
+					harness.AckDelivery(turn.Approver, req, nil)
+					return false, nil
+				}
+				turn.Images = nil
+				planApproval = &req
+				slashKind = slashRequestNone
+				handler = NewProtocolHandler(turn)
+				activeTurn = &activeTurnContext{
+					ctx: ctx, turn: turn, handler: handler, emit: emitter.emit,
+					accept: emitter.emitAccepted, threadID: threadID, turnDoneCh: make(chan struct{}),
+				}
+				proc.setActiveTurn(activeTurn)
+				continue
+			}
+			if proc.isDead() && !emitter.emitted() {
+				// 进程在本轮还没向上发出任何事件前就退出：丢弃进程，交给调用方重建重试。
 				proc.kill()
 				h.dropProcess(proc)
-				return false, ctx.Err()
+				return true, fmt.Errorf("codex: app-server exited before the turn produced any event")
 			}
-		}
+			tail := strings.TrimSpace(proc.stderrBuf.String())
+			if route != nil && route.APIKey != "" {
+				tail = strings.ReplaceAll(tail, route.APIKey, "[redacted]")
+			}
+			errMsg := tail
+			if errMsg == "" {
+				errMsg = "codex process closed connection unexpectedly"
+			}
+			emitter.emit(harness.Event{
+				Type: harness.EventError,
+				Err:  errMsg,
+			})
+			proc.kill()
+			h.dropProcess(proc)
+			return false, fmt.Errorf("codex turn incomplete (stderr: %s)", tail)
 
-		// 拿不到 turnId（例如 compact 之类响应不携带 turnId 的请求还没收到 turn/started）时无法优雅中断，
-		// 退化为进程级强停，避免卡在无响应的等待上。
-		proc.kill()
-		h.dropProcess(proc)
-		return false, ctx.Err()
+		case <-ctx.Done():
+			_, turnID := activeTurn.ids()
+			if turnID != "" && threadID != "" {
+				interruptCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_, _ = client.call(interruptCtx, "turn/interrupt", map[string]any{
+					"threadId": threadID,
+					"turnId":   turnID,
+				})
+				cancel()
+
+				select {
+				case <-activeTurn.turnDoneCh:
+					return false, ctx.Err()
+				case <-time.After(1500 * time.Millisecond):
+					// 中断超时无响应，彻底杀死进程组并自愈重建
+					proc.kill()
+					h.dropProcess(proc)
+					return false, ctx.Err()
+				}
+			}
+
+			// 拿不到 turnId（例如 compact 之类响应不携带 turnId 的请求还没收到 turn/started）时无法优雅中断，
+			// 退化为进程级强停，避免卡在无响应的等待上。
+			proc.kill()
+			h.dropProcess(proc)
+			return false, ctx.Err()
+		}
 	}
 }
 
@@ -1491,15 +1591,12 @@ func buildTurnStartParams(turn harness.Turn, threadID string) map[string]any {
 	return params
 }
 
-// buildCollaborationMode 构造 plan 模式的 collaborationMode 参数（schema：TurnStartParams.collaborationMode
+// buildCollaborationMode 显式选择 plan 或 default，避免线程沿用上一轮的计划模式（schema：TurnStartParams.collaborationMode
 // -> CollaborationMode{mode: ModeKind, settings: Settings}，Settings.model 必填）。
 // schema 不允许缺省 settings.model，因此 turn.Model 为空时返回 nil，退化为普通 build 回合，不下发该参数。
 // settings.developer_instructions 留空（schema 语义为 null：使用该模式的内置指令）——plan 模式的约束文本
 // 已由上层拼进 Prompt，这里不再重复下发。
 func buildCollaborationMode(turn harness.Turn) map[string]any {
-	if strings.TrimSpace(turn.InteractionMode) != "plan" {
-		return nil
-	}
 	if turn.Model == "" {
 		return nil
 	}
@@ -1507,8 +1604,12 @@ func buildCollaborationMode(turn harness.Turn) map[string]any {
 	if turn.Effort != "" {
 		settings["reasoning_effort"] = turn.Effort
 	}
+	mode := "default"
+	if strings.TrimSpace(turn.InteractionMode) == "plan" {
+		mode = "plan"
+	}
 	return map[string]any{
-		"mode":     "plan",
+		"mode":     mode,
 		"settings": settings,
 	}
 }

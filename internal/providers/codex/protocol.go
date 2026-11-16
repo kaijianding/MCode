@@ -83,6 +83,9 @@ type ProtocolHandler struct {
 	usageBaseSet      bool
 	loggedUnknown     map[string]struct{}
 	turnDone          bool
+	turnSucceeded     bool
+	completedPlan     string
+	updatedPlan       string
 	planUpdateCount   uint64
 
 	// 每个 ProtocolHandler 只服务一轮，请求计时和样本列表随本轮创建、随本轮丢弃。
@@ -111,6 +114,18 @@ func (h *ProtocolHandler) IsTurnDone() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.turnDone
+}
+
+func (h *ProtocolHandler) planForApproval() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.turnSucceeded {
+		return ""
+	}
+	if strings.TrimSpace(h.completedPlan) != "" {
+		return h.completedPlan
+	}
+	return h.updatedPlan
 }
 
 // HandleLine 解析单行 JSON-RPC 报文并派发对应事件。
@@ -249,6 +264,14 @@ func (h *ProtocolHandler) HandleNotification(msg *JSONRPCMessage, emit func(harn
 			return
 		}
 		h.mu.Lock()
+		var plan strings.Builder
+		if p.Explanation != "" {
+			plan.WriteString(p.Explanation + "\n\n")
+		}
+		for _, step := range p.Plan {
+			plan.WriteString("- " + step.Step + "\n")
+		}
+		h.updatedPlan = strings.TrimSpace(plan.String())
 		h.planUpdateCount++
 		toolID := fmt.Sprintf("plan-%s-%d", p.TurnID, h.planUpdateCount)
 		h.mu.Unlock()
@@ -515,6 +538,7 @@ func (h *ProtocolHandler) handleItemCompleted(params json.RawMessage, emit func(
 	case "plan":
 		// 计划正文按普通文本展示；已流过 delta 时只补尾部，避免重复输出。
 		h.mu.Lock()
+		h.completedPlan = it.Text
 		var streamed string
 		if b, ok := h.streamedPlan[it.ID]; ok {
 			streamed = b.String()
@@ -847,6 +871,7 @@ func (h *ProtocolHandler) handleTurnCompleted(params json.RawMessage, emit func(
 
 	h.mu.Lock()
 	h.turnDone = true
+	h.turnSucceeded = p.Turn.Status == "" || p.Turn.Status == "completed"
 	h.mu.Unlock()
 
 	// 失败或中断的轮次不会再有 item/completed，先为未完成的工具补发失败收尾。

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,16 +33,22 @@ const (
 	appServerCompactWithoutStart = "compact_no_started"
 	// appServerSteer 在 turn/start 后挂起，等 turn/steer 才结束该轮。
 	appServerSteer = "steer"
+	appServerPlan  = "plan"
 )
 
 type codexAppServerConfig struct {
-	Mode    string `json:"mode"`
-	LogPath string `json:"logPath,omitempty"`
+	Mode     string `json:"mode"`
+	LogPath  string `json:"logPath,omitempty"`
+	PlanPath string `json:"planPath,omitempty"`
 }
 
 // codexAppServerCommand 返回以给定模式运行假 app-server 的测试二进制，logPath 非空时记录收到的每条请求。
 func codexAppServerCommand(ctx context.Context, mode, logPath string) *exec.Cmd {
-	cfg, _ := json.Marshal(codexAppServerConfig{Mode: mode, LogPath: logPath})
+	config := codexAppServerConfig{Mode: mode, LogPath: logPath}
+	if mode == appServerPlan {
+		config.PlanPath, _ = filepath.Abs("testdata/plan_items.jsonl")
+	}
+	cfg, _ := json.Marshal(config)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCodexAppServerProcess$")
 	cmd.Env = append(os.Environ(), "MCODE_CODEX_APPSERVER="+string(cfg))
 	return cmd
@@ -125,6 +132,20 @@ func TestCodexAppServerProcess(t *testing.T) {
 			}
 			response(id, map[string]any{"turn": map[string]any{"id": "turn_mock_abc"}})
 			params, _ := msg["params"].(map[string]any)
+			if cfg.Mode == appServerPlan {
+				mode, _ := params["collaborationMode"].(map[string]any)
+				if mode["mode"] == "plan" {
+					data, err := os.ReadFile(cfg.PlanPath)
+					if err != nil {
+						os.Exit(2)
+					}
+					if _, err := os.Stdout.Write(data); err != nil {
+						os.Exit(2)
+					}
+					completed("completed")
+					continue
+				}
+			}
 			input, _ := params["input"].([]any)
 			text := ""
 			if len(input) > 0 {
