@@ -676,13 +676,11 @@ const PlanMessageCard: React.FC<PlanMessageCardProps> = ({ message, highlight })
   return (
     <article
       key={message.id}
+      title={formatRelativeTime(message.createdAt)}
       className={`${messageLayoutClass(message)} space-y-2 min-w-0 overflow-hidden mb-4 ${messageCardClass(message)}`}
     >
       <div className="flex items-center justify-between gap-2 text-mc-caption">
         <span className="font-semibold text-[var(--foreground)]">{messageKindLabel(message)}</span>
-        <span className="text-[var(--foreground-muted)]">
-          #{message.turnIndex} · {formatRelativeTime(message.createdAt)}
-        </span>
       </div>
 
       <div className="min-w-0 space-y-2">
@@ -820,7 +818,7 @@ const MessageActionSheet: React.FC<MessageActionSheetProps> = ({ title, items, o
 };
 
 // 行级 memo：流式输出只会让变化的消息重新渲染，其余行（含 Markdown 解析结果）保持原样。
-const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
+export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
   const {
     threadID,
     activity,
@@ -965,7 +963,6 @@ const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
             )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0 text-[var(--foreground-muted)] text-mc-footnote">
-            <span>#{item.turnIndex}</span>
             <ChevronRightIcon
               className={`w-3.5 h-3.5 transition-transform duration-200 ${
                 isExpanded ? 'rotate-90' : ''
@@ -1392,7 +1389,7 @@ const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
 
     return (
       <React.Fragment key={message.id}>
-        <div className="flex flex-col items-end mb-4 min-w-0" {...longPress.handlers}>
+        <div className="flex flex-col items-end mb-4 min-w-0" title={formatRelativeTime(message.createdAt)} {...longPress.handlers}>
           <div
             className="rounded-[20px] px-3.5 py-2.5 bg-[var(--user-bubble)] text-[16px] leading-[23px] text-[var(--foreground)] max-w-[85%] min-w-0 break-words select-text [overflow-wrap:anywhere]"
             style={longPress.pressed ? { backgroundColor: 'var(--press)' } : undefined}
@@ -1465,9 +1462,6 @@ const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
                 }
               />
             )}
-            <span className="text-mc-footnote text-[var(--foreground-muted)] text-right">
-              {formatRelativeTime(message.createdAt)}
-            </span>
           </div>
         </div>
         {messageSheetOpen && sheetItems.length > 0 && (
@@ -1485,6 +1479,7 @@ const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
     return (
       <article
         key={message.id}
+        title={formatRelativeTime(message.createdAt)}
         className="mb-5 w-full bg-transparent border-0 p-0 text-[16px] leading-[23px] text-[var(--foreground)] min-w-0"
       >
         <div className="min-w-0 max-w-full space-y-2">
@@ -1590,14 +1585,12 @@ const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
   return (
     <article
       key={message.id}
+      title={formatRelativeTime(message.createdAt)}
       className={`${messageLayoutClass(message)} space-y-2 min-w-0 overflow-hidden mb-4 ${messageCardClass(message)}`}
     >
       <div className="flex items-center justify-between gap-2 text-mc-caption">
         <span className="font-semibold text-[var(--foreground)]">
           {errorInfo ? errorInfo.title : messageKindLabel(message)}
-        </span>
-        <span className="text-[var(--foreground-muted)]">
-          #{message.turnIndex} · {formatRelativeTime(message.createdAt)}
         </span>
       </div>
 
