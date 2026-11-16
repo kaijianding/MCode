@@ -408,14 +408,6 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     aliases: ['权限', '允许'],
     webOnly: true
   },
-
-  {
-    id: 'row-agy-channel',
-    page: 'general',
-    section: 'Agent',
-    title: 'Antigravity 通道',
-    settingsKey: 'providers.agy.channel'
-  },
   {
     id: 'row-tray-quota-hidden',
     page: 'general',
