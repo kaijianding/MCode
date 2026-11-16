@@ -48,6 +48,7 @@ import { LazyBoundary } from './LazyFallback';
 import { visibleFilterChips, type ThreadFilter } from '../utils/homeFilterChips';
 import { readHomeQuery, shouldCollapseOnBlur, writeHomeQuery } from '../utils/homeSearch';
 import { undoKind } from './threadListNotice';
+import { threadListTargetIndex } from './threadListKeys';
 
 // 自动化弹层只在用户点开时渲染。
 // BulkThreadsSheet 不懒加载：同一模块里的 useBulkThreadsApi 在列表主体里同步使用，
@@ -91,6 +92,7 @@ interface ThreadListProps {
 }
 
 interface ThreadRowProps {
+  tabStop: boolean;
   isSelected?: boolean;
   thread: RemoteThreadSummary;
   projectName?: string;
@@ -105,6 +107,7 @@ interface ThreadRowProps {
 }
 
 interface DormantThreadRowProps {
+  tabStop: boolean;
   isSelected?: boolean;
   thread: RemoteThreadSummary;
   projectName?: string;
@@ -207,8 +210,44 @@ function matchesFilter(thread: RemoteThreadSummary, filter: ThreadFilter): boole
   return true;
 }
 
+function handleThreadRowKey(event: React.KeyboardEvent<HTMLElement>, onMenu: () => void): boolean {
+  if (event.target !== event.currentTarget || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    event.preventDefault();
+    onMenu();
+    return true;
+  }
+  const list = event.currentTarget.closest('.thread-list');
+  const rows = Array.from(list?.querySelectorAll<HTMLElement>('[data-thread-row]') ?? []);
+  const target = threadListTargetIndex(event.key, rows.indexOf(event.currentTarget), rows.length);
+  if (target === null) return false;
+  event.preventDefault();
+  rows[target]?.focus();
+  return true;
+}
+
+function ThreadMenuButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="会话操作"
+      className="absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center [@media(hover:hover)]:hidden"
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onPointerCancel={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => { event.stopPropagation(); onClick(); }}
+    >
+      <EllipsisHorizontalIcon className="h-4 w-4" />
+    </button>
+  );
+}
+
 // 行组件加 React.memo：列表刷新时未变化的会话在 mergeThreadSummary 里保持原引用，行本身不必重渲染。
 const ArchivedThreadRow = React.memo(function ArchivedThreadRow({
+  tabStop,
   isSelected,
   thread,
   projectName,
@@ -216,6 +255,7 @@ const ArchivedThreadRow = React.memo(function ArchivedThreadRow({
   onMenu,
   showTrailingDivider = true
 }: {
+  tabStop: boolean;
   isSelected?: boolean;
   thread: RemoteThreadSummary;
   projectName?: string;
@@ -230,6 +270,9 @@ const ArchivedThreadRow = React.memo(function ArchivedThreadRow({
       <div className={`relative z-10 flex min-h-[52px] items-center gap-2 ${threadRowSurfaceClass(isSelected)} gutter-x`}>
         <button
           type="button"
+          data-thread-row={thread.id}
+          tabIndex={tabStop ? 0 : -1}
+          onKeyDown={(event) => handleThreadRowKey(event, () => onMenu(thread))}
           aria-current={isSelected ? 'true' : undefined}
           aria-label={`打开已归档会话 ${thread.title || '未命名会话'}${rowStatusLabel ? `，${rowStatusLabel}` : ''}`}
           className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left"
@@ -395,6 +438,7 @@ function MessageHitSnippet({ text, needle }: { text: string; needle: string }) {
 }
 
 const ThreadRow = React.memo(function ThreadRow({
+  tabStop,
   isSelected,
   thread,
   projectName,
@@ -539,10 +583,11 @@ const ThreadRow = React.memo(function ThreadRow({
       </button>
       <div
         role="button"
-        tabIndex={0}
+        data-thread-row={thread.id}
+        tabIndex={tabStop ? 0 : -1}
         aria-label={`打开会话 ${thread.title || '未命名会话'}${rowStatusLabel ? `，${rowStatusLabel}` : ''}`}
         aria-current={isSelected ? 'true' : undefined}
-        className={`relative z-10 min-h-[76px] ${threadRowSurfaceClass(isSelected)} gutter-x py-2.5 transition-colors hover:bg-row-hover active:bg-row-hover touch-pan-y${isDragging ? ' thread-row--dragging' : ''}`}
+        className={`relative z-10 min-h-[76px] ${threadRowSurfaceClass(isSelected)} gutter-x py-2.5 [@media(hover:none)]:pr-11 transition-colors hover:bg-row-hover active:bg-row-hover touch-pan-y${isDragging ? ' thread-row--dragging' : ''}`}
         style={{
           transform: `translateX(${offset}px)`,
           transition: isDragging ? 'none' : 'transform 280ms cubic-bezier(.22,1,.36,1)'
@@ -556,6 +601,8 @@ const ThreadRow = React.memo(function ThreadRow({
           onMenu(thread);
         }}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || handleThreadRowKey(event, () => onMenu(thread))) return;
+          if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             if (isOpen) {
@@ -567,6 +614,7 @@ const ThreadRow = React.memo(function ThreadRow({
           }
         }}
       >
+        <ThreadMenuButton onClick={() => onMenu(thread)} />
         {/* Line 1: 左侧项目名 + 行首状态（运行中/待授权/待回答/失败，对应桌面端的行首图标位）；
             行尾只保留 threadRowStatus 选出的一个状态位：待审批 > 未读 > 置顶 > 最近活动。 */}
         <div className="flex items-center justify-between gap-2 min-w-0">
@@ -621,6 +669,7 @@ const ThreadRow = React.memo(function ThreadRow({
 });
 
 const DormantThreadRow = React.memo(function DormantThreadRow({
+  tabStop,
   isSelected,
   thread,
   projectName,
@@ -757,10 +806,11 @@ const DormantThreadRow = React.memo(function DormantThreadRow({
       </button>
       <div
         role="button"
-        tabIndex={0}
+        data-thread-row={thread.id}
+        tabIndex={tabStop ? 0 : -1}
         aria-label={`打开已休眠会话 ${thread.title || '未命名会话'}${rowStatusLabel ? `，${rowStatusLabel}` : ''}`}
         aria-current={isSelected ? 'true' : undefined}
-        className={`relative z-10 flex h-[44px] min-h-[44px] items-center justify-between gap-2 ${threadRowSurfaceClass(isSelected)} gutter-x transition-colors hover:bg-row-hover active:bg-row-hover touch-pan-y${isDragging ? ' thread-row--dragging' : ''}`}
+        className={`relative z-10 flex h-[44px] min-h-[44px] items-center justify-between gap-2 ${threadRowSurfaceClass(isSelected)} gutter-x [@media(hover:none)]:pr-11 transition-colors hover:bg-row-hover active:bg-row-hover touch-pan-y${isDragging ? ' thread-row--dragging' : ''}`}
         style={{
           transform: `translateX(${offset}px)`,
           transition: isDragging ? 'none' : 'transform 280ms cubic-bezier(.22,1,.36,1)'
@@ -774,6 +824,8 @@ const DormantThreadRow = React.memo(function DormantThreadRow({
           onMenu(thread);
         }}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || handleThreadRowKey(event, () => onMenu(thread))) return;
+          if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             if (isOpen) {
@@ -785,6 +837,7 @@ const DormantThreadRow = React.memo(function DormantThreadRow({
           }
         }}
       >
+        <ThreadMenuButton onClick={() => onMenu(thread)} />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {projectName && (
             <span className="truncate text-footnote text-muted opacity-40 shrink-0 max-w-[100px]">
@@ -1095,6 +1148,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
   }, [query]);
   const [filter, setFilter] = useState<ThreadFilter>('all');
   const [openRowID, setOpenRowID] = useState<string | null>(null);
+  const [focusedRowID, setFocusedRowID] = useState<string | null>(null);
   const [dormantExpanded, setDormantExpanded] = useState(false);
   const [dormantLimit, setDormantLimit] = useState(10);
   // 活跃会话折叠：按项目 id（全部项目用 'all'）记住当前展示条数
@@ -1427,6 +1481,19 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     return projectID ? rows : sortByActivityDesc(rows);
   }, [archivedThreads, projectID, query]);
 
+  const visibleRowIDs = filter === 'archived'
+    ? archivedVisible.map((thread) => thread.id)
+    : filter === 'dormant'
+      ? visibleDormantThreads.map((thread) => thread.id)
+      : [...allActive.flatMap((section) => section.rows.map((thread) => thread.id)),
+        ...(dormantExpanded ? visibleDormantThreads.map((thread) => thread.id) : [])];
+  const tabStopID = visibleRowIDs.includes(focusedRowID ?? '') ? focusedRowID
+    : visibleRowIDs.includes(selectedThreadID ?? '') ? selectedThreadID : visibleRowIDs[0];
+  const handleListFocus = (event: React.FocusEvent<HTMLDivElement>) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-thread-row]');
+    if (row?.dataset.threadRow) setFocusedRowID(row.dataset.threadRow);
+  };
+
   const handleOpenMessageHit = useCallback(
     (hit: RemoteMessageSearchHit) => {
       const known = [...threads, ...archivedThreads].find((item) => item.id === hit.threadID);
@@ -1654,12 +1721,13 @@ export const ThreadList: React.FC<ThreadListProps> = ({
               <p>{query ? '试试其他标题。' : '在会话菜单里归档的会话会出现在这里。'}</p>
             </div>
           ) : (
-            <div className="thread-list" aria-live="polite">
+            <div className="thread-list" aria-live="polite" onFocus={handleListFocus}>
               <section className="dormant-section" aria-label="已归档会话">
                 {archivedVisible.map((thread) => (
                   <ArchivedThreadRow
                     key={thread.id}
                     thread={thread}
+                    tabStop={thread.id === tabStopID}
                     isSelected={thread.id === selectedThreadID}
                     projectName={!projectID ? projects.find((project) => project.id === thread.projectID)?.name : undefined}
                     onOpen={handleOpen}
@@ -1686,13 +1754,14 @@ export const ThreadList: React.FC<ThreadListProps> = ({
             )}
           </div>
         ) : (
-          <div className="thread-list" aria-live="polite">
+          <div className="thread-list" aria-live="polite" onFocus={handleListFocus}>
             {filter === 'dormant' ? (
               <section className="dormant-section" aria-label="已休眠会话">
                 {visibleDormantThreads.map((thread) => (
                   <DormantThreadRow
                     key={thread.id}
                     thread={thread}
+                    tabStop={thread.id === tabStopID}
                     isSelected={thread.id === selectedThreadID}
                     projectName={!projectID ? projects.find((project) => project.id === thread.projectID)?.name : undefined}
                     onOpen={handleOpen}
@@ -1721,6 +1790,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
                       <ThreadRow
                         key={thread.id}
                         thread={thread}
+                        tabStop={thread.id === tabStopID}
                         isSelected={thread.id === selectedThreadID}
                         projectName={!projectID ? projects.find((project) => project.id === thread.projectID)?.name : undefined}
                         projectScoped={Boolean(projectID)}
@@ -1757,6 +1827,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
                           <DormantThreadRow
                             key={thread.id}
                             thread={thread}
+                            tabStop={thread.id === tabStopID}
                             isSelected={thread.id === selectedThreadID}
                             projectName={!projectID ? projects.find((project) => project.id === thread.projectID)?.name : undefined}
                             onOpen={handleOpen}
