@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 自动化运行记录面板：一级为当前项目的自动化列表，点进去看某个自动化的运行记录。
 // 数据来自宿主扩展方法 automations.*（internal/remote/automation_ext_methods.go）。
 // 除查看、立即运行、标记已读与归档外，宿主声明写方法时还支持新建、编辑、暂停/恢复、重置、删除。
@@ -239,14 +240,7 @@ export const AutomationSheet: React.FC<AutomationSheetProps> = ({ projectID, onC
   }, [api, confirm, reload]);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="settings-sheet max-h-[85dvh] overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="automation-sheet-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet max-h-[85dvh] overflow-y-auto" labelledBy="automation-sheet-title">
         <div className="sheet-handle" aria-hidden="true" />
 
         {/* 标题栏：二级页显示返回 */}
@@ -595,7 +589,6 @@ export const AutomationSheet: React.FC<AutomationSheetProps> = ({ projectID, onC
             setConfirm(null);
           }}
         />
-      </section>
-    </div>
+      </SheetFrame>
   );
 };

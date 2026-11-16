@@ -1,5 +1,6 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 计划全文阅读弹层：审批卡只展示摘要，完整计划在这里读，底部保留与卡片上完全相同的操作。
-// 外层结构沿用项目内 settings-sheet 抽屉（sheet-layer + sheet-handle + 标题栏 + 滚动主体）。
+// 外层结构沿用项目内 settings-sheet 抽屉（遮罩 + sheet-handle + 标题栏 + 滚动主体）。
 
 import React from 'react';
 import { createPortal } from 'react-dom';
@@ -29,24 +30,10 @@ export const PlanReaderSheet: React.FC<PlanReaderSheetProps> = ({
 
   React.useEffect(() => {
     closeRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onClose]);
+  }, []);
 
   return createPortal(
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="plan-reader-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="panel" labelledBy="plan-reader-title">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         <div className="mb-3 flex w-full min-w-0 shrink-0 items-start justify-between gap-3">
@@ -82,8 +69,7 @@ export const PlanReaderSheet: React.FC<PlanReaderSheetProps> = ({
             {actions}
           </div>
         ) : null}
-      </section>
-    </div>,
+      </SheetFrame>,
     document.body
   );
 };

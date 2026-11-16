@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 子代理改动合并审查抽屉：查看待合入 diff，批准合并或放弃改动
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -204,14 +205,7 @@ export const SwarmMergeReviewSheet: React.FC<SwarmMergeReviewSheetProps> = ({
 
   return (
     <>
-      <div className="sheet-layer" role="presentation" onMouseDown={isBusy ? undefined : onClose}>
-        <section
-          className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-x-hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="审查子代理改动"
-          onMouseDown={(event) => event.stopPropagation()}
-        >
+      <SheetFrame onRequestClose={() => { if (!isBusy) onClose(); }} size="bare" cardClassName="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel="审查子代理改动">
           <div className="sheet-handle shrink-0" aria-hidden="true" />
 
           {/* 标题栏 */}
@@ -457,8 +451,7 @@ export const SwarmMergeReviewSheet: React.FC<SwarmMergeReviewSheetProps> = ({
               )}
             </div>
           </div>
-        </section>
-      </div>
+        </SheetFrame>
 
       <ConfirmDialog
         isOpen={confirmDiscard}

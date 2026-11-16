@@ -62,3 +62,6 @@ assertIncludes(bareHtml, 'class="custom" style="left:12px"', 'bare 卡片及样�
 assertIncludes(bareHtml, `class="${SHEET_LAYER_CLASS}" style="top:24px"`, '遮罩样式');
 
 assertIncludes(bareHtml, 'aria-label="自定义弹层"', 'aria-label');
+
+const siblingHtml = renderToStaticMarkup(<SheetFrame onRequestClose={() => {}} layerChildren={<aside>选择器</aside>}>卡片</SheetFrame>);
+assertIncludes(siblingHtml, '</section><aside>选择器</aside></div>', '遮罩内卡片后的节点');

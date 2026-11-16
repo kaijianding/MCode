@@ -1,8 +1,9 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 记忆抽屉：Mac 上待审的记忆先落本地收件箱，这里分三个分页处理。
 //   - 待审提议：列出提议，接受（写入 Nowledge Mem）、编辑后接受、或驳回；
 //   - 搜索：只读查 Nowledge Mem 里的记忆（MemorySearchPanel）；
 //   - 新建：手动记录一条记忆并加入待审列表（MemoryCreateForm）。
-// 外层结构照抄 SwarmBeesSheet：sheet-layer + settings-sheet，点击遮罩关闭。
+// 外层结构照抄 SwarmBeesSheet：遮罩 + settings-sheet，点击遮罩关闭。
 // 每个分页跟着宿主声明的能力走，缺哪个方法就少哪个分页。
 
 import React, { useState } from 'react';
@@ -237,14 +238,7 @@ const MemoryProposalsSheetBody: React.FC<MemoryProposalsSheetProps> = ({
 
   return (
     <>
-      <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-        <section
-          className="settings-sheet max-h-[85dvh] overflow-y-auto"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="memory-proposals-title"
-          onMouseDown={(event) => event.stopPropagation()}
-        >
+      <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet max-h-[85dvh] overflow-y-auto" labelledBy="memory-proposals-title">
           <div className="sheet-handle" aria-hidden="true" />
 
           {/* 标题栏 */}
@@ -510,8 +504,7 @@ const MemoryProposalsSheetBody: React.FC<MemoryProposalsSheetProps> = ({
           {tab === 'create' && (
             <MemoryCreateForm projectID={projectID} projectName={projectName} onCreated={handleCreated} />
           )}
-        </section>
-      </div>
+        </SheetFrame>
 
       {/* 驳回前二次确认 */}
       <ConfirmDialog

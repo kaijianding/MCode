@@ -1,7 +1,7 @@
 // 添加项目面板：两种方式——填 Mac 上的绝对路径（防抖 400ms 调 projects.validatePath 实时提示，
 // 也可打开目录浏览器选择），或在宿主上 git clone 一个仓库并登记成项目。
 // 成功后统一走 onAdded 回调；宿主未声明 projects.listDir / projects.clone 时隐藏对应入口。
-// 外层结构沿用项目内 settings-sheet 抽屉（sheet-layer + sheet-handle + 标题栏 + 主体 + 底部操作）。
+// 外层结构沿用项目内 settings-sheet 抽屉（遮罩 + sheet-handle + 标题栏 + 主体 + 底部操作）。
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRemoteCall } from '../context/useRemoteCall';
@@ -15,6 +15,7 @@ import {
   type RemoteProjectExtValidateResult
 } from '../context/remoteProjectApi';
 import { DirectoryPicker } from './DirectoryPicker';
+import { SheetFrame } from './sheet/SheetFrame';
 import { ExclamationTriangleIcon, PlusIcon, XMarkIcon } from './Icons';
 
 export interface AddProjectSheetProps {
@@ -204,14 +205,20 @@ export const AddProjectSheet: React.FC<AddProjectSheetProps> = ({ onClose, onAdd
       : (validation?.reason ?? '');
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={requestClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full min-w-0 overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-project-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame
+      onRequestClose={requestClose}
+      labelledBy="add-project-title"
+      closeOnEscape={false}
+      layerChildren={browseTarget !== null && (
+        <DirectoryPicker
+          isOpen
+          title={browseTarget === 'local' ? '选择项目目录' : '选择存放目录'}
+          initialPath={browseTarget === 'local' ? path : parentPath}
+          onCancel={() => setBrowseTarget(null)}
+          onSelect={handleBrowseSelect}
+        />
+      )}
+    >
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         <div className="mb-3 flex w-full min-w-0 shrink-0 items-start justify-between gap-3">
@@ -507,17 +514,6 @@ export const AddProjectSheet: React.FC<AddProjectSheetProps> = ({ onClose, onAdd
             </button>
           )}
         </div>
-      </section>
-
-      {browseTarget !== null && (
-        <DirectoryPicker
-          isOpen
-          title={browseTarget === 'local' ? '选择项目目录' : '选择存放目录'}
-          initialPath={browseTarget === 'local' ? path : parentPath}
-          onCancel={() => setBrowseTarget(null)}
-          onSelect={handleBrowseSelect}
-        />
-      )}
-    </div>
+    </SheetFrame>
   );
 };

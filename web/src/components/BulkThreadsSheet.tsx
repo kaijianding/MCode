@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 移动端批量整理抽屉：按最后活跃时间与置顶/已休眠范围预览命中会话，再批量归档、标为已休眠或标为已读。
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -208,14 +209,7 @@ export const BulkThreadsSheet: React.FC<BulkThreadsSheetProps> = ({
   }, [action, api, onDone, preview, projectID, submitting]);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bulk-threads-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="panel" labelledBy="bulk-threads-title">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         <div className="mb-3 flex w-full min-w-0 shrink-0 items-start justify-between gap-3">
@@ -405,7 +399,6 @@ export const BulkThreadsSheet: React.FC<BulkThreadsSheetProps> = ({
             {submitting ? '处理中…' : ACTION_LABELS[action]}
           </button>
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };

@@ -30,11 +30,13 @@ export interface SheetFrameProps {
   layerClassName?: string;
   role?: 'dialog' | 'alertdialog';
   closeOnEscape?: boolean;
+  layerChildren?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function SheetFrame({ onRequestClose, labelledBy, ariaLabel, onFocus, size = 'panel', cardClassName, cardRef: externalRef, cardStyle, layerStyle, layerClassName, role = 'dialog', closeOnEscape = true, children }: SheetFrameProps) {
+export function SheetFrame({ onRequestClose, labelledBy, ariaLabel, onFocus, size = 'panel', cardClassName, cardRef: externalRef, cardStyle, layerStyle, layerClassName, role = 'dialog', closeOnEscape = true, layerChildren, children }: SheetFrameProps) {
   const cardRef = useRef<HTMLElement | null>(null);
+  const layerRef = useRef<HTMLDivElement | null>(null);
   const identity = useRef({});
   const closeRef = useRef(onRequestClose);
   const escapeRef = useRef(closeOnEscape);
@@ -43,12 +45,13 @@ export function SheetFrame({ onRequestClose, labelledBy, ariaLabel, onFocus, siz
 
   useEffect(() => {
     const card = cardRef.current;
-    if (!card) return;
+    const layer = layerRef.current;
+    if (!card || !layer) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const item = identity.current;
     sheetStack = pushSheet(sheetStack, item);
-    const focusable = () => Array.from(card.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => element.getClientRects().length > 0);
-    if (!card.contains(document.activeElement)) (focusable()[0] ?? card).focus();
+    const focusable = () => Array.from(layer.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => element.getClientRects().length > 0);
+    if (!layer.contains(document.activeElement)) (focusable()[0] ?? card).focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isTopSheet(sheetStack, item)) return;
       if (event.key === 'Escape' && escapeRef.current) {
@@ -71,10 +74,11 @@ export function SheetFrame({ onRequestClose, labelledBy, ariaLabel, onFocus, siz
 
   const cardClass = [size === 'bare' ? undefined : size === 'menu' ? SHEET_MENU_CARD_CLASS : SHEET_PANEL_CARD_CLASS, cardClassName].filter(Boolean).join(' ');
   return (
-    <div className={[SHEET_LAYER_CLASS, layerClassName].filter(Boolean).join(' ')} style={layerStyle} role="presentation" onMouseDown={onRequestClose}>
+    <div ref={layerRef} className={[SHEET_LAYER_CLASS, layerClassName].filter(Boolean).join(' ')} style={layerStyle} role="presentation" onMouseDown={onRequestClose}>
       <section ref={(node) => { cardRef.current = node; if (typeof externalRef === 'function') externalRef(node); else if (externalRef) (externalRef as React.MutableRefObject<HTMLElement | null>).current = node; }} className={cardClass} style={cardStyle} role={role} aria-modal="true" aria-labelledby={labelledBy} aria-label={ariaLabel} onFocus={onFocus} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         {children}
       </section>
+      {layerChildren}
     </div>
   );
 }

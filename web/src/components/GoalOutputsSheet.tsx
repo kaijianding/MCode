@@ -1,7 +1,8 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 目标产物弹层：按目标汇总任务的标题、状态与完成说明，复用任务详情 sheet 查看单个任务。
 // 算法与桌面端 internal/ui/kanban.go 的 goalOutputs 一致，只取看板快照，不新增 RPC。
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { Goal, KanbanDisplayColumn, TaskItem } from '../types/contract';
 import { XMarkIcon } from './Icons';
 
@@ -102,26 +103,8 @@ export const GoalOutputsSheet: React.FC<GoalOutputsSheetProps> = ({
   const doneCount = useMemo(() => outputs.filter((out) => out.task.status === 'done').length, [outputs]);
   const title = goal.title || goal.prompt;
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="目标产物"
-        className="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet flex flex-col outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel="目标产物">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
         <div className="flex shrink-0 items-start justify-between gap-3 min-w-0 w-full">
           <div className="min-w-0 flex-1">
@@ -189,7 +172,6 @@ export const GoalOutputsSheet: React.FC<GoalOutputsSheetProps> = ({
             关闭
           </button>
         </div>
-      </section>
-    </div>
+      </SheetFrame>
   );
 };

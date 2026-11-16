@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 全局子代理档位抽屉：列出/新增/编辑/删除档位，改动先落在本地草稿，保存时整表提交给 Mac 端
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -496,14 +497,7 @@ export const SwarmTiersSheet: React.FC<SwarmTiersSheetProps> = ({ isOpen, onClos
 
   return (
     <>
-      <div className="sheet-layer" role="presentation" onMouseDown={requestClose}>
-        <section
-          className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="swarm-tiers-title"
-          onMouseDown={(event) => event.stopPropagation()}
-        >
+      <SheetFrame onRequestClose={requestClose} size="panel" labelledBy="swarm-tiers-title" closeOnEscape={false}>
           <div className="sheet-handle shrink-0" aria-hidden="true" />
 
           {/* 标题栏 */}
@@ -692,8 +686,7 @@ export const SwarmTiersSheet: React.FC<SwarmTiersSheetProps> = ({ isOpen, onClos
               )}
             </div>
           </div>
-        </section>
-      </div>
+        </SheetFrame>
 
       <ConfirmDialog
         isOpen={confirmClose}
