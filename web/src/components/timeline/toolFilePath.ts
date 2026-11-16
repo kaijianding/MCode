@@ -1,4 +1,8 @@
-export function toolFilePath(_toolName: string | undefined, toolInput: unknown): string | null {
+import { classifyToolName } from './projection';
+
+export function toolFilePath(toolName: string | undefined, toolInput: unknown): string | null {
+  const category = classifyToolName(toolName);
+  if (category !== 'read' && category !== 'edit') return null;
   let input = toolInput;
   if (typeof input === 'string') {
     try { input = JSON.parse(input); } catch { return null; }
