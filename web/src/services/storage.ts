@@ -30,6 +30,7 @@ export interface SessionCredentials {
 
 export interface EnvironmentUIState {
   selectedProjectID: string | null;
+  recentProjectIDs: string[];
 }
 
 const pairingError = (error: string): PairingInputResult => ({ token: null, error });
@@ -149,7 +150,7 @@ export function getEnvironmentID(): string {
 }
 
 export function readEnvironmentUIState(environmentID: string): EnvironmentUIState {
-  const fallback: EnvironmentUIState = { selectedProjectID: null };
+  const fallback: EnvironmentUIState = { selectedProjectID: null, recentProjectIDs: [] };
   if (typeof window === 'undefined') return fallback;
   try {
     const raw = window.localStorage.getItem(ENVIRONMENT_STATE_KEY);
@@ -157,19 +158,21 @@ export function readEnvironmentUIState(environmentID: string): EnvironmentUIStat
     const all = JSON.parse(raw) as Record<string, Partial<EnvironmentUIState>>;
     const state = all[environmentID];
     return {
-      selectedProjectID: typeof state?.selectedProjectID === 'string' ? state.selectedProjectID : null
+      selectedProjectID: typeof state?.selectedProjectID === 'string' ? state.selectedProjectID : null,
+      recentProjectIDs: Array.isArray(state?.recentProjectIDs) && state.recentProjectIDs.every((id) => typeof id === 'string')
+        ? state.recentProjectIDs.slice(0, 20) : []
     };
   } catch {
     return fallback;
   }
 }
 
-export function writeEnvironmentUIState(environmentID: string, state: EnvironmentUIState): void {
+export function writeEnvironmentUIState(environmentID: string, state: Partial<EnvironmentUIState>): void {
   if (typeof window === 'undefined') return;
   try {
     const raw = window.localStorage.getItem(ENVIRONMENT_STATE_KEY);
     const all = raw ? (JSON.parse(raw) as Record<string, EnvironmentUIState>) : {};
-    all[environmentID] = state;
+    all[environmentID] = { ...all[environmentID], ...state };
     window.localStorage.setItem(ENVIRONMENT_STATE_KEY, JSON.stringify(all));
   } catch {
     // UI 状态不是连接凭据，存储失败不应阻断页面。

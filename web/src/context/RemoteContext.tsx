@@ -41,6 +41,7 @@ import type {
 } from '../services/storage';
 import type { SessionNewPairingCodeResult } from '../types/generated';
 import { isThreadSummary, mergeThreadSummary } from './remoteGuards';
+import { orderProjectsByRecent, pushRecentProject } from '../utils/projectOrder';
 import { useRemoteBoardActions } from './remoteBoard';
 import { useRemoteConnection } from './remoteConnection';
 import { useRemoteThreadActions } from './remoteThreadActions';
@@ -93,12 +94,15 @@ export const RemoteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [selectedProjectID, setSelectedProjectIDState] = useState<string | null>(
     () => readEnvironmentUIState(environmentID).selectedProjectID
   );
+  const [recentProjectIDs, setRecentProjectIDs] = useState(() => readEnvironmentUIState(environmentID).recentProjectIDs);
+  const recentProjectIDsRef = useRef(recentProjectIDs);
   const [theme, setThemeState] = useState<'system' | 'light' | 'dark'>(getStoredTheme);
   const [activeActionTaskID, setActiveActionTaskID] = useState<string | null>(null);
   const [actionLoadingText, setActionLoadingText] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [inspectedTask, setInspectedTask] = useState<TaskItem | null>(null);
-  const [projects, setProjects] = useState<RemoteProjectSummary[]>([]);
+  const [projectList, setProjects] = useState<RemoteProjectSummary[]>([]);
+  const projects = useMemo(() => orderProjectsByRecent(projectList, recentProjectIDs), [projectList, recentProjectIDs]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [threads, setThreads] = useState<RemoteThreadSummary[]>([]);
@@ -394,7 +398,7 @@ export const RemoteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     refreshThreadsForProjectRef
   });
 
-  const { threadActions, reset: resetThreadActions, createThread, sendThreadMessage, checkThreadAction, dismissThreadAction } =
+  const { threadActions, reset: resetThreadActions, createThread: createThreadAction, sendThreadMessage, checkThreadAction, dismissThreadAction } =
     threadActionController;
 
   const { commandSnapshots, loadThreadCommands, reset: resetCommands } = useRemoteCommands({
@@ -451,10 +455,24 @@ export const RemoteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setStoredTheme(newTheme);
   }, []);
 
+  const rememberProject = useCallback((projectID: string) => {
+    const recent = pushRecentProject(recentProjectIDsRef.current, projectID);
+    recentProjectIDsRef.current = recent;
+    setRecentProjectIDs(recent);
+    writeEnvironmentUIState(environmentID, { recentProjectIDs: recent });
+  }, [environmentID]);
+
+  const createThread = useCallback(async (...args: Parameters<typeof createThreadAction>) => {
+    const action = await createThreadAction(...args);
+    if (action.state === 'accepted') rememberProject(action.projectID);
+    return action;
+  }, [createThreadAction, rememberProject]);
+
   const setSelectedProjectID = useCallback((projectID: string | null) => {
     setSelectedProjectIDState(projectID);
+    if (projectID) rememberProject(projectID);
     writeEnvironmentUIState(environmentID, { selectedProjectID: projectID });
-  }, [environmentID]);
+  }, [environmentID, rememberProject]);
 
   useEffect(() => {
     const root = document.documentElement;

@@ -1,6 +1,6 @@
 // 移动首页顶栏：项目范围、视图切换、连接胶囊与设置 sheet。
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRemote } from '../context/RemoteContext';
 import { isThreadBusy } from '../context/remoteGuards';
 import { AlwaysAllowedSection } from './AlwaysAllowedSection';
@@ -215,6 +215,8 @@ export const Header: React.FC<HeaderProps> = ({
     reloadSettings();
   }, [reloadSettings, settingsOpen]);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopeQuery, setScopeQuery] = useState('');
+  const scopeSearchRef = useRef<HTMLInputElement>(null);
   const [showForgetConfirm, setShowForgetConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -250,6 +252,18 @@ export const Header: React.FC<HeaderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onCloseSettings, scopeOpen, settingsOpen]);
 
+  useEffect(() => {
+    if (!scopeOpen) {
+      setScopeQuery('');
+    } else if (window.matchMedia('(hover: hover)').matches) {
+      scopeSearchRef.current?.focus();
+    }
+  }, [scopeOpen]);
+
+  const filteredProjects = projects.filter((project) => {
+    const query = scopeQuery.toLowerCase();
+    return project.name.toLowerCase().includes(query) || project.path.toLowerCase().includes(query);
+  });
   const projectName = projects.find((project) => project.id === selectedProjectID)?.name;
   const projectCounts = useMemo(() => {
     const counts = new Map<string, { attention: number; running: number }>();
@@ -445,7 +459,19 @@ export const Header: React.FC<HeaderProps> = ({
             {scopeOpen && (
               <div className="scope-menu" role="menu" aria-label="项目范围">
                 <div className="scope-menu__heading">项目范围</div>
-                <button
+                {projects.length > 8 && (
+                  <div className="search-field">
+                    <input ref={scopeSearchRef} type="search" placeholder="搜索项目" aria-label="搜索项目"
+                      value={scopeQuery} onChange={(event) => setScopeQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && filteredProjects[0]) {
+                          event.preventDefault();
+                          selectProject(filteredProjects[0].id);
+                        }
+                      }} />
+                  </div>
+                )}
+                {!scopeQuery && <button
                   type="button"
                   role="menuitemradio"
                   aria-checked={selectedProjectID === null}
@@ -457,8 +483,9 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="scope-menu__meta">{listedThreadCount} 个会话</span>
                   </span>
                   <span className="scope-menu__check">{selectedProjectID === null ? '✓' : ''}</span>
-                </button>
-                {projects.map((project) => {
+                </button>}
+                {filteredProjects.length === 0 && scopeQuery && <div className="scope-menu__heading">没有匹配的项目</div>}
+                {filteredProjects.map((project) => {
                   const count = projectCounts.get(project.id) ?? { attention: 0, running: 0 };
                   const countsLoaded = selectedProjectID === null || selectedProjectID === project.id;
                   return (
