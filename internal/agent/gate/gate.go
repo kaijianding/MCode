@@ -8,12 +8,14 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"mcode/internal/agent/patch"
 	"mcode/internal/harness"
+	"mcode/internal/providers/loginenv"
 )
 
 // Input 保存一次工具调用的门禁输入，对应 TS 的 gate、event 和 cwd。
@@ -113,8 +115,13 @@ func ReadOnlyPrompt(sandboxed bool) string {
 		return "Read-only mode: shell commands run in an OS sandbox. Local writes fail except under $TMPDIR; writing to remotes or devices (git push, curl with a body or non-GET method, gh writes, ssh/scp/rsync, adb install/push or shell writes) is refused. Other commands run normally."
 	}
 	var commands []string
+	_, _, kind := loginenv.CommandShell("")
+	powerShell := runtime.GOOS == "windows" && kind != "Git Bash"
 	for _, name := range strings.Fields(safe) {
 		if strings.Contains(name, "-") {
+			if !powerShell {
+				continue
+			}
 			parts := strings.Split(name, "-")
 			for i, part := range parts {
 				parts[i] = strings.ToUpper(part[:1]) + part[1:]

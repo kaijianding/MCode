@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -339,7 +340,7 @@ func TestReadOnlyPrompt(t *testing.T) {
 	if plain == "" || sandboxed == "" {
 		t.Fatal("只读提示不能为空")
 	}
-	for _, name := range []string{"rg", "git log", "Get-Content"} {
+	for _, name := range []string{"rg", "git log"} {
 		if !strings.Contains(plain, name) {
 			t.Errorf("白名单提示缺少 %q", name)
 		}
@@ -351,6 +352,21 @@ func TestReadOnlyPrompt(t *testing.T) {
 		if strings.Contains(" "+plain+" ", " "+name+" ") {
 			t.Errorf("提示不应列出 PowerShell 别名 %q", name)
 		}
+	}
+}
+
+func TestReadOnlyPromptOmitsCmdletsOutsidePowerShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("仅验证非 Windows 平台")
+	}
+	prompt := ReadOnlyPrompt(false)
+	for _, name := range []string{"Get-ChildItem", "Select-String"} {
+		if strings.Contains(prompt, name) {
+			t.Errorf("提示不应包含 %q", name)
+		}
+	}
+	if !strings.Contains(prompt, "grep") {
+		t.Error("提示缺少 grep")
 	}
 }
 
