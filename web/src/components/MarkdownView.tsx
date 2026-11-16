@@ -20,6 +20,7 @@ import {
 } from '../utils/highlight';
 import { parseSwarmEntries, type SwarmEntryParsed } from '../utils/markdown';
 import { useOverflowFade } from '../hooks/useOverflowFade';
+import { useSeenOnce } from '../hooks/useSeenOnce';
 import '../styles/overflow-fade.css';
 import { highlightRangesFrom, type OccurrenceRange } from '../utils/findHighlight';
 import {
@@ -51,9 +52,10 @@ function mentionSafeUrlTransform(url: string): string {
 export const CodeBlock = React.memo(function CodeBlock({ content, language, children }: { content: string; language: string; children?: React.ReactNode }) {
   // 冷门语言的语法包是首次遇到才下载的：注册完成会推进版本号，这里据此重新高亮
   const languageVersion = React.useSyncExternalStore(subscribeHighlightLanguages, getHighlightLanguagesVersion, getHighlightLanguagesVersion);
-  const html = React.useMemo(() => highlightCode(content, language), [content, language, languageVersion]);
   // 横向溢出时给滚动容器写 --fade-left/--fade-right，窄屏由 overflow-fade.css 做边缘遮罩。
   const scrollerRef = React.useRef<HTMLPreElement>(null);
+  const seen = useSeenOnce(scrollerRef);
+  const html = React.useMemo(() => seen ? highlightCode(content, language) : null, [content, language, languageVersion, seen]);
   useOverflowFade(scrollerRef);
   const [copied, setCopied] = React.useState(false);
   const copyTimerRef = React.useRef<number | null>(null);
