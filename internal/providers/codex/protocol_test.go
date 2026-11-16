@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -1558,6 +1559,33 @@ func TestLateToolCompletedNotDuplicated(t *testing.T) {
 			}
 			if events[2].Type != harness.EventError {
 				t.Errorf("expected error event, got %+v", events[2])
+			}
+		})
+	}
+}
+
+func TestMCPToolCallNullError(t *testing.T) {
+	cases := []struct {
+		name, status, result, err, wantText string
+		wantErr                             bool
+	}{
+		{name: "completed", status: "completed", result: `{"content":[{"type":"text","text":"ok"}]}`, err: `null`, wantText: `"ok"`},
+		{name: "failed result", status: "failed", result: `{"content":[{"type":"text","text":"boom"}]}`, err: `null`, wantErr: true, wantText: `"boom"`},
+		{name: "failed error", status: "failed", result: `null`, err: `{"message":"timeout"}`, wantErr: true, wantText: `timeout`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewProtocolHandler(harness.Turn{Mode: harness.ModeAgent})
+			var events []harness.Event
+			line := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"th_1","turnId":"turn_1","item":{"id":"tool_1","type":"mcpToolCall","status":%q,"result":%s,"error":%s}}}`, tc.status, tc.result, tc.err))
+			if _, err := h.HandleLine(context.Background(), line, func(e harness.Event) { events = append(events, e) }); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(events) != 1 || events[0].Type != harness.EventToolEnd {
+				t.Fatalf("expected one tool_end, got %+v", events)
+			}
+			if events[0].IsError != tc.wantErr || strings.Contains(events[0].Output, "null") || !strings.Contains(events[0].Output, tc.wantText) {
+				t.Errorf("unexpected tool_end: %+v", events[0])
 			}
 		})
 	}

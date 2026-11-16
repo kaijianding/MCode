@@ -612,9 +612,16 @@ func (h *ProtocolHandler) handleItemCompleted(params json.RawMessage, emit func(
 			return
 		}
 
-		isErr := it.Status == "failed" || len(it.Error) > 0
-		output := string(it.Result)
-		if len(it.Error) > 0 {
+		errorValue := bytes.TrimSpace(it.Error)
+		resultValue := bytes.TrimSpace(it.Result)
+		errorPresent := len(errorValue) > 0 && !bytes.Equal(errorValue, []byte("null"))
+		resultPresent := len(resultValue) > 0 && !bytes.Equal(resultValue, []byte("null"))
+		isErr := it.Status == "failed" || errorPresent
+		output := ""
+		if resultPresent {
+			output = string(it.Result)
+		}
+		if errorPresent {
 			output = string(it.Error)
 		}
 		_ = harness.Emit(emit, harness.Event{
