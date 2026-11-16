@@ -1,53 +1,9 @@
 package mcodeui
 
 import (
-	"math"
-	"strconv"
-	"strings"
-
 	"github.com/egoist/mygo/ui"
 	"mcode/internal/config"
 )
-
-// swarmNumberControl 保留迁移前的显示规则，并在写入时按需吸附。
-type swarmNumberControl struct {
-	numberControl
-	display func(int) int
-	step    int
-}
-
-func (n swarmNumberControl) render(c *ui.Context, st *SettingsState, s setting) {
-	n.renderDisabled(c, st, s, false)
-}
-
-func (n swarmNumberControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
-	cur := n.b.value(&st.cfg)
-	if n.display != nil {
-		cur = n.display(cur)
-	}
-	ui.Row(c.Key(s.ID + "-value")).AlignItems(ui.Center).Gap(Space2).Children(func() {
-		textFunc(func(*SettingsState) (string, bool) {
-			return strconv.Itoa(cur), false
-		}, func(_ *SettingsState, text string) {
-			parsed, err := strconv.Atoi(strings.TrimSpace(text))
-			if err != nil {
-				return
-			}
-			if n.step > 1 {
-				parsed = int(math.Round(float64(parsed)/float64(n.step))) * n.step
-			}
-			parsed = min(max(parsed, n.min), n.max)
-			if parsed != n.b.value(&st.cfg) {
-				commitSettingsControl(st, func(cfg *config.Config) { n.b.write(cfg, parsed) })
-			}
-		}, strconv.Itoa(n.b.def)).
-			withDisabled(func(*SettingsState) bool { return disabled }).
-			renderDisabled(c, st, setting{ID: s.ID, Title: s.Title}, disabled)
-		if n.unit != "" {
-			ui.Text(c, n.unit).FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
-		}
-	})
-}
 
 var advancedOrchestration = settingsSection{
 	ID:    "advanced.orchestration",
@@ -61,12 +17,12 @@ var advancedOrchestration = settingsSection{
 		{
 			ID: "row-swarm-max-rounds", Title: "最多派发轮次",
 			Aliases: []string{"子代理", "派发", "默认", "不限"},
-			Control: swarmNumberControl{numberControl: number(val(func(c *config.Config) *int { return &c.Orchestration.MaxRounds }, 10), "轮", config.MinSwarmMaxRounds, config.MaxSwarmMaxRounds), display: func(v int) int { return max(0, v) }},
+			Control: numberControl{b: val(func(c *config.Config) *int { return &c.Orchestration.MaxRounds }, 10), unit: "轮", min: config.MinSwarmMaxRounds, max: config.MaxSwarmMaxRounds, display: func(v int) int { return max(0, v) }},
 		},
 		{
 			ID: "row-swarm-bee-timeout", Title: "子代理运行超时", Lock: "swarm-bee-timeout",
 			Aliases: []string{"子代理", "超时", "默认"},
-			Control: swarmNumberControl{numberControl: number(val(func(c *config.Config) *int { return &c.Orchestration.BeeTimeoutMinutes }, config.DefaultSwarmBeeTimeoutMinutes), "分钟", config.MinSwarmBeeTimeoutMinutes, config.MaxSwarmBeeTimeoutMinutes), display: func(v int) int {
+			Control: numberControl{b: val(func(c *config.Config) *int { return &c.Orchestration.BeeTimeoutMinutes }, config.DefaultSwarmBeeTimeoutMinutes), unit: "分钟", min: config.MinSwarmBeeTimeoutMinutes, max: config.MaxSwarmBeeTimeoutMinutes, display: func(v int) int {
 				if v <= 0 {
 					return config.DefaultSwarmBeeTimeoutMinutes
 				}
@@ -76,7 +32,7 @@ var advancedOrchestration = settingsSection{
 		{
 			ID: "row-swarm-request-timeout", Title: "请求总时长预算", Lock: "swarm-request-timeout",
 			Aliases: []string{"子代理", "超时", "默认"},
-			Control: swarmNumberControl{numberControl: number(val(func(c *config.Config) *int { return &c.Orchestration.RequestTimeoutMinutes }, config.DefaultSwarmRequestTimeoutMinutes), "分钟", config.MinSwarmRequestTimeoutMinutes, config.MaxSwarmRequestTimeoutMinutes), step: 10, display: func(v int) int {
+			Control: numberControl{b: val(func(c *config.Config) *int { return &c.Orchestration.RequestTimeoutMinutes }, config.DefaultSwarmRequestTimeoutMinutes), unit: "分钟", min: config.MinSwarmRequestTimeoutMinutes, max: config.MaxSwarmRequestTimeoutMinutes, step: 10, display: func(v int) int {
 				if v <= 0 {
 					return config.DefaultSwarmRequestTimeoutMinutes
 				}
@@ -86,7 +42,7 @@ var advancedOrchestration = settingsSection{
 		{
 			ID: "row-swarm-review-max-lines", Title: "自动通过行数上限", Lock: "swarm-review-bees",
 			Aliases: []string{"审查", "行数", "默认"},
-			Control: swarmNumberControl{numberControl: number(val(func(c *config.Config) *int { return &c.Orchestration.ReviewMaxChangedLines }, config.DefaultReviewMaxChangedLines), "行", config.MinReviewMaxChangedLines, config.MaxReviewMaxChangedLines), display: func(v int) int { return max(0, v) }},
+			Control: numberControl{b: val(func(c *config.Config) *int { return &c.Orchestration.ReviewMaxChangedLines }, config.DefaultReviewMaxChangedLines), unit: "行", min: config.MinReviewMaxChangedLines, max: config.MaxReviewMaxChangedLines, display: func(v int) int { return max(0, v) }},
 			Visible: func(st *SettingsState) bool { return st.cfg.Orchestration.ReviewModeValue() == config.ReviewModeAI },
 		},
 	},

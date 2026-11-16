@@ -91,18 +91,6 @@ func (st *SettingsState) clearNumberDraft(id string) {
 	delete(st.numberDrafts, id)
 }
 
-// numberGeneration 是数值行输入框的键序号；定稿后换序号等于重建输入框。
-func (st *SettingsState) numberGeneration(id string) int {
-	return st.numberGens[id]
-}
-
-func (st *SettingsState) bumpNumberGeneration(id string) {
-	if st.numberGens == nil {
-		st.numberGens = make(map[string]int)
-	}
-	st.numberGens[id]++
-}
-
 // SettingsState 维护桌面端设置面板的交互状态。
 type SettingsState struct {
 	updateDotVisible bool
@@ -150,10 +138,6 @@ type SettingsState struct {
 	// 逐位输入时中间值会越出区间（60..100 输入「7」），每帧按配置回填会把输入框
 	// 跳到下限，后续按键就拼到钳制后的数字上，所以编辑期间以草稿为准。
 	numberDrafts map[string]string
-	// numberGens 按行 id 记录输入框重建次数：定稿时显示要和输入框里的内容不一致，
-	// 就换一个控件键把它重建出来，不去等原生输入框自己同步。
-	numberGens map[string]int
-
 	// jumpToItemID 是逐项搜索点了某条命中后要滚动到可视区的那一行 key，渲染到该行后立即清空。
 	jumpToItemID string
 	// highlightItemID 是同上要高亮的那一行 key，从 highlightStartedAt 起保持 settingsItemHighlightDuration。
@@ -493,6 +477,7 @@ func (s *SettingsState) Open() {
 		s.configWarning = configWarningsText(warnings)
 	}
 	s.cfgMu.Unlock()
+	s.numberDrafts = nil
 	if !s.textSavePending {
 		if loadErr := s.loadGlobalInstructions(); loadErr != nil {
 			s.noteError(loadErr.Error())

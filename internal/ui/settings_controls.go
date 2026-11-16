@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -234,6 +235,8 @@ type numberControl struct {
 	b        bind[int]
 	unit     string
 	min, max int
+	display  func(int) int
+	step     int
 }
 
 // number 声明一个数值行：输入框加单位后缀，默认值作占位。
@@ -254,12 +257,9 @@ func (n numberControl) renderDisabled(c *ui.Context, st *SettingsState, s settin
 		txt = n.displayText(st)
 	}
 	oldTxt := txt
-	gen := st.numberGeneration(s.ID)
 	ui.Row(c.Key(s.ID + "-value")).AlignItems(ui.Center).Gap(Space2).Children(func() {
 		TextField(c, TextFieldProps{
-			// 定稿时换一个键重建输入框：原生输入框只在没有未消化的输入时才跟随外部值，
-			// 重建能保证显示立刻回到配置值，不依赖它自己什么时候同步。
-			Key:         s.ID + "-input-" + strconv.Itoa(gen),
+			Key:         s.ID + "-input",
 			Value:       &txt,
 			Placeholder: strconv.Itoa(n.b.def),
 			Width:       90,
@@ -275,10 +275,6 @@ func (n numberControl) renderDisabled(c *ui.Context, st *SettingsState, s settin
 			ui.Text(c, n.unit).FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
 		}
 	})
-	if disabled || st.numberGeneration(s.ID) != gen {
-		// 这一帧输入的还是定稿前的输入框，它报回来的文本已经作废。
-		return
-	}
 	if txt == oldTxt {
 		// 没有新文本：已经显示配置值就收掉草稿，否则留着草稿等下一帧。
 		if txt == n.displayText(st) {
@@ -298,21 +294,28 @@ func (n numberControl) commit(c *ui.Context, st *SettingsState, s setting) {
 	if !ok {
 		return
 	}
-	if parsed, valid := parseNumber(txt); valid && parsed >= n.min && parsed <= n.max {
-		n.write(st, parsed)
+	if parsed, valid := parseNumber(txt); valid {
+		if n.step > 1 {
+			parsed = int(math.Round(float64(parsed)/float64(n.step))) * n.step
+		}
+		if parsed >= n.min && parsed <= n.max {
+			n.write(st, parsed)
+		}
 	}
 	st.clearNumberDraft(s.ID)
 	if strings.TrimSpace(txt) == n.displayText(st) {
 		return
 	}
-	// 显示要变（越界被丢弃，或写法不同），重建输入框并补一帧让它立刻画出来。
-	st.bumpNumberGeneration(s.ID)
+	// 显示要变（越界被丢弃，或写法不同），补一帧让它立刻画出来。
 	c.Invalidate()
 }
 
-// displayText 是输入框在编辑之外显示的值：越界的存量值（例如 0 表示未设置）按默认值显示。
+// displayText 是输入框在编辑之外显示的值。
 func (n numberControl) displayText(st *SettingsState) string {
 	cur := n.b.value(&st.cfg)
+	if n.display != nil {
+		return strconv.Itoa(n.display(cur))
+	}
 	if cur < n.min || cur > n.max {
 		cur = n.b.def
 	}
