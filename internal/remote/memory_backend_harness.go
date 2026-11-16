@@ -1491,8 +1491,8 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 	}
 	b.mu.Unlock()
 
-	b.hub.Publish(threadID, nil, nil, finalSummary)
 	if nextStarted != nil {
+		// 立即续跑时只刷出上一轮增量，避免中间的空闲摘要误报会话完成。
 		b.hub.Flush(threadID)
 		// 正文先落库再删队列行，崩溃时最多重复出现一条已写正文的排队项，不会丢消息。
 		b.persistMessages(threadID, []wire.ThreadMessage{nextStarted.userMsg})

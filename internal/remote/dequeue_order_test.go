@@ -162,6 +162,90 @@ func TestDequeueOrder_AutoDequeue(t *testing.T) {
 	waitThreadIdle(t, b, ctx, threadID)
 }
 
+func TestFinishTurnQueuedNextNoIdleGap(t *testing.T) {
+	for _, swarmReport := range []bool{true, false} {
+		name := "普通排队消息"
+		if swarmReport {
+			name = "Swarm汇报"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			startedCh := make(chan struct{}, 2)
+			releaseCh := make(chan struct{}, 2)
+			b, _, threadID := newDequeueOrderBackend(t, &controlledTestHarness{
+				startedCh: startedCh,
+				releaseCh: releaseCh,
+			})
+			detector := NewSessionAlertDetector()
+			doneCh := make(chan SessionAlert, 8)
+			remove := b.hub.AddObserver(func(id, method string, params any) {
+				if id != threadID {
+					return
+				}
+				if alert, ok := detector.Observe(id, method, params); ok && alert.Kind == SessionAlertDone {
+					doneCh <- alert
+				}
+			})
+			t.Cleanup(remove)
+
+			if _, err := b.SendMessage(ctx, wire.SendMessageParams{
+				ThreadID: threadID, Text: "turn 1", ActionID: newUUID(),
+			}); err != nil {
+				t.Fatalf("首轮 SendMessage 失败: %v", err)
+			}
+			select {
+			case <-startedCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("首轮未在预期时间内启动")
+			}
+
+			if swarmReport {
+				if err := b.SendSwarmReport(ctx, threadID, "queued report"); err != nil {
+					t.Fatalf("SendSwarmReport 失败: %v", err)
+				}
+			} else {
+				res, err := b.SendMessage(ctx, wire.SendMessageParams{
+					ThreadID: threadID, Text: "queued text", WhenRunning: "queue", ActionID: newUUID(),
+				})
+				if err != nil {
+					t.Fatalf("排队 SendMessage 失败: %v", err)
+				}
+				if res.Queued == nil || !*res.Queued {
+					t.Fatalf("期望消息进入队列，实际 Queued=%v", res.Queued)
+				}
+			}
+
+			// 第二轮进入 harness 前，首轮的收尾摘要已同步送达观察者。
+			releaseCh <- struct{}{}
+			select {
+			case <-startedCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("排队轮未在预期时间内启动")
+			}
+			select {
+			case alert := <-doneCh:
+				t.Fatalf("排队轮启动前误报会话完成: %+v", alert)
+			default:
+			}
+
+			releaseCh <- struct{}{}
+			select {
+			case <-doneCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("排队轮结束后未收到会话完成提醒")
+			}
+			// 等收尾全部退出并刷出剩余摘要，再检查没有重复提醒。
+			b.Close()
+			b.hub.Flush(threadID)
+			select {
+			case alert := <-doneCh:
+				t.Fatalf("排队轮结束后重复提醒会话完成: %+v", alert)
+			default:
+			}
+		})
+	}
+}
+
 // TestDequeueOrder_DrainQueuedFollowUps 覆盖 DrainQueuedFollowUps 这条同步出队路径。
 func TestDequeueOrder_DrainQueuedFollowUps(t *testing.T) {
 	ctx := context.Background()
