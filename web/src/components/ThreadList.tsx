@@ -47,6 +47,7 @@ import { useRemoteSettingsApi } from '../context/remoteSettingsApi';
 import { LazyBoundary } from './LazyFallback';
 import { visibleFilterChips, type ThreadFilter } from '../utils/homeFilterChips';
 import { readHomeQuery, shouldCollapseOnBlur, writeHomeQuery } from '../utils/homeSearch';
+import { undoKind } from './threadListNotice';
 
 // 自动化弹层只在用户点开时渲染。
 // BulkThreadsSheet 不懒加载：同一模块里的 useBulkThreadsApi 在列表主体里同步使用，
@@ -1119,6 +1120,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
   const [bulkNotice, setBulkNotice] = useState<{
     message: string;
     undoToken?: string;
+    archivedThread?: RemoteThreadSummary;
     action?: BulkThreadsAction;
   } | null>(null);
   const [bulkUndoing, setBulkUndoing] = useState(false);
@@ -1485,7 +1487,10 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     try {
       if (action === 'pin') await updateThread(thread.id, { pinned: !thread.isPinned });
       if (action === 'dormant') await updateThread(thread.id, { dormant: !thread.isDormant });
-      if (action === 'archive') await updateThread(thread.id, { archived: true });
+      if (action === 'archive') {
+        await updateThread(thread.id, { archived: true });
+        setBulkNotice({ message: '已归档', archivedThread: thread });
+      }
       if (action === 'unarchive') {
         await updateThread(thread.id, { archived: false });
         setArchivedThreads((rows) => rows.filter((row) => row.id !== thread.id));
@@ -1496,6 +1501,26 @@ export const ThreadList: React.FC<ThreadListProps> = ({
       setActionError(error instanceof Error ? error.message : action === 'unarchive' ? '取消归档失败' : '会话操作失败');
     } finally {
       setActionThreadID(null);
+    }
+  };
+
+  const handleNoticeUndo = async () => {
+    if (undoKind(bulkNotice) !== 'archive') {
+      await handleBulkUndo();
+      return;
+    }
+    const thread = bulkNotice?.archivedThread;
+    if (!thread || bulkUndoing) return;
+    setBulkUndoing(true);
+    try {
+      await updateThread(thread.id, { archived: false });
+      setArchivedThreads((rows) => rows.filter((row) => row.id !== thread.id));
+      void resyncThreads();
+      setBulkNotice({ message: '已撤销' });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '撤销失败');
+    } finally {
+      setBulkUndoing(false);
     }
   };
 
@@ -1533,11 +1558,11 @@ export const ThreadList: React.FC<ThreadListProps> = ({
       {bulkNotice && (
         <div className="inline-alert" role="status" aria-live="polite">
           <span className="min-w-0 select-text break-words">{bulkNotice.message}</span>
-          {bulkNotice.undoToken && (
+          {undoKind(bulkNotice) && (
             <button
               type="button"
               className="inline-alert__action"
-              onClick={() => void handleBulkUndo()}
+              onClick={() => void handleNoticeUndo()}
               disabled={bulkUndoing}
             >
               {bulkUndoing ? '撤销中…' : '撤销'}
