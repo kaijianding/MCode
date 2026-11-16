@@ -8,6 +8,8 @@ import { DiffViewer } from './DiffViewer';
 import { MarkdownView } from './MarkdownView';
 import { PlanReaderSheet } from './PlanReaderSheet';
 import { haptic } from '../utils/haptic';
+import { isImeComposing } from '../utils/ime';
+import { questionShortcut } from './requestKeys';
 
 interface RemoteRequestPanelProps {
   threadID: string;
@@ -281,6 +283,33 @@ export const RemoteRequestPanel: React.FC<RemoteRequestPanelProps> = ({
     }
   };
 
+  useEffect(() => {
+    const request = requests.find((candidate) => candidate.requestID === activeRequestID);
+    const question = request?.kind === 'question'
+      ? request.questions.find((candidate) => candidate.id === openQuestionKeys[request.requestID])
+      : undefined;
+    if (!request || !question || busyRequestID || !isConnected || !request.turnID ||
+        staleRequestIDs.has(request.requestID) || handledRequestIDs.has(request.requestID) ||
+        (window.location.protocol !== 'https:' && request.questions.some((item) => item.isSecret))) return;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const panel = scrollAreaRef.current;
+      if (!panel || panel.getClientRects().length === 0 || event.defaultPrevented || event.repeat) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const editable = !!target?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])');
+      const hasOtherDialog = Array.from(document.querySelectorAll('[role="dialog"]')).some(
+        (dialog) => !panel.contains(dialog) && !dialog.contains(panel)
+      );
+      if (hasOtherDialog) return;
+      const index = questionShortcut(event, isImeComposing(event), editable, question.choices.length);
+      if (index === null) return;
+      event.preventDefault();
+      setChoice(request.requestID, question.id, question.choices[index].label, question.allowsMultiple);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  });
+
   const setOther = (requestID: string, questionID: string, value: string): void => {
     setOtherAnswers((previous) => ({
       ...previous,
@@ -471,7 +500,7 @@ export const RemoteRequestPanel: React.FC<RemoteRequestPanelProps> = ({
                               <p className="text-xs text-[var(--foreground-muted)] break-words">{question.prompt}</p>
                             )}
                             <div className="space-y-2">
-                              {question.choices.map((choice) => {
+                              {question.choices.map((choice, index) => {
                                 const checked = selected.includes(choice.label);
                                 return (
                                   <label
@@ -483,6 +512,7 @@ export const RemoteRequestPanel: React.FC<RemoteRequestPanelProps> = ({
                                     }`}
                                   >
                                     <input
+                                      aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                                       type={question.allowsMultiple ? 'checkbox' : 'radio'}
                                       name={`${request.requestID}-${question.id}`}
                                       checked={checked}
