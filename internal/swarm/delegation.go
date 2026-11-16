@@ -636,7 +636,7 @@ func beePrompt(name string, d Delegation, cfg BeeConfig) string {
 		b.WriteString("\n\n## 档位要求\n" + sys)
 	}
 	if len(d.Acceptance) > 0 {
-		b.WriteString("\n\n## 验收\nmcode 在你汇报后于工作副本根目录逐条运行以下命令，全部退出码为 0 才合并；汇报前先自己跑通：")
+		b.WriteString("\n\n## 验收\nmcode 在你汇报后于工作副本根目录逐条运行以下命令，全部退出码为 0 才合并；汇报前先自己跑通。命令由 sh 执行（Windows 上为 Git Bash）：")
 		for _, command := range d.Acceptance {
 			fmt.Fprintf(&b, "\n- `%s`", command)
 		}

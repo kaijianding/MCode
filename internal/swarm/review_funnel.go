@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"mcode/internal/procattr"
+	"mcode/internal/providers/loginenv"
 	"mcode/internal/reviewcheck"
 	"mcode/internal/reviewfunnel"
 	"mcode/internal/textgen"
@@ -960,34 +963,21 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 		executed := command
 		// 主代理常用绝对路径 cd 到主工作区，验收必须在副本中执行。
 		if filepath.IsAbs(h.TargetWorkDir) && h.WorktreePath != "" {
-			var rewritten strings.Builder
-			remaining := command
-			for {
-				i := strings.Index(remaining, h.TargetWorkDir)
-				if i < 0 {
-					rewritten.WriteString(remaining)
-					break
-				}
-				end := i + len(h.TargetWorkDir)
-				boundary := end == len(remaining)
-				if !boundary {
-					r, _ := utf8.DecodeRuneInString(remaining[end:])
-					boundary = unicode.IsSpace(r) || strings.ContainsRune("/\"';&|)", r)
-				}
-				rewritten.WriteString(remaining[:i])
-				if boundary {
-					rewritten.WriteString(h.WorktreePath)
-				} else {
-					rewritten.WriteString(h.TargetWorkDir)
-				}
-				remaining = remaining[end:]
-			}
-			executed = rewritten.String()
+			executed = rewriteWorkDir(command, h.TargetWorkDir, h.WorktreePath)
 		}
-		// 独立 shell 保证命令里的 exit 不会跳过退出码记录。
+		shell := "sh"
+		if runtime.GOOS == "windows" {
+			shell = filepath.ToSlash(loginenv.GitBash())
+		}
+		var args []string
+		if shell == "" {
+			shell, args = procattr.ShellArgs(executed)
+		} else {
+			// 独立 shell 保证命令里的 exit 不会跳过退出码记录。
+			args = []string{"-c", `"$0" -c "$1"; code=$?; printf '\nmcode-acceptance-exit:%s\n' "$code"; exit "$code"`, shell, executed}
+		}
 		result := reviewcheck.Run(ctx, h.WorktreePath, reviewcheck.Command{
-			Shell: "sh", Args: [][]string{{"-c", `sh -c "$1"; code=$?; printf '\nmcode-acceptance-exit:%s\n' "$code"; exit "$code"`, "mcode-acceptance", executed}},
-			Display: command, Timeout: timeout,
+			Shell: shell, Args: [][]string{args}, Display: command, Timeout: timeout, Env: loginenv.Environ(),
 		}, l0MaxOutput)
 		if result.OK {
 			continue
@@ -1008,4 +998,40 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 		return false, detail
 	}
 	return true, ""
+}
+
+func rewriteWorkDir(command, target, worktree string) string {
+	if runtime.GOOS == "windows" {
+		worktree = filepath.ToSlash(worktree)
+	}
+	rewrite := func(command, target string) string {
+		var rewritten strings.Builder
+		remaining := command
+		for {
+			i := strings.Index(remaining, target)
+			if i < 0 {
+				rewritten.WriteString(remaining)
+				break
+			}
+			end := i + len(target)
+			boundary := end == len(remaining)
+			if !boundary {
+				r, _ := utf8.DecodeRuneInString(remaining[end:])
+				boundary = unicode.IsSpace(r) || strings.ContainsRune("/\\\"';&|)", r)
+			}
+			rewritten.WriteString(remaining[:i])
+			if boundary {
+				rewritten.WriteString(worktree)
+			} else {
+				rewritten.WriteString(target)
+			}
+			remaining = remaining[end:]
+		}
+		return rewritten.String()
+	}
+	command = rewrite(command, target)
+	if runtime.GOOS == "windows" && filepath.ToSlash(target) != target {
+		command = rewrite(command, filepath.ToSlash(target))
+	}
+	return command
 }

@@ -153,6 +153,10 @@ func Run(ctx context.Context, worktree string, cmd Command, maxOutput int) Resul
 		process.Stderr = buf
 		if err := process.Run(); err != nil {
 			result.OK = false
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				buf.Write([]byte(err.Error() + "\n"))
+			}
 			result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 			break
 		}

@@ -200,3 +200,10 @@ func TestTailTruncates(t *testing.T) {
 		t.Errorf("Tail 字节截断长度 = %d，期望 100", len(got))
 	}
 }
+
+func TestRunReportsStartError(t *testing.T) {
+	res := Run(context.Background(), t.TempDir(), Command{Shell: "mcode-no-such-shell", Args: [][]string{{"-c", "true"}}}, 0)
+	if res.OK || !strings.Contains(res.Output, "mcode-no-such-shell") {
+		t.Fatalf("result = %+v", res)
+	}
+}

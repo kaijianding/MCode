@@ -515,3 +515,10 @@ func TestAcceptanceHumanCannotApproveBeforeChecks(t *testing.T) {
 		t.Fatal("timeout bypassed acceptance")
 	}
 }
+
+func TestRewriteWorkDirBackslashBoundary(t *testing.T) {
+	got := rewriteWorkDir(`cd /source\sub`, "/source", "/copy")
+	if got != `cd /copy\sub` {
+		t.Fatalf("rewrite = %q", got)
+	}
+}
