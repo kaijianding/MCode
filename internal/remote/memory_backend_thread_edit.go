@@ -10,6 +10,8 @@ import (
 	"mcode/internal/harness"
 	"mcode/internal/remote/wire"
 	"mcode/internal/store"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -931,6 +933,14 @@ func (b *MemoryBackend) DeleteThread(ctx context.Context, threadID string) error
 		if s != nil {
 			if err := s.DeleteThread(ctx, targetID); err != nil && !errors.Is(err, store.ErrNotFound) {
 				return err
+			}
+		}
+		b.mu.Lock()
+		dataDir := b.dataDir
+		b.mu.Unlock()
+		if dataDir != "" {
+			if err := os.RemoveAll(filepath.Join(dataDir, "tool-outputs", targetID)); err != nil {
+				log.Printf("delete tool outputs for thread %s failed: %v", targetID, err)
 			}
 		}
 		// 正文已删除：清掉该会话的同步状态与持久待同步标记。删除前同步失败的不再补传。

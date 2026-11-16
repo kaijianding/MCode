@@ -544,6 +544,7 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_messages_tool_running ON messages(thread_id, seq) WHERE role = 'tool' AND tool_status = 'running';
 	CREATE INDEX IF NOT EXISTS idx_turns_status ON turns(status);
 	`,
+	`ALTER TABLE messages ADD COLUMN output_bytes INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // Store 封装 SQLite 数据库操作。
@@ -1085,7 +1086,7 @@ type rowScanner interface {
 // text_z/tool_input_z 存 zstd（或旧版 gzip）压缩后的正文，text_encoding 非空时由 scanMessageRow 解压还原明文。
 const messageSelectCols = `
 	id, thread_id, seq, role, kind, text, turn_index, turn_id, is_final, created_at, media,
-	tool_name, tool_input, tool_status, tool_completed_at, err_kind, text_encoding, text_z, tool_input_z
+	tool_name, tool_input, tool_status, tool_completed_at, err_kind, text_encoding, text_z, tool_input_z, output_bytes
 `
 
 const threadSelectCols = `
@@ -2006,8 +2007,8 @@ func (s *Store) AppendMessage(ctx context.Context, m Message) (Message, error) {
 
 	// 插入新消息
 	insertQuery := `
-	INSERT INTO messages (id, thread_id, seq, role, kind, text, turn_index, turn_id, is_final, created_at, media, tool_name, tool_input, tool_status, tool_completed_at, err_kind)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO messages (id, thread_id, seq, role, kind, text, turn_index, turn_id, is_final, created_at, media, tool_name, tool_input, tool_status, tool_completed_at, err_kind, output_bytes)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	if _, err := tx.ExecContext(ctx, insertQuery,
 		m.ID,
@@ -2026,6 +2027,7 @@ func (s *Store) AppendMessage(ctx context.Context, m Message) (Message, error) {
 		derefString(m.ToolStatus),
 		derefString(m.ToolCompletedAt),
 		derefString(m.ErrKind),
+		m.OutputBytes,
 	); err != nil {
 		return Message{}, fmt.Errorf("insert message %s: %w", m.ID, err)
 	}
@@ -2091,7 +2093,7 @@ func (s *Store) updateMessageTx(ctx context.Context, tx *sql.Tx, m Message) erro
 		return fmt.Errorf("read message %s encoding: %w", m.ID, err)
 	}
 
-	query := `UPDATE messages SET text = ?, kind = ?, is_final = ?, media = ?, tool_name = ?, tool_input = ?, tool_status = ?, tool_completed_at = ?, err_kind = ?, text_z = ?, tool_input_z = ?, text_encoding = ? WHERE id = ?`
+	query := `UPDATE messages SET text = ?, kind = ?, is_final = ?, media = ?, tool_name = ?, tool_input = ?, tool_status = ?, tool_completed_at = ?, err_kind = ?, text_z = ?, tool_input_z = ?, text_encoding = ?, output_bytes = ? WHERE id = ?`
 	textVal := m.Text
 	toolInputVal := derefString(m.ToolInput)
 	var textZ, toolInputZ []byte
@@ -2113,7 +2115,7 @@ func (s *Store) updateMessageTx(ctx context.Context, tx *sql.Tx, m Message) erro
 		log.Printf("store: message %s has unknown encoding %q, rewritten as plaintext", m.ID, currentEncoding)
 	}
 
-	res, err := tx.ExecContext(ctx, query, textVal, m.Kind, isFinalInt, mediaJSON, derefString(m.ToolName), toolInputVal, derefString(m.ToolStatus), derefString(m.ToolCompletedAt), derefString(m.ErrKind), textZ, toolInputZ, newEncoding, m.ID)
+	res, err := tx.ExecContext(ctx, query, textVal, m.Kind, isFinalInt, mediaJSON, derefString(m.ToolName), toolInputVal, derefString(m.ToolStatus), derefString(m.ToolCompletedAt), derefString(m.ErrKind), textZ, toolInputZ, newEncoding, m.OutputBytes, m.ID)
 	if err != nil {
 		return fmt.Errorf("update message %s: %w", m.ID, err)
 	}
@@ -2136,6 +2138,7 @@ func scanMessageRow(s rowScanner) (Message, string, string, error) {
 	var toolNameStr, toolInputStr, toolStatusStr, toolCompletedAtStr string
 	var errKindStr string
 	var textEncodingStr string
+	var outputBytes int64
 	var textZ, toolInputZ []byte
 	var isFinalInt int
 	if err := s.Scan(
@@ -2158,6 +2161,7 @@ func scanMessageRow(s rowScanner) (Message, string, string, error) {
 		&textEncodingStr,
 		&textZ,
 		&toolInputZ,
+		&outputBytes,
 	); err != nil {
 		return Message{}, "", "", fmt.Errorf("scan message: %w", err)
 	}
@@ -2177,6 +2181,7 @@ func scanMessageRow(s rowScanner) (Message, string, string, error) {
 	m.ToolStatus = stringToPtr(toolStatusStr)
 	m.ToolCompletedAt = stringToPtr(toolCompletedAtStr)
 	m.ErrKind = stringToPtr(errKindStr)
+	m.OutputBytes = outputBytes
 	return m, createdAtStr, mediaStr, nil
 }
 

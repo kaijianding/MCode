@@ -827,12 +827,23 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 					for idx, m := range td.messages {
 						if m.ID == toolMsgID {
 							out := e.Output
+							if len([]rune(out)) > toolOutputStreamMaxRunes {
+								dataDir := b.dataDir
+								if size, err := archiveToolOutput(dataDir, threadID, toolMsgID, out); err != nil {
+									log.Printf("archive tool output for thread %s message %s failed: %v", threadID, toolMsgID, err)
+								} else if size > 0 {
+									td.messages[idx].OutputBytes = &size
+								}
+							}
 							if runes := []rune(out); len(runes) > toolOutputStreamMaxRunes {
 								out = string(runes[:toolOutputStreamMaxRunes])
 							}
 							// 运行期间已流出的增量只是过程展示：tool_end 带来最终 output 时用它覆盖，
 							// 避免 provider 既推增量又重复一次全量时出现两遍文本；没有最终 output 时保留增量。
-							if stream, streamed := toolStreams[e.ToolID]; streamed {
+							if td.messages[idx].OutputBytes != nil {
+								// 存档与预览使用相同正文，避免工具名/输入前缀掩盖 outputBytes 的截断判断。
+								td.messages[idx].Text = out
+							} else if stream, streamed := toolStreams[e.ToolID]; streamed {
 								td.messages[idx].Text = stream.override(out)
 							} else if out != "" {
 								if td.messages[idx].Text != "" {
@@ -842,7 +853,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 								}
 							}
 							// blocked 表示工具被 hook 拦截（或改道），不是工具自身故障：正文不拼 [failed]，状态单列为 blocked。
-							if e.IsError && !e.Blocked {
+							if e.IsError && !e.Blocked && td.messages[idx].OutputBytes == nil {
 								td.messages[idx].Text += "\n[failed]"
 							}
 							status := "completed"

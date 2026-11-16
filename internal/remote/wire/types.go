@@ -419,6 +419,7 @@ type ThreadMessage struct {
 	ID              string  `json:"id"`
 	Role            string  `json:"role"`
 	Text            string  `json:"text"`
+	OutputBytes     *int64  `json:"outputBytes,omitempty"`
 	CreatedAt       string  `json:"createdAt"`
 	TurnIndex       int     `json:"turnIndex"`
 	TurnID          *string `json:"turnID,omitempty"`
@@ -451,6 +452,19 @@ type HistoryPage struct {
 	NextCursor *string         `json:"nextCursor"`
 	HasMore    bool            `json:"hasMore"`
 	Truncated  bool            `json:"truncated"`
+}
+
+type ThreadsToolOutputParams struct {
+	ThreadID  string `json:"threadID"`
+	MessageID string `json:"messageID"`
+	Offset    *int64 `json:"offset,omitempty"`
+	Length    *int64 `json:"length,omitempty"`
+}
+type ThreadsToolOutputResult struct {
+	Text       string `json:"text"`
+	Offset     int64  `json:"offset"`
+	TotalBytes int64  `json:"totalBytes"`
+	EOF        bool   `json:"eof"`
 }
 
 // --- 会话订阅与退订 ---

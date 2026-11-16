@@ -1,5 +1,7 @@
 import { useStableLabel } from './timeline/useStableLabel';
 import { previewToolOutput } from './timeline/previewLines';
+import { fetchToolOutput, needsToolOutputFetch } from './timeline/toolOutputFetch';
+import { useRemoteCall } from '../context/useRemoteCall';
 import { SheetFrame } from './sheet/SheetFrame';
 import { useCommandActivity } from '../hooks/useCommandActivity';
 import { CommandActivityView } from './timeline/CommandActivityView';
@@ -233,12 +235,30 @@ export const MarkdownContent: React.FC<{ text: string; prefix?: string }> = ({ t
   return <MarkdownView text={text} />;
 };
 
-const WorkEntryOutput: React.FC<{ text: string; highlight?: MarkdownHighlight; math: boolean; preview: boolean }> = ({ text, highlight, math, preview }) => {
+const WorkEntryOutput: React.FC<{ text: string; highlight?: MarkdownHighlight; math: boolean; preview: boolean; threadID: string; messageID: string; outputBytes?: number }> = ({ text, highlight, math, preview, threadID, messageID, outputBytes }) => {
+  const { call } = useRemoteCall();
   const [expanded, setExpanded] = React.useState(false);
-  const result = previewToolOutput(text, expanded);
+  const [loading, setLoading] = React.useState(false);
+  const [archivedText, setArchivedText] = React.useState<string | null>(null);
+  const needsFetch = needsToolOutputFetch(outputBytes, text);
+  const displayedText = expanded && archivedText !== null ? archivedText : text;
+  const result = previewToolOutput(displayedText, expanded);
+  const expandable = (preview && result.hidden > 0) || (needsFetch && archivedText === null) || archivedText !== null;
+  const toggle = async () => {
+    if (loading) return;
+    if (expanded) { setExpanded(false); return; }
+    if (needsFetch && archivedText === null) {
+      setLoading(true);
+      try {
+        const fetched = await fetchToolOutput((params) => call('threads.toolOutput', params), threadID, messageID);
+        setArchivedText(fetched);
+        setExpanded(true);
+      } catch { /* 失败后保留截断内容和重试入口 */ } finally { setLoading(false); }
+    } else { setExpanded(true); }
+  };
   return <>
-    <MarkdownView text={preview ? result.text : text} highlight={highlight} math={math} />
-    {preview && result.hidden > 0 && <button type="button" onClick={() => setExpanded(!expanded)} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline">{expanded ? '收起' : `展开 ${result.hidden} 行`}</button>}
+    <MarkdownView text={preview ? result.text : displayedText} highlight={highlight} math={math} />
+    {expandable && <button type="button" disabled={loading} onClick={() => void toggle()} className="px-2 py-1 text-xs text-[var(--primary)] hover:underline disabled:opacity-50">{loading ? '加载中' : expanded ? '收起' : result.hidden > 0 ? `展开 ${result.hidden} 行` : '展开全文'}</button>}
   </>;
 };
 
@@ -1118,7 +1138,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
                               }`}
                             >
                               {entry.toolStatus === 'running' && classifyToolName(entry.toolName) === 'command' && <CommandActivityView activity={activity[entry.id]} />}
-                              <WorkEntryOutput text={entry.text || ''} highlight={highlightFor(entry.id)} math={!isThinkingRow} preview={isToolEntry && ['read', 'search'].includes(classifyToolName(entry.toolName))} />
+                              <WorkEntryOutput text={entry.text || ''} highlight={highlightFor(entry.id)} math={!isThinkingRow} preview={isToolEntry && ['read', 'search'].includes(classifyToolName(entry.toolName))} threadID={threadID} messageID={entry.id} outputBytes={entry.outputBytes} />
                               {diffFiles && <ToolEntryDiff files={diffFiles} />}
                               {readThreadMedia && entry.media && entry.media.length > 0 && (
                                 <MessageMedia

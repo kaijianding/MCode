@@ -302,8 +302,10 @@
       "$ref": "#/$defs/RemoteThreadsKillRunningCommandResponse"
     },
     { "$ref": "#/$defs/RemoteThreadsBackgroundTaskLogRequest" },
+    { "$ref": "#/$defs/RemoteThreadsToolOutputRequest" },
           { "$ref": "#/$defs/RemoteThreadsCommandActivityRequest" },
     { "$ref": "#/$defs/RemoteThreadsBackgroundTaskLogResponse" },
+    { "$ref": "#/$defs/RemoteThreadsToolOutputResponse" },
           { "$ref": "#/$defs/RemoteThreadsCommandActivityResponse" },
     { "$ref": "#/$defs/RemoteThreadsStopBackgroundTaskRequest" },
     { "$ref": "#/$defs/RemoteThreadsStopBackgroundTaskResponse" },
@@ -3065,6 +3067,7 @@
         "text": {
           "type": "string"
         },
+        "outputBytes": { "type": "integer", "minimum": 1 },
         "createdAt": {
           "$ref": "#/$defs/ISO8601DateTime"
         },
@@ -7183,6 +7186,18 @@
       "required": ["text", "available"],
       "additionalProperties": false
     },
+    "RemoteThreadsToolOutputParams": {
+      "type": "object", "properties": {"threadID": {"$ref": "#/$defs/UUID"}, "messageID": {"$ref": "#/$defs/UUID"}, "offset": {"type": "integer", "minimum": 0}, "length": {"type": "integer", "minimum": 1, "maximum": 524288}}, "required": ["threadID", "messageID"], "additionalProperties": false
+    },
+    "RemoteThreadsToolOutputResult": {
+      "type": "object", "properties": {"text": {"type": "string"}, "offset": {"type": "integer"}, "totalBytes": {"type": "integer"}, "eof": {"type": "boolean"}}, "required": ["text", "offset", "totalBytes", "eof"], "additionalProperties": false
+    },
+    "RemoteThreadsToolOutputRequest": {
+      "type": "object", "properties": {"jsonrpc": {"const": "2.0"}, "method": {"const": "threads.toolOutput"}, "params": {"$ref": "#/$defs/RemoteThreadsToolOutputParams"}, "id": {"$ref": "#/$defs/JSONRPCId"}}, "required": ["jsonrpc", "method", "params", "id"], "additionalProperties": false
+    },
+    "RemoteThreadsToolOutputResponse": {
+      "type": "object", "properties": {"jsonrpc": {"const": "2.0"}, "result": {"$ref": "#/$defs/RemoteThreadsToolOutputResult"}, "id": {"$ref": "#/$defs/JSONRPCId"}}, "required": ["jsonrpc", "result", "id"], "additionalProperties": false
+    },
     "RemoteThreadsBackgroundTaskLogRequest": {
       "type": "object",
       "properties": { "jsonrpc": { "const": "2.0" }, "method": { "const": "threads.backgroundTaskLog" }, "params": { "$ref": "#/$defs/RemoteThreadsBackgroundTaskLogParams" }, "id": { "$ref": "#/$defs/JSONRPCId" } },
@@ -10893,6 +10908,7 @@
             "$ref": "#/$defs/RemoteThreadsKillRunningCommandRequest"
           },
           { "$ref": "#/$defs/RemoteThreadsBackgroundTaskLogRequest" },
+          { "$ref": "#/$defs/RemoteThreadsToolOutputRequest" },
           { "$ref": "#/$defs/RemoteThreadsCommandActivityRequest" },
           { "$ref": "#/$defs/RemoteThreadsStopBackgroundTaskRequest" },
           {
@@ -11335,6 +11351,7 @@
             "$ref": "#/$defs/RemoteThreadsKillRunningCommandResponse"
           },
           { "$ref": "#/$defs/RemoteThreadsBackgroundTaskLogResponse" },
+          { "$ref": "#/$defs/RemoteThreadsToolOutputResponse" },
           { "$ref": "#/$defs/RemoteThreadsCommandActivityResponse" },
           { "$ref": "#/$defs/RemoteThreadsStopBackgroundTaskResponse" },
           {

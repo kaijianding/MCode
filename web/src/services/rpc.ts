@@ -1484,6 +1484,10 @@ export class McodeRpcClient {
     return this.sendRpc<RemoteThreadsSendMessageResult>('threads.sendMessage', rpcParams, 60000);
   }
 
+  public async threadsToolOutput(params: { threadID: string; messageID: string; offset?: number; length?: number }): Promise<{ text: string; offset: number; totalBytes: number; eof: boolean }> {
+    return this.sendRpc('threads.toolOutput', params, 30000);
+  }
+
   public async listThreadQueue(threadID: string): Promise<RemoteThreadsQueueListResult> {
     return this.sendRpc<RemoteThreadsQueueListResult>('threads.queue.list', { threadID }, 30000);
   }

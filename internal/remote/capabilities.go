@@ -25,6 +25,7 @@ var implementedMethods = []string{
 	"threads.interrupt",
 	"threads.killRunningCommand",
 	"threads.backgroundTaskLog",
+	"threads.toolOutput",
 	"threads.commandActivity",
 	"threads.stopBackgroundTask",
 	"threads.turn.recall",

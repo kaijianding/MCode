@@ -140,16 +140,17 @@ type MediaRef struct {
 
 // Message 表示对话消息实体。
 type Message struct {
-	ID        string    `json:"id"`
-	ThreadID  string    `json:"thread_id"`
-	Seq       int64     `json:"seq"`
-	Role      string    `json:"role"`
-	Kind      string    `json:"kind"`
-	Text      string    `json:"text"`
-	TurnIndex int       `json:"turn_index"`
-	TurnID    string    `json:"turn_id"`
-	IsFinal   bool      `json:"is_final"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	ThreadID    string    `json:"thread_id"`
+	Seq         int64     `json:"seq"`
+	Role        string    `json:"role"`
+	Kind        string    `json:"kind"`
+	Text        string    `json:"text"`
+	OutputBytes int64     `json:"output_bytes,omitempty"`
+	TurnIndex   int       `json:"turn_index"`
+	TurnID      string    `json:"turn_id"`
+	IsFinal     bool      `json:"is_final"`
+	CreatedAt   time.Time `json:"created_at"`
 	// 结构化工具调用名称（仅当 role 为 tool 时出现）
 	ToolName *string `json:"tool_name,omitempty"`
 	// 结构化工具调用完整输入（按字符截断，仅当 role 为 tool 时出现）

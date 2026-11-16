@@ -17,6 +17,19 @@ import (
 	"mcode/internal/swarm"
 )
 
+func valueOrZero(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+func int64PtrUnlessZero(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
 func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
@@ -263,6 +276,7 @@ func messageToStore(threadID string, m wire.ThreadMessage) store.Message {
 		Role:            m.Role,
 		Kind:            kindStr,
 		Text:            m.Text,
+		OutputBytes:     valueOrZero(m.OutputBytes),
 		TurnIndex:       m.TurnIndex,
 		TurnID:          turnIDStr,
 		IsFinal:         isFinal,
@@ -308,6 +322,7 @@ func messageFromStore(m store.Message) wire.ThreadMessage {
 		ID:              m.ID,
 		Role:            m.Role,
 		Text:            m.Text,
+		OutputBytes:     int64PtrUnlessZero(m.OutputBytes),
 		CreatedAt:       formatTime(m.CreatedAt),
 		TurnIndex:       m.TurnIndex,
 		TurnID:          turnIDPtr,

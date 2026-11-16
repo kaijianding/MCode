@@ -87,6 +87,7 @@ type archivedMessage struct {
 	Role            string     `json:"role"`
 	Kind            string     `json:"kind"`
 	Text            string     `json:"text"`
+	OutputBytes     int64      `json:"output_bytes,omitempty"`
 	TurnIndex       int        `json:"turn_index"`
 	TurnID          string     `json:"turn_id"`
 	IsFinal         bool       `json:"is_final"`
@@ -129,6 +130,7 @@ func encodeThreadArchive(msgs []Message) ([]byte, int64, error) {
 			Role:            m.Role,
 			Kind:            m.Kind,
 			Text:            m.Text,
+			OutputBytes:     m.OutputBytes,
 			TurnIndex:       m.TurnIndex,
 			TurnID:          m.TurnID,
 			IsFinal:         m.IsFinal,
@@ -185,6 +187,7 @@ func decodeThreadArchive(threadID string, payload []byte, messageCount int) ([]M
 			Role:            a.Role,
 			Kind:            a.Kind,
 			Text:            a.Text,
+			OutputBytes:     a.OutputBytes,
 			TurnIndex:       a.TurnIndex,
 			TurnID:          a.TurnID,
 			IsFinal:         a.IsFinal,
@@ -391,8 +394,8 @@ func (s *Store) hydrateThreadTx(ctx context.Context, tx *sql.Tx, threadID string
 
 	insertQuery := `
 	INSERT INTO messages (id, thread_id, seq, role, kind, text, turn_index, turn_id, is_final, created_at, media,
-		tool_name, tool_input, tool_status, tool_completed_at, err_kind, text_encoding, text_z, tool_input_z)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		tool_name, tool_input, tool_status, tool_completed_at, err_kind, text_encoding, text_z, tool_input_z, output_bytes)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	dictID := atomic.LoadUint32(&s.zstdDictID)
 	for _, m := range msgs {
@@ -443,6 +446,7 @@ func (s *Store) hydrateThreadTx(ctx context.Context, tx *sql.Tx, threadID string
 			encoding,
 			textZ,
 			toolInputZ,
+			m.OutputBytes,
 		); err != nil {
 			return fmt.Errorf("insert hydrated message %s: %w", m.ID, err)
 		}

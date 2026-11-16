@@ -1053,6 +1053,36 @@ func (d *Dispatcher) handleSingle(ctx context.Context, c Conn, raw []byte) *wire
 		}
 		return replySuccess(wire.BackgroundTaskLogResult{Text: text, Available: available})
 
+	case "threads.toolOutput":
+		var p wire.ThreadsToolOutputParams
+		if err := decodeStrict(env.Params, &p); err != nil || !isValidUUID(p.ThreadID) || !isValidUUID(p.MessageID) || (p.Offset != nil && *p.Offset < 0) || (p.Length != nil && *p.Length < 1) {
+			return replyErr(wire.InvalidParams, "Invalid tool output params")
+		}
+		reader, ok := d.backend.(interface {
+			ThreadToolOutput(context.Context, string, string, int64, int64) (wire.ThreadsToolOutputResult, error)
+		})
+		if !ok {
+			return replyErr(wire.MethodNotFound, "Method not implemented")
+		}
+		offset, length := int64(0), int64(524288)
+		if p.Offset != nil {
+			offset = *p.Offset
+		}
+		if p.Length != nil {
+			length = *p.Length
+		}
+		if length > 524288 {
+			length = 524288
+		}
+		result, err := reader.ThreadToolOutput(ctx, p.ThreadID, p.MessageID, offset, length)
+		if errors.Is(err, store.ErrNotFound) {
+			return replyErr(wire.ErrCodeResourceNotFound, "Tool output not found")
+		}
+		if err != nil {
+			return replyWithBackendErr(err)
+		}
+		return replySuccess(result)
+
 	case "threads.commandActivity":
 		var p wire.CommandActivityParams
 		if err := decodeStrict(env.Params, &p); err != nil || !isValidUUID(p.ThreadID) {
