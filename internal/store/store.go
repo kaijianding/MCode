@@ -545,6 +545,19 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_turns_status ON turns(status);
 	`,
 	`ALTER TABLE messages ADD COLUMN output_bytes INTEGER NOT NULL DEFAULT 0;`,
+	// 一次性回填历史 bee 会话的 parent_thread_id 与 is_helper。
+	`
+	WITH refs AS (
+		SELECT json_extract(head.value, '$.threadId') AS thread_id, lead.lead_thread_id,
+		       row_number() OVER (PARTITION BY json_extract(head.value, '$.threadId') ORDER BY lead.rowid) AS rank
+		FROM hydra_leads AS lead, json_each(CASE WHEN json_valid(lead.heads_json) THEN lead.heads_json ELSE '[]' END) AS head
+		WHERE json_type(CASE WHEN json_valid(lead.heads_json) THEN lead.heads_json ELSE '[]' END) = 'array'
+		  AND head.type = 'object' AND json_type(head.value, '$.threadId') = 'text'
+	)
+	UPDATE threads SET parent_thread_id = refs.lead_thread_id, is_helper = 1
+	FROM refs WHERE refs.rank = 1 AND refs.thread_id <> '' AND threads.id = refs.thread_id
+	  AND (threads.parent_thread_id IS NULL OR threads.parent_thread_id = '')
+	`,
 }
 
 // Store 封装 SQLite 数据库操作。
@@ -864,10 +877,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	startuptrace.Mark("store ensureThreadColumns")
-
-	err := s.backfillSwarmLeadHelpers(ctx)
-	startuptrace.Mark("store backfillSwarmLeadHelpers")
-	return err
+	return nil
 }
 
 // ensureThreadColumns 修复历史迁移插入中间或多语句迁移跳过后续列导致的缺列。
@@ -907,36 +917,6 @@ func (s *Store) ensureThreadColumns(ctx context.Context) error {
 			}
 			columns[name] = true
 		}
-	}
-	return nil
-}
-
-// backfillSwarmLeadHelpers 幂等回填历史 Swarm bee 会话的 parent_thread_id 与 is_helper 标记。
-// 遍历 hydra_leads.heads_json 中的 threadId，若对应会话的 parent_thread_id 为空，
-// 则设为该行的 lead_thread_id，并把 is_helper 设为 1。
-func (s *Store) backfillSwarmLeadHelpers(ctx context.Context) error {
-	var tableCount int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'hydra_leads';").Scan(&tableCount)
-	if err != nil {
-		return fmt.Errorf("check hydra_leads table: %w", err)
-	}
-	if tableCount == 0 {
-		return nil
-	}
-
-	_, err = s.db.ExecContext(ctx, `
-		WITH refs AS (
-			SELECT json_extract(head.value, '$.threadId') AS thread_id, lead.lead_thread_id,
-			       row_number() OVER (PARTITION BY json_extract(head.value, '$.threadId') ORDER BY lead.rowid) AS rank
-			FROM hydra_leads AS lead, json_each(CASE WHEN json_valid(lead.heads_json) THEN lead.heads_json ELSE '[]' END) AS head
-			WHERE json_type(CASE WHEN json_valid(lead.heads_json) THEN lead.heads_json ELSE '[]' END) = 'array'
-			  AND head.type = 'object' AND json_type(head.value, '$.threadId') = 'text'
-		)
-		UPDATE threads SET parent_thread_id = refs.lead_thread_id, is_helper = 1
-		FROM refs WHERE refs.rank = 1 AND refs.thread_id <> '' AND threads.id = refs.thread_id
-		  AND (threads.parent_thread_id IS NULL OR threads.parent_thread_id = '')`)
-	if err != nil {
-		return fmt.Errorf("backfill swarm helper threads: %w", err)
 	}
 	return nil
 }

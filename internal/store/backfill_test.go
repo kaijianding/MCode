@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,7 +17,6 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}
-	defer s.Close()
 
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/tmp/p1"}); err != nil {
 		t.Fatalf("UpsertProject 失败: %v", err)
@@ -87,10 +87,18 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 		t.Fatalf("SaveSwarmLead 失败: %v", err)
 	}
 
-	// 执行幂等回填
-	if err := s.backfillSwarmLeadHelpers(ctx); err != nil {
-		t.Fatalf("backfillSwarmLeadHelpers 失败: %v", err)
+	// 模拟旧库：把版本退回一次性回填迁移之前，再通过 Open 触发升级。
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", len(migrations)-1)); err != nil {
+		t.Fatalf("回退 user_version 失败: %v", err)
 	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("关闭旧库失败: %v", err)
+	}
+	s, err = Open(dbPath)
+	if err != nil {
+		t.Fatalf("升级旧库失败: %v", err)
+	}
+	defer s.Close()
 
 	// 验证 bee-1 被回填
 	got1, err := s.GetThread(ctx, "bee-1")
@@ -119,15 +127,6 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 		t.Errorf("bee-3 不应被覆盖，ParentThreadID=%q", got3.ParentThreadID)
 	}
 
-	// 验证幂等性：再次调用不会报错或改变结果
-	if err := s.backfillSwarmLeadHelpers(ctx); err != nil {
-		t.Fatalf("再次执行 backfillSwarmLeadHelpers 失败: %v", err)
-	}
-	got1Again, _ := s.GetThread(ctx, "bee-1")
-	if got1Again.ParentThreadID != "lead-1" || !got1Again.IsHelper {
-		t.Errorf("再次回填后 bee-1 状态异常: %+v", got1Again)
-	}
-
 	// 验证 ListThreads 也会正确读出这两列
 	list, err := s.ListThreads(ctx, "p1", false)
 	if err != nil {
@@ -149,11 +148,11 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 
 func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "backfill_duplicate.db"))
+	dbPath := filepath.Join(t.TempDir(), "backfill_duplicate.db")
+	s, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
 	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "p", Path: "/p"}); err != nil {
 		t.Fatal(err)
 	}
@@ -171,9 +170,17 @@ func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.backfillSwarmLeadHelpers(ctx); err != nil {
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", len(migrations)-1)); err != nil {
+		t.Fatalf("回退 user_version 失败: %v", err)
+	}
+	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
+	s, err = Open(dbPath)
+	if err != nil {
+		t.Fatalf("升级旧库失败: %v", err)
+	}
+	defer s.Close()
 	bee, err := s.GetThread(ctx, "bee")
 	if err != nil {
 		t.Fatal(err)
@@ -187,5 +194,44 @@ func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
 	}
 	if untouched.ParentThreadID != "" || untouched.IsHelper {
 		t.Fatalf("untouched: %+v", untouched)
+	}
+}
+
+// TestBackfillSwarmLeadHelpersRunsOnce 验证新库不会在后续启动重复回填新写入的数据。
+func TestBackfillSwarmLeadHelpersRunsOnce(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "backfill_once.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "p", Path: "/p"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateThread(ctx, Thread{ID: "bee", ProjectID: "p", Title: "bee", Provider: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSwarmLead(ctx, SwarmLeadRecord{
+		LeadThreadID: "lead",
+		ProjectID:    "p",
+		BeesJSON:     `[{"threadId":"bee"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	bee, err := s.GetThread(ctx, "bee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bee.ParentThreadID != "" || bee.IsHelper {
+		t.Fatalf("新库重启后不应回填 bee: %+v", bee)
 	}
 }
