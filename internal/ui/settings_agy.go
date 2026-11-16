@@ -1297,12 +1297,6 @@ func renderAgyRoutingNote(c *ui.Context, key string, lines ...string) {
 		})
 }
 
-// agyRoutingSections 返回「账号调度」展开后的分节。两个图标选择器各有六个 64×44 方块，
-// 放不进行内右侧控件列，所以各自成节、标题由分节承载；两个开关连成一张「调度」卡。
-func agyRoutingSections() []settingsSection {
-	return []settingsSection{agyStrategySection, agyAffinitySection, agyRoutingSection}
-}
-
 // agyStrategySection 是调度策略分节。
 var agyStrategySection = settingsSection{
 	ID:    "sec-agy-strategy",
@@ -1610,14 +1604,6 @@ func renderAgyProviderSheetSections(c *ui.Context, st *SettingsState) {
 	for _, def := range agyProviderSheetSections(st) {
 		def.Render(c, st)
 	}
-}
-
-// renderAgyDispatchContent 渲染「账号调度」展开后的内容。
-func renderAgyDispatchContent(c *ui.Context, st *SettingsState) {
-	for _, sec := range agyRoutingSections() {
-		renderSettingsTreeSection(c, st, sec, true)
-	}
-	renderSettingsTreeSection(c, st, agyTerminalLoginSection, true)
 }
 
 // agyTerminalLoginSection 是终端登录（备用）分节：整块内容，按钮自己写着文案。
