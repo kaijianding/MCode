@@ -609,7 +609,8 @@ func beeReportRulesFor(cfg BeeConfig) string {
 	var first string
 	switch {
 	case cfg.ReadOnly:
-		first = "- 汇报只写一次，按 brief 的问题编号逐条作答：每条先写结论，再给对应的引用，不要整段转述源码。"
+		// 1000 字的阈值是为了让结论与阻塞留在 ReportSummaryLimit（1500）以内。
+		first = "- 汇报只写一次：开头先用不超过 1000 字按 brief 的问题编号写出各条结论，以及阻塞与环境差异（如副本缺文件、命令无法运行）；之后再逐条给出对应的引用，不要整段转述源码。"
 	case len(cfg.WritePaths) > 0:
 		// 1000 字的阈值是为了让汇报留在 ReportSummaryLimit（1500）以内。
 		first = "- 汇报只写一次：先写根因，再写编号步骤，每步给出位置、改法和验收标准。汇报正文超过约 1000 字时，把完整方案写进允许写入的路径，汇报里只留根因、各步标题和该文件路径。"

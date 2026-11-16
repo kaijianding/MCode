@@ -415,8 +415,11 @@ func TestBeePrompt_RulesByTier(t *testing.T) {
 			t.Errorf("只读类不应包含 %q:\n%s", bad, readOnly)
 		}
 	}
-	if !strings.Contains(readOnly, "按 brief 的问题编号逐条作答") {
-		t.Errorf("只读类汇报应按问题编号作答:\n%s", readOnly)
+	if !strings.Contains(readOnly, "开头先用不超过 1000 字按 brief 的问题编号写出各条结论") {
+		t.Errorf("只读类汇报应先写结论:\n%s", readOnly)
+	}
+	if !strings.Contains(readOnly, "阻塞与环境差异") {
+		t.Errorf("只读类汇报应包含阻塞与环境差异:\n%s", readOnly)
 	}
 
 	for _, want := range []string{"docs/plans/**、notes/*.md", "不改代码", "先写根因"} {
