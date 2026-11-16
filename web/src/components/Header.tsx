@@ -42,6 +42,7 @@ import { AboutSection } from './settings/AboutSection';
 import { MemoryProposalSettingsRowView } from './settings/MemoryProposalSettingsRowView';
 import { AttentionSettingsRowView } from './settings/AttentionSettingsRowView';
 import { SETTINGS_ITEMS } from './settings/settingsIndex';
+import { CONNECTION_NOTICE_DELAY_MS, connectionNoticeText } from './connectionNotice';
 
 // 子代理档位抽屉只在设置里手动打开，体积不小，改为按需加载。
 const SwarmTiersSheet = React.lazy(() =>
@@ -233,6 +234,41 @@ export const Header: React.FC<HeaderProps> = ({
   const [deviceRenameError, setDeviceRenameError] = useState<string | null>(null);
 
   const delayedStatus = useDelayedConnectionStatus(connectionState, isSyncing);
+  const lastConnectedAt = useRef<number | null>(null);
+  const previousConnectionState = useRef<string | null>(null);
+  const [interruptedSince, setInterruptedSince] = useState<number | null>(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [, setNoticeReady] = useState(false);
+
+  useEffect(() => {
+    const interrupted = connectionState === 'reconnecting' || connectionState === 'disconnected';
+    const wasInterrupted = previousConnectionState.current === 'reconnecting' || previousConnectionState.current === 'disconnected';
+    if (previousConnectionState.current === 'connected' && connectionState !== 'connected') {
+      lastConnectedAt.current = Date.now();
+    }
+    previousConnectionState.current = connectionState;
+    if (interrupted && !wasInterrupted) setInterruptedSince(Date.now());
+    else if (!interrupted) setInterruptedSince(null);
+  }, [connectionState]);
+
+  useEffect(() => {
+    if (interruptedSince === null) return;
+    setNoticeReady(false);
+    const timer = window.setTimeout(() => setNoticeReady(true), Math.max(0, interruptedSince + CONNECTION_NOTICE_DELAY_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [interruptedSince]);
+
+  useEffect(() => {
+    const updateOnline = () => setOnline(navigator.onLine);
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOnline);
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOnline);
+    };
+  }, []);
+
+  const noticeText = connectionNoticeText(connectionState, online, interruptedSince, lastConnectedAt.current, Date.now());
 
   const listedThreadCount = useMemo(() => threads.filter(isListedThread).length, [threads]);
 
@@ -552,15 +588,16 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={delayedStatus.state === 'reconnecting' || delayedStatus.state === 'disconnected' ? reconnect : undefined}
-                className="icon-button animate-fadeIn"
-                aria-label={delayedStatus.isSyncing ? '同步中' : connectionCopy[delayedStatus.state] ?? '连接状态'}
-                title={delayedStatus.state === 'reconnecting' ? '立即重连' : (delayedStatus.isSyncing ? '同步中' : connectionCopy[delayedStatus.state])}
+                className={`${noticeText ? 'connection-capsule status-danger' : 'icon-button'} animate-fadeIn motion-reduce:animate-none`}
+                aria-label={noticeText ?? (delayedStatus.isSyncing ? '同步中' : connectionCopy[delayedStatus.state] ?? '连接状态')}
+                title={noticeText ?? (delayedStatus.state === 'reconnecting' ? '立即重连' : (delayedStatus.isSyncing ? '同步中' : connectionCopy[delayedStatus.state]))}
               >
                 {delayedStatus.isSyncing || delayedStatus.state === 'connecting' || delayedStatus.state === 'reconnecting' ? (
                   <span className="loading-spinner loading-spinner--small" />
                 ) : (
                   <span className="h-2.5 w-2.5 rounded-full bg-danger shrink-0" />
                 )}
+                {noticeText && <span className="truncate">{noticeText}</span>}
               </button>
             )}
             <div ref={actionsSlotRef} className="contents" />
