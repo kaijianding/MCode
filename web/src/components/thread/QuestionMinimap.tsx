@@ -1,3 +1,4 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 提问导航轨：贴在时间线右缘的迷你地图，每条用户提问一根刻度，宽屏悬停出预览卡、点击跳转，
 // 触屏点轨道弹出可滚动的提问列表。刻度布局、当前项高亮与「+N」折叠照桌面端
 // internal/ui/timeline_minimap.go（minimapMinEntries = 4 少于 4 条不显示；刻度高 3、宽 8…20，
@@ -322,13 +323,7 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
       {listOpen &&
         typeof document !== 'undefined' &&
         createPortal(
-          <div
-            className="sheet-layer"
-            onClick={(event) => {
-              if (event.target === event.currentTarget) setListOpen(false);
-            }}
-          >
-            <div className="settings-sheet" role="dialog" aria-modal="true" aria-label="提问列表">
+          <SheetFrame onRequestClose={() => setListOpen(false)} size="bare" cardClassName="settings-sheet" ariaLabel="提问列表">
               <div className="sheet-handle" />
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-footnote font-semibold text-foreground">提问列表</div>
@@ -380,8 +375,7 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
                   );
                 })}
               </ul>
-            </div>
-          </div>,
+          </SheetFrame>,
           document.body
         )}
     </>

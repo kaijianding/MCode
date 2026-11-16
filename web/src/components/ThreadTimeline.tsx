@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 import { useCommandActivity } from '../hooks/useCommandActivity';
 import { CommandActivityView } from './timeline/CommandActivityView';
 import type { CommandActivityState } from '../utils/commandActivity';
@@ -1608,24 +1609,8 @@ const MessageActionSheet: React.FC<MessageActionSheetProps> = ({ title, items, o
   const handleRef = React.useRef<HTMLDivElement | null>(null);
   useSheetDrag(sheetRef, handleRef, onClose, true);
 
-  React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   return createPortal(
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        ref={sheetRef}
-        className="thread-action-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="message-actions-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="menu" cardRef={sheetRef} labelledBy="message-actions-title">
         <div ref={handleRef} className="sheet-handle" aria-hidden="true" />
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1651,8 +1636,7 @@ const MessageActionSheet: React.FC<MessageActionSheetProps> = ({ title, items, o
             </button>
           ))}
         </div>
-      </section>
-    </div>,
+    </SheetFrame>,
     document.body
   );
 };

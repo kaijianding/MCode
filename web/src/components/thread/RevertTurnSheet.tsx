@@ -1,3 +1,4 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 撤销此轮改动：先预览这一轮会还原哪些文件、哪些文件因为之后又被改过而保留，确认后才落盘。
 // 对应桌面端 internal/ui/revert_dialog.go（openRevertPreview / confirmRevert）。
 
@@ -94,16 +95,6 @@ export const RevertTurnSheet: React.FC<RevertTurnSheetProps> = ({
     onClose();
   }, [executing, onClose]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      requestClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, requestClose]);
-
   const handleApply = useCallback(async () => {
     if (executing || !preview || isRunning || preview.restorableCount === 0) return;
     setExecuting(true);
@@ -133,14 +124,7 @@ export const RevertTurnSheet: React.FC<RevertTurnSheetProps> = ({
   const nothingToRevert = Boolean(preview && preview.restorableCount === 0);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={requestClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="revert-sheet-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={requestClose} size="panel" labelledBy="revert-sheet-title">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         <div className="flex shrink-0 items-start justify-between gap-3 min-w-0 w-full mb-3">
@@ -290,7 +274,6 @@ export const RevertTurnSheet: React.FC<RevertTurnSheetProps> = ({
             </button>
           )}
         </div>
-      </section>
-    </div>
+    </SheetFrame>
   );
 };

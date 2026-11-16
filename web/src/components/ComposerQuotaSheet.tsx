@@ -1,3 +1,4 @@
+import { SheetFrame } from './sheet/SheetFrame';
 // 移动端输入框额度详情底部弹层组件（点击额度条中某个 provider 组打开）
 
 import React, { useEffect, useState } from 'react';
@@ -205,16 +206,6 @@ export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
     setShowRemaining(false);
   }, [isOpen, provider]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen || !provider) return null;
 
   const providerBudgets = budgets.filter((budget) => budget.provider === provider);
@@ -246,14 +237,7 @@ export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
     : quotaGroupCountdown(providerBudgets, now);
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-x-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${providerName} 额度`}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel={`${providerName} 额度`}>
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         {/* 标题栏：彩色图标 + 供应商名 + 套餐 + 刷新 */}
@@ -422,8 +406,7 @@ export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
             )}
           </div>
         </div>
-      </section>
-    </div>
+    </SheetFrame>
   );
 };
 

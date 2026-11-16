@@ -1,3 +1,4 @@
+import { SheetFrame, SHEET_LAYER_CLASS } from './sheet/SheetFrame';
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -923,18 +924,6 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   }, [isSavingTiers, setBeeTiersRpc, threadID, tierDraft]);
 
   const tierDirty = serializeBeeTiers(tierDraft) !== tierBaseline;
-
-  // Esc 关闭底部弹层，与点击遮罩关闭等价
-  useEffect(() => {
-    if (!activeSheet) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      setActiveSheet(null);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeSheet]);
 
   // 补全状态：@ 文件（异步搜索）、/ 命令与 # 模型（本地过滤）共用一个弹层
   const [triggerInfo, setTriggerInfo] = useState<TriggerQueryInfo | null>(null);
@@ -2006,16 +1995,15 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
 
       {/* Pill selection bottom sheets */}
       {activeSheet && (
-        <div
-          className={`sheet-layer${activeSheet === 'model-effort' && popoverAnchor ? ' sheet-layer--popover' : ''}`}
-          role="presentation"
-          onMouseDown={() => setActiveSheet(null)}
-        >
-          <section
-            className={`settings-sheet${activeSheet === 'model-effort' ? ' model-sheet' : ''}${
+        <SheetFrame
+            onRequestClose={() => setActiveSheet(null)}
+            closeOnEscape={false}
+            size="bare"
+            layerClassName={activeSheet === 'model-effort' && popoverAnchor ? `${SHEET_LAYER_CLASS}--popover` : undefined}
+            cardClassName={`settings-sheet${activeSheet === 'model-effort' ? ' model-sheet' : ''}${
               activeSheet === 'model-effort' && popoverAnchor ? ' model-popover' : ''
             }`}
-            style={
+            cardStyle={
               activeSheet === 'model-effort' && popoverAnchor
                 ? {
                     left: popoverAnchor.left,
@@ -2025,9 +2013,6 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
                   }
                 : undefined
             }
-            role="dialog"
-            aria-modal="true"
-            onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-center justify-between gap-3 mb-3">
@@ -2492,8 +2477,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
                 ))}
             </div>
             )}
-          </section>
-        </div>
+        </SheetFrame>
       )}
     </div>
   );

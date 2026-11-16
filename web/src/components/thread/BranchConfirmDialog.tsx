@@ -1,3 +1,4 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 从回复分支确认弹窗：把到指定回复为止的对话带入一个新会话
 
 import React from 'react';
@@ -18,23 +19,16 @@ export const BranchConfirmDialog = React.memo(function BranchConfirmDialog({
   handleConfirmBranch
 }: BranchConfirmDialogProps) {
   return (
-    <div
-      className="sheet-layer"
-      role="presentation"
-      onMouseDown={() => {
+    <SheetFrame
+      size="menu"
+      labelledBy="branch-confirm-title"
+      onRequestClose={() => {
         if (!isBranching) {
           setBranchConfirmMessageID(null);
           setBranchError(null);
         }
       }}
     >
-      <section
-        className="thread-action-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="branch-confirm-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
         <div className="sheet-handle" aria-hidden="true" />
         <div className="space-y-2">
           <h2 id="branch-confirm-title" className="sheet-title">
@@ -70,7 +64,6 @@ export const BranchConfirmDialog = React.memo(function BranchConfirmDialog({
             取消
           </button>
         </div>
-      </section>
-    </div>
+    </SheetFrame>
   );
 });

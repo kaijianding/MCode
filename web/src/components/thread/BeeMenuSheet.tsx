@@ -1,5 +1,6 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 子代理页「…」菜单：返回主会话、停止子代理、沿用改动续做、审阅待合并改动、复制会话链接。
-// 外层结构与 thread/ThreadMenuSheet.tsx 保持一致（sheet-layer + thread-action-sheet）。
+// 外层结构与 thread/ThreadMenuSheet.tsx 保持一致。
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronRightIcon, XMarkIcon } from '../Icons';
@@ -59,15 +60,6 @@ export const BeeMenuSheet: React.FC<BeeMenuSheetProps> = ({
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   // 复制当前子代理会话的分享链接（应用内 hash 路由）
   const handleCopyLink = useCallback(async () => {
     const link = `${window.location.origin}${window.location.pathname}#/t/${encodeURIComponent(threadID)}`;
@@ -98,14 +90,7 @@ export const BeeMenuSheet: React.FC<BeeMenuSheetProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="thread-action-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bee-actions-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={onClose} size="menu" labelledBy="bee-actions-title">
         <div className="sheet-handle" aria-hidden="true" />
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -182,7 +167,6 @@ export const BeeMenuSheet: React.FC<BeeMenuSheetProps> = ({
             {copyNotice.text}
           </p>
         )}
-      </section>
-    </div>
+    </SheetFrame>
   );
 };

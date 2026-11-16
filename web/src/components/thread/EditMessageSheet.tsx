@@ -1,3 +1,4 @@
+import { SheetFrame } from '../sheet/SheetFrame';
 // 编辑用户消息后重发：预填原文，确认后由调用方分支/新建会话再发送改后的文本。
 // 发送失败时输入框里的文本保持不动（对应桌面 internal/ui/timeline_menu.go:321 submitInlineEdit）。
 
@@ -36,16 +37,6 @@ export const EditMessageSheet: React.FC<EditMessageSheetProps> = ({
     onClose();
   }, [onClose, submitting]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      requestClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, requestClose]);
-
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     const trimmed = text.trim();
@@ -67,14 +58,7 @@ export const EditMessageSheet: React.FC<EditMessageSheetProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="sheet-layer" role="presentation" onMouseDown={requestClose}>
-      <section
-        className="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-message-sheet-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetFrame onRequestClose={requestClose} size="panel" labelledBy="edit-message-sheet-title">
         <div className="sheet-handle shrink-0" aria-hidden="true" />
 
         <div className="flex shrink-0 items-start justify-between gap-3 min-w-0 w-full mb-3">
@@ -140,7 +124,6 @@ export const EditMessageSheet: React.FC<EditMessageSheetProps> = ({
             {submitting ? '发送中…' : '保存并发送'}
           </button>
         </div>
-      </section>
-    </div>
+    </SheetFrame>
   );
 };
