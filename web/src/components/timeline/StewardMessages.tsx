@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ThreadMessage } from '../ThreadTimeline';
+import type { ThreadMessage } from './projection';
 import type { TaskItem } from '../../types/contract';
 import { StewardTaskCard } from './StewardTaskCard';
 

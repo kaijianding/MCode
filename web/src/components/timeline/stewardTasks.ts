@@ -1,5 +1,5 @@
 import type { TaskItem } from '../../types/contract';
-import type { TimelineItem } from '../ThreadTimeline';
+import type { TimelineItem } from './projection';
 
 export interface StewardTurnTasks {
   created: TaskItem[];

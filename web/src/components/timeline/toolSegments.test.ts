@@ -1,4 +1,4 @@
-import type { ThreadMessage } from '../ThreadTimeline';
+import type { ThreadMessage } from './projection';
 import { buildToolSegments } from './toolSegments';
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {

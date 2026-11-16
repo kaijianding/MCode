@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronDownIcon, ChevronRightIcon, DocumentTextIcon } from '../Icons';
-import type { ThreadMessage } from '../ThreadTimeline';
+import type { ThreadMessage } from './projection';
 import { ToolEntryDiff, isFileEditToolName, parseToolEditDiff } from './ToolEntryDiff';
 import type { ToolDiffFile, ToolDiffLine } from './ToolEntryDiff';
 

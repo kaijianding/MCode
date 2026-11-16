@@ -1,4 +1,4 @@
-import type { ThreadMessage } from '../ThreadTimeline';
+import type { ThreadMessage } from './projection';
 
 /**
  * 回合内活动段的纯函数：与桌面端 internal/ui/timeline_rows.go 的分段规则一一对应。

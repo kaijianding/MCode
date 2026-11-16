@@ -1,5 +1,5 @@
 import type { TaskItem } from '../../types/contract';
-import type { TimelineItem, ThreadMessage } from '../ThreadTimeline';
+import type { TimelineItem, ThreadMessage } from './projection';
 import { stewardTasksByTurnEnd } from './stewardTasks';
 
 function assertEqual(actual: unknown, expected: unknown): void {
