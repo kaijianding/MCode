@@ -24,6 +24,11 @@ const TICK_MAX_WIDTH = 16;
 const TICK_WEIGHT_LENGTH = 420;
 const PREVIEW_BODY_RUNES = 160;
 
+export function nearestTickIndex(y: number, positions: readonly number[]): number {
+  return positions.reduce((best, position, index) =>
+    best < 0 || Math.abs(position - y) < Math.abs(positions[best] - y) ? index : best, -1);
+}
+
 export interface QuestionMinimapEntry {
   messageID: string;
   /** 该提问在 messages 里的下标，用来按滚动位置判断当前提问 */
@@ -136,6 +141,8 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
   const entries = data.entries;
   const canHover = useHoverCapable();
   const frameRef = React.useRef<HTMLDivElement | null>(null);
+  const dragRef = React.useRef<{ pointerID: number; startY: number; lastID: string | null; moved: boolean } | null>(null);
+  const suppressClickRef = React.useRef(false);
   const [available, setAvailable] = React.useState(RAIL_BUDGET);
   const [hovered, setHovered] = React.useState<number | null>(null);
   const [activeID, setActiveID] = React.useState<string | null>(null);
@@ -256,7 +263,7 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
             aria-label={label}
             title={isPlus ? `更早的 ${row.plus} 条提问` : row.entry.text}
             onMouseEnter={() => setHovered(rowIndex)}
-            onMouseLeave={() => setHovered((previous) => (previous === rowIndex ? null : previous))}
+            onMouseLeave={() => { if (!dragRef.current) setHovered((previous) => (previous === rowIndex ? null : previous)); }}
             onFocus={() => setHovered(rowIndex)}
             onBlur={() => setHovered((previous) => (previous === rowIndex ? null : previous))}
             onClick={() => jump(row.entry.messageID)}
@@ -269,7 +276,12 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
             ) : (
               tick
             )}
-            {isHovered && !isPlus && (
+
+          </button>
+        ) : (
+          <span className="flex h-full w-5 items-center justify-end">{isPlus ? null : tick}</span>
+        )}
+        {isHovered && !isPlus && (
               <div className="pointer-events-none absolute right-full top-1/2 z-30 mr-2 w-[260px] -translate-y-1/2 rounded-xl border border-border bg-card px-3 py-2 text-left shadow-xl">
                 <div className="flex items-baseline gap-2">
                   <span className="shrink-0 text-mc-caption text-muted">#{row.entry.ordinal}</span>
@@ -283,10 +295,6 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
                 )}
               </div>
             )}
-          </button>
-        ) : (
-          <span className="flex h-full w-5 items-center justify-end">{isPlus ? null : tick}</span>
-        )}
       </div>
     );
   });
@@ -306,7 +314,50 @@ export const QuestionMinimap: React.FC<QuestionMinimapProps> = ({ data, containe
           aria-label="提问导航"
           data-question-minimap="true"
           className="pointer-events-auto relative w-5"
-          style={{ height: railHeight }}
+          style={{ height: railHeight, touchAction: 'none' }}
+          onPointerDown={(event) => {
+            if (!event.isPrimary || event.button !== 0) return;
+            suppressClickRef.current = false;
+            dragRef.current = { pointerID: event.pointerId, startY: event.clientY, lastID: null, moved: false };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerID !== event.pointerId || (!drag.moved && event.clientY === drag.startY)) return;
+            drag.moved = true;
+            const top = event.currentTarget.getBoundingClientRect().top;
+            const index = nearestTickIndex(event.clientY, plan.rows.map((_, i) => top + (i + 0.5) * rowHeight));
+            const row = plan.rows[index];
+            if (!row) return;
+            setHovered(index);
+            if (row.entry.messageID !== drag.lastID) {
+              drag.lastID = row.entry.messageID;
+              jump(row.entry.messageID);
+            }
+          }}
+          onPointerUp={(event) => {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerID !== event.pointerId) return;
+            dragRef.current = null;
+            suppressClickRef.current = true;
+            if (drag.moved) {
+              setHovered(null);
+            } else if (canHover) {
+              const top = event.currentTarget.getBoundingClientRect().top;
+              const index = nearestTickIndex(event.clientY, plan.rows.map((_, i) => top + (i + 0.5) * rowHeight));
+              const row = plan.rows[index];
+              if (row) jump(row.entry.messageID);
+            } else {
+              setListOpen(true);
+            }
+          }}
+          onPointerCancel={() => { dragRef.current = null; setHovered(null); }}
+          onClickCapture={(event) => {
+            if (event.detail !== 0 && suppressClickRef.current) {
+              suppressClickRef.current = false;
+              event.stopPropagation();
+            }
+          }}
         >
           {rows}
           {!canHover && (
