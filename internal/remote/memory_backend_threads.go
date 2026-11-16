@@ -180,14 +180,14 @@ func (b *MemoryBackend) ListThreads(ctx context.Context, params wire.ThreadListP
 
 	var candidates []threadSortItem
 	for _, t := range b.threads {
-		s := b.summaryForPublishLocked(t)
-		if params.ProjectID != nil && *params.ProjectID != "" && s.ProjectID != *params.ProjectID {
+		if params.ProjectID != nil && *params.ProjectID != "" && t.summary.ProjectID != *params.ProjectID {
 			continue
 		}
 		includeArchived := params.IncludeArchived != nil && *params.IncludeArchived
-		if !includeArchived && s.IsArchived {
+		if !includeArchived && t.summary.IsArchived {
 			continue
 		}
+		s := b.summaryForPublishLocked(t)
 		if b.swarmEnabledFor != nil {
 			s.SwarmEnabled = b.swarmEnabledFor(s.ID)
 		}

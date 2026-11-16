@@ -474,6 +474,42 @@ func TestMemoryBackend_BasicOperations(t *testing.T) {
 	}
 }
 
+func TestListThreadsOnlySummarizesMatchingThreads(t *testing.T) {
+	ctx := context.Background()
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	backend.AddThread(wire.ThreadSummary{ID: "match", ProjectID: "project-a"}, nil)
+	backend.AddThread(wire.ThreadSummary{ID: "match-archived", ProjectID: "project-a", IsArchived: true}, nil)
+	backend.AddThread(wire.ThreadSummary{ID: "other", ProjectID: "project-b"}, nil)
+	backend.AddThread(wire.ThreadSummary{ID: "other-archived", ProjectID: "project-b", IsArchived: true}, nil)
+	backend.AddThread(wire.ThreadSummary{ID: "helper", ProjectID: "project-a"}, nil)
+	backend.SetThreadRelation("helper", "match", true)
+
+	var called []string
+	backend.SetSwarmBusy(func(threadID string) bool {
+		called = append(called, threadID)
+		return false
+	})
+
+	list, err := backend.ListThreads(ctx, wire.ThreadListParams{ProjectID: stringPtr("project-a")})
+	if err != nil {
+		t.Fatalf("ListThreads failed: %v", err)
+	}
+	gotIDs := make(map[string]bool, len(list.Threads))
+	for _, thread := range list.Threads {
+		gotIDs[thread.ID] = true
+	}
+	if len(list.Threads) != 2 || !gotIDs["match"] || !gotIDs["helper"] {
+		t.Fatalf("unexpected threads: %+v", list.Threads)
+	}
+	if len(called) != 1 || called[0] != "match" {
+		t.Fatalf("swarm busy hook called for %v, want [match]", called)
+	}
+}
+
 type mockHarness struct {
 	mu        sync.Mutex
 	kind      harness.Kind
