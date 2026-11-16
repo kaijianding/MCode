@@ -1420,18 +1420,21 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 		return fmt.Errorf("agy did not apply %s %s", name, value)
 	}
 	if turn.Model != "" && turn.Model != "default" {
-		modelID := ""
+		modelID, current := "", ""
 		for _, option := range options {
 			if option["id"] == "model" || option["category"] == "model" {
 				modelID, _ = option["id"].(string)
+				current, _ = option["currentValue"].(string)
 				break
 			}
 		}
 		if modelID == "" {
 			return fmt.Errorf("agy did not apply model %s", turn.Model)
 		}
-		if err := apply(modelID, turn.Model, "model"); err != nil {
-			return err
+		if current != turn.Model {
+			if err := apply(modelID, turn.Model, "model"); err != nil {
+				return err
+			}
 		}
 	}
 	if turn.Effort != "" {

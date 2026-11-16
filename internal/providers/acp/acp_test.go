@@ -987,6 +987,16 @@ func TestACPPromptUsage(t *testing.T) {
 	}
 }
 
+func TestACPAgySkipsUnchangedModel(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_agy", AgentAgy, harness.Turn{Model: "old", Effort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config := featureParams(messages, "session/set_config_option"); len(config) != 0 {
+		t.Fatal(config)
+	}
+}
+
 func TestACPAgyModeAndModel(t *testing.T) {
 	for _, tc := range []struct {
 		name                string
