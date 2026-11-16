@@ -2895,6 +2895,11 @@
           "minimum": 0,
           "description": "当前模型的上下文窗口上限（tokens），优先使用 CLI 上报值，否则回退模型目录；缺失或为 0 表示未知"
         },
+        "aiDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "该会话已完成回合的 AI 用时总和（毫秒）"
+        },
         "lastTurnCostUSD": {
           "type": "number",
           "minimum": 0,

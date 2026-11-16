@@ -120,6 +120,7 @@ const (
 
 type memoryThread struct {
 	summary       wire.ThreadSummary
+	aiDuration    time.Duration
 	sortOrder     int64
 	queueRevision int
 	followUps     []wire.FollowUp
@@ -507,6 +508,7 @@ func (b *MemoryBackend) stewardLocked(td *memoryThread) bool {
 // 调用方需持有 b.mu。
 func (b *MemoryBackend) summaryForPublishLocked(td *memoryThread) wire.ThreadSummary {
 	s := td.summary
+	s.AIDurationMs = td.aiDuration.Milliseconds()
 	// 有执行轮次或前台正在处理消息时报告运行中；否则纠正异常收尾残留的标记。
 	if td.runTurnID != "" || td.runCancel != nil || td.stewardBusy {
 		s.IsRunning = true

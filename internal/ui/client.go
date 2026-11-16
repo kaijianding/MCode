@@ -134,8 +134,11 @@ type Thread struct {
 	SwarmBusy bool
 	// BackgroundTasks 是回合结束后仍需等待的后台任务数（provider 托管的后台任务，
 	// 以及会话空闲时仍 running 的命令）；子智能体不计入，由 SwarmBusy 表达。
-	BackgroundTasks int
-	UpdatedAt       time.Time
+	BackgroundTasks   int
+	UpdatedAt         time.Time
+	AIDuration        time.Duration
+	ContextUsedTokens int64
+	ContextWindow     int64
 
 	// LastUserMessageAt 是用户最后一次发消息的时间：侧边栏排序以它为准，助手回复、
 	// 改名等只改 UpdatedAt 的操作不应把会话顶到前面。零值表示未知。

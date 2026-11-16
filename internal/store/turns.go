@@ -213,6 +213,38 @@ func (s *Store) ListTurns(ctx context.Context, threadID string) ([]Turn, error) 
 	return turns, nil
 }
 
+// shortcut: 孤儿回合按最后活动时间估算用时，需要精确时长时改为排除 interrupted 收尾的回合。
+// ListAllTurnDurations 按会话累加已完成回合的实际用时。
+func (s *Store) ListAllTurnDurations(ctx context.Context) (map[string]time.Duration, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT thread_id, started_at, completed_at FROM turns WHERE completed_at IS NOT NULL AND completed_at <> ''`)
+	if err != nil {
+		return nil, fmt.Errorf("list all turn durations: %w", err)
+	}
+	defer rows.Close()
+	durations := make(map[string]time.Duration)
+	for rows.Next() {
+		var threadID, startedAtStr, completedAtStr string
+		if err := rows.Scan(&threadID, &startedAtStr, &completedAtStr); err != nil {
+			return nil, fmt.Errorf("scan turn duration: %w", err)
+		}
+		startedAt, err := parseTime(startedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse turn started_at: %w", err)
+		}
+		completedAt, err := parseTime(completedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse turn completed_at: %w", err)
+		}
+		if completedAt.After(startedAt) {
+			durations[threadID] += completedAt.Sub(startedAt)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate turn durations: %w", err)
+	}
+	return durations, nil
+}
+
 // ListRecentTurns 取指定线程最近 limit 轮记录，结果仍按 turn_index 升序排列。
 func (s *Store) ListRecentTurns(ctx context.Context, threadID string, limit int) ([]Turn, error) {
 	if limit <= 0 {

@@ -489,6 +489,14 @@ func (b *MemoryBackend) AttachStore(ctx context.Context, s *store.Store) error {
 	// 只由主宿主收尾为 interrupted，非主宿主不能把其他进程的活跃轮次视为残留。
 	b.finalizeOrphanTurns(ctx, s, loadedThreads)
 	startuptrace.Mark("AttachStore finalizeOrphanTurns")
+	// 孤儿回合收尾后再汇总，确保内存与落库的结束时间一致。
+	allDurations, durationsErr := s.ListAllTurnDurations(ctx)
+	if durationsErr != nil {
+		log.Printf("store list all turn durations error: %v", durationsErr)
+	}
+	for id, td := range loadedThreads {
+		td.aiDuration = allDurations[id]
+	}
 
 	// 排队审计事件只保留 30 天；启动清理失败不影响加载。
 	pruneCtx, pruneCancel := persistCtx()

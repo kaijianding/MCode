@@ -561,6 +561,7 @@ export type RemoteThreadSummary = {
   persona?: string;
   contextUsedTokens?: number;
   contextWindow?: number;
+  aiDurationMs?: number;
   lastTurnCostUSD?: number;
   fastMode: boolean;
   worktreeRequested: boolean;

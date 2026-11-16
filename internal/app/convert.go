@@ -87,6 +87,9 @@ func ThreadSummaryToUI(s wire.ThreadSummary) mcodeui.Thread {
 		LastStatus:        derefString(s.LastStatus),
 		HasPendingRequest: s.HasPendingRequest,
 		UpdatedAt:         parseRFC3339Nano(s.UpdatedAt),
+		AIDuration:        time.Duration(s.AIDurationMs) * time.Millisecond,
+		ContextUsedTokens: s.ContextUsedTokens,
+		ContextWindow:     s.ContextWindow,
 		// 侧边栏按用户最后发消息时间排序，缺失时留零值由 UI 侧回退到 UpdatedAt。
 		LastUserMessageAt: parseRFC3339Nano(derefString(s.LastUserMessageAt)),
 

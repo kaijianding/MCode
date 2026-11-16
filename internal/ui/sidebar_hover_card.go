@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func (st *sidebarHoverState) observe(ctx *ui.Context, now time.Time, threadID, p
 }
 
 // renderSidebarHoverCard 渲染会话行的悬停信息卡。
-// 只读展示 Thread 现有字段，不新增后端接口；卡片外壳用 ui.PopoverBase（禁 ui.Popover）。
+// 只读展示 Thread 摘要字段；卡片外壳用 ui.PopoverBase（禁 ui.Popover）。
 func renderSidebarHoverCard(c *ui.Context, s *chatState, row ui.Element, hovered bool, o sidebarThreadRowOptions, thVal Thread) {
 	if s == nil || thVal.ID == "" {
 		return
@@ -140,7 +141,7 @@ func renderSidebarHoverCard(c *ui.Context, s *chatState, row ui.Element, hovered
 }
 
 // renderSidebarHoverCardBody 渲染卡片内容：标题、派生来源、项目、分支、worktree、
-// 供应商与模型、状态、最近活动。没有数据源的字段（如改动行数）不展示。
+// 供应商与模型、状态、AI 用时、上下文、最近活动。没有数据源的字段不展示。
 func renderSidebarHoverCardBody(c *ui.Context, s *chatState, thVal Thread) {
 	title := thVal.Title
 	if title == "" {
@@ -202,6 +203,13 @@ func renderSidebarHoverCardBody(c *ui.Context, s *chatState, thVal Thread) {
 		StatusDot(c, nil, dot, status)
 		ui.Text(c, status).FontSize(sidebarFont(FontSizeCallout)).TextColor(ThemePrimaryText(c)).SingleLine()
 	})
+	if thVal.AIDuration > 0 {
+		hoverCardField(c, "hover-card-ai-duration-"+thVal.ID, "AI 用时", formatLiveStatsDuration(thVal.AIDuration))
+	}
+	if thVal.ContextWindow > 0 && thVal.ContextUsedTokens > 0 {
+		pct := int(math.Round(contextUsagePercent(thVal.ContextUsedTokens, thVal.ContextWindow)))
+		hoverCardField(c, "hover-card-context-"+thVal.ID, "上下文", formatTokenCount(thVal.ContextUsedTokens)+" / "+formatTokenCount(thVal.ContextWindow)+fmt.Sprintf(" · %d%%", pct))
+	}
 
 	if activity := threadActivityTime(thVal); !activity.IsZero() {
 		hoverCardField(c, "hover-card-activity-"+thVal.ID, "最近活动", formatRelativeTime(activity))

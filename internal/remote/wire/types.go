@@ -289,6 +289,8 @@ type ThreadSummary struct {
 	ContextUsedTokens int64 `json:"contextUsedTokens,omitempty"`
 	// ContextWindow 是当前模型的上下文窗口上限（tokens）：优先用 CLI 上报值，缺失时回退模型目录。
 	ContextWindow int64 `json:"contextWindow,omitempty"`
+	// AIDurationMs 是该会话已完成回合的 AI 用时总和（毫秒）。
+	AIDurationMs int64 `json:"aiDurationMs,omitempty"`
 	// LastTurnCostUSD 是最近一轮的花费（美元）。CLI 上报的 total_cost_usd 可能已是整次会话
 	// 的累计值，所以不能逐轮相加，口径与桌面端用量面板一致。用量不含费用时缺省不输出。
 	LastTurnCostUSD   float64 `json:"lastTurnCostUSD,omitempty"`

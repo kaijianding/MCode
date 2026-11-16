@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"mcode/internal/harness"
 	"mcode/internal/kanban"
@@ -29,6 +30,13 @@ func TestThreadMessageToUITurnTiming(t *testing.T) {
 		if got.TurnID != id || got.TurnIndex != 0 || got.TurnStatus != status || got.TurnStartedAt != start || got.TurnCompletedAt != end {
 			t.Fatalf("轮次元数据丢失: %+v", got)
 		}
+	}
+}
+
+func TestThreadSummaryToUI_AIDurationAndContext(t *testing.T) {
+	got := ThreadSummaryToUI(wire.ThreadSummary{ID: "t1", AIDurationMs: 1234, ContextUsedTokens: 90_000, ContextWindow: 200_000})
+	if got.AIDuration != 1234*time.Millisecond || got.ContextUsedTokens != 90_000 || got.ContextWindow != 200_000 {
+		t.Fatalf("ThreadSummaryToUI fields = %+v", got)
 	}
 }
 

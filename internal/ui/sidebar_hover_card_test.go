@@ -113,6 +113,47 @@ func TestSidebarHoverCardAppearsAfterDelay(t *testing.T) {
 	}
 }
 
+func TestSidebarHoverCardAIDurationAndContext(t *testing.T) {
+	resetSidebarHoverCardForTest()
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(
+		[]Project{{ID: "p1", Name: "mcode-test", Path: "/path/to/hovercard"}},
+		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "统计卡会话", AIDuration: 65 * time.Second, ContextUsedTokens: 90_000, ContextWindow: 200_000}}},
+	)
+	_, view := buildRoot(fake)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("统计卡会话") })
+	hoverRow(t, tt, "统计卡会话")
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+	for _, want := range []string{"AI 用时", "1m5s", "上下文", "90k / 200k · 45%"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Fatalf("expected hover card to contain %q, texts: %q", want, tt.Texts())
+		}
+	}
+
+	resetSidebarHoverCardForTest()
+	zero := NewFakeClient()
+	zero.SetProjectsAndThreads(
+		[]Project{{ID: "p1", Name: "mcode-test", Path: "/path/to/hovercard"}},
+		map[string][]Thread{"p1": {{ID: "t2", ProjectID: "p1", Title: "空统计会话"}}},
+	)
+	_, zeroView := buildRoot(zero)
+	zeroTT := ui.NewTester(zeroView, 1000, 700)
+	waitFor(t, zeroTT, func() bool { return zeroTT.HasText("空统计会话") })
+	hoverRow(t, zeroTT, "空统计会话")
+	zeroTT.Advance(700 * time.Millisecond)
+	zeroTT.Frame()
+	if _, ok := zeroTT.Find("状态"); !ok {
+		t.Fatalf("expected zero stats hover card, texts: %q", zeroTT.Texts())
+	}
+	for _, label := range []string{"AI 用时", "上下文"} {
+		if _, ok := zeroTT.Find(label); ok {
+			t.Fatalf("zero stats should hide %q, texts: %q", label, zeroTT.Texts())
+		}
+	}
+}
+
 // TestSidebarCompactTitleMarquee 验证紧凑模式下超长标题悬停后横向滚动、
 // 短标题不滚动，且未悬停时不挂动画。
 func TestSidebarCompactTitleMarquee(t *testing.T) {

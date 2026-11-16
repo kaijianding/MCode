@@ -985,7 +985,7 @@ func (b *MemoryBackend) startTurnLocked(td *memoryThread, text string, kind ...s
 		turnID:          turnID,
 		runCtx:          runCtx,
 		turnIndex:       turnIndex,
-		currentSummary:  td.summary,
+		currentSummary:  b.summaryForPublishLocked(td),
 		titleChanged:    titleChanged,
 		h:               h,
 		interactionMode: normalizeInteractionMode(td.summary.InteractionMode),
@@ -1120,7 +1120,11 @@ func (b *MemoryBackend) updateTurnFinish(threadID, turnID string, turnIndex int,
 				turn = store.Turn{ID: turnID, ThreadID: threadID, TurnIndex: turnIndex}
 			}
 		}
+		wasCompleted := turn.CompletedAt != nil
 		turn.Status, turn.CompletedAt = status, &completedAt
+		if !wasCompleted && !turn.StartedAt.IsZero() && completedAt.After(turn.StartedAt) {
+			td.aiDuration += completedAt.Sub(turn.StartedAt)
+		}
 		timing = turn
 		if td.turnTiming == nil {
 			td.turnTiming = make(map[string]store.Turn)

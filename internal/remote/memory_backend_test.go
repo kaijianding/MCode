@@ -33,6 +33,114 @@ func TestIsProviderCrashError(t *testing.T) {
 	}
 }
 
+func TestMemoryBackend_AIDurationAfterTurnFinish(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: time.Hour})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	threadID := "ai-duration-thread"
+	started := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	now := started
+	b.SetClock(func() time.Time { return now })
+	b.AddThread(wire.ThreadSummary{ID: threadID}, nil)
+	conn := newMockStreamConn()
+	hub.Subscribe(conn, threadID)
+	b.mu.Lock()
+	td := b.threads[threadID]
+	st := b.startTurnLocked(td, "hello")
+	b.mu.Unlock()
+	now = started.Add(3 * time.Second)
+	b.finishTurnEarly(td, threadID, st.turnID, st.turnIndex, true, false)
+	var published bool
+	for _, event := range conn.getEvents() {
+		if event.Payload.Thread.AIDurationMs == 3000 {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatal("missing AI duration in published summary")
+	}
+	now = started.Add(time.Hour)
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b.updateTurnFinish(threadID, st.turnID, st.turnIndex, "completed", "")
+		}()
+	}
+	wg.Wait()
+	got, err := b.GetThread(context.Background(), threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AIDurationMs != 3000 {
+		t.Fatalf("AIDurationMs = %d, want 3000", got.AIDurationMs)
+	}
+	b.mu.Lock()
+	b.usage[threadID] = map[int]harness.Usage{st.turnIndex: {ContextTokens: 90_000, ContextWindow: 200_000}}
+	next := b.startTurnLocked(td, "next")
+	b.mu.Unlock()
+	if next.currentSummary.AIDurationMs != 3000 || next.currentSummary.ContextUsedTokens != 90_000 || next.currentSummary.ContextWindow != 200_000 {
+		t.Fatalf("next turn lost completed stats: %+v", next.currentSummary)
+	}
+}
+
+func TestMemoryBackend_AIDurationAttachStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "ai-duration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	started := time.Now().UTC().Add(-time.Minute)
+	completed := started.Add(2 * time.Second)
+	if err := s.UpsertProject(ctx, store.Project{ID: "p1", Name: "P1", CreatedAt: started, UpdatedAt: started}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateThread(ctx, store.Thread{ID: "t1", ProjectID: "p1", Title: "AI 用时", CreatedAt: started, UpdatedAt: started}); err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range []store.Turn{
+		{ID: "completed", ThreadID: "t1", TurnIndex: 0, Status: "completed", StartedAt: started, CompletedAt: &completed},
+		{ID: "orphan", ThreadID: "t1", TurnIndex: 1, Status: "running", StartedAt: started},
+	} {
+		if err := s.CreateTurn(ctx, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AppendMessage(ctx, store.Message{ID: "activity", ThreadID: "t1", TurnID: "orphan", Role: "assistant", Text: "工作中", CreatedAt: started.Add(5 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewStreamHub(StreamHubOptions{Interval: time.Hour})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	if err := b.AttachStore(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := s.GetTurn(ctx, "orphan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orphan.CompletedAt == nil {
+		t.Fatal("orphan turn was not finalized")
+	}
+	if !orphan.CompletedAt.Equal(started.Add(5 * time.Second)) {
+		t.Fatalf("orphan completion = %v, want last activity", orphan.CompletedAt)
+	}
+	want := (2*time.Second + orphan.CompletedAt.Sub(started)).Milliseconds()
+	// 重复收尾从持久化读取的回合，也不能再次累加。
+	b.updateTurnFinish("t1", "completed", 0, "completed", "")
+	got, err := b.GetThread(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AIDurationMs != want {
+		t.Fatalf("AIDurationMs = %d, want %d", got.AIDurationMs, want)
+	}
+}
+
 func TestTurnTimingProjectionAndHistory(t *testing.T) {
 	started := time.Date(2026, 11, 6, 1, 2, 3, 4_000_000, time.UTC)
 	completed := started.Add(time.Second)

@@ -418,6 +418,50 @@ func TestTurnsCRUDAndRecent(t *testing.T) {
 	}
 }
 
+func TestListAllTurnDurations(t *testing.T) {
+	testenv.TempHome(t)
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "turn-durations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"t1", "t2"} {
+		if err := s.CreateThread(ctx, Thread{ID: id, ProjectID: "p1", Title: id, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	completed := func(start time.Time, duration time.Duration) *time.Time {
+		end := start.Add(duration)
+		return &end
+	}
+	turns := []Turn{
+		{ID: "d1", ThreadID: "t1", StartedAt: now, CompletedAt: completed(now, 2*time.Minute)},
+		{ID: "d2", ThreadID: "t1", StartedAt: now.Add(3 * time.Minute), CompletedAt: completed(now.Add(3*time.Minute), 30*time.Second)},
+		{ID: "d3", ThreadID: "t1", StartedAt: now.Add(4 * time.Minute)},
+		{ID: "d4", ThreadID: "t1", StartedAt: now.Add(5 * time.Minute), CompletedAt: completed(now.Add(5*time.Minute), -time.Second)},
+		{ID: "d5", ThreadID: "t2", StartedAt: now, CompletedAt: completed(now, time.Minute)},
+	}
+	for i := range turns {
+		turns[i].TurnIndex = i
+		turns[i].Status = "completed"
+		if err := s.CreateTurn(ctx, turns[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ListAllTurnDurations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["t1"] != 150*time.Second || got["t2"] != time.Minute {
+		t.Fatalf("durations = %#v, want t1=2m30s t2=1m", got)
+	}
+}
+
 // TestTurnsCascadeDelete 验证级联删除：删除线程后 turns 记录自动清空。
 func TestTurnsCascadeDelete(t *testing.T) {
 	testenv.TempHome(t)
