@@ -69,9 +69,6 @@ type agyPageState struct {
 	// 路由配置保存错误
 	routingErr  string
 	routingBusy bool
-
-	// dispatchOpen 表示 agy 行展开区里的「账号调度」子区是否展开，默认收起。
-	dispatchOpen bool
 }
 
 // agyClient 获取关联的 Client 实例；未关联时返回 nil。
@@ -1567,6 +1564,15 @@ func agyProviderSheetSections(st *SettingsState) []providerSheetSection {
 			},
 		},
 		{
+			ID:    "sec-agy-channel",
+			Title: "通道",
+			Render: func(c *ui.Context, st *SettingsState) {
+				renderSettingsSection(c, "sec-agy-channel", "通道", func() {
+					renderAgyChannelRow(c, st, st.isLocked("agy-enabled"))
+				})
+			},
+		},
+		{
 			ID:    "sec-agy-strategy",
 			Title: "调度策略",
 			Render: func(c *ui.Context, st *SettingsState) {
@@ -1604,59 +1610,6 @@ func renderAgyProviderSheetSections(c *ui.Context, st *SettingsState) {
 	for _, def := range agyProviderSheetSections(st) {
 		def.Render(c, st)
 	}
-}
-
-// renderAgyRowAdvancedSections 在 agy 行的展开区里渲染默认收起的「账号调度」子区：
-// 展开后依次渲染路由与负载均衡、终端登录（备用）。
-func renderAgyRowAdvancedSections(c *ui.Context, st *SettingsState) {
-	st.mu.Lock()
-	open := st.agy.dispatchOpen
-	st.mu.Unlock()
-
-	ui.Column(c.Key("agy-dispatch")).Gap(Space3).Children(func() {
-		btn := ui.ButtonBase(c.Key("row-agy-dispatch")).
-			Label("账号调度").
-			Padding(Space4, Space5).
-			Radius(RadiusMD)
-		if btn.Hovered() {
-			btn.Background(ThemeHover(c))
-		} else {
-			btn.Background(ui.Transparent)
-		}
-		btn.OnClick(func() {
-			st.mu.Lock()
-			st.agy.dispatchOpen = !st.agy.dispatchOpen
-			st.mu.Unlock()
-			st.invalidate()
-		})
-		btn.Children(func() {
-			ui.Row(c.Key("row-agy-dispatch-inner")).
-				Grow(1).
-				AlignItems(ui.Center).
-				Gap(Space3).
-				Children(func() {
-					ui.Column(c.Key("row-agy-dispatch-left")).
-						Grow(1).
-						Gap(Space1).
-						Children(func() {
-							ui.Text(c, "账号调度").
-								FontSize(uiFont(TypeProse)).
-								FontWeight(500).
-								TextColor(ThemePrimaryText(c)).
-								SingleLine()
-						})
-					icon := IconChevronRight()
-					if open {
-						icon = IconChevronDown()
-					}
-					ui.Icon(c, icon).Size(14, 14).TextColor(ThemeSecondaryText(c))
-				})
-		})
-
-		if open {
-			renderAgyDispatchContent(c, st)
-		}
-	})
 }
 
 // renderAgyDispatchContent 渲染「账号调度」展开后的内容。

@@ -29,3 +29,16 @@ func TestAgyChannelSearchIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestAgyProviderSheetHasChannelSection(t *testing.T) {
+	st := NewSettingsState(settingsTestDir(t), nil, newChatState(NewFakeClient()))
+	for _, section := range agyProviderSheetSections(st) {
+		if section.ID == "sec-agy-channel" {
+			if section.Advanced {
+				t.Fatal("通道节不应属于高级设置")
+			}
+			return
+		}
+	}
+	t.Fatal("缺少通道节")
+}

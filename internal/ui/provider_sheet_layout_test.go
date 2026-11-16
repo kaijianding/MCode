@@ -23,6 +23,8 @@ func TestProviderSheetSectionForRow(t *testing.T) {
 		{"通用命令行行", "cli", "codex", "row-provider-bin", "sec-provider-cli"},
 		{"模型行", "cli", "claude", "provider-model-sonnet", "sec-provider-models"},
 		{"账号行", "cli", "claude", "row-provider-account", "sec-provider-account"},
+		{"agy 通道", "cli", "agy", "row-agy-channel", "sec-agy-channel"},
+		{"agy 通道更新", "cli", "agy", "row-agy-channel-update", "sec-agy-channel"},
 		{"agy 调度策略", "cli", "agy", "sec-agy-routing-strategy", "sec-agy-strategy"},
 		{"agy 会话保持模式", "cli", "agy", "sec-agy-routing-affinity", "sec-agy-affinity"},
 		{"agy 冷却账号", "cli", "agy", "sec-agy-routing-sink", "sec-agy-routing"},

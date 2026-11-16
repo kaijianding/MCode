@@ -66,14 +66,6 @@ func openAgySettingsTest(t *testing.T, fake *FakeClient) (*ui.Tester, *SettingsS
 	return tt, st
 }
 
-// openAgyDispatchForTest 展开 agy 行里的「账号调度」子区（长页面里按钮常在窗口外，直接置状态）。
-func openAgyDispatchForTest(tt *ui.Tester, st *SettingsState) {
-	st.mu.Lock()
-	st.agy.dispatchOpen = true
-	st.mu.Unlock()
-	tt.Frame()
-}
-
 // clickSettingsAdvancedLabel 把设置详情区滚到底，再点击页底高级区里的文案。
 // 高级区默认收起且位于页底，展开后常在首屏之外，直接按坐标点击会落到窗口外。
 func clickSettingsAdvancedLabel(t *testing.T, tt *ui.Tester, label string, width, height float32) {
@@ -544,9 +536,6 @@ func TestSettingsAgy_AutoWarmupSwitch(t *testing.T) {
 
 	tt, st := openAgySettingsTest(t, fake)
 
-	// 自动预热开关在 agy 行的「账号调度」子区里（「高级」页签），先展开。
-	openAgyDispatchForTest(tt, st)
-
 	// 等待加载完成并展示自动预热配置项
 	waitFor(t, tt, func() bool {
 		return tt.HasText("到期自动预热") && tt.HasText("切换到期自动预热")
@@ -614,13 +603,13 @@ func TestSettingsAgy_WarmupButtonBusyState(t *testing.T) {
 	fake.mu.Unlock()
 }
 
-// agy 面板的节定义顺序固定：账号 → 调度策略 → 会话保持模式 → 调度 → 终端登录。
+// agy 面板的节定义顺序固定：账号 → 通道 → 调度策略 → 会话保持模式 → 调度 → 终端登录。
 func TestAgyProviderSheetSectionsOrder(t *testing.T) {
 	testenv.TempHome(t)
 	st := NewSettingsState(settingsTestDir(t), nil, newChatState(NewFakeClient()))
 	defs := agyProviderSheetSections(st)
-	wantIDs := []string{"sec-agy-accounts", "sec-agy-strategy", "sec-agy-affinity", "sec-agy-routing", "sec-agy-advanced-login"}
-	wantTitles := []string{"账号", "调度策略", "会话保持模式", "调度", "终端登录"}
+	wantIDs := []string{"sec-agy-accounts", "sec-agy-channel", "sec-agy-strategy", "sec-agy-affinity", "sec-agy-routing", "sec-agy-advanced-login"}
+	wantTitles := []string{"账号", "通道", "调度策略", "会话保持模式", "调度", "终端登录"}
 	if len(defs) != len(wantIDs) {
 		t.Fatalf("节数量 = %d, want %d", len(defs), len(wantIDs))
 	}

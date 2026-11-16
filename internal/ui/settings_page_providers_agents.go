@@ -2069,12 +2069,6 @@ func renderProviderAccountTab(c *ui.Context, st *SettingsState, id string, view 
 
 // renderProviderAdvancedTab 渲染「高级」页签：检查更新、可执行文件路径与 Magpie 全局配置。
 func renderProviderAdvancedTab(c *ui.Context, st *SettingsState, id string, view providerDetailState, locked bool) {
-	if id == "agy" {
-		renderAgyChannelRow(c, st, locked)
-		// (e) 默认收起的「账号调度」子区
-		renderAgyRowAdvancedSections(c, st)
-		return
-	}
 	if isCLIProviderID(id) {
 		// CLI harness 的路径、版本与认证方式。
 		renderProviderCLIExpanded(c, st, id, false, locked)

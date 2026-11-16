@@ -176,6 +176,8 @@ func providerSheetSectionForRow(kind, id, rowID string) string {
 				return "sec-agy-affinity"
 			case strings.HasPrefix(rowID, "sec-agy-routing-"), rowID == "sec-agy-auto-warmup":
 				return "sec-agy-routing"
+			case rowID == "row-agy-channel", rowID == "row-agy-channel-update":
+				return "sec-agy-channel"
 			default:
 				return "sec-agy-accounts"
 			}

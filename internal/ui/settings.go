@@ -1199,9 +1199,6 @@ resolved:
 	if providerID != "" {
 		s.providerRows.currentProvider = providerID
 		s.providerRows.currentProviderKind = "cli"
-		if providerID == "agy" {
-			s.agy.dispatchOpen = true
-		}
 		// 命中高级节时先展开，避免目标行尚未渲染就消费滚动标记。
 		switch providerSheetSectionForRow("cli", providerID, hit.Item.ID) {
 		case "sec-provider-cli", "sec-agy-routing", "sec-agy-advanced-login":

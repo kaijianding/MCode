@@ -361,6 +361,7 @@ func countSettingsLockBranches(name string, file *ast.File) int {
 func TestSettingsGuard_LockBranches(t *testing.T) {
 	allowed := map[string]int{
 		"settings_page_providers_agents.go": 4, // 供应商面板入口和 agy 菜单栏额度行各算一次锁定，等 P5 由渲染器统一处理锁定后归零。
+		"settings_agy.go":                   1,
 	}
 	checkSettingsGuardBaseline(t, "LockBranches", settingsGuardCounts(t, countSettingsLockBranches), allowed)
 }
