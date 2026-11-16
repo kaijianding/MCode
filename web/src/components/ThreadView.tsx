@@ -3,8 +3,6 @@
 import React, { lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  RemoteThreadProjectionPayload,
-  RemoteThreadStreamSnapshot,
   RemoteThreadSummary,
   RemoteAttachmentUploadResult,
   RemoteComposerOptions
@@ -15,9 +13,7 @@ import { makeActionID, mergeThreadSummary } from '../context/remoteGuards';
 import { isPreviewableImageFile } from '../context/remoteImages';
 import { RpcError } from '../services/rpc';
 import type {
-  RemoteThreadAction,
-  RemoteThreadSubscriptionHandle,
-  RemoteThreadSubscriptionHandlers
+  RemoteThreadAction
 } from '../context/RemoteContext';
 import {
   ExclamationTriangleIcon,
@@ -31,8 +27,6 @@ import {
   buildTimelineItems,
   isEndedStatus,
   isWorkEntry,
-  mergeLatestHistoryPage,
-  mergeThreadMessages,
   isHiddenTimelineMessage,
   workRecordExpandedMap
 } from './ThreadTimeline';
@@ -52,6 +46,7 @@ import { menuBaseForRoute } from './thread/menu/menuRouteOpen';
 import type { ThreadMenuPage, ThreadMenuPageHandle, ThreadMenuPageSpec } from './thread/menu/menuPages';
 import type { SaveTaskBodyProps } from './thread/SaveTaskForm';
 import { QueuedFollowUpSection } from './thread/QueuedFollowUpSection';
+import { useThreadQueue } from './thread/useThreadQueue';
 import { ContinueTurnPill } from './thread/ContinueTurnPill';
 import { QuestionMinimap, buildQuestionMinimapData } from './thread/QuestionMinimap';
 import { TodoProgressPill } from './thread/TodoProgressPill';
@@ -61,6 +56,7 @@ import {
   linkedTaskColumnLabel,
   getHelperStatusDisplay
 } from './thread/threadHelpers';
+import { useThreadStream, useThreadStreamHistory, useThreadStreamPolling, useThreadStreamSubscription } from './thread/useThreadStream';
 import { useInitialPinToLatest } from './thread/useInitialPinToLatest';
 import { collapseWorkRecordState, pickExpandedWorkRecordTurnID } from './thread/expandedWorkRecord';
 import { useSendAnchor } from './thread/useSendAnchor';
@@ -83,7 +79,6 @@ import { isErrorMessage } from '../utils/continuation';
 import { stripReferencedThreadBlock } from '../utils/threadMention';
 import { useTurnElapsedSeconds } from '../hooks/useTurnElapsedSeconds';
 import { countUnreadMessages, createUnreadAnchor, formatUnreadCount } from '../utils/unreadCount';
-import { createFrameCoalescer } from '../utils/frameCoalescer';
 import type { UnreadAnchor } from '../utils/unreadCount';
 
 // 抽屉与请求面板只在用户打开（或确实有待处理请求）时才渲染：懒加载拆出它们的代码，会话页首屏不必等这些包。
@@ -177,9 +172,6 @@ interface ThreadViewProps {
   jumpRequest?: { messageID?: string; requestID?: string; nonce: number } | null;
 }
 
-// 单页请求条数固定，实际上限由宿主决定
-const PAGE_SIZE = 50;
-
 // 草稿按会话隔离：内存 Map 作前置缓存，首次读取时回读 draftStorage（刷新后仍在），写入防抖落盘。
 const threadDrafts = new Map<string, string>();
 // 仅来自持久化、本次运行尚未编辑的草稿；未决发送动作的正文恢复优先于它。
@@ -195,7 +187,6 @@ function readThreadDraft(threadID: string): string | undefined {
   restoredDraftIDs.add(threadID);
   return stored;
 }
-const POLL_INTERVAL_MS = 2500;
 
 export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview, filePath, jumpRequest }) => {
   const { supportsAnswer, answerDecision } = useRemoteStewardApi();
@@ -219,8 +210,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     respondToRequest,
     interruptThread,
     killRunningCommand,
-    queueSnapshots,
-    listThreadQueue,
     interruptAndSendThread,
     recallTurn,
     compactThread,
@@ -245,14 +234,15 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   } = useRemote();
   const isConnected = connectionState === 'connected';
 
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [truncated, setTruncated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [historyInitialDone, setHistoryInitialDone] = useState(false);
+  const stream = useThreadStream();
+  const {
+    messages, setMessages, nextCursor, setNextCursor, hasMore, setHasMore,
+    truncated, setTruncated, isLoading, setIsLoading, isLoadingMore, errorMessage,
+    setErrorMessage, historyInitialDone, setHistoryInitialDone, streamError,
+    setStreamError, streamState, setStreamState, messagesRef, frameCoalescer,
+    pendingHistoryScrollRef, lastFailedRequestRef, requestIdRef, streamStateRef,
+    streamRunIDRef, streamedMessageSequenceRef, removedStreamMessageIDsRef
+  } = stream;
   const [latestSummary, setLatestSummary] = useState<RemoteThreadSummary>(thread);
   const [draft, setDraft] = useState(() => readThreadDraft(thread.id) ?? '');
   const [attachments, setAttachments] = useState<RemoteAttachmentUploadResult[]>([]);
@@ -263,10 +253,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionQueryError, setActionQueryError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
-  // 跟进队列快照轮询失败：队列组件内部只管自己的动作错误，读取失败在这里显示
-  const [queuePollError, setQueuePollError] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const [streamState, setStreamState] = useState<'disabled' | 'subscribing' | 'subscribed' | 'disconnected' | 'error'>('disabled');
   const [isPolling, setIsPolling] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [checkingActionID, setCheckingActionID] = useState<string | null>(null);
@@ -563,7 +549,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   }, []);
 
 
-  const requestIdRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   // 展开的工作记录跨过滚动区底边时，右下角胶囊才给出「收起」段。
@@ -591,12 +576,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   }, [recomputeActiveExpanded, thread.id]);
   // 决策条的跳转 id 约 300ms 后被清空，卸载时把未触发的定时器一起清掉
   // 发送后锚定期间置为 true：贴底跟随据此暂停，锚定解除后恢复（见 thread/useSendAnchor.ts）
-  const messagesRef = useRef<ThreadMessage[]>([]);
-  const frameCoalescerRef = useRef<ReturnType<typeof createFrameCoalescer> | null>(null);
-  if (frameCoalescerRef.current === null) {
-    frameCoalescerRef.current = createFrameCoalescer(() => setMessages(messagesRef.current));
-  }
-  const frameCoalescer = frameCoalescerRef.current;
   const sendAnchorHoldRef = useRef(false);
   const { end: endPin, resume: resumePin } = useInitialPinToLatest(
     thread.id,
@@ -607,7 +586,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   );
   const pinSentMessage = usePinSentMessage();
   const anchorMissingRef = useRef<(messageID: string) => void>(() => {});
-  const [queueRevealRequest, setQueueRevealRequest] = useState<{ followUpID: string; nonce: number } | null>(null);
   const sendAnchor = useSendAnchor({
     threadID: thread.id,
     messages,
@@ -625,10 +603,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
       armSendAnchor();
     } else resumePin();
   }, [armSendAnchor, frameCoalescer, pinSentMessage, resumePin]);
-  const pendingHistoryScrollRef = useRef<{ scrollHeight: number; scrollTop: number; key: string | null; offset: number } | null>(null);
-  const historySyncFrameRef = useRef(0);
   const pendingWorkRecordScrollRef = useRef<{ threadID: string; turnID: string } | null>(null);
-  const lastFailedRequestRef = useRef<{ cursor: string | null; append: boolean } | null>(null);
 
   useEffect(() => {
     if (!showJumpToLatest) {
@@ -654,16 +629,10 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     new Map<string, { text: string; version: number }>()
   );
   const acceptedActionsRef = useRef(new Set<string>());
-  const loadingMoreRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
   const pollGenerationRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const pollTargetTurnIDRef = useRef<string | null>(null);
-  const streamStateRef = useRef(streamState);
-  const streamRunIDRef = useRef<string | null>(null);
-  const streamedMessageSequenceRef = useRef(new Map<string, number>());
-  const removedStreamMessageIDsRef = useRef(new Set<string>());
-  const subscriptionHandleRef = useRef<RemoteThreadSubscriptionHandle | null>(null);
   const mountedRef = useRef(true);
   const isConnectedRef = useRef(isConnected);
   const pollCycleRef = useRef<() => Promise<void>>(async () => {});
@@ -673,7 +642,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   const retryAttemptRef = useRef(0);
 
   isConnectedRef.current = isConnected;
-  streamStateRef.current = streamState;
   attachmentsRef.current = attachments;
 
   // 恢复/重连后的同步失败按 1s、2s、4s 退避重试；成功后归零，用完才保留 pollError。
@@ -745,7 +713,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   const compactSupported = Boolean(capabilities?.methods.includes('threads.compact'));
   const forwardQuestionSupported = Boolean(capabilities?.methods.includes('threads.swarm.forwardQuestion'));
   const requestSnapshot = requestSnapshots[thread.id];
-  const queueSnapshot = queueSnapshots[thread.id];
   const contextSummary =
     threads.find((candidate) => candidate.id === thread.id) ??
     (currentThread?.id === thread.id ? currentThread : null);
@@ -819,231 +786,9 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     pendingTurnID: activeTurnID
   });
 
-  const loadPage = useCallback(
-    async (cursor: string | null, append: boolean) => {
-      const requestId = ++requestIdRef.current;
-      loadingMoreRef.current = append;
-      if (append) {
-        // 加载更早历史是用户主动操作，结束初始贴底，避免被拉回底部
-        endPin();
-        setIsLoadingMore(true);
-      } else setIsLoading(true);
-
-      try {
-        const page = await getThreadHistory(thread.id, cursor, PAGE_SIZE);
-        if (requestId !== requestIdRef.current) return;
-
-        lastFailedRequestRef.current = null;
-        const incoming = (Array.isArray(page.messages) ? page.messages : []) as ThreadMessage[];
-        const protectedMessageIDs = new Set([
-          ...streamedMessageSequenceRef.current.keys(),
-          ...removedStreamMessageIDsRef.current
-        ]);
-        const merged = mergeThreadMessages(
-          append ? messagesRef.current : messagesRef.current.filter((message) => protectedMessageIDs.has(message.id) && !removedStreamMessageIDsRef.current.has(message.id)),
-          incoming.filter((message) => !protectedMessageIDs.has(message.id))
-        );
-        if (append && scrollRef.current) {
-          const viewportTop = scrollRef.current.getBoundingClientRect().top;
-          const viewportBottom = viewportTop + scrollRef.current.clientHeight;
-          const anchor = Array.from(scrollRef.current.querySelectorAll<HTMLElement>('[data-item-key]')).find((element) => {
-            const bounds = element.getBoundingClientRect();
-            return bounds.height > 0 && bounds.bottom > viewportTop && bounds.top < viewportBottom;
-          });
-          pendingHistoryScrollRef.current = {
-            scrollHeight: scrollRef.current.scrollHeight,
-            scrollTop: scrollRef.current.scrollTop,
-            key: anchor?.dataset.itemKey ?? null,
-            offset: anchor ? anchor.getBoundingClientRect().top - viewportTop : 0
-          };
-        }
-        messagesRef.current = merged;
-        frameCoalescer.cancel();
-        setMessages(merged);
-        setNextCursor(page.nextCursor ?? null);
-        setHasMore(Boolean(page.hasMore));
-        setTruncated((prev) => (append ? prev || Boolean(page.truncated) : Boolean(page.truncated)));
-        setErrorMessage(null);
-        if (!append) setHistoryInitialDone(true);
-      } catch (err) {
-        if (requestId !== requestIdRef.current) return;
-        lastFailedRequestRef.current = { cursor, append };
-        setErrorMessage(err instanceof Error ? err.message : '加载会话历史失败');
-        if (!append) setHistoryInitialDone(false);
-      } finally {
-        if (requestId === requestIdRef.current) {
-          loadingMoreRef.current = false;
-          setIsLoading(false);
-          setIsLoadingMore(false);
-        }
-      }
-    },
-    [endPin, frameCoalescer, getThreadHistory, thread.id]
-  );
-
-  useLayoutEffect(() => {
-    const pending = pendingHistoryScrollRef.current;
-    pendingHistoryScrollRef.current = null;
-    const container = scrollRef.current;
-    if (!pending || !container) return;
-    container.scrollTop = pending.scrollTop + (container.scrollHeight - pending.scrollHeight);
-    if (!pending.key) return;
-    // 虚拟列表对新插入的行先用估算高度，实测后总高度会变；接下来几帧按锚点行把阅读位置校正回来。
-    // 循环不随 messages 变化取消：加载完成后紧跟着的流式更新不应打断校正。
-    let frames = 40;
-    window.clearTimeout(historySyncFrameRef.current);
-    // 用户一旦开始滑动就停止校正，避免把手指拉回去。
-    const stop = () => { frames = 0; };
-    container.addEventListener('touchstart', stop, { passive: true, once: true });
-    container.addEventListener('wheel', stop, { passive: true, once: true });
-    const syncAnchor = () => {
-      if (frames <= 0) return;
-      const node = Array.from(container.querySelectorAll<HTMLElement>('[data-item-key]'))
-        .find((element) => element.dataset.itemKey === pending.key);
-      if (node) {
-        const diff = node.getBoundingClientRect().top - container.getBoundingClientRect().top - pending.offset;
-        if (Math.abs(diff) > 1) container.scrollTop += diff;
-      }
-      frames -= 1;
-      if (frames > 0) {
-        historySyncFrameRef.current = window.setTimeout(syncAnchor, 16);
-      } else {
-        historySyncFrameRef.current = 0;
-        container.removeEventListener('touchstart', stop);
-        container.removeEventListener('wheel', stop);
-      }
-    };
-    historySyncFrameRef.current = window.setTimeout(syncAnchor, 16);
-  }, [messages]);
-
-  useEffect(() => () => window.clearTimeout(historySyncFrameRef.current), [thread.id]);
-
-  const refreshLatestPage = useCallback(
-    async (reportError = true): Promise<ThreadMessage[] | null> => {
-      const requestId = requestIdRef.current;
-      const requestRunID = streamRunIDRef.current;
-      const messageSequences = new Map(streamedMessageSequenceRef.current);
-      try {
-        const page = await getThreadHistory(thread.id, null, PAGE_SIZE);
-        if (requestId !== requestIdRef.current || !mountedRef.current) return null;
-        const previous = messagesRef.current;
-        const protectedMessageIDs = new Set([
-          ...[...streamedMessageSequenceRef.current]
-            .filter(([id, sequence]) => requestRunID !== streamRunIDRef.current || messageSequences.get(id) !== sequence)
-            .map(([id]) => id),
-          ...removedStreamMessageIDsRef.current
-        ]);
-        const { messages: merged, gap, shouldUpdateCursor } = mergeLatestHistoryPage(
-          previous,
-          page,
-          protectedMessageIDs
-        );
-        messagesRef.current = merged;
-        frameCoalescer.cancel();
-        setMessages(merged);
-        // 实时刷新不回退已经加载到更早历史的游标。
-        if (shouldUpdateCursor) {
-          setNextCursor(page.nextCursor ?? null);
-          setHasMore(Boolean(page.hasMore));
-        }
-        setTruncated((previous) => previous || Boolean(page.truncated) || Boolean(gap));
-        setHistoryInitialDone(true);
-        setErrorMessage(null);
-        lastFailedRequestRef.current = null;
-        setPollError(null);
-        return merged;
-      } catch (err) {
-        if (reportError && requestId === requestIdRef.current && mountedRef.current) {
-          setPollError(err instanceof Error ? err.message : '刷新会话历史失败');
-        }
-        return null;
-      }
-    },
-    [frameCoalescer, getThreadHistory, thread.id]
-  );
-
-  const applyStreamSnapshot = useCallback(
-    (snapshot: RemoteThreadStreamSnapshot): void => {
-      if (!mountedRef.current || snapshot.threadID !== thread.id) return;
-      if (streamRunIDRef.current !== snapshot.runID) {
-        streamRunIDRef.current = snapshot.runID;
-        streamedMessageSequenceRef.current.clear();
-        removedStreamMessageIDsRef.current.clear();
-      }
-
-      const protectedMessageIDs = new Set(
-        [...streamedMessageSequenceRef.current]
-          .filter(([, sequence]) => sequence > snapshot.sequence)
-          .map(([id]) => id)
-      );
-      const previous = messagesRef.current;
-      const { messages: merged, gap, shouldUpdateCursor } = mergeLatestHistoryPage(
-        previous,
-        snapshot.history,
-        protectedMessageIDs
-      );
-      messagesRef.current = merged;
-      frameCoalescer.cancel();
-      setMessages(merged);
-
-      for (const message of snapshot.history.messages) {
-        const existingSequence = streamedMessageSequenceRef.current.get(message.id);
-        if (existingSequence === undefined || existingSequence <= snapshot.sequence) {
-          streamedMessageSequenceRef.current.set(message.id, snapshot.sequence);
-          removedStreamMessageIDsRef.current.delete(message.id);
-        }
-      }
-      if (shouldUpdateCursor) {
-        setNextCursor(snapshot.history.nextCursor ?? null);
-        setHasMore(Boolean(snapshot.history.hasMore));
-      }
-      setTruncated((previousValue) => previousValue || Boolean(snapshot.history.truncated) || Boolean(gap));
-      setHistoryInitialDone(true);
-      setIsLoading(false);
-      setErrorMessage(null);
-      setPollError(null);
-      setLatestSummary((previousValue) =>
-        previousValue.id === snapshot.thread.id
-          ? mergeThreadSummary(previousValue, snapshot.thread, false)
-          : snapshot.thread
-      );
-    },
-    [frameCoalescer, thread.id]
-  );
-
-  const applyStreamProjection = useCallback(
-    (payload: RemoteThreadProjectionPayload, sequence: number, runID: string): void => {
-      if (!mountedRef.current || streamRunIDRef.current !== runID) return;
-      const removedIDs = new Set(payload.removedMessageIDs);
-      for (const id of removedIDs) {
-        streamedMessageSequenceRef.current.delete(id);
-        removedStreamMessageIDsRef.current.add(id);
-      }
-
-      const additions = payload.messages.filter((message) => !removedIDs.has(message.id)) as ThreadMessage[];
-      for (const message of additions) {
-        streamedMessageSequenceRef.current.set(message.id, sequence);
-        removedStreamMessageIDsRef.current.delete(message.id);
-      }
-
-      const merged = mergeThreadMessages(
-        messagesRef.current.filter((message) => !removedIDs.has(message.id)),
-        additions
-      );
-      messagesRef.current = merged;
-      frameCoalescer.schedule();
-      setLatestSummary((previous) =>
-        previous.id === payload.thread.id
-          ? mergeThreadSummary(previous, payload.thread, false)
-          : payload.thread
-      );
-      setHistoryInitialDone(true);
-      setIsLoading(false);
-      setErrorMessage(null);
-      setPollError(null);
-    },
-    [frameCoalescer]
-  );
+  const { loadPage, loadEarlierHistory, refreshLatestPage, applyStreamSnapshot, applyStreamProjection } = useThreadStreamHistory({
+    stream, thread, endPin, getThreadHistory, scrollRef, mountedRef, setPollError, setLatestSummary
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1202,14 +947,9 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     setLatestSummary((previous) => (previous.id === thread.id ? mergeThreadSummary(previous, thread, false) : thread));
   }, [thread]);
 
-  useEffect(() => {
-    if (!queueSupported || !isConnected) return;
-    setQueuePollError(null);
-    void listThreadQueue(thread.id).catch((err) => {
-      if (mountedRef.current) setQueuePollError(err instanceof Error ? err.message : '加载跟进队列失败');
-    });
-  }, [isConnected, listThreadQueue, queueSupported, thread.id]);
-
+  const { queuePollError, setQueueRevealRequest, queueSectionProps } = useThreadQueue({
+    thread, latestSummary, queueSupported, isConnected, mountedRef, draft, attachments
+  });
 
   // 卸载时清掉复制反馈定时器
   useEffect(() => {
@@ -1356,252 +1096,18 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
     return summary;
   }, [refreshThread, thread.id]);
 
-  const pausePolling = useCallback(() => {
-    if (pollTimerRef.current !== null) {
-      window.clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    if (mountedRef.current) setIsPolling(false);
-    clearRefreshRetry();
-  }, [clearRefreshRetry]);
+  const { pausePolling, beginPolling, refreshOnce } = useThreadStreamPolling({
+    stream, eventsSupported, isConnected, mountedRef, isConnectedRef, pollTimerRef,
+    pollGenerationRef, pollInFlightRef, pollTargetTurnIDRef, pollCycleRef, refreshOnceRef,
+    refreshPendingRef, clearRefreshRetry, scheduleRefreshRetry, setIsPolling, setPollError,
+    refreshLatestPage, refreshLatestState
+  });
 
-  useEffect(() => {
-    let active = true;
-    if (!eventsSupported) {
-      streamStateRef.current = 'disabled';
-      setStreamState('disabled');
-      setStreamError(null);
-      return () => {
-        active = false;
-      };
-    }
-    if (!isConnected) {
-      streamStateRef.current = 'disconnected';
-      setStreamState('disconnected');
-      return () => {
-        active = false;
-      };
-    }
-
-    const handlers: RemoteThreadSubscriptionHandlers = {
-      onSnapshot: (snapshot) => {
-        if (!active) return;
-        applyStreamSnapshot(snapshot);
-        if (!snapshot.thread.isRunning) {
-          pollTargetTurnIDRef.current = null;
-          pausePolling();
-        }
-      },
-      onEvent: (event) => {
-        if (!active) return;
-        applyStreamProjection(event.payload, event.sequence, event.runID);
-        if (!event.payload.thread.isRunning) {
-          pollTargetTurnIDRef.current = null;
-          pausePolling();
-        }
-      },
-      onState: (state) => {
-        if (!active) return;
-        streamStateRef.current = state;
-        setStreamState(state);
-        if (state === 'subscribed') {
-          setStreamError(null);
-          pausePolling();
-        }
-      },
-      onError: (error) => {
-        if (!active) return;
-        setStreamError(error.message);
-      }
-    };
-
-    const handle = subscribeThread(thread.id, handlers);
-    subscriptionHandleRef.current = handle;
-    void handle.ready.catch((err) => {
-      if (!active) return;
-      const error = err instanceof Error ? err : new Error('会话实时订阅失败，请重试');
-      setStreamError(error.message);
-      streamStateRef.current = 'error';
-      setStreamState('error');
-    });
-
-    return () => {
-      active = false;
-      if (subscriptionHandleRef.current?.subscriptionID === handle.subscriptionID) {
-        subscriptionHandleRef.current = null;
-      }
-      unsubscribeThread(thread.id, handle.subscriptionID);
-    };
-  }, [
-    applyStreamProjection,
-    applyStreamSnapshot,
-    eventsSupported,
-    isConnected,
-    pausePolling,
-    subscribeThread,
-    thread.id,
-    unsubscribeThread
-  ]);
-
-  const schedulePoll = useCallback(
-    (delay = POLL_INTERVAL_MS) => {
-      if (
-        !mountedRef.current ||
-        !isConnectedRef.current ||
-        (eventsSupported && streamStateRef.current === 'subscribed') ||
-        document.visibilityState !== 'visible' ||
-        navigator.onLine === false
-      ) {
-        pausePolling();
-        return;
-      }
-      if (pollTimerRef.current !== null) window.clearTimeout(pollTimerRef.current);
-      setIsPolling(true);
-      const generation = pollGenerationRef.current;
-      pollTimerRef.current = window.setTimeout(() => {
-        pollTimerRef.current = null;
-        if (generation !== pollGenerationRef.current || !mountedRef.current) return;
-        void pollCycleRef.current();
-      }, delay);
-    },
-    [eventsSupported, isConnected, pausePolling]
-  );
-
-  const runPoll = useCallback(async () => {
-    if (
-      !mountedRef.current ||
-      !isConnectedRef.current ||
-      (eventsSupported && streamStateRef.current === 'subscribed') ||
-      document.visibilityState !== 'visible' ||
-      navigator.onLine === false ||
-      pollInFlightRef.current
-    ) {
-      return;
-    }
-    if (loadingMoreRef.current) {
-      schedulePoll();
-      return;
-    }
-
-    const generation = pollGenerationRef.current;
-    pollInFlightRef.current = true;
-    setIsPolling(true);
-    try {
-      const incoming = await refreshLatestPage(true);
-      if (generation !== pollGenerationRef.current || !mountedRef.current) return;
-      if (!incoming) {
-        pausePolling();
-        return;
-      }
-
-      const summary = await refreshLatestState();
-      if (generation !== pollGenerationRef.current || !mountedRef.current) return;
-      const targetTurnID = pollTargetTurnIDRef.current;
-      const targetEnded =
-        !targetTurnID ||
-        messagesRef.current.some(
-          (message) => message.turnID === targetTurnID && isEndedStatus(message.turnStatus)
-        );
-
-      if (summary && !summary.isRunning && targetEnded) {
-        pollTargetTurnIDRef.current = null;
-        pausePolling();
-        return;
-      }
-      schedulePoll();
-    } catch (err) {
-      if (generation === pollGenerationRef.current && mountedRef.current) {
-        setPollError(err instanceof Error ? err.message : '刷新会话状态失败，请稍后重试');
-        pausePolling();
-        // 轮询失败不再永久停止：按退避重试，refreshOnce 成功后会在运行中重新开始轮询。
-        scheduleRefreshRetry();
-      }
-    } finally {
-      pollInFlightRef.current = false;
-    }
-  }, [eventsSupported, isConnected, pausePolling, refreshLatestPage, refreshLatestState, scheduleRefreshRetry, schedulePoll]);
-
-  pollCycleRef.current = runPoll;
-
-  const beginPolling = useCallback(
-    (targetTurnID?: string | null) => {
-      if (targetTurnID !== undefined) pollTargetTurnIDRef.current = targetTurnID;
-      if (!isConnected || document.visibilityState !== 'visible' || navigator.onLine === false) {
-        pausePolling();
-        return;
-      }
-      setPollError(null);
-      schedulePoll(0);
-    },
-    [isConnected, pausePolling, schedulePoll]
-  );
-
-  const refreshOnce = useCallback(async () => {
-    if (
-      !mountedRef.current ||
-      !isConnectedRef.current ||
-      document.visibilityState !== 'visible' ||
-      navigator.onLine === false
-    ) {
-      return;
-    }
-    // 请求在途时记下这次意图，等在途请求结束后补一次，避免恢复时的重试被守卫吞掉。
-    if (pollInFlightRef.current || loadingMoreRef.current) {
-      refreshPendingRef.current = true;
-      return;
-    }
-    refreshPendingRef.current = false;
-    const generation = pollGenerationRef.current;
-    pollInFlightRef.current = true;
-    let succeeded = false;
-    try {
-      const incoming = await refreshLatestPage(true);
-      if (!mountedRef.current) return;
-      if (!incoming) {
-        // 历史页拉取失败（refreshLatestPage 已写入 pollError）或请求已过期：按退避重试。
-        if (generation === pollGenerationRef.current) scheduleRefreshRetry();
-        return;
-      }
-      const summary = await refreshLatestState();
-      if (generation !== pollGenerationRef.current || !mountedRef.current) return;
-      succeeded = true;
-      clearRefreshRetry();
-      setPollError(null);
-      const targetTurnID = pollTargetTurnIDRef.current;
-      const targetEnded = Boolean(
-        targetTurnID &&
-          messagesRef.current.some(
-            (message) => message.turnID === targetTurnID && isEndedStatus(message.turnStatus)
-          )
-      );
-      if (summary?.isRunning || (targetTurnID && !targetEnded)) beginPolling();
-      else if (targetEnded) {
-        pollTargetTurnIDRef.current = null;
-        pausePolling();
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setPollError(err instanceof Error ? err.message : '刷新会话状态失败，请稍后重试');
-        scheduleRefreshRetry();
-      }
-    } finally {
-      pollInFlightRef.current = false;
-      if (refreshPendingRef.current) {
-        refreshPendingRef.current = false;
-        if (succeeded) void refreshOnceRef.current();
-      }
-    }
-  }, [
-    beginPolling,
-    clearRefreshRetry,
-    isConnected,
-    pausePolling,
-    refreshLatestPage,
-    refreshLatestState,
-    scheduleRefreshRetry
-  ]);
-
-  refreshOnceRef.current = refreshOnce;
+  const { retryStreamSubscription } = useThreadStreamSubscription({
+    stream, thread, eventsSupported, isConnected, mountedRef, pollTargetTurnIDRef,
+    pausePolling, applyStreamSnapshot, applyStreamProjection, subscribeThread,
+    unsubscribeThread, retryThreadSubscription
+  });
 
   useEffect(() => {
     if (contextSummary) {
@@ -2240,11 +1746,6 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   const lastVisibleMessageIsError = isErrorMessage(lastVisibleMessage);
   // 草稿非空（含附件）时不显示继续胶囊，与桌面端 internal/ui/composer.go:364 的 hasContent 一致
   const composerHasContent = draft.trim() !== '' || attachments.length > 0;
-  // 跟进队列编辑组借出时需要把输入框当前草稿与附件一起寄存给宿主
-  const queueComposerDraft = useMemo(
-    () => ({ text: draft, attachmentIDs: attachments.map((attachment) => attachment.attachmentID) }),
-    [attachments, draft]
-  );
 
   // 运行中宿主拒绝 `#模型 正文` 委派，也不进入队列：草稿一旦是委派写法就禁用发送
   const runningDelegation = Boolean(
@@ -3085,7 +2586,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
             <button
               type="button"
               disabled={isLoadingMore || !nextCursor}
-              onClick={() => void loadPage(nextCursor, true)}
+              onClick={() => void loadEarlierHistory()}
               className="w-full min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-medium border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--card-alt,var(--card))] text-[var(--foreground)] transition flex items-center justify-center gap-2 disabled:opacity-40"
             >
               {isLoadingMore ? (
@@ -3232,12 +2733,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
           <>
             <QueuedFollowUpSection
               key={thread.id}
-              threadID={thread.id}
-              followUps={queueSnapshot?.followUps ?? []}
-              revealRequest={queueRevealRequest}
-              isRunning={latestSummary.isRunning}
-              provider={latestSummary.provider}
-              composerDraft={queueComposerDraft}
+              {...queueSectionProps}
               onRestoreDraft={updateDraft}
             />
             {queuePollError && (
@@ -3368,13 +2864,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
             <button
               type="button"
               disabled={streamState === 'subscribing'}
-              onClick={() => {
-                setStreamError(null);
-                void retryThreadSubscription().catch((err) => {
-                  if (!mountedRef.current) return;
-                  setStreamError(err instanceof Error ? err.message : '重试实时会话同步失败');
-                });
-              }}
+              onClick={retryStreamSubscription}
               className="min-h-[32px] px-3 rounded-full font-medium shrink-0 bg-[var(--subtle-strong,var(--user-bubble))] text-[var(--foreground)] disabled:opacity-45 active:scale-95 transition"
             >
               {streamState === 'subscribing' ? '重试中...' : '重试'}
