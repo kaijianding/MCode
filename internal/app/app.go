@@ -607,13 +607,7 @@ func Open(opts Options) (*App, error) {
 			},
 		})
 		swarmPipeline.Start()
-		swarmMgr.SetSettingsFunc(func() swarm.Settings {
-			if c, err := config.Load(opts.DataDir); err == nil {
-				config.ApplyEnv(&c, os.LookupEnv)
-				return SwarmSettingsFromConfig(c.Orchestration)
-			}
-			return SwarmSettingsFromConfig(config.OrchestrationConfig{})
-		})
+		swarmMgr.SetSettingsFunc(newCachedSwarmSettings(opts.DataDir))
 		if err := swarmMgr.Restore(context.Background()); err != nil {
 			log.Printf("swarm restore error: %v", err)
 		} else {
