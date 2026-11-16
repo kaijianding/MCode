@@ -32,6 +32,7 @@ import { reportSectionKey } from './SwarmCapsules';
 import type { RemoteSwarmBee, RemoteSwarmState } from '../types/swarm';
 import { RunningGlyph } from './timeline/RunningGlyph';
 import { ToolEntryDiff, parseToolEditDiff, summarizeToolDiff } from './timeline/ToolEntryDiff';
+import { toolFilePath } from './timeline/toolFilePath';
 import { TurnFinishedBar } from './timeline/TurnFinishedBar';
 import { TurnFilesCard, type TurnEditedFile } from './timeline/TurnFilesCard';
 import {
@@ -1089,6 +1090,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
                           isToolEntry && (entry.toolStatus === 'running' || entry.toolStatus === 'background');
                         // 文件编辑类工具尝试解析出差量；解析不出就回落到纯文本
                         const diffFiles = isToolEntry ? parseToolEditDiff(entry.toolName, entry.toolInput) : null;
+                        const filePath = isToolEntry ? toolFilePath(entry.toolName, entry.toolInput) : null;
                         const diffSummary = diffFiles ? summarizeToolDiff(diffFiles) : null;
                         // 待办类工具（TodoWrite / update_plan）：进度与输入框上方的胶囊共用同一份解析
                         const todoProgress = isToolEntry
@@ -1117,8 +1119,15 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
                                   <CheckCircleIcon className="w-3.5 h-3.5 shrink-0 text-[var(--primary)]" />
                                 ) : null}
                                 <span className={`px-1.5 py-0.5 rounded font-medium border truncate ${labelClass}`}>
-                                  {rowLabel}
+                                  <span className={isThinkingRow && thinkingStreaming ? 'text-shimmer' : undefined}>{rowLabel}</span>
                                 </span>
+                                {filePath && (onOpenFile ? (
+                                  <button type="button" className="min-w-0 truncate font-mono hover:underline" title={filePath} onClick={(event) => { event.stopPropagation(); onOpenFile(filePath); }}>
+                                    {filePath.split(/[\\/]/).pop()}
+                                  </button>
+                                ) : (
+                                  <span className="min-w-0 truncate font-mono" title={filePath}>{filePath.split(/[\\/]/).pop()}</span>
+                                ))}
                                 {diffSummary && (
                                   <span className="shrink-0 font-mono">
                                     <span className="text-emerald-600 dark:text-emerald-400">+{diffSummary.additions}</span>

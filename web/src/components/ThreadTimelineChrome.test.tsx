@@ -20,6 +20,19 @@ for (const html of [assistant, user, error]) {
 }
 if (!error.includes('❌ 接口错误')) throw new Error('错误标题应保留');
 
+const thinking = { ...base, id: 'thinking', role: 'assistant' as const, kind: 'thinking' as const };
+const renderWork = (running: boolean) => renderToStaticMarkup(
+  <RemoteProvider><TimelineEntry
+    activity={{}} threadID="thread" item={{ type: 'workRecord', turnID: 'turn', turnIndex: 42, entries: [thinking] }} expanded
+    copyState={null} minuteTick={0} onToggleExpanded={() => {}} onToggleWorkRecord={() => {}}
+    segmentOpenState={{}} onToggleToolSegment={() => {}} autoCollapse={false}
+    onCopyMessage={() => {}} canBranch={false} highlighted={false} decisionAnswers={{}}
+    isRunning={running} lastMessageID="thinking"
+  /></RemoteProvider>
+);
+if (!renderWork(true).includes('text-shimmer')) throw new Error('流式思考行应显示扫光');
+if (renderWork(false).includes('text-shimmer')) throw new Error('结束的思考行不应显示扫光');
+
 const timeline = renderToStaticMarkup(
   <RemoteProvider><ThreadTimeline
     threadID="thread"

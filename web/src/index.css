@@ -104,6 +104,18 @@
 .app-shell { display: flex; height: var(--app-height); flex-direction: column; overflow: hidden; background: var(--screen); color: var(--foreground); }
 .app-main { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }
 
+.text-shimmer {
+  background: linear-gradient(90deg, var(--foreground-muted) 35%, var(--foreground) 50%, var(--foreground-muted) 65%) 100% 0 / 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: text-shimmer 1.5s linear infinite;
+}
+@keyframes text-shimmer { to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer { animation: none; background: none; color: inherit; }
+}
+
 /* 键盘弹起时底部留白只有 8px，悬浮额度条放不下，先隐藏。 */
 html[data-keyboard-open] .composer-quota-floating { display: none; }
 
