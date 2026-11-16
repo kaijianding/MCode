@@ -1,24 +1,16 @@
 package remote
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"mcode/internal/config"
+	"mcode/internal/modelsdev"
 	"mcode/internal/providers/claude"
-	"mcode/internal/providers/cline"
 	"mcode/internal/providers/codex"
-	"mcode/internal/providers/modelcache"
 	"mcode/internal/remote/wire"
 	"mcode/internal/testenv"
-	_ "unsafe"
 )
-
-// 仅测试访问包内缓存，避免修改 Cline 的生产 API。
-//
-//go:linkname clineModelCache mcode/internal/providers/cline.modelCache
-var clineModelCache modelcache.Cache[cline.Model]
 
 func TestProviderModelsReturnsIndependentCapabilities(t *testing.T) {
 	testenv.TempHome(t)
@@ -443,23 +435,17 @@ func TestContextLimitForNormalizesClaudeID(t *testing.T) {
 	}
 }
 
-func TestProviderModelsClineKeepsCLIContextWindow(t *testing.T) {
-	testenv.TempHome(t)
-	const modelID = "cline-test-context-window-20261116"
-	if err := clineModelCache.Refresh(context.Background(), func(context.Context) ([]cline.Model, error) {
-		return []cline.Model{{ID: modelID, Name: "Cline test", ContextWindow: 1_000_000}}, nil
-	}); err != nil {
-		t.Fatalf("注入 Cline 缓存失败: %v", err)
+// CLI 上报的窗口不被 models.dev 覆盖；CLI 没报时才用 models.dev 补。
+func TestApplyClineEffortsKeepsCLIContextWindow(t *testing.T) {
+	m := wire.ProviderModel{ID: "cline-test", ContextLimit: 1_000_000}
+	applyClineEfforts(&m, modelsdev.Info{ContextLimit: 200_000}, true)
+	if m.ContextLimit != 1_000_000 {
+		t.Fatalf("CLI 上报窗口应保留，got %d", m.ContextLimit)
 	}
-	t.Cleanup(func() { clineModelCache = modelcache.Cache[cline.Model]{} })
 
-	for _, model := range ProviderModels("cline") {
-		if model.ID == modelID {
-			if model.ContextLimit != 1_000_000 {
-				t.Fatalf("Cline CLI 上报窗口应保留，got %d", model.ContextLimit)
-			}
-			return
-		}
+	empty := wire.ProviderModel{ID: "cline-test"}
+	applyClineEfforts(&empty, modelsdev.Info{ContextLimit: 200_000}, true)
+	if empty.ContextLimit != 200_000 {
+		t.Fatalf("CLI 未报窗口时应取 models.dev，got %d", empty.ContextLimit)
 	}
-	t.Fatalf("Cline 目录缺少注入模型 %q", modelID)
 }
