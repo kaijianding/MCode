@@ -49,6 +49,7 @@ import { visibleFilterChips, type ThreadFilter } from '../utils/homeFilterChips'
 import { readHomeQuery, shouldCollapseOnBlur, writeHomeQuery } from '../utils/homeSearch';
 import { undoKind } from './threadListNotice';
 import { threadListTargetIndex } from './threadListKeys';
+import { recallThreadListWindow, rememberThreadListWindow } from './threadListWindow';
 
 // 自动化弹层只在用户点开时渲染。
 // BulkThreadsSheet 不懒加载：同一模块里的 useBulkThreadsApi 在列表主体里同步使用，
@@ -71,7 +72,6 @@ const FILTER_LABELS: Record<ThreadFilter, string> = {
 const BULK_NOTICE_TIMEOUT_MS = 8000;
 
 // 活跃会话默认先显示 5 条；列表滚到接近底部时自动再追加 10 条，直到全部展开（不再提供「收起」）。
-const ACTIVE_PAGE_INIT = 5;
 const ACTIVE_PAGE_STEP = 10;
 // 已休眠会话的本地分页步长，与服务端分页互不干扰。
 const DORMANT_PAGE_STEP = 25;
@@ -1139,6 +1139,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     updateThread,
     environmentID
   } = useRemote();
+  const windowKey = `${environmentID}:${projectID ?? 'all'}`;
 
   const [query, setQuery] = useState(() => {
     try { return typeof window === 'undefined' ? '' : readHomeQuery(window.sessionStorage); } catch { return ''; }
@@ -1149,8 +1150,8 @@ export const ThreadList: React.FC<ThreadListProps> = ({
   const [filter, setFilter] = useState<ThreadFilter>('all');
   const [openRowID, setOpenRowID] = useState<string | null>(null);
   const [focusedRowID, setFocusedRowID] = useState<string | null>(null);
-  const [dormantExpanded, setDormantExpanded] = useState(false);
-  const [dormantLimit, setDormantLimit] = useState(10);
+  const [dormantExpanded, setDormantExpanded] = useState(() => recallThreadListWindow(windowKey).dormantExpanded);
+  const [dormantLimit, setDormantLimit] = useState(() => recallThreadListWindow(windowKey).dormantLimit);
   // 活跃会话折叠：按项目 id（全部项目用 'all'）记住当前展示条数
   const [activeLimits, setActiveLimits] = useState<Record<string, number>>({});
   const [menuThread, setMenuThread] = useState<RemoteThreadSummary | null>(null);
@@ -1247,12 +1248,13 @@ export const ThreadList: React.FC<ThreadListProps> = ({
 
   useEffect(() => {
     setCreateProjectID(projectID ?? '');
-    setDormantExpanded(false);
-    setDormantLimit(10);
+    setDormantExpanded(recallThreadListWindow(windowKey).dormantExpanded);
+    setDormantLimit(recallThreadListWindow(windowKey).dormantLimit);
     setOpenRowID(null);
     setBulkOpen(false);
     setAutomationOpen(false);
     setArchivedLoaded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectID]);
 
   // 批量整理结果提示条约 8 秒后自动消失，撤销后重新计时。
@@ -1410,7 +1412,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
   // 活跃会话默认只露前几条；置顶与「等你」的行始终完整显示、不计入折叠。
   // 搜索时结果集本身很小，不折叠。
   const activeLimitKey = projectID ?? 'all';
-  const activeLimit = activeLimits[activeLimitKey] ?? ACTIVE_PAGE_INIT;
+  const activeLimit = activeLimits[activeLimitKey] ?? recallThreadListWindow(windowKey).activeLimit;
   const activeWindow = useMemo(() => {
     const pinned = activeThreads.filter((thread) => thread.section === 'pinned');
     const attention = activeThreads.filter((thread) => thread.section === 'attention');
@@ -1428,21 +1430,25 @@ export const ThreadList: React.FC<ThreadListProps> = ({
 
   // 活跃会话：哨兵可见时再多显示 10 条，hidden 归零后哨兵不再渲染。
   const loadMoreActive = useCallback(() => {
+    const nextLimit = activeLimit + ACTIVE_PAGE_STEP;
     setActiveLimits((limits) => ({
       ...limits,
-      [activeLimitKey]: activeLimit + ACTIVE_PAGE_STEP
+      [activeLimitKey]: nextLimit
     }));
-  }, [activeLimit, activeLimitKey]);
+    rememberThreadListWindow(windowKey, { activeLimit: nextLimit });
+  }, [activeLimit, activeLimitKey, windowKey]);
 
   // 已休眠会话：先展开本地已缓存的下一批，本地到底后再向服务端要下一页。
   const loadMoreDormant = useCallback(() => {
     if (threadsLoadingMore) return;
     if (dormantLimit < dormantThreads.length) {
-      setDormantLimit((limit) => limit + DORMANT_PAGE_STEP);
+      const nextLimit = dormantLimit + DORMANT_PAGE_STEP;
+      setDormantLimit(nextLimit);
+      rememberThreadListWindow(windowKey, { dormantLimit: nextLimit });
     } else if (threadsHasMore) {
       void loadMoreThreads();
     }
-  }, [dormantLimit, dormantThreads.length, loadMoreThreads, threadsHasMore, threadsLoadingMore]);
+  }, [dormantLimit, dormantThreads.length, loadMoreThreads, threadsHasMore, threadsLoadingMore, windowKey]);
 
   const allActive = useMemo(() => {
     const visibleActive = activeWindow.threads;
@@ -1816,7 +1822,11 @@ export const ThreadList: React.FC<ThreadListProps> = ({
                 {(dormantThreads.length > 0 || threadsHasMore) && (
                   <section className="dormant-section" aria-label="已休眠">
                     <div className="gutter-x">
-                      <button type="button" className="dormant-toggle" onClick={() => setDormantExpanded((expanded) => !expanded)} aria-expanded={dormantExpanded}>
+                      <button type="button" className="dormant-toggle" onClick={() => {
+                        const expanded = !dormantExpanded;
+                        setDormantExpanded(expanded);
+                        rememberThreadListWindow(windowKey, { dormantExpanded: expanded });
+                      }} aria-expanded={dormantExpanded}>
                         <span className="dormant-toggle__label"><ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${dormantExpanded ? 'rotate-180' : ''}`} />已休眠</span>
                         <span className="dormant-toggle__count">{dormantThreads.length}{threadsHasMore ? '+' : ''}</span>
                       </button>
