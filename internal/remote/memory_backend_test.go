@@ -660,12 +660,15 @@ func TestMemoryBackend_AlreadyRunningRPCError(t *testing.T) {
 	backend := NewMemoryBackend(hub)
 	defer backend.Close()
 
-	startedCh := make(chan struct{})
+	startedCh := make(chan struct{}, 1)
 	blockCh := make(chan struct{})
 
 	mock := &mockHarness{
 		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
-			close(startedCh)
+			select {
+			case startedCh <- struct{}{}:
+			default:
+			}
 			<-blockCh
 			return nil
 		},
@@ -693,22 +696,17 @@ func TestMemoryBackend_AlreadyRunningRPCError(t *testing.T) {
 		t.Fatalf("timed out waiting for harness run to start")
 	}
 
-	// 在运行中再次发送消息，期望返回 RPCError
-	_, err = backend.SendMessage(ctx, wire.SendMessageParams{
+	// 插入关闭且 WhenRunning 为空时应退回排队。
+	res, err := backend.SendMessage(ctx, wire.SendMessageParams{
 		ThreadID: threadID,
 		Text:     "并发新消息",
 		ActionID: "00000000-0000-0000-0000-000000000206",
 	})
-	if err == nil {
-		t.Fatalf("expected error on second SendMessage while running, got nil")
+	if err != nil {
+		t.Fatalf("SendMessage while running failed: %v", err)
 	}
-
-	var rpcErr *wire.RPCError
-	if !errors.As(err, &rpcErr) {
-		t.Fatalf("expected *wire.RPCError, got: %T (%v)", err, err)
-	}
-	if rpcErr.Code != wire.ErrCodeOperationRejected {
-		t.Errorf("expected ErrCodeOperationRejected (%d), got: %d", wire.ErrCodeOperationRejected, rpcErr.Code)
+	if res.Queued == nil || !*res.Queued || res.FollowUpID == nil || res.TurnID != nil {
+		t.Fatalf("expected queued result, got %+v", res)
 	}
 
 	// 释放阻塞通道并等待结束

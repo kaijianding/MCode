@@ -47,6 +47,7 @@ import type { ThreadMenuPage, ThreadMenuPageHandle, ThreadMenuPageSpec } from '.
 import type { SaveTaskBodyProps } from './thread/SaveTaskForm';
 import { QueuedFollowUpSection } from './thread/QueuedFollowUpSection';
 import { shouldTakeOverComposer } from './thread/composerTakeover';
+import { runningSendParams } from './thread/runningSend';
 import { shouldAutoLoadOlder } from './thread/autoLoadOlder';
 import { useThreadQueue } from './thread/useThreadQueue';
 import { ContinueTurnPill } from './thread/ContinueTurnPill';
@@ -1491,8 +1492,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
         void refreshThread(thread.id);
         return true;
       }
-      const params: Parameters<typeof sendThreadMessage>[2] = {};
-      if (summary.isRunning) params.whenRunning = 'queue';
+      const params: Parameters<typeof sendThreadMessage>[2] = runningSendParams(summary.isRunning, isStewardThread);
       if (composerOptionsSupported) {
         // 宿主会按 options 重新校验模型并重置 provider 会话，只发送相对摘要发生变化的选择。
         const options = changedComposerOptions(composerOptions, summaryComposerOptions(summary));

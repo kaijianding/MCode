@@ -330,17 +330,20 @@ func TestSessionSettings_QueueWhileRunning(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	// 1. 当 QueueWhileRunning 为 false（默认）：运行中发消息应报错拒绝
+	// 1. 插入关闭且 WhenRunning 为空时：运行中发消息应排队。
 	backend.SetGeneralSettingsFunc(func() config.Config {
 		return config.Config{Session: config.SessionConfig{QueueWhileRunning: false}}
 	})
 
-	_, err = backend.SendMessage(context.Background(), wire.SendMessageParams{
+	defaultRes, err := backend.SendMessage(context.Background(), wire.SendMessageParams{
 		ThreadID: thID,
 		Text:     "任务 2 (默认关闭)",
 	})
-	if err == nil {
-		t.Errorf("expected SendMessage to fail when thread is already running and QueueWhileRunning=false")
+	if err != nil {
+		t.Fatalf("SendMessage with insert disabled failed: %v", err)
+	}
+	if defaultRes.Queued == nil || !*defaultRes.Queued || defaultRes.FollowUpID == nil {
+		t.Errorf("expected queued result with insert disabled, got %+v", defaultRes)
 	}
 
 	// 2. 当 QueueWhileRunning 为 true：运行中发消息应自动排队入队，返回 Queued: true
@@ -424,6 +427,46 @@ func TestSessionSettings_InsertIntoRunningTurnFallsBackToQueue(t *testing.T) {
 		t.Fatalf("expected running message to be queued when provider does not implement Steerer, got %+v", res)
 	}
 
+	backend.InterruptCurrent(ctx, thID)
+	waitThreadIdle(t, backend, ctx, thID)
+}
+
+func TestSessionSettings_InsertIntoRunningTurnDisabledQueues(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	started := make(chan struct{}, 1)
+	mock := &mockHarness{
+		kind: "mock",
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	backend.RegisterHarness(mock)
+	thID := "thread-insert-disabled"
+	backend.AddThread(wire.ThreadSummary{ID: thID, Title: "Insert disabled", Provider: "mock"}, nil)
+	ctx := context.Background()
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{ThreadID: thID, Text: "任务 1"}); err != nil {
+		t.Fatalf("SendMessage 1 failed: %v", err)
+	}
+	<-started
+	backend.SetGeneralSettingsFunc(func() config.Config {
+		return config.Config{Session: config.SessionConfig{QueueWhileRunning: false, InsertIntoRunningTurn: false}}
+	})
+	res, err := backend.SendMessage(ctx, wire.SendMessageParams{ThreadID: thID, Text: "任务 2"})
+	if err != nil {
+		t.Fatalf("SendMessage with insert disabled failed: %v", err)
+	}
+	if res.Queued == nil || !*res.Queued || res.FollowUpID == nil || res.TurnID != nil {
+		t.Fatalf("expected queued result, got %+v", res)
+	}
 	backend.InterruptCurrent(ctx, thID)
 	waitThreadIdle(t, backend, ctx, thID)
 }

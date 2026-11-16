@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"mcode/internal/config"
 	"mcode/internal/harness"
 	"mcode/internal/remote/wire"
 	"mcode/internal/store"
@@ -223,6 +224,9 @@ func TestMemoryBackend_CurrentTurnInputSendNowKeepsHostEventKind(t *testing.T) {
 func TestMemoryBackend_CurrentTurnInputIgnoresSteer(t *testing.T) {
 	h := &steerStateHarness{started: make(chan struct{}), release: make(chan struct{}), text: make(chan string, 1)}
 	backend := runtimeBackend(t, h)
+	backend.SetGeneralSettingsFunc(func() config.Config {
+		return config.Config{Session: config.SessionConfig{InsertIntoRunningTurn: true}}
+	})
 	ctx := context.Background()
 	threadID := runtimeThread(backend)
 

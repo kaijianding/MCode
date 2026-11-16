@@ -486,7 +486,9 @@ func (b *MemoryBackend) sendMessage(ctx context.Context, params wire.SendMessage
 	// 运行中的普通发送：开启「插入当前回合」时优先把消息注入正在执行的轮次
 	// （harness.Steerer，Provider 相关），无法注入时退回排队而不是直接拒绝。
 	if isRunning && params.WhenRunning == "" && !priority {
-		if td.phase != phaseRunning {
+		if !insertIntoRunningTurn {
+			params.WhenRunning = "queue"
+		} else if td.phase != phaseRunning {
 			// 轮次仍在启动阶段，服务商还没进入可注入状态：开启插入时退回排队。
 			if insertIntoRunningTurn {
 				params.WhenRunning = "queue"

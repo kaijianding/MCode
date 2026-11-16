@@ -2,7 +2,6 @@ package remote
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -192,8 +191,7 @@ func TestQueueDispatch_QueueWhileRunning_Order(t *testing.T) {
 	}
 }
 
-// TestQueueDispatch_QueueWhileRunning_Rejected 验证在 QueueWhileRunning=false 时：
-// 轮次运行中调用 SendMessage 会直接返回 ErrCodeOperationRejected 的 RPCError，且队列保持为空。
+// TestQueueDispatch_QueueWhileRunning_Rejected 验证插入关闭且 WhenRunning 省略时退回排队。
 func TestQueueDispatch_QueueWhileRunning_Rejected(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
@@ -255,31 +253,26 @@ func TestQueueDispatch_QueueWhileRunning_Rejected(t *testing.T) {
 		t.Fatal("timed out waiting for turn to start")
 	}
 
-	// 运行中发消息，QueueWhileRunning 为 false，应当返回 ErrCodeOperationRejected
-	_, err = backend.SendMessage(ctx, wire.SendMessageParams{
+	// 运行中发消息，插入关闭时应直接入队。
+	res, err := backend.SendMessage(ctx, wire.SendMessageParams{
 		ThreadID: threadID,
-		Text:     "should be rejected",
+		Text:     "should be queued",
 		ActionID: "act-rej-attempt",
 	})
-	if err == nil {
-		t.Fatal("expected SendMessage while running to fail when QueueWhileRunning=false, got nil")
+	if err != nil {
+		t.Fatalf("SendMessage while running failed: %v", err)
+	}
+	if res.Queued == nil || !*res.Queued || res.FollowUpID == nil || res.TurnID != nil {
+		t.Fatalf("expected queued result, got %+v", res)
 	}
 
-	var rpcErr *wire.RPCError
-	if !errors.As(err, &rpcErr) {
-		t.Fatalf("expected *wire.RPCError, got %T (%v)", err, err)
-	}
-	if rpcErr.Code != wire.ErrCodeOperationRejected {
-		t.Errorf("expected ErrCodeOperationRejected (%d), got: %d", wire.ErrCodeOperationRejected, rpcErr.Code)
-	}
-
-	// 队列保持为空
+	// 队列中保留刚提交的消息。
 	snap, err := backend.QueueList(ctx, threadID)
 	if err != nil {
 		t.Fatalf("QueueList failed: %v", err)
 	}
-	if len(snap.FollowUps) != 0 {
-		t.Errorf("expected queue to remain empty, got %d items", len(snap.FollowUps))
+	if len(snap.FollowUps) != 1 || snap.FollowUps[0].Text != "should be queued" {
+		t.Errorf("expected queued message to remain in queue, got %+v", snap.FollowUps)
 	}
 
 	close(turnProceed)

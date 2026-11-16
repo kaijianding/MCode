@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"mcode/internal/config"
 	"mcode/internal/git"
 	"mcode/internal/harness"
 	"mcode/internal/remote/wire"
@@ -287,6 +288,9 @@ func setupPendingQuestion(t *testing.T) (*MemoryBackend, *pendingQuestionHarness
 		}
 	})
 	b.SetHarness(h, t.TempDir(), harness.ModeAgent)
+	b.SetGeneralSettingsFunc(func() config.Config {
+		return config.Config{Session: config.SessionConfig{InsertIntoRunningTurn: true}}
+	})
 	events := make(chan wire.RequestsChangedParams, 8)
 	conn := newMockStreamConn()
 	conn.notifyFn = func(method string, params any) error {
@@ -415,6 +419,9 @@ func (h *steerStateHarness) Steer(ctx context.Context, sessionID, text string) e
 func TestRuntimeRegression_SteerAndExplicitQueue(t *testing.T) {
 	h := &steerStateHarness{started: make(chan struct{}), release: make(chan struct{}), text: make(chan string, 1)}
 	b := runtimeBackend(t, h)
+	b.SetGeneralSettingsFunc(func() config.Config {
+		return config.Config{Session: config.SessionConfig{InsertIntoRunningTurn: true}}
+	})
 	ctx := context.Background()
 	id := runtimeThread(b)
 	first, err := b.SendMessage(ctx, wire.SendMessageParams{ThreadID: id, Text: "start"})
