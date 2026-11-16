@@ -606,6 +606,7 @@ interface TimelineEntryProps {
   findActiveOccurrence?: number | null;
   /** 时间线最后一条可见消息的 id：错误卡片的「接着干」只在最新一条上自动重试 */
   lastMessageID?: string | null;
+  latestActionMessage?: boolean;
   /** 当前是否还在跑；错误卡片的自动重试要等这一轮跑完再开始 */
   isRunning?: boolean;
   /** 错误卡片的续跑入口；宿主没接线时不传，错误卡片因此不渲染按钮 */
@@ -635,6 +636,25 @@ function lastVisibleMessageID(items: TimelineItem[]): string | null {
     }
   }
   return null;
+}
+
+function latestActionMessageIDs(items: TimelineItem[]): Set<string> {
+  const result = new Set<string>();
+  let user = false;
+  let assistant = false;
+  for (let index = items.length - 1; index >= 0 && (!user || !assistant); index -= 1) {
+    const item = items[index];
+    if (item.type !== 'message' || item.message.kind === 'plan') continue;
+    const message = item.message;
+    if (!user && (message.kind === 'user' || message.role === 'user') && !parseSwarmReport(message.text || '')) {
+      result.add(message.id);
+      user = true;
+    } else if (!assistant && isAssistantMessage(message)) {
+      result.add(message.id);
+      assistant = true;
+    }
+  }
+  return result;
 }
 
 /** 回合改动文件卡片的相等性：路径与增删行数都没变就不用重渲染。 */
@@ -879,6 +899,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
     findActiveMessageID,
     findActiveOccurrence,
     lastMessageID,
+    latestActionMessage = true,
     isRunning = false,
     onContinue,
     onOpenFile,
@@ -1422,7 +1443,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
 
     return (
       <React.Fragment key={message.id}>
-        <div className="flex flex-col items-end mb-4 min-w-0" title={formatRelativeTime(message.createdAt)} {...longPress.handlers}>
+        <div className="group flex flex-col items-end mb-4 min-w-0" title={formatRelativeTime(message.createdAt)} {...longPress.handlers}>
           <div
             className="rounded-[20px] px-3.5 py-2.5 bg-[var(--user-bubble)] text-[16px] leading-[23px] text-[var(--foreground)] max-w-[85%] min-w-0 break-words select-text [overflow-wrap:anywhere]"
             style={longPress.pressed ? { backgroundColor: 'var(--press)' } : undefined}
@@ -1459,7 +1480,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
               {isExpanded ? '收起' : `展开 · 还有 ${Math.max(0, totalLines - visibleLines)} 行`}
             </button>
           )}
-          <div className="flex items-center justify-end gap-2 mt-1 px-1 min-w-0">
+          <div className={`flex items-center justify-end gap-2 mt-1 px-1 min-w-0 ${!narrowScreen && !latestActionMessage && !copyState ? '[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 [&:has([aria-expanded=true])]:opacity-100 transition-opacity motion-reduce:transition-none' : ''}`}>
             {!narrowScreen && canQuote && (
               <button
                 type="button"
@@ -1513,7 +1534,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
       <article
         key={message.id}
         title={formatRelativeTime(message.createdAt)}
-        className="mb-5 w-full bg-transparent border-0 p-0 text-[16px] leading-[23px] text-[var(--foreground)] min-w-0"
+        className="group mb-5 w-full bg-transparent border-0 p-0 text-[16px] leading-[23px] text-[var(--foreground)] min-w-0"
       >
         <div className="min-w-0 max-w-full space-y-2">
           {!hasText ? (
@@ -1562,7 +1583,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 min-w-0 mt-2">
+        <div className={`flex items-center justify-end gap-2 min-w-0 mt-2 ${!narrowScreen && !latestActionMessage && !copyState ? '[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 [&:has([aria-expanded=true])]:opacity-100 transition-opacity motion-reduce:transition-none' : ''}`}>
           {isLong && (
             <button
               type="button"
@@ -1711,6 +1732,7 @@ export const TimelineEntry = React.memo<TimelineEntryProps>((props) => {
   previous.findActiveMessageID === next.findActiveMessageID &&
   previous.findActiveOccurrence === next.findActiveOccurrence &&
   previous.lastMessageID === next.lastMessageID &&
+  previous.latestActionMessage === next.latestActionMessage &&
   previous.isRunning === next.isRunning &&
   previous.onContinue === next.onContinue &&
   previous.onOpenFile === next.onOpenFile &&
@@ -1887,6 +1909,7 @@ const VirtualTimeline: React.FC<VirtualTimelineProps> = ({
   const { toggleWorkRecord } = useWorkRecordHandlers(threadID, autoCollapse, onToggleWorkRecord);
   // 时间线最后一条可见消息：错误卡片的自动重试只认它
   const lastMessageID = React.useMemo(() => lastVisibleMessageID(items), [items]);
+  const latestActionIDs = React.useMemo(() => latestActionMessageIDs(items), [items]);
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = React.useState(0);
@@ -2018,6 +2041,7 @@ const VirtualTimeline: React.FC<VirtualTimelineProps> = ({
           findActiveMessageID={activeFindMessageID}
           findActiveOccurrence={activeFindOccurrence}
           lastMessageID={lastMessageID}
+          latestActionMessage={item.type === 'message' && latestActionIDs.has(item.message.id)}
           swarmTruncatedReports={swarmTruncatedReports}
           isRunning={isRunning}
           onOpenFile={onOpenFile}
@@ -2218,6 +2242,7 @@ export const ThreadTimeline: React.FC<ThreadTimelineProps> = ({
   );
   // 时间线最后一条可见消息（已跳过隐藏消息与并进胶囊的汇报行）
   const lastMessageID = React.useMemo(() => lastVisibleMessageID(visibleItems), [visibleItems]);
+  const latestActionIDs = React.useMemo(() => latestActionMessageIDs(visibleItems), [visibleItems]);
   // B7 后台任务：命令只算「回合已结束、命令仍在跑」，bee 只算运行中；都为 0 时聚合行不渲染
   const backgroundCommands = React.useMemo(
     () => collectBackgroundCommands(visibleItems, Boolean(isRunning)),
@@ -2407,6 +2432,7 @@ export const ThreadTimeline: React.FC<ThreadTimelineProps> = ({
           findActiveMessageID={activeFindMessageID}
           findActiveOccurrence={activeFindOccurrence}
           lastMessageID={lastMessageID}
+          latestActionMessage={item.type === 'message' && latestActionIDs.has(item.message.id)}
           swarmTruncatedReports={swarmTruncatedReports}
           isRunning={isRunning}
           onOpenFile={onOpenFile}

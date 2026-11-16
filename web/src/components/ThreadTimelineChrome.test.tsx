@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TimelineEntry, type ThreadMessage } from './ThreadTimeline';
+import { RemoteProvider } from '../context/RemoteContext';
+import { ThreadTimeline, TimelineEntry, type ThreadMessage } from './ThreadTimeline';
 
 const renderMessage = (message: ThreadMessage) => renderToStaticMarkup(
   <TimelineEntry
@@ -18,3 +19,19 @@ for (const html of [assistant, user, error]) {
   if (!html.includes('title=')) throw new Error('消息应通过 title 提供时间');
 }
 if (!error.includes('❌ 接口错误')) throw new Error('错误标题应保留');
+
+const timeline = renderToStaticMarkup(
+  <RemoteProvider><ThreadTimeline
+    threadID="thread"
+    items={[
+      { type: 'message', message: { ...base, id: 'first', role: 'user', kind: 'user' } },
+      { type: 'message', message: { ...base, id: 'last', role: 'user', kind: 'user' } }
+    ]}
+    expandedIds={{}} copyState={null} onToggleExpanded={() => {}} onToggleWorkRecord={() => {}}
+    onCopyMessage={() => {}}
+  /></RemoteProvider>
+);
+const actionRows = [...timeline.matchAll(/<div class="([^"]*justify-end gap-2 mt-1 px-1 min-w-0[^"]*)"/g)].map((match) => match[1]);
+if (actionRows.length !== 2 || !actionRows[0].includes('group-hover:opacity-100') || actionRows[1].includes('group-hover:opacity-100')) {
+  throw new Error('仅较早的用户消息操作行应在悬停时显示');
+}
