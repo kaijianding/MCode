@@ -1,7 +1,7 @@
 // 同 LazyFallback.test.tsx：web/ 没有测试运行器，用 react-dom/server 渲染成字符串后直接断言。
 // 这里只校验外壳的语义与 class：遮罩层、dialog 角色、两种卡片样式、aria-labelledby 透传。
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SheetFrame, SHEET_MENU_CARD_CLASS, SHEET_PANEL_CARD_CLASS } from './SheetFrame';
+import { SheetFrame, SHEET_MENU_CARD_CLASS, SHEET_PANEL_CARD_CLASS, pushSheet, removeSheet, isTopSheet, nextFocusIndex } from './SheetFrame';
 
 function assertIncludes(haystack: string, needle: string, what: string): void {
   if (!haystack.includes(needle)) {
@@ -45,3 +45,14 @@ if (menuHtml.includes('settings-sheet')) {
 
 // labelledBy 输出为 aria-labelledby。
 assertIncludes(labelledHtml, 'aria-labelledby="sheet-title"', 'aria-labelledby ');
+
+const stack = pushSheet(pushSheet([], 'outer'), 'inner');
+if (!isTopSheet(stack, 'inner') || isTopSheet(stack, 'outer') || !isTopSheet(removeSheet(stack, 'inner'), 'outer')) {
+  throw new Error('弹层栈顺序错误');
+}
+for (const [index, count, backwards, expected] of [[1, 2, false, 0], [0, 2, true, 1], [0, 0, false, -1], [-1, 2, true, 1]] as const) {
+  if (nextFocusIndex(index, count, backwards) !== expected) throw new Error('焦点循环错误');
+}
+const variantHtml = renderToStaticMarkup(<SheetFrame onRequestClose={() => {}} layerClassName="sheet-layer--popover" role="alertdialog">内容</SheetFrame>);
+assertIncludes(variantHtml, 'sheet-layer sheet-layer--popover', '遮罩变体');
+assertIncludes(variantHtml, 'role="alertdialog"', '警告对话框');
