@@ -130,3 +130,39 @@ func TestWorktreeAdd_CloneIgnoredDisabled(t *testing.T) {
 		t.Errorf("expected node_modules absent in worktree, stat err = %v", err)
 	}
 }
+
+func TestCloneReferencedIgnored(t *testing.T) {
+	if ok, reason := cloneVolumeOK(t.TempDir(), t.TempDir()); !ok {
+		t.Skipf("当前环境不支持 clonefile：%s", reason)
+	}
+	runner, dir := setupTestRepo(t)
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("/docker/\n/scripts/run.sh\n/unreferenced\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{"docker/Dockerfile": "image", "scripts/run.sh": "script", "unreferenced": "other"}
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	SetCloneIgnored(true, []string{"unmatched"})
+	t.Cleanup(func() { SetCloneIgnored(false, nil) })
+	wtDir := filepath.Join(t.TempDir(), "wt-referenced")
+	if err := runner.WorktreeAdd(ctx, dir, wtDir, "feat-referenced", "", WithCloneReferenced("run scripts/run.sh, see docker/Dockerfile")); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"docker/Dockerfile", "scripts/run.sh"} {
+		got, err := os.ReadFile(filepath.Join(wtDir, rel))
+		if err != nil || string(got) != files[rel] {
+			t.Errorf("%s: got %q, err %v", rel, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "unreferenced")); !os.IsNotExist(err) {
+		t.Errorf("expected unreferenced absent, stat err = %v", err)
+	}
+}

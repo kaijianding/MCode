@@ -1341,7 +1341,7 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		}
 		branch = fmt.Sprintf("mcode/swarm/%s/%d", leadPrefix, index)
 
-		if err := m.opts.Git.WorktreeAdd(ctx, beeWorkDir, wtPath, branch, baseCommit); err != nil {
+		if err := m.opts.Git.WorktreeAdd(ctx, beeWorkDir, wtPath, branch, baseCommit, git.WithCloneReferenced(spec.Prompt+"\n"+strings.Join(spec.Acceptance, "\n"))); err != nil {
 			_ = m.opts.Git.BranchDelete(ctx, beeWorkDir, branch, true)
 			_ = os.RemoveAll(wtPath)
 			return Bee{}, fmt.Errorf("worktree add failed for bee %d: %w", index, err)

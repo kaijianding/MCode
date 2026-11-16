@@ -35,6 +35,7 @@ type WorktreeAddOption func(*worktreeAddOptions)
 
 type worktreeAddOptions struct {
 	initSubmodules *bool
+	referenced     string
 }
 
 // WithInitSubmodules 显式指定是否初始化子模块。
@@ -42,6 +43,11 @@ func WithInitSubmodules(enabled bool) WorktreeAddOption {
 	return func(o *worktreeAddOptions) {
 		o.initSubmodules = &enabled
 	}
+}
+
+// WithCloneReferenced 指定需要克隆的被忽略路径引用。
+func WithCloneReferenced(text string) WorktreeAddOption {
+	return func(o *worktreeAddOptions) { o.referenced = text }
 }
 
 // HasSubmodules 检查指定根目录或工作树路径下是否存在 .gitmodules 文件且非目录。
@@ -111,7 +117,7 @@ func (r *Runner) WorktreeAdd(ctx context.Context, root, path, branch, base strin
 		}
 	}
 
-	r.cloneIgnoredInto(ctx, root, path)
+	r.cloneIgnoredInto(ctx, root, path, cfg.referenced)
 
 	return nil
 }

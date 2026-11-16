@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -34,9 +36,9 @@ func GetCloneIgnored() (bool, []string) {
 
 // cloneIgnoredInto 尽力而为地把源 Checkout 中被忽略、且基名匹配配置模式的条目
 // 以写时复制方式带入新 worktree。任何失败只记录日志，不影响调用方。
-func (r *Runner) cloneIgnoredInto(ctx context.Context, root, wtPath string) {
+func (r *Runner) cloneIgnoredInto(ctx context.Context, root, wtPath, referenced string) {
 	enabled, patterns := GetCloneIgnored()
-	if !enabled || len(patterns) == 0 {
+	if !enabled || (len(patterns) == 0 && referenced == "") {
 		return
 	}
 
@@ -68,7 +70,7 @@ func (r *Runner) cloneIgnoredInto(ctx context.Context, root, wtPath string) {
 		if rel == "" || filepath.IsAbs(rel) || hasDotDotSegment(rel) {
 			continue
 		}
-		if !matchAnyPattern(filepath.Base(rel), patterns) {
+		if !matchAnyPattern(filepath.Base(rel), patterns) && !referencesPath(referenced, rel) {
 			continue
 		}
 
@@ -95,6 +97,43 @@ func (r *Runner) cloneIgnoredInto(ctx context.Context, root, wtPath string) {
 	if cloned > 0 {
 		log.Printf("git: 已克隆 %d 个忽略条目到 %s，用时 %s", cloned, wtPath, time.Since(start).Round(time.Millisecond))
 	}
+}
+
+// referencesPath 判断文本是否以路径边界引用了 rel。
+func referencesPath(text, rel string) bool {
+	if rel == "" {
+		return false
+	}
+	for offset := 0; offset < len(text); {
+		i := strings.Index(text[offset:], rel)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		before := i == 0 || strings.HasSuffix(text[:i], "./")
+		if !before {
+			r, _ := utf8.DecodeLastRuneInString(text[:i])
+			before = unicode.IsSpace(r) || strings.ContainsRune("\"'`()[]{}=", r)
+		}
+		end := i + len(rel)
+		after := end == len(text)
+		if !after {
+			r, size := utf8.DecodeRuneInString(text[end:])
+			after = unicode.IsSpace(r) || strings.ContainsRune("\"'`()[]{}:,;/", r) || (r >= 0x3000 && r <= 0x303f && unicode.IsPunct(r)) || (r >= 0xff00 && r <= 0xffef && unicode.IsPunct(r))
+			if r == '.' {
+				after = end+size == len(text)
+				if !after {
+					next, _ := utf8.DecodeRuneInString(text[end+size:])
+					after = unicode.IsSpace(next)
+				}
+			}
+		}
+		if before && after {
+			return true
+		}
+		offset = i + 1
+	}
+	return false
 }
 
 // hasDotDotSegment 判断相对路径中是否含有 ".." 段。
