@@ -132,6 +132,8 @@ type SettingsState struct {
 	base            config.Config
 	remoteHostsText string
 	errorMessage    string
+	savedSeq        uint64
+	showSaved       bool
 	// configWarning 记录读盘时被 config 逐字段重置的非法值说明：它不是错误，只提示用户
 	// 磁盘上有笔误，保存照常进行（E-07）。
 	configWarning string
@@ -546,6 +548,34 @@ var settingsSaveHook func()
 // 回写只覆盖真正变了的字段。后台 goroutine（如 loadProjects → rememberUsedProvider）也会调
 // 这里，整份换掉 cfg 会和渲染路径的无锁读撞车。
 func (s *SettingsState) save() bool {
+	if !s.persist() {
+		return false
+	}
+	s.cfgMu.Lock()
+	s.savedSeq++
+	seq := s.savedSeq
+	s.showSaved = true
+	s.cfgMu.Unlock()
+	time.AfterFunc(2*time.Second, func() {
+		s.cfgMu.Lock()
+		if s.savedSeq != seq {
+			s.cfgMu.Unlock()
+			return
+		}
+		s.showSaved = false
+		s.cfgMu.Unlock()
+		s.invalidate()
+	})
+	return true
+}
+
+func (s *SettingsState) savedBadgeVisible() bool {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	return s.showSaved && s.errorMessage == ""
+}
+
+func (s *SettingsState) persist() bool {
 	s.stewardLabelMu.Lock()
 	s.stewardLabelKey = ""
 	s.stewardLabelMu.Unlock()
@@ -577,7 +607,7 @@ func (s *SettingsState) updateAndSave(mutate func(cfg *config.Config)) {
 	}
 	s.cfgMu.Unlock()
 	s.mu.Unlock()
-	s.save()
+	s.persist()
 }
 
 // saveSnapshot 用锁内拍下的快照完成校验、合并写盘与内存回写。
@@ -631,6 +661,10 @@ func (s *SettingsState) noteError(msg string) {
 }
 
 func (s *SettingsState) noteErrorLocked(msg string) {
+	if msg != "" {
+		s.showSaved = false
+		s.savedSeq++
+	}
 	if s.errorMessage != msg {
 		s.errorMessage = msg
 	}
@@ -1643,8 +1677,17 @@ func renderSettingsWindow(c *ui.Context, st *SettingsState) {
 	}
 	width, _ := c.Size()
 	ui.Column(c.Key("settings-window-root")).Label("设置").Fill().Background(ThemeWindowBg(c)).Children(func() {
-		ui.Row(c.Key("settings-window-titlebar")).FillWidth().Height(HeaderHeight).DragWindow().
-			Padding(settingsVerticalPadding, titleBarTrailingInset(c), settingsVerticalPadding, titleBarLeadingInset(c))
+		ui.Row(c.Key("settings-window-titlebar")).FillWidth().Height(HeaderHeight).DragWindow().AlignItems(ui.Center).
+			Padding(settingsVerticalPadding, titleBarTrailingInset(c), settingsVerticalPadding, titleBarLeadingInset(c)).Children(func() {
+			ui.Spacer(c)
+			if st.savedBadgeVisible() {
+				ui.Row(c.Key("settings-saved-badge-wrap")).Transition(motionTransition(c, ui.ElementTransition{
+					Duration: DurSnap, ExitDuration: DurSnap, Enter: &ui.Motion{Opacity: 0}, Exit: &ui.Motion{Opacity: 0},
+				})).Children(func() {
+					Capsule(c, CapsuleProps{Key: "settings-saved-badge", Text: "已保存", Icon: IconCheck(), Tone: ToneSuccess, Size: ControlXS})
+				})
+			}
+		})
 		ui.Row(c.Key("settings-dialog-body")).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c.Key("settings-dialog-nav")).Width(min(float32(220), width*0.35)).FillHeight().Children(func() {
 				renderSettingsNav(c, st)
