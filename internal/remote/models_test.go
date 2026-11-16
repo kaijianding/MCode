@@ -1,15 +1,24 @@
 package remote
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"mcode/internal/config"
 	"mcode/internal/providers/claude"
+	"mcode/internal/providers/cline"
 	"mcode/internal/providers/codex"
+	"mcode/internal/providers/modelcache"
 	"mcode/internal/remote/wire"
 	"mcode/internal/testenv"
+	_ "unsafe"
 )
+
+// 仅测试访问包内缓存，避免修改 Cline 的生产 API。
+//
+//go:linkname clineModelCache mcode/internal/providers/cline.modelCache
+var clineModelCache modelcache.Cache[cline.Model]
 
 func TestProviderModelsReturnsIndependentCapabilities(t *testing.T) {
 	testenv.TempHome(t)
@@ -425,4 +434,32 @@ func TestContextLimitPrefersCatalogWindow(t *testing.T) {
 	if got := contextLimitFor(catalog, "omp", "missing/model"); got != providerContextLimits["omp"] {
 		t.Fatalf("目录里没有该模型时应回退静态表，got %d", got)
 	}
+}
+
+func TestContextLimitForNormalizesClaudeID(t *testing.T) {
+	catalog := []wire.ProviderModel{{ID: "claude-fable-5-1", ContextLimit: 1_000_000}}
+	if got := contextLimitFor(catalog, "claude", "claude-fable-5-1[1m]"); got != 1_000_000 {
+		t.Fatalf("Claude 1m ID 应匹配目录窗口，got %d", got)
+	}
+}
+
+func TestProviderModelsClineKeepsCLIContextWindow(t *testing.T) {
+	testenv.TempHome(t)
+	const modelID = "cline-test-context-window-20261116"
+	if err := clineModelCache.Refresh(context.Background(), func(context.Context) ([]cline.Model, error) {
+		return []cline.Model{{ID: modelID, Name: "Cline test", ContextWindow: 1_000_000}}, nil
+	}); err != nil {
+		t.Fatalf("注入 Cline 缓存失败: %v", err)
+	}
+	t.Cleanup(func() { clineModelCache = modelcache.Cache[cline.Model]{} })
+
+	for _, model := range ProviderModels("cline") {
+		if model.ID == modelID {
+			if model.ContextLimit != 1_000_000 {
+				t.Fatalf("Cline CLI 上报窗口应保留，got %d", model.ContextLimit)
+			}
+			return
+		}
+	}
+	t.Fatalf("Cline 目录缺少注入模型 %q", modelID)
 }

@@ -235,7 +235,7 @@ func modelContextLimit(provider, modelID string) int {
 func contextLimitFor(models []wire.ProviderModel, provider, modelID string) int {
 	if modelID != "" {
 		for _, m := range models {
-			if m.ID == modelID && m.ContextLimit > 0 {
+			if sameModelID(provider, m.ID, modelID) && m.ContextLimit > 0 {
 				return m.ContextLimit
 			}
 		}
@@ -340,7 +340,7 @@ func clineSupportsReasoning(id string) bool {
 // ACP 不提供档位，目录里有刻度就用它，没有（toggle 型或没收录）而模型支持推理时用共用刻度。
 func applyClineEfforts(m *wire.ProviderModel, info modelsdev.Info, found bool) {
 	if found {
-		if info.ContextLimit > 0 {
+		if m.ContextLimit == 0 && info.ContextLimit > 0 {
 			m.ContextLimit = info.ContextLimit
 		}
 		if len(info.Efforts) > 0 {
@@ -637,7 +637,7 @@ func nativeProviderModels(provider string) []wire.ProviderModel {
 		cached := cline.CachedModels()
 		res := make([]wire.ProviderModel, len(cached))
 		for i, m := range cached {
-			res[i] = wire.ProviderModel{ID: m.ID, Name: m.Name, Detail: optionalString(m.Detail), IsDefault: m.Default, Secondary: m.Secondary}
+			res[i] = wire.ProviderModel{ID: m.ID, Name: m.Name, Detail: optionalString(m.Detail), IsDefault: m.Default, Secondary: m.Secondary, ContextLimit: m.ContextWindow}
 		}
 		return res
 	case "mcode":
