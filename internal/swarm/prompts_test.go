@@ -427,8 +427,13 @@ func TestLeadPolicyDelegateTool(t *testing.T) {
 		if strings.Contains(got, "swarm_delegate") != enabled {
 			t.Errorf("delegateTool=%v: 工具提示不符", enabled)
 		}
-		if enabled && !strings.Contains(got, "Only when the tool is not in your tool list") {
-			t.Error("缺少后备条件")
+		for _, want := range []string{"appears only as a deferred tool, it is available", "Only when no such tool can be found"} {
+			if enabled && !strings.Contains(got, want) {
+				t.Errorf("缺少工具提示 %q", want)
+			}
+		}
+		if !enabled && strings.Contains(got, "deferred tool") {
+			t.Error("禁用工具时不应包含 deferred tool 提示")
 		}
 	}
 }
