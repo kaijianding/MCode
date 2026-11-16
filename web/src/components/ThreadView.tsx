@@ -46,6 +46,7 @@ import { menuBaseForRoute } from './thread/menu/menuRouteOpen';
 import type { ThreadMenuPage, ThreadMenuPageHandle, ThreadMenuPageSpec } from './thread/menu/menuPages';
 import type { SaveTaskBodyProps } from './thread/SaveTaskForm';
 import { QueuedFollowUpSection } from './thread/QueuedFollowUpSection';
+import { shouldTakeOverComposer } from './thread/composerTakeover';
 import { useThreadQueue } from './thread/useThreadQueue';
 import { ContinueTurnPill } from './thread/ContinueTurnPill';
 import { QuestionMinimap, buildQuestionMinimapData } from './thread/QuestionMinimap';
@@ -1594,7 +1595,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
   useEffect(() => {
     if (requestPanelFlashNonce === 0) return;
     const timer = window.setTimeout(() => setRequestPanelFlashNonce(0), 1500);
-    return () => window.clearTimeout(timer);
+      return () => window.clearTimeout(timer);
   }, [requestPanelFlashNonce]);
   // 推送点开的一次性定位：目标还没加载时不报错，等消息或审批快照到达后再试。
   const consumedPushJumpNonceRef = useRef(0);
@@ -2298,6 +2299,28 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
 
   const unreadLabel = formatUnreadCount(unreadCount);
 
+  const takeOverComposer = canSend && !(swarmSupported && swarmError && swarmState === null) &&
+    shouldTakeOverComposer(requestSnapshot?.requests ?? []);
+  const requestPanel = requestSnapshot && (
+          <div
+            ref={requestPanelRef}
+            className={`shrink-0 min-w-0 ${requestPanelFlashNonce > 0 ? 'push-target-flash' : ''} ${takeOverComposer ? 'animate-slideUp' : ''}`}
+          >
+            <LazyBoundary>
+              <RemoteRequestPanel
+                threadID={thread.id}
+                requests={requestSnapshot.requests}
+                isConnected={isConnected}
+                skipSupported={Boolean(capabilities?.features?.includes('requests.skip'))}
+                onRespond={handleRemoteRespond}
+                onRefresh={async () => {
+                  await listRequests(thread.id);
+                }}
+              />
+            </LazyBoundary>
+          </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative w-full">
       {/* 头部：返回键、标题、副标题（项目 · 分支/工作区）、⋯ 菜单 */}
@@ -2708,25 +2731,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
         }}
       >
         {/* 待处理授权与提问卡片 */}
-        {requestSnapshot && (
-          <div
-            ref={requestPanelRef}
-            className={`shrink-0 min-w-0 ${requestPanelFlashNonce > 0 ? 'push-target-flash' : ''}`}
-          >
-            <LazyBoundary>
-              <RemoteRequestPanel
-                threadID={thread.id}
-                requests={requestSnapshot.requests}
-                isConnected={isConnected}
-                skipSupported={Boolean(capabilities?.features?.includes('requests.skip'))}
-                onRespond={handleRemoteRespond}
-                onRefresh={async () => {
-                  await listRequests(thread.id);
-                }}
-              />
-            </LazyBoundary>
-          </div>
-        )}
+        {!takeOverComposer && requestPanel}
 
         {/* 跟进队列（位于输入区上方、RemoteRequestPanel 下方）：分组编辑、撤回、立即发送、插话与上下移都在组件内 */}
         {!swarmState?.isBee && (
@@ -2981,6 +2986,8 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
           </div>
         ) : canSend ? (
           <div className="w-full max-w-[880px] mx-auto">
+            {takeOverComposer && requestPanel}
+            <div hidden={takeOverComposer}>
             <ThreadComposer
               ref={composerRef}
               threadID={thread.id}
@@ -3048,6 +3055,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread, onBack, subview,
                   : undefined
               }
             />
+            </div>
           </div>
         ) : (
           <div
