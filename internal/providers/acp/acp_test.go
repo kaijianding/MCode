@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"mcode/internal/harness"
 	"mcode/internal/providers/loginenv"
@@ -1179,6 +1181,69 @@ func TestAgyTurnOutcome(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAgyStepErrorText(t *testing.T) {
+	const payloadHex = "081120032ACC010A0B088FC1DED6061090E5E53D1805420B088FC1DED6061090E5E53D622437613765636239362D633166632D343662382D383133622D343461636132396431626135A201500A2430396439646261372D663734362D343731612D386665362D39623332663532316561366510551829222432363537353235392D386563312D346232652D393133362D393836316165653936646130D201110A0F0803120B088FC1DED60610F8E6E73D9A02206464373033656438383265313431383438643339633436653163613266333937C201A5011AA2011272415049206572726F722028617474656D70742032293A20554E415641494C41424C452028636F646520353033293A204E6F20636170616369747920617661696C61626C6520666F72206D6F64656C2067656D696E692D332E382D666C6173682D68696768206F6E2074686520736572766572322C30396439646261372D663734362D343731612D386665362D3962333266353231656136652D38352D32303130"
+	tests := []struct {
+		name    string
+		payload []byte
+		want    []string
+	}{
+		{
+			name:    "protobuf payload",
+			payload: mustDecodeHex(t, payloadHex),
+			want:    []string{"UNAVAILABLE (code 503): No capacity available for model gemini-3.8-flash-high"},
+		},
+		{
+			name:    "quota payload",
+			payload: append([]byte("\x08\x11\x20\x03\x2a\x0a"), []byte("Error 429, Message: quota exhausted, Status: RESOURCE_EXHAUSTED quotaResetTimeStamp:2026-11-16T10:00:00Z")...),
+			want:    []string{"RESOURCE_EXHAUSTED", "2026-11-16T10:00:00Z"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "steps.db")
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("CREATE TABLE steps (idx INTEGER, step_type INTEGER, step_payload BLOB)"); err != nil {
+				db.Close()
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("INSERT INTO steps VALUES (1, 17, ?)", tc.payload); err != nil {
+				db.Close()
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			text, ok := agyNewStepError(dbPath, -1)
+			if !ok {
+				t.Fatal("agyNewStepError returned ok=false")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("text = %q, want substring %q", text, want)
+				}
+			}
+			for _, r := range text {
+				if unicode.IsControl(r) {
+					t.Fatalf("text contains control character %U: %q", r, text)
+				}
+			}
+		})
+	}
+}
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
 }
 
 func TestACPResumeAndClose(t *testing.T) {

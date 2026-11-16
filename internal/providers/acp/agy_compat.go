@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -139,14 +141,33 @@ func agyNewStepError(dbPath string, start int64) (string, bool) {
 	if err != nil || kind != 17 {
 		return "", false
 	}
-	text := string(payload)
-	if newline := strings.IndexByte(text, '\n'); newline >= 0 {
-		text = text[:newline]
+	var parts []string
+	segment := make([]rune, 0, 64)
+	appendSegment := func() {
+		part := strings.TrimSpace(string(segment))
+		if utf8.RuneCountInString(part) >= 16 {
+			parts = append(parts, part)
+		}
+		segment = segment[:0]
 	}
-	if strings.TrimSpace(text) == "" {
+	for remaining := payload; len(remaining) > 0; {
+		r, size := utf8.DecodeRune(remaining)
+		remaining = remaining[size:]
+		if (r == utf8.RuneError && size == 1) || (!unicode.IsPrint(r) && r != ' ') {
+			appendSegment()
+			continue
+		}
+		segment = append(segment, r)
+	}
+	appendSegment()
+	text := strings.TrimSpace(strings.Join(parts, " "))
+	if text == "" {
 		return "", false
 	}
-	return strings.TrimSpace(text), true
+	if runes := []rune(text); len(runes) > 4096 {
+		text = string(runes[:4096])
+	}
+	return text, true
 }
 
 func agyTurnFailure(dbPath string, start int64, stopReason string) error {
