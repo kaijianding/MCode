@@ -887,7 +887,7 @@ func (m *Manager) Restore(ctx context.Context) error {
 	}
 
 	now := m.now()
-	var restoredLeadIDs []string
+	var changedLeadIDs []string
 
 	m.mu.Lock()
 	for _, rec := range records {
@@ -907,11 +907,13 @@ func (m *Manager) Restore(ctx context.Context) error {
 			requestStartedAt: rec.RequestStartedAt,
 			bees:             make([]Bee, len(rec.Bees)),
 		}
+		leadChanged := false
 		for i, h := range rec.Bees {
 			beeCopy := h.clone()
 			// 重启后工作副本可能已被清理：清空路径，避免后续落地与清理对着不存在的目录反复失败。
 			if beeCopy.WorktreePath != "" {
 				if _, statErr := os.Stat(beeCopy.WorktreePath); os.IsNotExist(statErr) {
+					leadChanged = true
 					beeCopy.WorktreePath = ""
 					beeCopy.Summary += "（工作副本已不存在）"
 					if beeCopy.PendingMerge {
@@ -924,16 +926,19 @@ func (m *Manager) Restore(ctx context.Context) error {
 				}
 			}
 			if beeCopy.ReviewState == ReviewRunning {
+				leadChanged = true
 				// 审查会话随进程一起消失，交回用户裁决；清掉线程号，避免继续轮询旧会话。
 				beeCopy.ReviewState = ReviewNeedsHuman
 				beeCopy.ReviewReason = "MCode 重启，审查中断"
 				beeCopy.ReviewThreadID = ""
 			}
 			if beeCopy.Interrupted && beeCopy.Reported {
+				leadChanged = true
 				// lead 已收到汇报，旧版本遗留的中断标记不再自动续跑。
 				beeCopy.Interrupted = false
 			}
 			if beeCopy.Status == StatusRunning {
+				leadChanged = true
 				beeCopy.Status = StatusStopped
 				// 标记为待续跑，后端就绪后优先续接原会话。
 				beeCopy.Interrupted = true
@@ -962,11 +967,13 @@ func (m *Manager) Restore(ctx context.Context) error {
 			})
 		}
 		m.leads[rec.LeadThreadID] = lead
-		restoredLeadIDs = append(restoredLeadIDs, rec.LeadThreadID)
+		if leadChanged {
+			changedLeadIDs = append(changedLeadIDs, rec.LeadThreadID)
+		}
 	}
 	m.mu.Unlock()
 
-	for _, leadID := range restoredLeadIDs {
+	for _, leadID := range changedLeadIDs {
 		m.persistLead(leadID)
 	}
 	return nil

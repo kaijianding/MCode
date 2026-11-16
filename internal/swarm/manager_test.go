@@ -772,13 +772,15 @@ func TestManager_LeadThreadForWorkDir(t *testing.T) {
 }
 
 type fakePersister struct {
-	mu    sync.Mutex
-	leads map[string]LeadRecord
+	mu         sync.Mutex
+	leads      map[string]LeadRecord
+	saveCounts map[string]int
 }
 
 func newFakePersister() *fakePersister {
 	return &fakePersister{
-		leads: make(map[string]LeadRecord),
+		leads:      make(map[string]LeadRecord),
+		saveCounts: make(map[string]int),
 	}
 }
 
@@ -786,6 +788,7 @@ func (p *fakePersister) SaveLead(ctx context.Context, rec LeadRecord) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.leads[rec.LeadThreadID] = rec
+	p.saveCounts[rec.LeadThreadID]++
 	return nil
 }
 
@@ -797,6 +800,12 @@ func (p *fakePersister) LoadLeads(ctx context.Context) ([]LeadRecord, error) {
 		res = append(res, rec)
 	}
 	return res, nil
+}
+
+func (p *fakePersister) saveCount(leadThreadID string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.saveCounts[leadThreadID]
 }
 
 // 验证 DispatchFromReply 派发后，bee 结束时 Tick 只调用一次 OnReport，消息以 ReportPrefix 开头且包含 bee 名
@@ -1002,6 +1011,47 @@ func TestManager_Restore_StopsRunningAndRestoresNextIndex(t *testing.T) {
 	persistedLead := persister.leads[leadID]
 	if persistedLead.Bees[0].Status != StatusStopped {
 		t.Errorf("expected persisted bee 0 to be stopped, got %s", persistedLead.Bees[0].Status)
+	}
+}
+
+func TestManager_Restore_SkipsPersistForUnchangedLeads(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	persister := newFakePersister()
+	unchangedID := "lead-restore-unchanged"
+	changedID := "lead-restore-changed"
+	for _, rec := range []LeadRecord{
+		{
+			LeadThreadID: unchangedID,
+			Bees:         []Bee{{ThreadID: "bee-done", Status: StatusCompleted}},
+			Queue:        []QueuedBeeRecord{{Index: 1, Spec: BeeSpec{Name: "queued", Task: "queued", Prompt: "queued"}}},
+		},
+		{
+			LeadThreadID: changedID,
+			Bees:         []Bee{{ThreadID: "bee-running", Status: StatusRunning}},
+		},
+	} {
+		if err := persister.SaveLead(ctx, rec); err != nil {
+			t.Fatalf("SaveLead failed: %v", err)
+		}
+	}
+	persister.mu.Lock()
+	persister.saveCounts = make(map[string]int)
+	persister.mu.Unlock()
+
+	mgr := NewManager(Options{Persister: persister})
+	if err := mgr.Restore(ctx); err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+
+	if got := persister.saveCount(unchangedID); got != 0 {
+		t.Fatalf("unchanged lead should not be persisted, got %d saves", got)
+	}
+	if got := len(persister.leads[unchangedID].Queue); got != 1 {
+		t.Fatalf("unchanged lead queue should remain persisted, got %d entries", got)
+	}
+	if got := persister.saveCount(changedID); got != 1 {
+		t.Fatalf("changed lead should be persisted once, got %d saves", got)
 	}
 }
 
