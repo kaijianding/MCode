@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"error","params":{"threadId":"th_mock_123","turnId":"turn_mock_abc","error":{"message":"stream disconnected - retrying sampling request (1/5)","additionalDetails":"429 Too Many Requests","codexErrorInfo":{"responseStreamConnectionFailed":{"httpStatusCode":429}}},"willRetry":true}}

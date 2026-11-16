@@ -1201,6 +1201,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 // runTurnAttempt 执行一次完整尝试：取常驻进程、准备线程、发起 turn/start（或原生 compact / review），
 // 再等待回合结束或 ctx 取消。retryable 表示这次失败发生在向上发出任何内容事件之前的启动阶段。
 func (h *Harness) runTurnAttempt(ctx context.Context, turn harness.Turn, route *MagpieRoute, emitter *turnEmitter) (retryable bool, err error) {
+	ctx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+
 	proc, err := h.acquireProcess(ctx, turn, route)
 	if err != nil {
 		return false, err
@@ -1239,6 +1242,7 @@ func (h *Harness) runTurnAttempt(ctx context.Context, turn harness.Turn, route *
 	defer proc.turnMu.Unlock()
 
 	handler := NewProtocolHandler(turn)
+	handler.interrupt = cancelTurn
 	activeTurn := &activeTurnContext{
 		ctx:        ctx,
 		turn:       turn,

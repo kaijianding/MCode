@@ -240,6 +240,70 @@ func TestRunRetryAbortsWhenContextCancelled(t *testing.T) {
 	}
 }
 
+func TestRateLimitedRetryAbortsTurn(t *testing.T) {
+	testenv.TempHome(t)
+	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fixture, err := filepath.Abs("testdata/error_rate_limited_retry.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _ := json.Marshal(retryHelperConfig{Mode: "rate_limited_retry", Fixture: fixture, LogPath: logPath})
+	sb := &mockSandbox{cmdFunc: func(ctx context.Context) *exec.Cmd {
+		return retryHelperCommand(ctx, string(config))
+	}}
+	h := New(Options{})
+	defer h.Close()
+	turn := harness.Turn{WorkDir: t.TempDir(), Mode: harness.ModeAgent, Prompt: "429", Sandbox: sb}
+	var events []harness.Event
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = h.Run(ctx, turn, func(event harness.Event) { events = append(events, event) })
+	if err == nil {
+		t.Fatal("Run 应因上游限流失败")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("Run 应及时中断，耗时 %v", elapsed)
+	}
+	sawLimited, sawInterrupt := false, false
+	for _, event := range events {
+		if event.Type == harness.EventError && event.ErrKind == harness.ErrKindRateLimited && strings.HasPrefix(event.Err, "上游限流（429），已停止等待重试：") {
+			sawLimited = true
+		}
+	}
+	for _, line := range readLines(t, logPath) {
+		var request struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(line, &request) == nil && request.Method == "turn/interrupt" {
+			sawInterrupt = true
+		}
+	}
+	if !sawLimited {
+		t.Fatalf("缺少限流错误事件: %+v", events)
+	}
+	if !sawInterrupt {
+		t.Fatal("应发送 turn/interrupt")
+	}
+}
+
+func TestReconnectRetryDoesNotAbort(t *testing.T) {
+	err, events := retryRun(t, codexRetryScript("reconnect_retry", 0, "", ""), []time.Duration{0, 0}, func(ctx context.Context, _ time.Duration) error { return ctx.Err() })
+	if err != nil {
+		t.Fatalf("普通断流重连应正常完成，Run: %v", err)
+	}
+	var sawReconnect, sawLimited bool
+	for _, event := range events {
+		if event.Type == harness.EventError {
+			sawReconnect = event.Err == "Reconnecting... 1/5"
+			sawLimited = sawLimited || event.ErrKind == harness.ErrKindRateLimited
+		}
+	}
+	if !sawReconnect || sawLimited {
+		t.Fatalf("普通重连通知应保持原语义: %+v", events)
+	}
+}
+
 // codexAcceptedScript 生成假 app-server：turn/start 应答后依次推 turn/started、一条文本和 turn/completed。
 // turn/started 让读取协程先上报送达信号，从而能稳定断言 accepted 排在正文之前。
 func codexAcceptedScript() string {

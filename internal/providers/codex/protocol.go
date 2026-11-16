@@ -70,6 +70,7 @@ func (m *JSONRPCMessage) RawID() string {
 // 不依赖外部进程，可直接用于单元测试。
 type ProtocolHandler struct {
 	turn              harness.Turn
+	interrupt         func()
 	mu                sync.Mutex
 	streamedText      map[string]*strings.Builder
 	streamedReasoning map[string]*strings.Builder
@@ -296,7 +297,9 @@ func (h *ProtocolHandler) HandleNotification(msg *JSONRPCMessage, emit func(harn
 			Message   string `json:"message"`
 			WillRetry bool   `json:"willRetry"`
 			Error     *struct {
-				Message string `json:"message"`
+				Message           string          `json:"message"`
+				AdditionalDetails string          `json:"additionalDetails"`
+				CodexErrorInfo    json.RawMessage `json:"codexErrorInfo"`
 			} `json:"error"`
 		}
 		errMsg := ""
@@ -305,6 +308,24 @@ func (h *ProtocolHandler) HandleNotification(msg *JSONRPCMessage, emit func(harn
 				errMsg = p.Error.Message
 			} else if p.Message != "" {
 				errMsg = p.Message
+			}
+			if p.WillRetry {
+				raw := msg.Params
+				if len(raw) > 2000 {
+					raw = raw[:2000]
+				}
+				log.Printf("codex: willRetry error notification params=%s", raw)
+			}
+			if p.WillRetry && p.Error != nil && isRateLimitedError(p.Error.CodexErrorInfo, p.Error.AdditionalDetails, p.Error.Message) {
+				h.finishPendingTools(toolEndReasonFailed, emit)
+				_ = harness.Emit(emit, harness.Event{
+					Type: harness.EventError, ErrKind: harness.ErrKindRateLimited,
+					Err: "上游限流（429），已停止等待重试：" + errMsg,
+				})
+				if h.interrupt != nil {
+					h.interrupt()
+				}
+				return
 			}
 		}
 		if errMsg != "" {
@@ -333,6 +354,40 @@ func (h *ProtocolHandler) HandleNotification(msg *JSONRPCMessage, emit func(harn
 	default:
 		h.logUnknownOnce(msg.Method)
 	}
+}
+
+func isRateLimitedError(codexErrorInfo json.RawMessage, details, message string) bool {
+	if strings.Contains(message, "429 Too Many Requests") || strings.Contains(details, "429 Too Many Requests") {
+		return true
+	}
+	var info any
+	if json.Unmarshal(codexErrorInfo, &info) != nil {
+		return false
+	}
+	var scan func(any) bool
+	scan = func(value any) bool {
+		switch item := value.(type) {
+		case string:
+			return item == "usageLimitExceeded" || item == "rateLimitExceeded"
+		case map[string]any:
+			for key, nested := range item {
+				if key == "httpStatusCode" && nested == float64(429) {
+					return true
+				}
+				if scan(nested) {
+					return true
+				}
+			}
+		case []any:
+			for _, nested := range item {
+				if scan(nested) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return scan(info)
 }
 
 type rawThreadItem struct {

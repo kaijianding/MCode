@@ -17,6 +17,7 @@ type retryHelperConfig struct {
 	FailTimes int
 	CountPath string
 	LogPath   string
+	Fixture   string
 }
 
 func retryHelperCommand(ctx context.Context, config string) *exec.Cmd {
@@ -84,6 +85,19 @@ func TestRetryHelperProcess(t *testing.T) {
 			}
 		case "turn/start":
 			response(id, map[string]any{"turn": map[string]any{"id": "turn_mock_abc"}})
+			if cfg.Mode == "rate_limited_retry" {
+				data, err := os.ReadFile(cfg.Fixture)
+				if err != nil {
+					os.Exit(2)
+				}
+				if _, err := os.Stdout.Write(data); err != nil {
+					os.Exit(2)
+				}
+				continue
+			}
+			if cfg.Mode == "reconnect_retry" {
+				notify("error", map[string]any{"threadId": "th_mock_123", "turnId": "turn_mock_abc", "error": map[string]any{"message": "Reconnecting... 1/5"}, "willRetry": true})
+			}
 			if cfg.Mode == "accepted" {
 				notify("turn/started", map[string]any{"threadId": "th_mock_123", "turn": map[string]any{"id": "turn_mock_abc"}})
 			}
@@ -92,6 +106,9 @@ func TestRetryHelperProcess(t *testing.T) {
 				os.Exit(0)
 			}
 			notify("turn/completed", map[string]any{"turn": map[string]any{"id": "turn_mock_abc", "status": "completed"}})
+		case "turn/interrupt":
+			response(id, map[string]any{})
+			notify("turn/completed", map[string]any{"turn": map[string]any{"id": "turn_mock_abc", "status": "interrupted"}})
 		}
 	}
 	os.Exit(0)
