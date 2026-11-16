@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,26 @@ import (
 	"mcode/internal/remote/wire"
 	"mcode/internal/store"
 )
+
+func TestTrimPartialRune(t *testing.T) {
+	complete := []byte("ab界")
+	for _, tc := range []struct {
+		name       string
+		data, want []byte
+	}{
+		{"missing one byte", complete[:len(complete)-1], []byte("ab")},
+		{"missing two bytes", complete[:len(complete)-2], []byte("ab")},
+		{"complete", complete, complete},
+		{"invalid middle", []byte{'a', 0xff, 'b'}, []byte{'a', 0xff, 'b'}},
+		{"empty", []byte{}, []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trimPartialRune(tc.data); !bytes.Equal(got, tc.want) || len(got) != len(tc.want) {
+				t.Fatalf("got %x, want %x", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestToolOutputArchive(t *testing.T) {
 	dir := t.TempDir()
@@ -236,6 +257,14 @@ func TestThreadsToolOutputRPC(t *testing.T) {
 		if err := json.Unmarshal(d.Handle(ctx, &fakeConn{info: ClientInfo{Authenticated: true}}, req), &decoded); err != nil || len(decoded.Result.Text) != toolOutputReadMaxBytes || decoded.Result.EOF {
 			t.Fatalf("read limit bytes=%d eof=%v err=%v", len(decoded.Result.Text), decoded.Result.EOF, err)
 		}
+	}
+	invalid := strings.Repeat("a", 300*1024) + "\xff" + strings.Repeat("a", 300*1024)
+	if _, err := archiveToolOutput(dir, threadID, messageID, invalid); err != nil {
+		t.Fatal(err)
+	}
+	invalidPart, err := backend.ThreadToolOutput(ctx, threadID, messageID, 0, toolOutputReadMaxBytes)
+	if err != nil || len(invalidPart.Text) != toolOutputReadMaxBytes || invalidPart.Text != invalid[:toolOutputReadMaxBytes] {
+		t.Fatalf("invalid byte chunk length=%d err=%v", len(invalidPart.Text), err)
 	}
 
 	if _, err := archiveToolOutput(dir, threadID, messageID, full); err != nil {

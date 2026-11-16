@@ -22,6 +22,18 @@ func toolOutputPath(dataDir, threadID, messageID string) string {
 	return filepath.Join(dataDir, "tool-outputs", threadID, messageID+".txt")
 }
 
+func trimPartialRune(data []byte) []byte {
+	for i := len(data) - 1; i >= 0 && i >= len(data)-(utf8.UTFMax-1); i-- {
+		if utf8.RuneStart(data[i]) {
+			if !utf8.FullRune(data[i:]) {
+				return data[:i]
+			}
+			break
+		}
+	}
+	return data
+}
+
 func archiveToolOutput(dataDir, threadID, messageID, text string) (int64, error) {
 	if len([]rune(text)) <= toolOutputStreamMaxRunes {
 		return 0, nil
@@ -32,9 +44,7 @@ func archiveToolOutput(dataDir, threadID, messageID, text string) (int64, error)
 	data := []byte(text)
 	if len(data) > toolOutputArchiveMaxBytes {
 		data = data[:toolOutputArchiveMaxBytes]
-		for len(data) > 0 && !utf8.Valid(data) {
-			data = data[:len(data)-1]
-		}
+		data = trimPartialRune(data)
 	}
 	path := toolOutputPath(dataDir, threadID, messageID)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -98,8 +108,6 @@ func (b *MemoryBackend) ThreadToolOutput(ctx context.Context, threadID, messageI
 	if len(data) > limit {
 		data = data[:limit]
 	}
-	for len(data) > 0 && !utf8.Valid(data) {
-		data = data[:len(data)-1]
-	}
+	data = trimPartialRune(data)
 	return wire.ThreadsToolOutputResult{Text: string(data), Offset: actualOffset, TotalBytes: total, EOF: actualOffset+int64(len(data)) >= total}, nil
 }
