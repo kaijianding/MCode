@@ -150,7 +150,18 @@ func TestGitBranchPopoverActionMenu(t *testing.T) {
 	if err := tt.Click("分支操作 other"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, func() bool { _, ok := tt.Find("复制名称"); return ok })
+	// 比较菜单打开前后的布局时保持动画时钟不变。
+	deadline := time.Now().Add(uiWaitTimeout)
+	for time.Now().Before(deadline) {
+		tt.Frame()
+		if _, ok := tt.Find("复制名称"); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, ok := tt.Find("复制名称"); !ok {
+		t.Fatal("菜单未打开")
+	}
 	after, ok := tt.Find("切换到分支 unmerged")
 	if !ok || after.Y != before.Y {
 		t.Fatal("打开菜单不应改变列表中后续分支的位置")

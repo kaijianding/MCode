@@ -993,6 +993,12 @@ func modelsDialogWithProvidersTester(t *testing.T, client Client, providers []Pr
 	state := observeModelsPageState(t)
 	tt := ui.NewTester(func(c *ui.Context) { renderSettingsWindow(c, st) }, 1000, 4000)
 	waitModelsPageLoaded(t, tt, state)
+	waitFor(t, tt, func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.providerRows.loaded
+	})
+	tt.Frame()
 	return tt, st
 }
 

@@ -27,6 +27,14 @@ func openSettingsAdvancedPage(t *testing.T, tt *ui.Tester, st *SettingsState, pa
 	t.Helper()
 	st.selectSettingsPage(page)
 	tt.Frame()
+	if page == "models" {
+		waitFor(t, tt, func() bool {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.providerRows.loaded
+		})
+		tt.Frame()
+	}
 }
 
 // TestSettingsAdvanced_TreePagesHaveNoCollapsedArea 覆盖：已迁入页面树的页面没有页底高级折叠区。

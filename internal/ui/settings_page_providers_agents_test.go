@@ -140,6 +140,8 @@ func openProvidersPageTest(t *testing.T, fake *FakeClient) (*ui.Tester, *Setting
 // clickProviderDetailTabForTest 打开供应商面板；高级节需要先展开。
 func clickProviderDetailTabForTest(t *testing.T, tt *ui.Tester, id, label string) {
 	t.Helper()
+	waitFor(t, tt, func() bool { return !tt.HasText("检查中…") })
+	tt.Frame()
 	if err := tt.Click(providerDisplayName(id)); err != nil {
 		t.Fatalf("打开供应商 %q：%v", id, err)
 	}

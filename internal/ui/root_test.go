@@ -20,6 +20,8 @@ func waitFor(t *testing.T, tt *ui.Tester, cond func() bool) {
 	// 条件满足即返回；上限放宽到 10s，避免全量并行测试负载高时偶发超时。
 	deadline := time.Now().Add(uiWaitTimeout)
 	for time.Now().Before(deadline) {
+		// 测试时钟默认冻结，推进它才能让入场动画完成。
+		tt.Advance(50 * time.Millisecond)
 		tt.Frame()
 		if cond() {
 			return
