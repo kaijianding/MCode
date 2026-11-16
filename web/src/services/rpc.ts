@@ -393,6 +393,50 @@ export class McodeRpcClient {
   private compactSuggestionListeners = new Set<(offer: RuntimeCompactSuggestionParams) => void>();
   /** 通用通知监听器：按方法名精确匹配，服务端新增方法时无需改动此处。 */
   private notificationListeners = new Set<{ method: string; handler: (params: unknown) => void }>();
+  private readonly builtInNotificationHandlers = new Map<string, (params: unknown) => void>([
+    ['kanban.taskUpdated', (params) => {
+      if (params) this.publishBoard(params as Board);
+    }],
+    ['threads.changed', (params) => {
+      const changed = parseThreadsChanged(params);
+      if (changed) this.options.onThreadsChanged?.(changed);
+    }],
+    ['requests.changed', (params) => {
+      const changed = parseRequestsChanged(params);
+      if (changed) this.options.onRequestsChanged?.(changed);
+    }],
+    ['threads.queue.changed', (params) => {
+      const changed = parseQueueChanged(params);
+      if (changed) this.options.onQueueChanged?.(changed);
+    }],
+    ['threads.event', (params) => {
+      const parsed = parseThreadEvent(params);
+      if (parsed) this.options.onThreadEvent?.(parsed);
+    }],
+    ['threads.swarm.changed', (params) => {
+      const swarmState = parseSwarmState(params);
+      if (!swarmState) return;
+      this.options.onSwarmChanged?.(swarmState);
+      for (const listener of this.swarmListeners) {
+        try {
+          listener(swarmState);
+        } catch {
+          // 忽略单个监听器内部异常
+        }
+      }
+    }],
+    ['threads.compactSuggestion', (params) => {
+      const offer = parseCompactSuggestion(params);
+      if (!offer) return;
+      for (const listener of this.compactSuggestionListeners) {
+        try {
+          listener(offer);
+        } catch {
+          // 忽略单个监听器内部异常
+        }
+      }
+    }]
+  ]);
   private nextId = 1;
   private pendingRequests = new Map<
     number,
@@ -683,73 +727,11 @@ export class McodeRpcClient {
     try {
       const message = JSON.parse(event.data);
 
-      // 通用通知分发：任何方法名（含尚未识别的）都会回调已注册的监听器；
-      // 下面按方法名的既有处理保持原样，不受影响。
-      if (message.jsonrpc === '2.0' && typeof message.method === 'string' && this.isReady) {
+      // 通用通知分发与内置处理共用一条路径；通知不会落入响应处理。
+      if (message.jsonrpc === '2.0' && typeof message.method === 'string') {
+        if (!this.isReady) return;
         this.dispatchNotification(message.method, message.params);
-      }
-
-      // 处理服务端主动推送的通知 (JSON-RPC notification)。通知只能来自当前已鉴权 socket。
-      if (
-        message.jsonrpc === '2.0' &&
-        message.method === 'kanban.taskUpdated' &&
-        message.params &&
-        this.isReady
-      ) {
-        this.publishBoard(message.params as Board);
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'threads.changed' && this.isReady) {
-        const changed = parseThreadsChanged(message.params);
-        if (changed) this.options.onThreadsChanged?.(changed);
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'requests.changed' && this.isReady) {
-        const changed = parseRequestsChanged(message.params);
-        if (changed) this.options.onRequestsChanged?.(changed);
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'threads.queue.changed' && this.isReady) {
-        const changed = parseQueueChanged(message.params);
-        if (changed) this.options.onQueueChanged?.(changed);
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'threads.event' && this.isReady) {
-        const parsed = parseThreadEvent(message.params);
-        if (parsed) this.options.onThreadEvent?.(parsed);
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'threads.swarm.changed' && this.isReady) {
-        const swarmState = parseSwarmState(message.params);
-        if (swarmState) {
-          this.options.onSwarmChanged?.(swarmState);
-          for (const listener of this.swarmListeners) {
-            try {
-              listener(swarmState);
-            } catch {
-              // 忽略单个监听器内部异常
-            }
-          }
-        }
-        return;
-      }
-
-      if (message.jsonrpc === '2.0' && message.method === 'threads.compactSuggestion' && this.isReady) {
-        const offer = parseCompactSuggestion(message.params);
-        if (offer) {
-          for (const listener of this.compactSuggestionListeners) {
-            try {
-              listener(offer);
-            } catch {
-              // 忽略单个监听器内部异常
-            }
-          }
-        }
+        this.builtInNotificationHandlers.get(message.method)?.(message.params);
         return;
       }
 
