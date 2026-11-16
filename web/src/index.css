@@ -16,18 +16,18 @@
 @layer base {
   :root {
     color-scheme: light;
-    --screen: #fcfcfc;
-    --card: #ffffff;
-    --card-alt: #fcfcfc;
+    --screen: var(--mc-surface-main);
+    --card: var(--mc-surface-card);
+    --card-alt: var(--mc-surface-main);
     --foreground: #27272a;
     --foreground-muted: #6f6f79;
     --border: #e4e4e7;
     --border-subtle: rgba(228, 228, 231, 0.7);
     --row-hover: #f4f4f5;
-    --subtle-strong: #fafafa;
+    --subtle-strong: var(--mc-surface-main);
     --primary: #1b4ed8;
     --quota-low: #16a34a;
-    --quota-mid: #c9a227;
+    --quota-mid: var(--mc-caution);
     --quota-high: #ea580c;
     --quota-critical: var(--danger-foreground);
     --warning-foreground: #bb4d00;
@@ -61,12 +61,12 @@
     --foreground-muted: #838383;
     --border: #191919;
     --border-subtle: rgba(25, 25, 25, 0.7);
-    --row-hover: #141414;
+    --row-hover: var(--mc-surface-canvas);
     --subtle-strong: #111111;
     --primary: #346bf1;
-    --quota-low: #30d158;
-    --quota-mid: #e8c15a;
-    --quota-high: #ff9f0a;
+    --quota-low: var(--mc-success);
+    --quota-mid: var(--mc-caution);
+    --quota-high: var(--mc-warning);
     --quota-critical: var(--danger-foreground);
     --warning-foreground: #ffb900;
     --danger-foreground: #ff6467;

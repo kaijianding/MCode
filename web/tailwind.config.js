@@ -42,7 +42,7 @@ export default {
           cardDark: '#26262A',
           borderDark: 'rgba(255, 255, 255, 0.08)',
           light: '#F8FAFC',
-          cardLight: '#FFFFFF',
+          cardLight: 'var(--mc-on-accent)',
           borderLight: 'rgba(0, 0, 0, 0.08)'
         },
         status: {
