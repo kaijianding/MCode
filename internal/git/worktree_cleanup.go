@@ -64,8 +64,8 @@ type WorktreeScanItem struct {
 	SizeBytes int64
 }
 
-// mainRepoRoot 若 root 本身是 linked worktree，则经 --git-common-dir 回溯到主仓库根目录。
-func (r *Runner) mainRepoRoot(ctx context.Context, root string) (string, error) {
+// MainRepoRoot 若 root 本身是 linked worktree，则经 --git-common-dir 回溯到主仓库根目录。
+func (r *Runner) MainRepoRoot(ctx context.Context, root string) (string, error) {
 	out, err := r.run(ctx, root, nil, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", ErrNotRepo
@@ -86,7 +86,7 @@ func (r *Runner) mainRepoRoot(ctx context.Context, root string) (string, error) 
 
 // ScanWorktrees 列出 root 所属仓库下除主 worktree 以外的全部 worktree。
 func (r *Runner) ScanWorktrees(ctx context.Context, root string) ([]WorktreeScanItem, error) {
-	mainRoot, err := r.mainRepoRoot(ctx, root)
+	mainRoot, err := r.MainRepoRoot(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +243,7 @@ func overlapsCwd(path, cwd string) bool {
 
 // CleanSafeWorktrees 删除已合入、无改动、未被使用且空闲足够久的 worktree，返回已删除路径。
 func (r *Runner) CleanSafeWorktrees(ctx context.Context, root string, g CleanupGuard) ([]string, error) {
-	mainRoot, err := r.mainRepoRoot(ctx, root)
+	mainRoot, err := r.MainRepoRoot(ctx, root)
 	if err != nil {
 		return nil, err
 	}

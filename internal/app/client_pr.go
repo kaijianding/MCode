@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mcode/internal/git"
+	"mcode/internal/remote/wire"
 )
 
 // GitPRList 列出会话所在仓库开放的 PR/MR，limit<=0 时由 git 层取默认条数。
@@ -103,13 +104,78 @@ func (c *Client) GitPRResolveWorktree(ctx context.Context, threadID string, numb
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dataDir, "worktrees", filepath.Base(root)+"-pr-"+strconv.Itoa(number))
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	if err := runner.PRResolveWorktree(callCtx, root, path, number, head, base); err != nil {
+	mainRoot, err := runner.MainRepoRoot(callCtx, root)
+	if err != nil {
+		return "", err
+	}
+	path := prWorktreePath(dataDir, mainRoot, number)
+	if err := runner.PRResolveWorktree(callCtx, mainRoot, path, number, head, base); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func prWorktreePath(dataDir, mainRoot string, number int) string {
+	return filepath.Join(dataDir, "worktrees", filepath.Base(mainRoot)+"-pr-"+strconv.Itoa(number))
+}
+
+// GitPRCleanupWorktree 在合并后把空闲会话切回主仓库，再清理安全的 PR worktree。
+func (c *Client) GitPRCleanupWorktree(ctx context.Context, threadID string, number int) (string, error) {
+	if number <= 0 {
+		return "", fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	dataDir := c.effectiveDataDir()
+	if dataDir == "" {
+		return "", errors.New("数据目录未初始化，无法清理 Worktree")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	runner, root, err := c.gitStashTarget(callCtx, threadID)
+	if err != nil {
+		return "", err
+	}
+	mainRoot, err := runner.MainRepoRoot(callCtx, root)
+	if err != nil {
+		return "", err
+	}
+	path := prWorktreePath(dataDir, mainRoot, number)
+	remoteURL, err := runner.RemoteURL(callCtx, mainRoot)
+	if err != nil {
+		return "", err
+	}
+	if reason, err := runner.PRWorktreeKeepReason(callCtx, mainRoot, path, git.DetectForge(remoteURL), number); err != nil || reason != "" {
+		return reason, err
+	}
+	includeArchived := true
+	threads, err := c.backend.ListThreads(callCtx, wire.ThreadListParams{IncludeArchived: &includeArchived})
+	if err != nil {
+		return "", err
+	}
+	cleanPath := func(path string) string {
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			path = real
+		}
+		return filepath.Clean(path)
+	}
+	var affected []string
+	for _, thread := range threads.Threads {
+		workDir, ok := c.ThreadWorkDir(thread.ID)
+		if !ok || cleanPath(workDir) != cleanPath(path) {
+			continue
+		}
+		if thread.IsRunning {
+			return "会话正在运行", nil
+		}
+		affected = append(affected, thread.ID)
+	}
+	for _, id := range affected {
+		if err := c.GitSwitchWorktree(callCtx, id, mainRoot); err != nil {
+			return "", err
+		}
+	}
+	return "", runner.PRRemoveWorktree(callCtx, mainRoot, path, number)
 }
 
 // GitPRDetail 读取单条 PR/MR 的详情。

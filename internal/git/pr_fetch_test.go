@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -20,6 +22,132 @@ func setupPRConflict(t *testing.T) (*Runner, string, string) {
 	runTestGit(t, dir, "commit", "-qam", "main change")
 	runTestGit(t, dir, "push", "-q", "origin", "main")
 	return runner, dir, bare
+}
+
+func TestPRResolveWorktreeReuseMergesNewBase(t *testing.T) {
+	runner, dir, _ := setupPRConflict(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pr-1")
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, "seed.txt", "resolved\n")
+	runTestGit(t, path, "add", "seed.txt")
+	runTestGit(t, path, "commit", "-qm", "resolve")
+	runTestGit(t, path, "push", "-q", "origin", "HEAD:refs/heads/pr-head", "HEAD:refs/pull/1/head")
+	writeTestFile(t, dir, "seed.txt", "new main\n")
+	runTestGit(t, dir, "commit", "-qam", "advance main")
+	runTestGit(t, dir, "push", "-q", "origin", "main")
+
+	// 未提交修改挡住合并时必须返回错误，不能误报解决工作区已就绪。
+	writeTestFile(t, path, "seed.txt", "uncommitted\n")
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err == nil {
+		t.Fatal("未提交修改阻止合并时应返回错误")
+	}
+	writeTestFile(t, path, "seed.txt", "resolved\n")
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := runner.OpState(ctx, path)
+	if err != nil || state.Kind != OpMerge || len(state.Conflicts) != 1 || state.Conflicts[0].Path != "seed.txt" {
+		t.Fatalf("复用后状态 = %+v，错误 = %v", state, err)
+	}
+}
+
+func TestPRWorktreeKeepReason(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"未提交改动", "有未提交的改动"},
+		{"未完成合并", "合并尚未完成"},
+		{"未推送提交", "有未推送的提交"},
+		{"已推送且源分支删除", ""},
+		{"未注册路径", ""},
+		{"抓取失败", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner, dir, bare := setupPRConflict(t)
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "pr-1")
+			if tc.name == "未注册路径" {
+				if reason, err := runner.PRWorktreeKeepReason(ctx, dir, path, ForgeUnknown, 1); err != nil || reason != "" {
+					t.Fatalf("原因 = %q，错误 = %v", reason, err)
+				}
+				return
+			}
+			if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+				t.Fatal(err)
+			}
+			if err := runner.AbortOp(ctx, path); err != nil {
+				t.Fatal(err)
+			}
+			switch tc.name {
+			case "未提交改动":
+				writeTestFile(t, path, "untracked.txt", "keep\n")
+			case "未完成合并":
+				runTestGit(t, path, "merge", "--no-commit", "-s", "ours", "origin/main")
+			case "未推送提交", "已推送且源分支删除":
+				writeTestFile(t, path, "seed.txt", "resolution\n")
+				runTestGit(t, path, "commit", "-qam", "resolution")
+				if tc.want == "" {
+					runTestGit(t, path, "push", "-q", "origin", "HEAD:refs/pull/1/head", ":refs/heads/pr-head")
+				}
+			case "抓取失败":
+				runTestGit(t, bare, "update-ref", "-d", "refs/pull/1/head")
+			}
+			reason, err := runner.PRWorktreeKeepReason(ctx, dir, path, ForgeGitHub, 1)
+			if tc.name == "抓取失败" {
+				if err == nil {
+					t.Fatal("无法确认远端提交时必须返回错误")
+				}
+				return
+			}
+			if err != nil || reason != tc.want {
+				t.Fatalf("原因 = %q，期望 %q，错误 = %v", reason, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestPRRemoveWorktree(t *testing.T) {
+	for _, branchOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(branchOnly), func(t *testing.T) {
+			runner, dir, _ := setupPRConflict(t)
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "pr-1")
+			if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+				t.Fatal(err)
+			}
+			if err := runner.AbortOp(ctx, path); err != nil {
+				t.Fatal(err)
+			}
+			if branchOnly {
+				if err := runner.WorktreeRemove(ctx, dir, path, false); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeTestFile(t, path, "keep.txt", "keep\n")
+				if err := runner.PRRemoveWorktree(ctx, dir, path, 1); err == nil {
+					t.Fatal("不能删除带未提交改动的 worktree")
+				}
+				if err := os.Remove(filepath.Join(path, "keep.txt")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runner.PRRemoveWorktree(ctx, dir, path, 1); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("worktree 目录仍存在: %v", err)
+			}
+			if out := runTestGit(t, dir, "branch", "--list", "mcode/pr-1"); out != "" {
+				t.Fatalf("本地分支仍存在: %s", out)
+			}
+			if err := runner.PRRemoveWorktree(ctx, dir, path, 1); err != nil {
+				t.Fatalf("重复清理应成功: %v", err)
+			}
+		})
+	}
 }
 
 // TestPRConflicts 覆盖真实冲突与无冲突两种 PR head。

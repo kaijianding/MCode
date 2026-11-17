@@ -101,7 +101,7 @@ func (r *Runner) PRConflicts(ctx context.Context, root string, forge Forge, numb
 // PRResolveWorktree 在 path 准备 PR/MR 的冲突解决 worktree：
 // 抓取 head 与 base、检出本地分支 mcode/pr-<N>、设置上游并合并 base。
 // 合并产生冲突是预期结果：只要 OpState 显示 merge 进行中且有冲突就返回 nil。
-// path 已是本仓库的 worktree 时直接返回 nil。
+// 复用 worktree 时保留进行中的合并，否则重新合并最新 base。
 func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, number int, head, base string) error {
 	if number <= 0 {
 		return fmt.Errorf("无效的 PR 编号: %d", number)
@@ -127,7 +127,14 @@ func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, numbe
 	}
 	for _, wt := range worktrees {
 		if resolvePath(wt.Path) == resolvePath(path) {
-			return nil
+			state, err := r.OpState(ctx, path)
+			if err != nil {
+				return err
+			}
+			if state.Kind == OpMerge {
+				return nil
+			}
+			return r.mergePRBase(ctx, path, base)
 		}
 	}
 
@@ -149,7 +156,10 @@ func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, numbe
 	if err := r.SetUpstream(ctx, path, branch, "origin/"+head); err != nil {
 		return fmt.Errorf("设置上游分支失败: %w", err)
 	}
+	return r.mergePRBase(ctx, path, base)
+}
 
+func (r *Runner) mergePRBase(ctx context.Context, path, base string) error {
 	if _, err := r.run(ctx, path, opEnv, "merge", "--no-edit", "origin/"+base); err != nil {
 		state, stateErr := r.OpState(ctx, path)
 		if stateErr == nil && state.Kind == OpMerge && len(state.Conflicts) > 0 {
@@ -158,6 +168,74 @@ func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, numbe
 		return fmt.Errorf("merge %s: %w", base, err)
 	}
 	return nil
+}
+
+// PRWorktreeKeepReason 返回阻止自动清理 PR worktree 的原因。
+func (r *Runner) PRWorktreeKeepReason(ctx context.Context, root, path string, forge Forge, number int) (string, error) {
+	worktrees, err := r.WorktreeList(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	for _, wt := range worktrees {
+		if resolvePath(wt.Path) != resolvePath(path) {
+			continue
+		}
+		out, err := r.run(ctx, path, nil, "status", "--porcelain")
+		if err != nil {
+			return "", err
+		}
+		if len(strings.TrimSpace(string(out))) > 0 {
+			return "有未提交的改动", nil
+		}
+		state, err := r.OpState(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		if state.Kind != "" {
+			return "合并尚未完成", nil
+		}
+		if _, err := r.FetchPRHead(ctx, root, forge, number); err != nil {
+			return "", err
+		}
+		out, err = r.run(ctx, root, nil, "rev-list", "--count", PRHeadRef(number)+"..mcode/pr-"+strconv.Itoa(number))
+		if err != nil {
+			return "", err
+		}
+		count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+		if err != nil {
+			return "", err
+		}
+		if count > 0 {
+			return "有未推送的提交", nil
+		}
+		break
+	}
+	return "", nil
+}
+
+// PRRemoveWorktree 删除已确认安全的 PR worktree 及本地解决分支。
+func (r *Runner) PRRemoveWorktree(ctx context.Context, root, path string, number int) error {
+	worktrees, err := r.WorktreeList(ctx, root)
+	if err != nil {
+		return err
+	}
+	for _, wt := range worktrees {
+		if resolvePath(wt.Path) == resolvePath(path) {
+			if err := r.WorktreeRemove(ctx, root, path, false); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	branch := "mcode/pr-" + strconv.Itoa(number)
+	if _, err := r.run(ctx, root, nil, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		if isExitCode(err, 1) {
+			return nil
+		}
+		return err
+	}
+	_, err = r.run(ctx, root, nil, "branch", "-D", "--", branch)
+	return err
 }
 
 // validatePRBranch 校验来自 forge CLI 的分支名，拒绝空值、以 '-' 开头的值

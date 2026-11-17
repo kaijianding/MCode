@@ -231,6 +231,13 @@ type gitPRDialogFake struct {
 	resolveErr    error
 	resolveCalls  []gitPRResolveCall
 	switchCalls   []gitPRSwitchCall
+	cleanupCalls  []gitPRActionCall
+	cleanupReason string
+	cleanupErr    error
+	cleanupWait   <-chan struct{}
+	mergeErr      error
+	mergeStarted  chan struct{}
+	mergeWait     <-chan struct{}
 }
 
 type gitPRConflictCall struct {
@@ -285,7 +292,24 @@ func (f *gitPRDialogFake) GitSwitchWorktree(ctx context.Context, threadID, path 
 	return f.FakeClient.GitSwitchWorktree(ctx, threadID, path)
 }
 
-func (f *gitPRDialogFake) GitPRMerge(context.Context, string, int, string) error { return nil }
+func (f *gitPRDialogFake) GitPRCleanupWorktree(_ context.Context, threadID string, number int) (string, error) {
+	f.mu.Lock()
+	f.cleanupCalls = append(f.cleanupCalls, gitPRActionCall{threadID: threadID, number: number})
+	reason, err, wait := f.cleanupReason, f.cleanupErr, f.cleanupWait
+	f.mu.Unlock()
+	if wait != nil {
+		<-wait
+	}
+	return reason, err
+}
+
+func (f *gitPRDialogFake) GitPRMerge(context.Context, string, int, string) error {
+	if f.mergeStarted != nil {
+		close(f.mergeStarted)
+		<-f.mergeWait
+	}
+	return f.mergeErr
+}
 
 func (f *gitPRDialogFake) GitPRReview(context.Context, string, int, string, string) error { return nil }
 
@@ -349,6 +373,86 @@ func waitGitPRDialog(t *testing.T, s *chatState, check func(*gitPRDialogState) b
 			t.Fatal("等待 PR 弹窗状态超时")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestGitPRMergeCleansWorktree(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason, toast string
+		err, mergeErr       error
+		closeDialog         bool
+	}{
+		{name: "清理成功"},
+		{name: "保留工作区", reason: "有未推送的提交", toast: "已保留 PR #42 的工作区：有未推送的提交"},
+		{name: "清理失败", err: errors.New("清理失败原文"), toast: "清理失败原文"},
+		{name: "合并失败", mergeErr: errors.New("合并失败原文")},
+		{name: "合并期间关闭弹窗", closeDialog: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			done := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(done) }) }
+			t.Cleanup(release)
+			f := &gitPRDialogFake{FakeClient: NewFakeClient(), cleanupReason: tc.reason, cleanupErr: tc.err, cleanupWait: done, mergeErr: tc.mergeErr}
+			mergeGate := make(chan struct{})
+			if tc.closeDialog {
+				f.mergeStarted, f.mergeWait = make(chan struct{}), mergeGate
+			}
+			s := newGitPRDialogTestState(t, f)
+			st := getGitPRDialogState(s)
+			st.mu.Lock()
+			st.open, st.threadID, st.selected = true, "thread-1", 42
+			st.detail = &git.PRDetail{PRSummary: git.PRSummary{Number: 42, State: "open"}}
+			st.mu.Unlock()
+			s.runGitPRAction("merge", "squash")
+			if tc.closeDialog {
+				select {
+				case <-f.mergeStarted:
+				case <-time.After(3 * time.Second):
+					close(mergeGate)
+					t.Fatal("合并未开始")
+				}
+				st.mu.Lock()
+				st.open = false
+				st.detailSeq++
+				st.mu.Unlock()
+				close(mergeGate)
+			} else {
+				waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return st.actionBusy == "" && !st.detailLoading && !st.listLoading })
+			}
+			if tc.mergeErr == nil && !tc.closeDialog {
+				// 清理仍阻塞时，合并成功后的详情刷新必须已执行。
+				if len(f.detailCalls()) != 1 {
+					t.Error("清理阻塞了合并后的详情刷新")
+				}
+			}
+			release()
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				f.mu.Lock()
+				calls := append([]gitPRActionCall(nil), f.cleanupCalls...)
+				f.mu.Unlock()
+				s.mu.Lock()
+				toast := s.toastMessage
+				s.mu.Unlock()
+				if tc.mergeErr != nil {
+					if len(calls) != 0 {
+						t.Fatal("合并失败后不应清理")
+					}
+					break
+				}
+				if len(calls) == 1 && toast == tc.toast {
+					if calls[0].number != 42 || calls[0].threadID != "thread-1" {
+						t.Fatalf("清理调用 = %+v", calls)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("清理调用 = %+v，toast = %q", calls, toast)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
 	}
 }
 

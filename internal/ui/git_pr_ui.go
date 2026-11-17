@@ -46,6 +46,7 @@ type gitPRActionClient interface {
 type gitPRConflictClient interface {
 	GitPRConflicts(ctx context.Context, threadID string, number int, base string) ([]string, error)
 	GitPRResolveWorktree(ctx context.Context, threadID string, number int, head, base string) (string, error)
+	GitPRCleanupWorktree(ctx context.Context, threadID string, number int) (string, error)
 }
 
 // gitPRDialogState 是 PR 弹窗的状态，按 chatState 附加（与 chatFindStates 的做法一致）。
@@ -308,6 +309,16 @@ func (s *chatState) runGitPRAction(kind, method string) {
 		var err error
 		if kind == "merge" {
 			err = client.GitPRMerge(context.Background(), threadID, number, method)
+			if cleanup, ok := s.client.(gitPRConflictClient); err == nil && ok {
+				go func() {
+					reason, err := cleanup.GitPRCleanupWorktree(context.Background(), threadID, number)
+					if err != nil {
+						s.setToast(err.Error())
+					} else if reason != "" {
+						s.setToast(fmt.Sprintf("已保留 PR #%d 的工作区：%s", number, reason))
+					}
+				}()
+			}
 		} else {
 			err = client.GitPRReview(context.Background(), threadID, number, kind, body)
 		}
