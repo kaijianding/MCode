@@ -983,6 +983,16 @@ func renderGitError(c *ui.Context, key, msg string) {
 		})
 }
 
+// gitChangeBadgeVisible 返回 Git 按钮是否叠改动数角标：设置页关掉后不画。
+// 设置尚未注册时按默认显示，免得启动早期工具栏少一块。
+func gitChangeBadgeVisible(s *chatState) bool {
+	cs := getChatSettings(s)
+	if cs == nil {
+		return true
+	}
+	return cs.cfg.SourceControl.ShowChangeBadgeEnabled()
+}
+
 // renderGitCommitButton 打开改动面板的「未提交」范围，角标保留当前改动数。
 func renderGitCommitButton(c *ui.Context, s *chatState, hs *chatHeaderState, threadID string, st GitState) {
 	ui.Row(c.Key("chat-header-commit")).AlignItems(ui.Center).Children(func() {
@@ -994,7 +1004,7 @@ func renderGitCommitButton(c *ui.Context, s *chatState, hs *chatHeaderState, thr
 				s.invalidate()
 			}, Variant: ButtonGhost, Size: ControlSM,
 		})
-		if st.Changes > 0 {
+		if st.Changes > 0 && gitChangeBadgeVisible(s) {
 			renderGitCountBadge(c, "chat-header-commit-badge", st.Changes)
 		}
 	})
