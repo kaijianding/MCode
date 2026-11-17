@@ -644,6 +644,7 @@ func TestSwarmReviewMaxChangedLinesSave(t *testing.T) {
 	}
 	tt.Command("selectAll")
 	tt.Type("123")
+	tt.Key(0, ui.KeyEnter)
 	waitFor(t, tt, func() bool { return st.cfg.Orchestration.ReviewMaxChangedLines == 123 })
 	val := 123
 	loaded, err := config.Load(st.dataDir)

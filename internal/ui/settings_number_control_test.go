@@ -41,7 +41,7 @@ func focusedNumberFieldText(tt *ui.Tester) (string, bool) {
 // 下一位按键就拼到 60 上，用户看到的永远是「1」开头的三位数。
 func TestNumberFieldAcceptsTypedDigits(t *testing.T) {
 	st, tt, dataDir := newNumberFieldTestState(t)
-	if err := tt.Click("85"); err != nil {
+	if err := tt.Click("编辑比例宽度"); err != nil {
 		t.Fatalf("click percent input failed: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -69,7 +69,7 @@ func TestNumberFieldAcceptsTypedDigits(t *testing.T) {
 // 不允许替用户改成边界值：900 不会变成 100，而是回到原来的 85。
 func TestNumberFieldRevertsOutOfRangeOnBlur(t *testing.T) {
 	st, tt, dataDir := newNumberFieldTestState(t)
-	if err := tt.Click("85"); err != nil {
+	if err := tt.Click("编辑比例宽度"); err != nil {
 		t.Fatalf("click percent input failed: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -107,7 +107,7 @@ func TestNumberFieldRevertsOutOfRangeOnBlur(t *testing.T) {
 // TestNumberFieldRevertsOutOfRangeOnEnter 回车定稿与失焦同一条路径：越界输入被丢弃。
 func TestNumberFieldRevertsOutOfRangeOnEnter(t *testing.T) {
 	st, tt, _ := newNumberFieldTestState(t)
-	if err := tt.Click("85"); err != nil {
+	if err := tt.Click("编辑比例宽度"); err != nil {
 		t.Fatalf("click percent input failed: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -137,7 +137,7 @@ func newSwarmNumberFieldTestState(t *testing.T) (*SettingsState, *ui.Tester, str
 // TestNumberFieldSwarmRowCommitsTypedValue 验证 Swarm 数字行逐位输入期间只保留草稿，定稿时写入完整值。
 func TestNumberFieldSwarmRowCommitsTypedValue(t *testing.T) {
 	st, tt, dataDir := newSwarmNumberFieldTestState(t)
-	if err := tt.Click("60"); err != nil {
+	if err := tt.Click("编辑子代理运行超时"); err != nil {
 		t.Fatalf("click swarm timeout input failed: %v; texts=%v", err, tt.Texts())
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -168,7 +168,7 @@ func TestNumberFieldSwarmRowCommitsTypedValue(t *testing.T) {
 // TestNumberFieldReopenDropsStaleDraft 验证关闭后重开不会把旧数字草稿写回配置。
 func TestNumberFieldReopenDropsStaleDraft(t *testing.T) {
 	st, tt, dataDir := newSwarmNumberFieldTestState(t)
-	if err := tt.Click("60"); err != nil {
+	if err := tt.Click("编辑子代理运行超时"); err != nil {
 		t.Fatalf("click swarm timeout input failed: %v; texts=%v", err, tt.Texts())
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -201,7 +201,7 @@ func TestNumberFieldReopenDropsStaleDraft(t *testing.T) {
 // TestNumberFieldOutOfRangeEnterKeepsFocus 验证越界回车恢复原值且输入框仍持有焦点。
 func TestNumberFieldOutOfRangeEnterKeepsFocus(t *testing.T) {
 	st, tt, _ := newSwarmNumberFieldTestState(t)
-	if err := tt.Click("60"); err != nil {
+	if err := tt.Click("编辑子代理运行超时"); err != nil {
 		t.Fatalf("click swarm timeout input failed: %v; texts=%v", err, tt.Texts())
 	}
 	tt.Key(ui.Cmd, ui.KeyA)

@@ -263,6 +263,7 @@ func (n numberControl) renderDisabled(c *ui.Context, st *SettingsState, s settin
 			Value:       &txt,
 			Placeholder: strconv.Itoa(n.b.def),
 			Width:       90,
+			Label:       "编辑" + s.Title,
 			Disabled:    disabled,
 			OnSubmit:    func(string) { n.commit(c, st, s) },
 			OnFocusChange: func(f bool) {
@@ -365,6 +366,7 @@ func (t textControl) renderDisabled(c *ui.Context, st *SettingsState, s setting,
 		Value:       &val,
 		Placeholder: t.placeholder,
 		Width:       settingsTextFieldWidth,
+		Label:       "编辑" + s.Title,
 		Disabled:    disabled,
 		OnChange: func(text string) {
 			st.mu.Lock()
