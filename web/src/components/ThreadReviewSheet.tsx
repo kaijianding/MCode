@@ -316,7 +316,8 @@ export const ThreadReviewSheetBody = forwardRef<ThreadMenuPageHandle, ThreadRevi
     const handleRevertHunk = useCallback((file: ParsedFileDiff, startLine: number, lineCount: number) => {
       const snapshot = reviewSnapshot;
       const metadata = snapshot?.files.find((item) => item.path === file.displayPath);
-      if (!reviewApi.revertHunkSupported || !snapshot || !metadata || snapshot.running || snapshot.unavailable) return;
+      const scope = snapshot?.scope;
+      if (!reviewApi.revertHunkSupported || !snapshot || !metadata || snapshot.running || snapshot.unavailable || scope === 'pr' || !scope) return;
       setConfirmDialog({
         isOpen: true,
         title: '撤销此块？',
@@ -328,7 +329,6 @@ export const ThreadReviewSheetBody = forwardRef<ThreadMenuPageHandle, ThreadRevi
           setRevertingHunk(true);
           void (async () => {
             try {
-              const scope = snapshot.scope;
               const fileSnapshot = await reviewApi.get({
                 threadID, scope, ...(scope === 'turn' ? { turnID: snapshot.turnID } : {}), path: metadata.path
               });
