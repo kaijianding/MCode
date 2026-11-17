@@ -38,6 +38,8 @@ type gitHistoryState struct {
 	mu                                                        sync.Mutex
 	opts                                                      git.LogOptions
 	head, root                                                string
+	ahead, behind                                             int
+	upstream                                                  bool
 	initialized, dirty, loading, showLoading, more, resetList bool
 	seq                                                       uint64
 	cancel                                                    context.CancelFunc
@@ -414,10 +416,12 @@ func renderGitPaneHistory(c *ui.Context, s *chatState, threadID string, ps *gitP
 	}
 	ps.mu.Lock()
 	head, root, branch := ps.state.Head, ps.state.WorkDir, ps.state.Branch
+	ahead, behind, upstream := ps.state.Ahead, ps.state.Behind, ps.state.HasUpstream
 	ps.mu.Unlock()
 	h.mu.Lock()
-	if h.head != head || h.root != root {
+	if h.head != head || h.root != root || h.ahead != ahead || h.behind != behind || h.upstream != upstream {
 		h.head, h.root = head, root
+		h.ahead, h.behind, h.upstream = ahead, behind, upstream
 		h.resetLocked()
 	}
 	dirty, detailDirty, diffDirty, diffPath := h.dirty, h.detailDirty, h.diffDirty, h.diffPath

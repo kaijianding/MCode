@@ -338,6 +338,57 @@ func TestGitHistoryDebounceAndHeadRefresh(t *testing.T) {
 	}
 }
 
+func TestGitHistoryReloadsWhenUpstreamMoves(t *testing.T) {
+	s, ps, h, client := gitHistoryTestState(t)
+	ps.mu.Lock()
+	ps.state = GitState{WorkDir: "/repo", Branch: "main", Head: "head-1", HasUpstream: true, Ahead: 1}
+	ps.mu.Unlock()
+	var hookMu sync.Mutex
+	pushed := false
+	client.logHook = func(context.Context, git.LogOptions) ([]git.LogCommit, error) {
+		hookMu.Lock()
+		defer hookMu.Unlock()
+		var refs []git.LogRef
+		if !pushed {
+			refs = []git.LogRef{{Name: "origin/main", Kind: "remote"}}
+		}
+		return []git.LogCommit{{SHA: "head-1", Subject: "提交", Refs: refs}}, nil
+	}
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneHistory(c, s, ps.threadID, ps) }, 500, 320)
+	gitHistoryWaitLoaded(t, h)
+	tt.Frame()
+	h.mu.Lock()
+	hasRefs := len(h.commits) == 1 && len(h.commits[0].Refs) == 1
+	h.mu.Unlock()
+	if !hasRefs {
+		t.Fatal("首次加载缺少远端标签")
+	}
+	hookMu.Lock()
+	pushed = true
+	hookMu.Unlock()
+	ps.mu.Lock()
+	ps.state.Ahead = 0
+	ps.mu.Unlock()
+	tt.Frame()
+	gitHistoryWaitLoaded(t, h)
+	client.historyMu.Lock()
+	calls := len(client.logCalls)
+	client.historyMu.Unlock()
+	h.mu.Lock()
+	hasRefs = len(h.commits) == 1 && len(h.commits[0].Refs) == 0
+	h.mu.Unlock()
+	if calls != 2 || !hasRefs {
+		t.Fatalf("上游变化后请求数=%d，远端标签已更新=%v", calls, hasRefs)
+	}
+	tt.Frame()
+	tt.Frame()
+	client.historyMu.Lock()
+	defer client.historyMu.Unlock()
+	if len(client.logCalls) != calls {
+		t.Fatalf("上游未变时重复请求=%d", len(client.logCalls))
+	}
+}
+
 func TestGitHistoryDetailAndDiffNavigation(t *testing.T) {
 	s, ps, h, _ := gitHistoryTestState(t)
 	openGitCommitDetail(ps, "abcdef0")
