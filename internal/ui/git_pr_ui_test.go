@@ -1,11 +1,115 @@
 package mcodeui
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"mcode/internal/git"
 )
+
+func TestGitPRActionsVisible(t *testing.T) {
+	for _, tc := range []struct {
+		state       string
+		draft, want bool
+	}{{"open", false, true}, {"open", true, true}, {"draft", true, true}, {"merged", false, false}, {"closed", false, false}} {
+		if got := gitPRActionsVisible(git.PRDetail{PRSummary: git.PRSummary{State: tc.state, IsDraft: tc.draft}}); got != tc.want {
+			t.Errorf("状态 %q 草稿 %v: 得到 %v", tc.state, tc.draft, got)
+		}
+	}
+}
+
+func TestGitPRMergeBlocked(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		want  bool
+	}{{"CONFLICTING", true}, {"MERGEABLE", false}, {"UNKNOWN", false}, {"", false}} {
+		if got := gitPRMergeBlocked(git.PRDetail{Mergeable: tc.state}); got != tc.want {
+			t.Errorf("合并状态 %q: 得到 %v", tc.state, got)
+		}
+	}
+}
+
+type gitPRActionCall struct {
+	threadID    string
+	number      int
+	kind, value string
+}
+type gitPRActionFake struct {
+	*FakeClient
+	calls chan gitPRActionCall
+	err   error
+}
+
+func (f *gitPRActionFake) GitPRList(context.Context, string, int) ([]git.PRSummary, error) {
+	return []git.PRSummary{{Number: 42, State: "open"}}, nil
+}
+func (f *gitPRActionFake) GitPRDetail(context.Context, string, int) (git.PRDetail, error) {
+	return git.PRDetail{PRSummary: git.PRSummary{Number: 42, State: "open"}}, nil
+}
+func (f *gitPRActionFake) GitPRReview(_ context.Context, threadID string, number int, event, body string) error {
+	f.calls <- gitPRActionCall{threadID, number, event, body}
+	return f.err
+}
+func (f *gitPRActionFake) GitPRMerge(_ context.Context, threadID string, number int, method string) error {
+	f.calls <- gitPRActionCall{threadID, number, "merge", method}
+	return f.err
+}
+
+func TestGitPRRunAction(t *testing.T) {
+	for _, tc := range []struct {
+		kind, method, body, value string
+		fail                      bool
+	}{
+		{"approve", "", "批准评论", "批准评论", false},
+		{"request-changes", "", "需要调整", "需要调整", false},
+		{"merge", "rebase", "草稿", "rebase", false},
+		{"approve", "", "草稿", "草稿", true},
+	} {
+		t.Run(tc.kind+tc.method+tc.value, func(t *testing.T) {
+			f := &gitPRActionFake{FakeClient: NewFakeClient(), calls: make(chan gitPRActionCall, 1)}
+			if tc.fail {
+				f.err = errors.New("操作失败")
+			}
+			s := newChatState(f)
+			s.selectedThreadID = "thread-1"
+			st := getGitPRDialogState(s)
+			st.mu.Lock()
+			st.open, st.threadID, st.selected, st.reviewBody = true, "thread-1", 42, tc.body
+			st.detail = &git.PRDetail{PRSummary: git.PRSummary{Number: 42, State: "open"}}
+			st.mu.Unlock()
+			s.runGitPRAction(tc.kind, tc.method)
+			select {
+			case got := <-f.calls:
+				if want := (gitPRActionCall{"thread-1", 42, tc.kind, tc.value}); got != want {
+					t.Errorf("调用 = %+v，期望 %+v", got, want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("操作未执行")
+			}
+			deadline := time.Now().Add(time.Second)
+			for {
+				st.mu.Lock()
+				busy, body, errText := st.actionBusy, st.reviewBody, st.actionErr
+				st.mu.Unlock()
+				if busy == "" {
+					if tc.fail && errText == "" {
+						t.Error("缺少错误信息")
+					}
+					if !tc.fail && (body != "" || errText != "") {
+						t.Errorf("草稿 %q，错误 %q", body, errText)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("操作未完成")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+}
 
 // TestGitPRStateLabel 覆盖状态与草稿标签的文案。
 func TestGitPRStateLabel(t *testing.T) {

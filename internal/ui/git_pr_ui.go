@@ -12,7 +12,7 @@ import (
 )
 
 // PR 只读查看弹窗：左列是当前仓库开放的 PR/MR 列表，右侧是选中项的详情。
-// 只做浏览，不做评论、评审与合并；「在浏览器打开」留给用户去网页上处理。
+// 浏览之外支持批准、要求修改和合并。
 
 // modalDragGitPR 是「Pull Request 列表」弹窗的拖拽 key。
 const modalDragGitPR = "modal-drag-git-pr"
@@ -35,6 +35,11 @@ type gitPRClient interface {
 	GitPRDetail(ctx context.Context, threadID string, number int) (git.PRDetail, error)
 }
 
+type gitPRActionClient interface {
+	GitPRMerge(ctx context.Context, threadID string, number int, method string) error
+	GitPRReview(ctx context.Context, threadID string, number int, event, body string) error
+}
+
 // gitPRDialogState 是 PR 弹窗的状态，按 chatState 附加（与 chatFindStates 的做法一致）。
 type gitPRDialogState struct {
 	mu sync.Mutex
@@ -50,9 +55,19 @@ type gitPRDialogState struct {
 	detailLoading bool
 	detailErr     string
 	detail        *git.PRDetail
+	reviewBody    string
+	actionBusy    string
+	actionErr     string
+	mergeConfirm  string
+	mergeMenuOpen bool
 
 	listSeq   uint64 // 递增序号，丢弃过期的异步结果
 	detailSeq uint64
+}
+
+func (st *gitPRDialogState) resetActions() {
+	st.reviewBody, st.actionBusy, st.actionErr, st.mergeConfirm = "", "", "", ""
+	st.mergeMenuOpen = false
 }
 
 var (
@@ -106,6 +121,7 @@ func (s *chatState) openGitPRDialog() {
 	st.detail = nil
 	st.detailErr = ""
 	st.detailLoading = false
+	st.resetActions()
 	st.listErr = ""
 	st.listSeq++
 	st.detailSeq++
@@ -128,6 +144,7 @@ func (s *chatState) closeGitPRDialog() {
 	st.detailErr = ""
 	st.selected = 0
 	st.detail = nil
+	st.resetActions()
 	st.listSeq++
 	st.detailSeq++
 	st.mu.Unlock()
@@ -194,6 +211,9 @@ func (s *chatState) fetchGitPRList() {
 				st.selected = 0
 				st.detail = nil
 				st.detailErr = ""
+				st.detailLoading = false
+				st.detailSeq++
+				st.resetActions()
 			}
 		}
 		st.mu.Unlock()
@@ -216,11 +236,66 @@ func (s *chatState) selectGitPR(number int) {
 	st.detail = nil
 	st.detailErr = ""
 	st.detailLoading = true
+	st.resetActions()
 	st.detailSeq++
 	seq := st.detailSeq
 	st.mu.Unlock()
 	s.invalidate()
 	s.fetchGitPRDetail(number, seq)
+}
+
+func gitPRActionsVisible(detail git.PRDetail) bool {
+	state := strings.ToLower(strings.TrimSpace(detail.State))
+	return state == "open" || state == "opened" || state == "draft"
+}
+
+func gitPRMergeBlocked(detail git.PRDetail) bool {
+	return strings.EqualFold(strings.TrimSpace(detail.Mergeable), "CONFLICTING")
+}
+
+func (s *chatState) runGitPRAction(kind, method string) {
+	client, ok := s.client.(gitPRActionClient)
+	if !ok {
+		return
+	}
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || (kind == "request-changes" && strings.TrimSpace(st.reviewBody) == "") || (kind == "merge" && (method == "" || gitPRMergeBlocked(*st.detail))) || (kind != "approve" && kind != "request-changes" && kind != "merge") {
+		st.mu.Unlock()
+		return
+	}
+	number, threadID, body, seq := st.selected, st.threadID, st.reviewBody, st.detailSeq
+	st.actionBusy, st.actionErr = kind, ""
+	st.mu.Unlock()
+	s.invalidate()
+	go func() {
+		var err error
+		if kind == "merge" {
+			err = client.GitPRMerge(context.Background(), threadID, number, method)
+		} else {
+			err = client.GitPRReview(context.Background(), threadID, number, kind, body)
+		}
+		st.mu.Lock()
+		if !st.open || st.detailSeq != seq || st.selected != number {
+			st.mu.Unlock()
+			return
+		}
+		st.actionBusy = ""
+		if err != nil {
+			st.actionErr = err.Error()
+			st.mu.Unlock()
+			s.invalidate()
+			return
+		}
+		st.resetActions()
+		st.detailLoading = true
+		st.detailSeq++
+		seq = st.detailSeq
+		st.mu.Unlock()
+		s.invalidate()
+		s.fetchGitPRDetail(number, seq)
+		s.fetchGitPRList()
+	}()
 }
 
 // fetchGitPRDetail 在后台读取详情；序号变化后旧结果直接丢弃。
@@ -321,10 +396,6 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 							FontSize(uiFont(TypeTitle)).
 							FontWeight(600).
 							TextColor(ThemePrimaryText(c)).
-							SingleLine()
-						ui.Text(c, "只读查看").
-							FontSize(uiFont(TypeCaption)).
-							TextColor(ThemeSecondaryText(c)).
 							SingleLine()
 						ui.Spacer(c)
 						if listLoading || detailLoading {
@@ -556,7 +627,7 @@ func renderGitPRDetailPane(c *ui.Context, s *chatState, detail *git.PRDetail, se
 					FontSize(uiFont(TypeFootnote)).
 					TextColor(ThemeSecondaryText(c))
 			default:
-				renderGitPRDetail(c, *detail, contentH)
+				renderGitPRDetail(c, s, *detail, contentH)
 			}
 
 			if errText != "" && detail != nil {
@@ -569,7 +640,7 @@ func renderGitPRDetailPane(c *ui.Context, s *chatState, detail *git.PRDetail, se
 }
 
 // renderGitPRDetail 渲染详情：标题、元信息、状态标签、改动统计、检查、正文与评论。
-func renderGitPRDetail(c *ui.Context, detail git.PRDetail, contentH float32) {
+func renderGitPRDetail(c *ui.Context, s *chatState, detail git.PRDetail, contentH float32) {
 	ui.Scroll(c.Key("modal-git-pr-detail-scroll")).
 		FillWidth().
 		MaxHeight(contentH).
@@ -597,6 +668,9 @@ func renderGitPRDetail(c *ui.Context, detail git.PRDetail, contentH float32) {
 							renderGitPRTag(c, "modal-git-pr-detail-tag-state", gitPRStateLabel(detail.State, detail.IsDraft))
 							renderGitPRTag(c, "modal-git-pr-detail-tag-review", gitPRReviewLabel(detail.ReviewDecision))
 							renderGitPRTag(c, "modal-git-pr-detail-tag-checks", gitPRChecksLabel(detail.ChecksState))
+							if gitPRMergeBlocked(detail) {
+								renderGitPRTag(c, "modal-git-pr-detail-tag-conflict", "冲突")
+							}
 							ui.Text(c, gitPRChangeStats(detail.Additions, detail.Deletions, detail.ChangedFiles)).
 								FontSize(uiFont(TypeCaption)).
 								TextColor(ThemeSecondaryText(c)).
@@ -631,18 +705,59 @@ func renderGitPRDetail(c *ui.Context, detail git.PRDetail, contentH float32) {
 						ui.Text(c, "还没有评论").
 							FontSize(uiFont(TypeFootnote)).
 							TextColor(ThemeSecondaryText(c))
-						return
+					} else {
+						ui.Column(c.Key("modal-git-pr-detail-comments")).
+							FillWidth().
+							Gap(Space2).
+							Children(func() {
+								for i, comment := range detail.Comments {
+									renderGitPRCommentRow(c, fmt.Sprintf("modal-git-pr-detail-comment-%d", i), comment)
+								}
+							})
 					}
-					ui.Column(c.Key("modal-git-pr-detail-comments")).
-						FillWidth().
-						Gap(Space2).
-						Children(func() {
-							for i, comment := range detail.Comments {
-								renderGitPRCommentRow(c, fmt.Sprintf("modal-git-pr-detail-comment-%d", i), comment)
-							}
-						})
+					if _, ok := s.client.(gitPRActionClient); ok && gitPRActionsVisible(detail) {
+						renderGitPRActions(c, s, detail)
+					}
 				})
 		})
+}
+
+func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	body, busy, errText, confirm, menuOpen := st.reviewBody, st.actionBusy, st.actionErr, st.mergeConfirm, st.mergeMenuOpen
+	st.mu.Unlock()
+	area := ui.TextArea(c.Key("modal-git-pr-review-body"), &body).Placeholder("评论").Lines(4, 10).FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).Background(ThemeHover(c)).Border(Hairline, ThemeBorder(c)).Radius(RadiusSM).Padding(Space2, Space3).FillWidth()
+	area.OnChange(func() { st.mu.Lock(); st.reviewBody = body; st.mu.Unlock() })
+	ui.Row(c.Key("modal-git-pr-review-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
+		if confirm != "" {
+			ui.Text(c, fmt.Sprintf("合并 #%d？", detail.Number)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
+			ui.Spacer(c)
+			Button(c, ButtonOpts{Key: "modal-git-pr-merge-confirm", Text: "确认", Variant: ButtonPrimary, Loading: busy == "merge", Disabled: busy != "" && busy != "merge", OnClick: func() { s.runGitPRAction("merge", confirm) }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-merge-cancel", Text: "取消", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeConfirm = ""; st.mu.Unlock(); s.invalidate() }})
+			return
+		}
+		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", OnClick: func() { s.runGitPRAction("approve", "") }})
+		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("request-changes", "") }})
+		ui.Spacer(c)
+		trigger := Button(c, ButtonOpts{Key: "modal-git-pr-merge", Text: "合并 ▾", Variant: ButtonPrimary, Disabled: busy != "" || gitPRMergeBlocked(detail), OnClick: func() { st.mu.Lock(); st.mergeMenuOpen = true; st.mu.Unlock(); s.invalidate() }})
+		appPopover(c.Key("modal-git-pr-merge-popover"), trigger, &menuOpen, func() { st.mu.Lock(); st.mergeMenuOpen = false; st.mu.Unlock(); s.invalidate() }, func() {
+			popoverCard(c, ui.Column(c.Key("modal-git-pr-merge-menu"))).Padding(Space1).Gap(Space0).Children(func() {
+				for _, item := range []struct{ label, method string }{{"Squash 合并", "squash"}, {"合并提交", "merge"}, {"变基合并", "rebase"}} {
+					Button(c, ButtonOpts{Key: "modal-git-pr-merge-" + item.method, Text: item.label, Variant: ButtonGhost, OnClick: func() {
+						st.mu.Lock()
+						st.mergeMenuOpen = false
+						st.mergeConfirm = item.method
+						st.mu.Unlock()
+						s.invalidate()
+					}})
+				}
+			})
+		})
+	})
+	if errText != "" {
+		ui.Text(c, errText).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c)).MaxLines(3)
+	}
 }
 
 // renderGitPRSectionTitle 渲染小节标题。
