@@ -228,6 +228,8 @@ func (s *Store) ListAllActivityIntervals(ctx context.Context, skipNotices []stri
 	SELECT t.thread_id, NULL, t.completed_at, m.created_at, m.tool_completed_at, m.text
 	FROM messages m JOIN turns t ON t.id = m.turn_id
 	WHERE m.role = 'tool' AND m.tool_completed_at IS NOT NULL AND m.tool_completed_at <> ''
+	-- 只取回合结束后仍在运行的工具，避免把全部工具输出读进内存。
+	AND julianday(m.tool_completed_at) > julianday(t.completed_at)
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list all activity intervals: %w", err)
