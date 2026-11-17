@@ -13,7 +13,7 @@
 9. **约束须有证据**：没有证据（明确需求、真实报告、真实日志或事故、可复现的真实失败）时，不加臆想的场景、限制、防护、路径、测试或验收标准。本文件已规定的要求、信任边界校验、防止数据丢失的错误处理、安全，以及覆盖本次改动行为的测试，都不在此限。
 10. **静止时不重绘**：mygo 只要还有一个组件级动画（`AnimateTo`、`Transition`、`Loop`、`Keyframes` 等）没结束，就会每帧重建整棵组件树并重绘整个窗口；界面静止时不得有任何动画在跑。这条来自真实事故：额度小仪表把随时间变化的进度直接传给 `AnimateTo`，空闲时窗口以 60 帧/秒全量重绘，CPU 长期 40% 以上。
    - `AnimateTo` / `AnimateWith` / `Transition` 的目标值在显示不变时必须保持不变：不要直接传 `time.Now`、`usagePanelNow()`、布局测量等连续变化的值，先按像素量化（如按条宽 `math.Round(v*w)/w`）。
-   - 持续性动画（运行中图标、扫光、旋转、骨架屏、脉冲等会循环或持续数秒以上的动画）不用 `motionLoop` / `Loop` / `Keyframes` 配 `RepeatForever`，它们每帧都会重建整棵组件树。改在 `Draw` 回调里按 `p.Now()` 算相位，用 `p.After` 或 `p.AnimationFrameRate` 请求重画，mygo 只重画该图形、不重建组件树；帧率够用即可，参考 `internal/ui/sidebar_bees.go` 的 `renderRunningGlyph`（200ms 一步）。同样要尊重 `ReduceMotion`。
+   - 持续性动画（运行中图标、扫光、旋转、骨架屏、脉冲等会循环或持续数秒以上的动画）不用 `motionLoop` / `Loop` / `Keyframes` 配 `RepeatForever`，它们每帧都会重建整棵组件树；在渲染函数里反复挂 `c.After` 做呼吸、脉动也算持续性动画，每次到点同样重建整棵组件树。改在 `Draw` 回调里按 `p.Now()` 算相位，用 `p.After` 或 `p.AnimationFrameRate` 请求重画，mygo 只重画该图形、不重建组件树；帧率够用即可，参考 `internal/ui/sidebar_bees.go` 的 `renderRunningGlyph`（200ms 一步）。同样要尊重 `ReduceMotion`。
    - 实在只能用组件级循环动画时，只在状态确实在进行时挂载（运行中、加载中），状态结束即卸载；不要把运行态写死为 `true`。
    - 渲染函数每帧都会执行，里面不得做文件系统、子进程、SQLite、`config.Load` 等 IO，也不得对全部线程做拷贝或排序；只在弹层打开、点击时计算，或在数据变化时缓存。后台定时任务同理，不得按周期全量回载历史数据。
    - 新增或改动动画时，在 headless 测试里推进时钟跑到动画结束，断言不再请求下一帧。怀疑空闲重绘时，用 `MCODE_PPROF` 抓 CPU profile，看 `runFrame` 是否常驻。
