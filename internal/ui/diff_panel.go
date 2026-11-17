@@ -43,7 +43,6 @@ type diffPanelState struct {
 	// 审阅正文与编辑器均有上限；编辑器只在 UI 线程创建和使用。
 	scope         string
 	prNumber      int
-	scopeMenuOpen bool
 	snapshot      ReviewSnapshot
 	selectedPath  string
 	comments      []*reviewComment
@@ -59,17 +58,19 @@ type diffPanelState struct {
 	contentOrder  []reviewDiffKey
 	views         map[reviewDiffKey]*reviewDiffView
 	viewOrder     []reviewDiffKey
-	patchLists    map[string]*ui.ListState
-	patchOrder    []string
-	owner         *chatState
-	requestGen    uint64
-	threadID      string
-	turnID        string
-	loading       bool
-	err           string
-	data          ThreadDiff
-	files         []git.FileDiff
-	collapsed     map[string]bool
+	// cacheLimit 随一屏可见的卡片数增长；低于同屏正文数时缓存会互相挤掉、反复取数。
+	cacheLimit int
+	patchLists map[string]*ui.ListState
+	patchOrder []string
+	owner      *chatState
+	requestGen uint64
+	threadID   string
+	turnID     string
+	loading    bool
+	err        string
+	data       ThreadDiff
+	files      []git.FileDiff
+	collapsed  map[string]bool
 	// expandedDeferred 缓存大文件延迟补丁点开后的展开结果，键为文件路径（见 expandDeferredDiffFile）。
 	expandedDeferred map[string]git.FileDiff
 	// expandingDeferred 记录正在后台展开的大文件，重复点开只排队一次解析。
@@ -90,6 +91,16 @@ type diffPanelState struct {
 	prReviewEvent  string
 	prReviewNumber int
 	prReviewErr    string
+
+	// cardOpen 记录用户显式开合过的改动卡片，键为文件路径；未记录的默认折叠。
+	cardOpen map[string]bool
+	// scrolledPath 是卡片列表最近一次滚到的选中文件，选中文件从外部变化时据此滚动。
+	scrolledPath string
+	// gitDetail 非空时「未提交」范围改为显示该文件的逐行暂存或冲突解决。
+	gitDetail string
+	// gitSig 是最近一次看到的 Git 改动路径签名（见 reviewGitSyncPaths）。
+	gitSig     string
+	gitSigSeen bool
 }
 
 func getDiffPanelState(s *chatState) *diffPanelState {
@@ -442,53 +453,56 @@ func renderDiffStatusState(c *ui.Context, key string, icon *ui.SVG, title, subti
 		Center().Margin(ui.Auto)
 }
 
-// renderDiffHeader 渲染顶部标题栏、轮次选择、刷新按钮和关闭按钮。
+// renderDiffHeader 渲染顶部标题栏：左侧范围（或旧接口的轮次），右侧评论、刷新与更多。
 func renderDiffHeader(c *ui.Context, s *chatState, dp *diffPanelState, threadID, turnID string, data ThreadDiff, loading bool) {
+	_, modern := s.client.(reviewClient)
 	ui.Row(c.Key("diff-panel-header")).
 		FillWidth().
 		Height(diffHeaderHeight).
-		Padding(Space3, Space4).
+		Shrink(0).
+		Padding(0, Space2, 0, Space3).
 		BorderWidth(0, 0, Hairline, 0).
 		BorderColor(ThemeBorder(c)).
 		AlignItems(ui.Center).
-		Gap(Space3).
+		Gap(Space1).
 		Children(func() {
-			ui.Spacer(c)
-
-			if _, ok := s.client.(reviewClient); ok {
+			if modern {
 				renderReviewScope(c, s, dp)
-				if reviewScope(dp.scope) == "turn" {
-					renderDiffTurnSelector(c, s, dp, data, turnID)
-				}
 			} else {
 				renderDiffTurnSelector(c, s, dp, data, turnID)
 			}
-
-			// 无边框刷新按钮
-			refreshBtn := ui.ButtonBase(c.Key("diff-refresh-btn")).
+			ui.Spacer(c)
+			if modern {
+				renderReviewCommentsAction(c, s, dp, threadID)
+			}
+			refresh := ui.ButtonBase(c.Key("diff-refresh-btn")).
 				Label("刷新").
 				Tooltip("刷新改动").
 				Disabled(loading).
+				Size(ControlSM, ControlSM).
 				Radius(RadiusSM).
-				Padding(Space1, Space3)
-			scale := motionPressScale(c, refreshBtn, "button-press-scale", !loading && refreshBtn.Pressed())
-			refreshBtn.Scale(scale, scale)
-			if refreshBtn.Hovered() {
-				refreshBtn.Background(ThemeHover(c))
+				Justify(ui.Center).
+				AlignItems(ui.Center)
+			scale := motionPressScale(c, refresh, "button-press-scale", !loading && refresh.Pressed())
+			refresh.Scale(scale, scale)
+			if refresh.Hovered() {
+				refresh.Background(ThemeHover(c))
 			}
-			if refreshBtn.Clicked() {
+			if refresh.Clicked() {
 				s.loadDiff(threadID, turnID)
 			}
-			refreshBtn.Children(func() {
+			refresh.Children(func() {
 				if loading {
-					LoadingIndicator(c, nil, "", IconSM)
+					renderGitSyncSpin(c)
 					return
 				}
-				ui.Text(c, "刷新").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
+				ui.Icon(c, IconRefreshCw()).Size(IconSM, IconSM).TextColor(ThemeSecondaryText(c))
 			})
-
+			if modern {
+				IconButton(c, IconButtonProps{Key: "diff-more-btn", Icon: IconMoreHorizontal(), Label: "改动更多操作", Variant: ButtonGhost, Size: ControlSM}).Menu(func(m *ui.Menu) {
+					renderReviewHeaderMenu(m, s, dp, threadID, data, turnID)
+				})
+			}
 		})
 }
 
@@ -659,36 +673,6 @@ func renderDiffTurnSelector(c *ui.Context, s *chatState, dp *diffPanelState, dat
 				}
 			})
 	})
-}
-
-// renderDiffStatusBadge 渲染文件状态小标签（新增/删除/修改/重命名）。
-func renderDiffStatusBadge(c *ui.Context, status string) {
-	label, code := "修改", byte('M')
-	switch status {
-	case "added":
-		label, code = "新增", 'A'
-	case "deleted":
-		label, code = "删除", 'D'
-	case "renamed":
-		label, code = "重命名", 'R'
-	case "copied":
-		label, code = "复制", 'C'
-	case "unmerged", "conflicted":
-		label, code = "冲突", 'U'
-	}
-	_, fg := gitStatusPresentation(c, code)
-	bg := fg.Alpha(0.12)
-
-	ui.Row(c.Key("diff-badge-"+status)).
-		Padding(Hairline, Space2).
-		Radius(RadiusXS).
-		Background(bg).
-		Children(func() {
-			ui.Text(c, label).
-				FontSize(uiFont(TypeCaption)).
-				FontWeight(500).
-				TextColor(fg)
-		})
 }
 
 // renderDiffFileList 供合并审查器与看板复用；patch 使用各自有界的虚拟视口。

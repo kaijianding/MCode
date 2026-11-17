@@ -32,6 +32,8 @@ type ReviewFile struct {
 	Binary   bool
 	TooLarge bool
 	Missing  bool
+	// Additions 与 Deletions 是增删行数，旧服务端不提供时为 0。
+	Additions, Deletions int
 }
 
 // ReviewFileContent 的不可用标记为真时不包含正文。
@@ -51,12 +53,25 @@ type reviewClient interface {
 	ReviewGet(ctx context.Context, threadID, scope, turnID, path string) (ReviewSnapshot, error)
 }
 
+// reviewAtClient 读取单个文件时沿用列表的 head；工作区范围不必每个文件重新快照。
+type reviewAtClient interface {
+	ReviewGetAt(ctx context.Context, threadID, scope, turnID, head, path string) (ReviewSnapshot, error)
+}
+
 type reviewPRClient interface {
 	ReviewGetPR(ctx context.Context, threadID string, number int, path string) (ReviewSnapshot, error)
 	GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error
 }
 
 func getReview(ctx context.Context, client reviewClient, threadID, scope, turnID string, number int, path string) (ReviewSnapshot, error) {
+	return getReviewAt(ctx, client, threadID, scope, turnID, number, "", path)
+}
+
+// getReviewAt 的 head 非空时固定读取列表时的快照，用于卡片正文。
+func getReviewAt(ctx context.Context, client reviewClient, threadID, scope, turnID string, number int, head, path string) (ReviewSnapshot, error) {
+	if at, ok := client.(reviewAtClient); ok && head != "" && path != "" && scope != "pr" {
+		return at.ReviewGetAt(ctx, threadID, scope, turnID, head, path)
+	}
 	if scope == "pr" {
 		if pr, ok := client.(reviewPRClient); ok {
 			return pr.ReviewGetPR(ctx, threadID, number, path)

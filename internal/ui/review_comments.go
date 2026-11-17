@@ -365,7 +365,6 @@ func renderReviewCommentsAction(c *ui.Context, s *chatState, dp *diffPanelState,
 	isPR := reviewScope(dp.scope) == "pr"
 	diffPanelMu.Unlock()
 	if isPR {
-		renderReviewPRAction(c, s, dp, tid)
 		return
 	}
 	reconcileReviewCommentAttachments(s, dp, tid)
@@ -383,13 +382,8 @@ func renderReviewCommentsAction(c *ui.Context, s *chatState, dp *diffPanelState,
 	if count == 0 {
 		return
 	}
-	button := ui.ButtonBase(c.Key("review-comments-attach")).Label(fmt.Sprintf("添加到对话 %d", count)).Disabled(busy || queueable == 0).Padding(Space2).Transition(motionListItem(c))
-	buttonScale := motionPressScale(c, button, "button-press-scale", !busy && queueable != 0 && button.Pressed())
-	button.Scale(buttonScale, buttonScale)
-	if button.Clicked() {
-		reviewCommentsAddToConversation(s, dp, tid)
-	}
-	button.Children(func() { ui.Text(c, fmt.Sprintf("添加到对话 %d", count)).FontSize(uiFont(TypeFootnote)) })
+	label := fmt.Sprintf("添加到对话 %d", count)
+	Button(c, ButtonOpts{Key: "review-comments-attach", Text: label, Variant: ButtonSecondary, Size: ControlSM, Disabled: busy || queueable == 0, OnClick: func() { reviewCommentsAddToConversation(s, dp, tid) }})
 }
 
 func reviewCommentsToPR(comments []reviewComment) []git.PRReviewComment {
@@ -509,37 +503,6 @@ func toggleReviewRead(dp *diffPanelState, key string) {
 			dp.readKeys = dp.readKeys[len(dp.readKeys)-reviewReadMarkerLimit:]
 		}
 	}
-}
-
-func renderReviewReadButton(c *ui.Context, s *chatState, dp *diffPanelState, tid string, snapshot ReviewSnapshot, file ReviewFile, surface string) {
-	key := reviewReadKey(reviewKey(s, tid, snapshot, file.Path), file)
-	diffPanelMu.Lock()
-	read := slices.Contains(dp.readKeys, key)
-	diffPanelMu.Unlock()
-	label := "标记为已读"
-	if read {
-		label = "标记为未读"
-	}
-	button := ui.ButtonBase(c.Key("review-read-" + surface + file.Path)).Label(label).Tooltip(label).Padding(Space1)
-	buttonScale := motionPressScale(c, button, "button-press-scale", button.Pressed())
-	button.Scale(buttonScale, buttonScale)
-	target := float32(0)
-	if read {
-		target = 1
-	}
-	amount := button.AnimateTo("read", target, ui.Animation{Duration: animateDuration(c, motionFast), Ease: motionEaseStandard})
-	if button.Clicked() {
-		toggleReviewRead(dp, key)
-		rememberReviewPreference(s, dp, tid)
-		s.invalidate()
-	}
-	button.Children(func() {
-		icon := IconCircleSmall()
-		if read {
-			icon = IconCheck()
-		}
-		ui.Icon(c, icon).Size(IconSM, IconSM).TextColor(ThemeSecondaryText(c).Mix(ThemeAccent(c), amount))
-	})
 }
 
 func selectReviewFile(s *chatState, dp *diffPanelState, tid, path string) {

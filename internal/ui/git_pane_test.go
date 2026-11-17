@@ -748,7 +748,7 @@ func TestGitPaneStageFailureDoesNotCommit(t *testing.T) {
 	ps.entries = []git.StatusEntry{{Path: "a.go", Worktree: 'M'}}
 	st := gitChangesStateFor(ps)
 	st.root, st.draft = root, "保留草稿"
-	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneChanges(c, s, ps.threadID, ps) }, 600, 600)
+	tt := ui.NewTester(func(c *ui.Context) { renderGitComposerForTest(c, s, ps) }, 600, 600)
 	if err := tt.Click("提交全部 1 个文件"); err != nil {
 		t.Fatal(err)
 	}
@@ -909,7 +909,7 @@ func TestGitPaneCommitFailureKeepsThreadDraft(t *testing.T) {
 	ps.entries = []git.StatusEntry{{Path: "a.go", Index: 'M'}}
 	st := gitChangesStateFor(ps)
 	st.root, st.draft = ps.state.WorkDir, "原会话草稿"
-	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneChanges(c, s, ps.threadID, ps) }, 600, 600)
+	tt := ui.NewTester(func(c *ui.Context) { renderGitComposerForTest(c, s, ps) }, 600, 600)
 	if err := tt.Click("提交 1 个文件"); err != nil {
 		t.Fatal(err)
 	}
@@ -980,16 +980,17 @@ func TestGitPaneFailureRecoveryButtons(t *testing.T) {
 
 func TestGitPaneConflictOpensFirstFile(t *testing.T) {
 	s, ps, _ := gitPaneTestState(t)
-	ps.segment = 1
 	ps.op = git.OpState{Kind: git.OpRebase, Conflicts: []git.ConflictFile{{Path: "first.go"}, {Path: "second.go"}}}
-	st := gitChangesStateFor(ps)
-	st.selected, st.staged, st.group = "old.go", true, 2
 	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneOpBanner(c, s, ps) }, 800, 120)
 	if err := tt.Click("· 2 个冲突"); err != nil {
 		t.Fatal(err)
 	}
-	if ps.segment != 0 || st.selected != "first.go" || st.staged || st.group != 0 || !st.detail {
-		t.Fatalf("冲突跳转状态 = %d/%+v", ps.segment, st)
+	dp := getDiffPanelState(s)
+	diffPanelMu.Lock()
+	scope, detail := dp.scope, dp.gitDetail
+	diffPanelMu.Unlock()
+	if !inspectorPaneOpen(s, sidePaneDiffID) || scope != "uncommitted" || detail != "first.go" {
+		t.Fatalf("冲突跳转：open=%v scope=%q detail=%q", inspectorPaneOpen(s, sidePaneDiffID), scope, detail)
 	}
 }
 

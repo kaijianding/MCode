@@ -56,7 +56,7 @@ func TestReviewUnifiedSplitSharedState(t *testing.T) {
 	view := newReviewDiffView(content, "go")
 	old, next := view.state.Old, view.state.New
 	split, width := false, float32(800)
-	tt := ui.NewTester(func(c *ui.Context) { renderReviewDiffView(c, "diff", view, split, width).Fill() }, 800, 300)
+	tt := ui.NewTester(func(c *ui.Context) { renderReviewDiffView(c, "diff", view, split, width, false).Fill() }, 800, 300)
 	tt.Frame()
 	view.state.SetScrollY(1000)
 	tt.Frame()
@@ -94,50 +94,50 @@ func TestReviewUnifiedSplitSharedState(t *testing.T) {
 	}
 }
 
-func TestReviewFileContentFetchedOnSelect(t *testing.T) {
+func TestReviewCardsFetchOnlyOpenCards(t *testing.T) {
 	fake := NewFakeClient()
 	list, full := reviewFixture()
+	list.Files[0].Additions, list.Files[0].Deletions = 1, 1
+	list.Files = append(list.Files, ReviewFile{Path: "big.go", Status: "M", Additions: diffLargeFileLineThreshold + 1})
 	fake.SetReviewSnapshot("t1", "turn", "", "", list)
 	fake.SetReviewSnapshot("t1", "turn", "turn-1", "a.go", full)
 	_, tt, dp := newReviewTester(t, fake)
-	if !tt.HasText("a.go") || !tt.HasText("b.go") {
-		t.Fatal("应先显示元数据文件列表")
+	if !tt.HasText("a.go") || !tt.HasText("b.go") || !tt.HasText("big.go") || !tt.HasText("+1") || !tt.HasText("−1") {
+		t.Fatal("文件卡片头缺少文件名或增删行数")
 	}
-	for _, call := range fake.ReviewGetCalls() {
-		if call.Path != "" {
-			t.Fatal("未选中就请求全文")
-		}
-	}
-	if len(dp.views) != 0 {
-		t.Fatal("列表阶段不应创建 Buffer")
+	diffPanelMu.Lock()
+	loaded := len(dp.views)
+	diffPanelMu.Unlock()
+	if loaded != 0 {
+		t.Fatalf("默认折叠不应读取正文：%d 个视图", loaded)
 	}
 	clickText(t, tt, "a.go")
 	waitFor(t, tt, func() bool {
 		diffPanelMu.Lock()
 		defer diffPanelMu.Unlock()
-		for _, entry := range dp.contents {
-			if entry.content != nil {
+		for _, view := range dp.views {
+			if view != nil {
 				return true
 			}
 		}
 		return false
 	})
-	tt.Frame()
-	if len(dp.views) != 1 {
-		t.Fatalf("只应为选中的文件创建 Buffer，得到 %d", len(dp.views))
-	}
-	if !tt.HasText("返回改动列表") {
-		t.Fatal("窄栏缺少返回按钮")
-	}
-	tt.Advance(DurBase + 50*time.Millisecond)
-	clickText(t, tt, "返回改动列表")
-	if !tt.HasText("b.go") {
-		t.Fatal("返回后未恢复列表")
-	}
 	for _, call := range fake.ReviewGetCalls() {
-		if call.Path == "b.go" {
-			t.Fatal("滚动或返回列表不应加载其他全文")
+		if call.Path == "big.go" {
+			t.Fatal("超大文件默认折叠，不应读取全文")
 		}
+	}
+	clickText(t, tt, "a.go")
+	tt.Advance(DurSlow)
+	tt.Frame()
+	diffPanelMu.Lock()
+	open, ok := dp.cardOpen["a.go"]
+	diffPanelMu.Unlock()
+	if !ok || open {
+		t.Fatal("再次点击文件头应收起卡片")
+	}
+	if tt.FramePending() {
+		t.Fatal("卡片收起动画结束后仍在请求下一帧")
 	}
 }
 
@@ -280,9 +280,6 @@ func TestTimelineAndInspectorUseSameRevision(t *testing.T) {
 	s.mu.Unlock()
 	key := reviewKey(s, "t1", timeline, "a.go")
 	entry := reviewContentFor(s, dp, key)
-	if !entry.loading {
-		t.Fatal("首次选择应懒加载")
-	}
 	waitFor(t, tt, func() bool { entry = reviewContentFor(s, dp, key); return !entry.loading })
 	diffPanelMu.Lock()
 	inspectorKey := reviewKey(s, "t1", dp.snapshot, "a.go")

@@ -1502,39 +1502,26 @@ func TestChatHeaderLeftClusterOrder(t *testing.T) {
 	}
 }
 
-func TestChatHeaderCommitOpensGitChanges(t *testing.T) {
+func TestChatHeaderCommitOpensUncommittedReview(t *testing.T) {
 	s, ps, _ := gitPaneTestState(t)
 	hs := getChatHeaderState(s)
-	ps.segment = 1
 	tt := ui.NewTester(func(c *ui.Context) {
 		renderGitCommitButton(c, s, hs, ps.threadID, GitState{Changes: 2})
 	}, 400, 100)
-	if err := tt.Click("提交与推送"); err != nil {
-		t.Fatal(err)
-	}
-	if !inspectorPaneOpen(s, sidePaneGitID) {
-		t.Fatal("没有打开 Git 面板")
-	}
-	ps.mu.Lock()
-	segment := ps.segment
-	ps.mu.Unlock()
-	if segment != 0 {
-		t.Fatalf("变更分段 = %d", segment)
+	for range 2 {
+		if err := tt.Click("提交与推送"); err != nil {
+			t.Fatal(err)
+		}
+		dp := getDiffPanelState(s)
+		diffPanelMu.Lock()
+		scope := dp.scope
+		diffPanelMu.Unlock()
+		if !inspectorPaneOpen(s, sidePaneDiffID) || scope != "uncommitted" {
+			t.Fatalf("应打开改动面板的未提交范围：open=%v scope=%q", inspectorPaneOpen(s, sidePaneDiffID), scope)
+		}
 	}
 	if !tt.HasText("2") {
 		t.Fatal("缺少改动数角标")
-	}
-	ps.mu.Lock()
-	ps.segment = 1
-	ps.mu.Unlock()
-	if err := tt.Click("提交与推送"); err != nil {
-		t.Fatal(err)
-	}
-	ps.mu.Lock()
-	segment = ps.segment
-	ps.mu.Unlock()
-	if segment != 0 || !inspectorPaneOpen(s, sidePaneGitID) {
-		t.Fatal("重复点击应保持 Git 变更面板打开")
 	}
 }
 

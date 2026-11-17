@@ -9,7 +9,8 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 )
 
-const reviewDiffCacheLimit = 8
+// reviewDiffCacheLimit 覆盖改动列表一屏可见的卡片及前后缓冲。
+const reviewDiffCacheLimit = 16
 const reviewWideWidth float32 = 640
 
 // 键含工作区和两端版本；不同轮次、作用域不能误用相同路径的正文。
@@ -97,7 +98,8 @@ func (v *reviewDiffView) layout(split bool, width float32) {
 	d.SetScrollY(y)
 }
 
-func renderReviewDiffView(c *ui.Context, key string, view *reviewDiffView, split bool, width float32) ui.Element {
+// fit 为真时视图与内容等高、由外层列表滚动（改动卡片）；否则自己滚动并占满父容器（时间线）。
+func renderReviewDiffView(c *ui.Context, key string, view *reviewDiffView, split bool, width float32, fit bool) ui.Element {
 	if view.restore {
 		view.state.SetScrollY(view.state.LineTop(view.side, view.anchor) + view.offset)
 		view.restore = false
@@ -107,7 +109,12 @@ func renderReviewDiffView(c *ui.Context, key string, view *reviewDiffView, split
 		c.Invalidate()
 	}
 	view.state.Font.Size = TypeCode
-	return editor.DiffView(c.Key(key), view.state).Grow(1).MinHeight(0).FillWidth()
+	view.state.FitContent = fit
+	el := editor.DiffView(c.Key(key), view.state).FillWidth()
+	if !fit {
+		el.Grow(1).MinHeight(0)
+	}
+	return el
 }
 
 func reviewKey(s *chatState, threadID string, snapshot ReviewSnapshot, path string) reviewDiffKey {
@@ -164,7 +171,7 @@ func reviewViewFor(dp *diffPanelState, key reviewDiffKey, content ReviewFileCont
 		dp.views[key] = view
 	}
 	dp.viewOrder = touchReviewKey(dp.viewOrder, key)
-	for len(dp.viewOrder) > reviewDiffCacheLimit {
+	for len(dp.viewOrder) > max(reviewDiffCacheLimit, dp.cacheLimit) {
 		delete(dp.views, dp.viewOrder[0])
 		dp.viewOrder = dp.viewOrder[1:]
 	}
@@ -186,7 +193,7 @@ func reviewContentFor(s *chatState, dp *diffPanelState, key reviewDiffKey) revie
 	entry := &reviewContentEntry{loading: true}
 	dp.contents[key] = entry
 	dp.contentOrder = touchReviewKey(dp.contentOrder, key)
-	for len(dp.contentOrder) > reviewDiffCacheLimit {
+	for len(dp.contentOrder) > max(reviewDiffCacheLimit, dp.cacheLimit) {
 		delete(dp.contents, dp.contentOrder[0])
 		dp.contentOrder = dp.contentOrder[1:]
 	}
@@ -199,7 +206,7 @@ func reviewContentFor(s *chatState, dp *diffPanelState, key reviewDiffKey) revie
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		snapshot, err := getReview(ctx, client, key.threadID, key.scope, key.turnID, key.prNumber, key.path)
+		snapshot, err := getReviewAt(ctx, client, key.threadID, key.scope, key.turnID, key.prNumber, key.head, key.path)
 		result := reviewContentEntry{}
 		switch {
 		case err != nil:
@@ -244,135 +251,103 @@ func renderReviewPanel(c *ui.Context, s *chatState, dp *diffPanelState) {
 	}
 	diffPanelMu.Lock()
 	snapshot, loading, errMsg := dp.snapshot, dp.loading, dp.err
-	turn, path := dp.turnID, dp.selectedPath
+	turn, scope, detail := dp.turnID, reviewScope(dp.scope), dp.gitDetail
 	diffPanelMu.Unlock()
-	ui.Column(c.Key("review-panel")).Fill().Background(ThemeWindowBg(c)).Draw(func(_ *ui.Painter, r ui.Rect) {
+	g := reviewGitFor(s, scope)
+	if g != nil {
+		reviewGitSyncPaths(s, dp, g, tid, loading)
+	}
+	panel := ui.Column(c.Key("review-panel")).Fill().Background(ThemeWindowBg(c))
+	panel.Draw(func(_ *ui.Painter, r ui.Rect) {
 		if dp.reviewWidth != r.W {
 			dp.reviewWidth = r.W
 			c.Invalidate()
 		}
-	}).Children(func() {
+	})
+	panel.Children(func() {
 		renderDiffHeader(c, s, dp, tid, turn, reviewTurns(s), loading)
-		renderReviewCommentsAction(c, s, dp, tid)
-		if loading {
-			ui.Row(c.Key("review-busy")).Height(Space4).Children(func() { reviewBusy(c, "review-loading") })
+		if scope == "pr" {
+			renderReviewPRAction(c, s, dp, tid)
 		}
-		switch {
-		case tid == "":
-			renderDiffEmptyState(c)
-			return
-		case errMsg != "":
-			renderDiffStatusState(c, "review-error", IconOctagonAlert(), errMsg, "", func() { s.loadDiff(tid, turn) })
-			return
-		case snapshot.Unavailable != "":
-			renderDiffStatusState(c, "review-unavailable", iconFileSearch, snapshot.Unavailable, "", nil)
-			return
-		case len(snapshot.Files) == 0:
-			if !loading {
-				renderDiffEmptyState(c)
-			}
-			return
-		}
-		wide := dp.reviewWidth >= reviewWideWidth
-		ui.Row(c.Key("review-body")).Grow(1).MinHeight(0).FillWidth().Children(func() {
-			if wide || path == "" {
-				dp.rowsList.Key = func(i int) any { return snapshot.Files[i].Path }
-				list := ui.List(c.Key("review-files"), &dp.rowsList, len(snapshot.Files), func(i int) {
-					file := snapshot.Files[i]
-					row := ui.ButtonBase(c.Key("review-file-" + file.Path)).Label(file.Path).FillWidth().Padding(Space3).Radius(RadiusSM).Transition(motionListItem(c))
-					if file.Path == path {
-						row.Background(ThemeSelected(c))
-					}
-					if row.Clicked() && !loading {
-						selectReviewFile(s, dp, tid, file.Path)
-					}
-					row.Children(func() {
-						ui.Text(c, file.Path).FontSize(uiFont(TypeFootnote)).SingleLine().TextColor(ThemePrimaryText(c))
-						renderDiffStatusBadge(c, file.Status)
-						renderReviewReadButton(c, s, dp, tid, snapshot, file, "list")
-					})
-				}).FillHeight().MinHeight(0)
-				if wide {
-					list.Width(200).Shrink(0)
-				} else {
-					list.Grow(1).FillWidth()
-				}
-			}
-			if path != "" {
-				ui.Column(c.Key("review-selected-" + path)).Grow(1).MinWidth(0).FillHeight().Transition(motionCollapse(c)).Children(func() {
-					ui.Row(c.Key("review-file-toolbar")).FillWidth().Height(diffHeaderHeight).AlignItems(ui.Center).Gap(Space2).Children(func() {
-						if !wide {
-							btn := ui.ButtonBase(c.Key("review-back")).Label("返回改动列表").Padding(Space2)
-							btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-							btn.Scale(btnScale, btnScale)
-							if btn.Clicked() {
-								selectReviewFile(s, dp, tid, "")
-							}
-							btn.Children(func() { ui.Icon(c, IconArrowLeft()).Size(IconSM, IconSM) })
-						}
-						ui.Text(c, path).SingleLine().Grow(1).FontSize(uiFont(TypeFootnote))
-						for _, file := range snapshot.Files {
-							if file.Path == path {
-								renderReviewReadButton(c, s, dp, tid, snapshot, file, "header")
-								break
-							}
-						}
-						if wide {
-							label := "并排"
-							if dp.preferSplit {
-								label = "统一"
-							}
-							btn := ui.ButtonBase(c.Key("review-layout")).Label(label).Padding(Space2)
-							btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-							btn.Scale(btnScale, btnScale)
-							if btn.Clicked() {
-								dp.preferSplit = !dp.preferSplit
-								c.Invalidate()
-							}
-							btn.Children(func() { ui.Text(c, label).FontSize(uiFont(TypeFootnote)) })
-						}
-					})
-					for _, file := range snapshot.Files {
-						if file.Path == path {
-							renderReviewFile(c, s, dp, tid, snapshot, file, dp.preferSplit, dp.reviewWidth)
-							break
-						}
-					}
+		if g != nil {
+			ui.Column(c.Key("review-git-banners")).FillWidth().Shrink(0).Padding(0, Space3).Gap(Space2).Children(func() {
+				renderGitPaneOpBanner(c, s, g.ps)
+				renderGitPaneFailure(c, g.ps)
+			})
+			if detail != "" && gitPaneDiffView != nil {
+				gitPaneDiffView(c, s, tid, g.ps, detail, false, func() {
+					diffPanelMu.Lock()
+					dp.gitDetail = ""
+					diffPanelMu.Unlock()
+					s.loadDiff(tid, "")
 				})
+				return
+			}
+		}
+		ui.Column(c.Key("review-body")).Grow(1).MinHeight(0).FillWidth().Children(func() {
+			switch {
+			case tid == "":
+				renderDiffEmptyState(c)
+			case errMsg != "":
+				renderDiffStatusState(c, "review-error", IconOctagonAlert(), errMsg, "", func() { s.loadDiff(tid, turn) })
+			case snapshot.Unavailable != "":
+				renderDiffStatusState(c, "review-unavailable", iconFileSearch, snapshot.Unavailable, "", nil)
+			case len(snapshot.Files) == 0:
+				if !loading {
+					renderDiffEmptyState(c)
+				}
+			default:
+				renderReviewCards(c, s, dp, panel, tid, snapshot, g)
 			}
 		})
+		if g != nil {
+			renderGitPaneUndo(c, g.ps)
+			renderGitCommitComposer(c, s, tid, g.ps, panel)
+		}
 	})
 }
 
 func renderReviewFile(c *ui.Context, s *chatState, dp *diffPanelState, tid string, snapshot ReviewSnapshot, file ReviewFile, split bool, width float32, surface ...string) {
+	card := len(surface) == 0
+	note := func(key string, icon *ui.SVG, text string, retry func()) {
+		if card {
+			reviewCardNote(c, key, text, retry)
+			return
+		}
+		renderDiffStatusState(c, key, icon, text, "", retry)
+	}
 	metadata := ReviewFileContent{Binary: file.Binary, TooLarge: file.TooLarge, Missing: file.Missing}
 	if reason := reviewFileReason(metadata); reason != "" {
-		renderDiffStatusState(c, "review-file-unavailable", IconFile(), reason, "", nil)
+		note("review-file-unavailable", IconFile(), reason, nil)
 		return
 	}
 	key := reviewKey(s, tid, snapshot, file.Path)
 	entry := reviewContentFor(s, dp, key)
 	if entry.loading {
+		if card {
+			reviewCardLoading(c, "review-file-loading-"+file.Path)
+			return
+		}
 		reviewBusy(c, "review-file-loading")
 		return
 	}
 	if entry.err != "" {
-		renderDiffStatusState(c, "review-content-error", IconOctagonAlert(), entry.err, "", func() { s.loadDiff(tid, snapshot.TurnID) })
+		note("review-content-error", IconOctagonAlert(), entry.err, func() { s.loadDiff(tid, snapshot.TurnID) })
 		return
 	}
 	if entry.content == nil {
 		return
 	}
 	if reason := reviewFileReason(*entry.content); reason != "" {
-		renderDiffStatusState(c, "review-content-unavailable", IconFile(), reason, "", nil)
+		note("review-content-unavailable", IconFile(), reason, nil)
 		return
 	}
-	if len(surface) > 0 {
+	if !card {
 		key.surface = surface[0]
 	}
 	view := reviewViewFor(dp, key, *entry.content, file.Language)
 	configureReviewHunkActions(c, s, dp, tid, snapshot, file, *entry.content, view)
 	configureReviewComments(c, s, dp, key, *entry.content, view)
-	renderReviewDiffView(c, fmt.Sprintf("review-diff-%s-%s", key.head, key.path), view, split, width)
+	renderReviewDiffView(c, fmt.Sprintf("review-diff-%s-%s", key.head, key.path), view, split, width, card)
 	renderReviewOrphanComments(c, s, dp, key, *entry.content)
 }

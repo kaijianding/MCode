@@ -128,11 +128,6 @@ func (h *gitHistoryState) closeDetailLocked() {
 }
 
 func gitHistorySelectSegment(ps *gitPaneState) {
-	ps.mu.Lock()
-	if !ps.disposed {
-		ps.segment = 1
-	}
-	ps.mu.Unlock()
 	gitHistoryInvalidate(ps)
 }
 

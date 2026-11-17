@@ -983,18 +983,13 @@ func renderGitError(c *ui.Context, key, msg string) {
 		})
 }
 
-// renderGitCommitButton 打开 Git 面板的变更分段，角标保留当前改动数。
+// renderGitCommitButton 打开改动面板的「未提交」范围，角标保留当前改动数。
 func renderGitCommitButton(c *ui.Context, s *chatState, hs *chatHeaderState, threadID string, st GitState) {
 	ui.Row(c.Key("chat-header-commit")).AlignItems(ui.Center).Children(func() {
 		IconButton(c.Key("chat-header-commit-btn"), IconButtonProps{
-			Icon: IconArrowUpToLine(), Label: "提交与推送", Active: inspectorPaneOpen(s, sidePaneGitID),
+			Icon: IconArrowUpToLine(), Label: "提交与推送", Active: inspectorPaneOpen(s, sidePaneDiffID),
 			OnClick: func() {
-				inspectorSelect(s, sidePaneGitID, false)
-				if ps := getGitPaneState(s); ps != nil {
-					ps.mu.Lock()
-					ps.segment = 0
-					ps.mu.Unlock()
-				}
+				openReviewUncommitted(s, "")
 				hs.titleMenuOpen, hs.branchMenuOpen = false, false
 				s.invalidate()
 			}, Variant: ButtonGhost, Size: ControlSM,

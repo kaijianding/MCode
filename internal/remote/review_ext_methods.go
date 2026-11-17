@@ -44,7 +44,7 @@ func handleThreadsReviewGet(ctx context.Context, d *Dispatcher, c Conn, params j
 	if err := json.Unmarshal(params, &fields); err != nil {
 		return nil, ExtInvalidParams(err.Error())
 	}
-	for _, key := range []string{"turnID", "path"} {
+	for _, key := range []string{"turnID", "path", "headRevision"} {
 		if raw, ok := fields[key]; ok && string(raw) == "null" {
 			return nil, ExtInvalidParams("Invalid params: '" + key + "' must be a string")
 		}

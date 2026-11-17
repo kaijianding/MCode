@@ -190,12 +190,6 @@ func TestGitHistoryPaginationAtBottom(t *testing.T) {
 func TestGitHistoryOpenFilePassesPath(t *testing.T) {
 	s, ps, h, client := gitHistoryTestState(t)
 	openGitFileHistory(ps, "src/file.go")
-	ps.mu.Lock()
-	segment := ps.segment
-	ps.mu.Unlock()
-	if segment != 1 {
-		t.Fatal("没有切换历史分段")
-	}
 	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneHistory(c, s, ps.threadID, ps) }, 500, 320)
 	gitHistoryWaitLoaded(t, h)
 	tt.Frame()

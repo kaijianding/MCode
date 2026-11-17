@@ -21,6 +21,7 @@ type ReviewBlobFile struct {
 	Path, OrigPath, Status    string
 	OldHash, NewHash          string
 	OldSize, NewSize          int64
+	Additions, Deletions      int
 	Binary, TooLarge, Missing bool
 }
 
@@ -83,9 +84,9 @@ func (r *Runner) ReviewFiles(ctx context.Context, root, base, head string, untra
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	binary := make(map[string]bool, len(stats))
+	numstat := make(map[string]FileStat, len(stats))
 	for _, s := range stats {
-		binary[s.Path] = s.Binary
+		numstat[s.Path] = s
 	}
 	parts := bytes.Split(out, []byte{0})
 	files := make([]ReviewBlobFile, 0)
@@ -122,7 +123,8 @@ func (r *Runner) ReviewFiles(ctx context.Context, root, base, head string, untra
 		if f.Status != "M" && f.Status != "A" && f.Status != "D" && f.Status != "R" && f.Status != "?" {
 			return nil, fmt.Errorf("不支持的 Git 审阅状态 %s", f.Status)
 		}
-		f.Binary = binary[f.Path]
+		stat := numstat[f.Path]
+		f.Binary, f.Additions, f.Deletions = stat.Binary, max(stat.Additions, 0), max(stat.Deletions, 0)
 		for _, side := range []struct {
 			hash string
 			size *int64

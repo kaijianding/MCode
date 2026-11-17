@@ -23,7 +23,7 @@ func benchmarkReviewFrame(b *testing.B, lines int, changing, split bool) {
 	dp := &diffPanelState{}
 	key := reviewDiffKey{workspace: "bench", scope: "turn", head: "0", path: content.Path}
 	view := reviewViewFor(dp, key, content, "go")
-	tt := ui.NewTester(func(c *ui.Context) { renderReviewDiffView(c, "bench", view, split, 800).Fill() }, 800, 600)
+	tt := ui.NewTester(func(c *ui.Context) { renderReviewDiffView(c, "bench", view, split, 800, false).Fill() }, 800, 600)
 	tt.Frame()
 	tt.Frame()
 	b.ReportAllocs()

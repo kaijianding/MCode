@@ -407,7 +407,7 @@ func TestReviewCommentPopoverAndReadButton(t *testing.T) {
 	fake.SetReviewSnapshot("t1", "turn", "", "", list)
 	fake.SetReviewSnapshot("t1", "turn", "turn-1", "a.go", full)
 	_, tt, dp := newReviewTester(t, fake)
-	clickText(t, tt, "标记为已读")
+	clickText(t, tt, "标记为已查看")
 	diffPanelMu.Lock()
 	selected := dp.selectedPath
 	readCount := len(dp.readKeys)
@@ -457,18 +457,26 @@ func TestReviewCommentPopoverAndReadButton(t *testing.T) {
 	}
 }
 
-func TestReviewReadButtonReduceMotion(t *testing.T) {
-	setAppReduceMotion(t, true)
-	s, _, dp, _, _ := reviewCommentsSetup(t)
-	snapshot, _ := reviewFixture()
-	file := snapshot.Files[0]
-	tt := ui.NewTesterWith(func(c *ui.Context) {
-		renderReviewReadButton(c, s, dp, "t1", snapshot, file, "test")
-	}, 320, 100, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
-	tt.Frame()
-	clickText(t, tt, "标记为已读")
-	tt.Frame()
-	if _, ok := tt.Find("标记为未读"); !ok || len(dp.readKeys) != 1 {
-		t.Fatal("减少动效时已读状态没有直接完成")
+func TestReviewReadButtonSettles(t *testing.T) {
+	for _, reduce := range []bool{false, true} {
+		t.Run(fmt.Sprint(reduce), func(t *testing.T) {
+			setAppReduceMotion(t, reduce)
+			read := false
+			tt := ui.NewTesterWith(func(c *ui.Context) {
+				renderReviewReadButton(c, "a.go", read, true, func() { read = !read })
+			}, 320, 100, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduce}})
+			tt.Frame()
+			clickText(t, tt, "标记为已查看")
+			tt.Frame()
+			if _, ok := tt.Find("标记为未查看"); !ok || !read {
+				t.Fatal("点击后没有变为已查看")
+			}
+			// 动画结束后界面静止，不得继续请求下一帧（AGENTS.md 第 10 条）。
+			tt.Advance(DurSlow)
+			tt.Frame()
+			if tt.FramePending() {
+				t.Fatal("已查看动画结束后仍在请求下一帧")
+			}
+		})
 	}
 }

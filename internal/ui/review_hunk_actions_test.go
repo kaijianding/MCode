@@ -30,7 +30,7 @@ func newReviewHunkTester(t *testing.T, client Client, snapshot ReviewSnapshot, f
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Column(c).Fill().Children(func() {
 			configureReviewHunkActions(c, s, dp, "t1", snapshot, file, content, view)
-			renderReviewDiffView(c, "hunk-test", view, false, 800).Label("review-hunk-viewer")
+			renderReviewDiffView(c, "hunk-test", view, false, 800, false).Label("review-hunk-viewer")
 		})
 	}, 800, 400)
 	tt.Frame()
@@ -194,7 +194,7 @@ func TestReviewHunkActionsHiddenWhenUnsupported(t *testing.T) {
 			view.state.HunkActions = true
 			tt := ui.NewTester(func(c *ui.Context) {
 				configureReviewHunkActions(c, s, &diffPanelState{}, "t1", list, file, content, view)
-				renderReviewDiffView(c, "unsupported", view, false, 800)
+				renderReviewDiffView(c, "unsupported", view, false, 800, false)
 			}, 800, 400)
 			tt.Frame()
 			tt.Advance(DurSheet + 50*time.Millisecond)

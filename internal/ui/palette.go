@@ -123,27 +123,27 @@ func buildPaletteItems(s *chatState) []paletteItem {
 
 	for _, command := range []struct {
 		id, title, action string
-		segment           int
 	}{
-		{"cmd-git-commit", "Git：提交", "segment", 0},
-		{"cmd-git-push", "Git：推送", "push", 0},
-		{"cmd-git-pull", "Git：拉取", "pull", 0},
-		{"cmd-git-fetch", "Git：抓取", "fetch", 0},
-		{"cmd-git-switch-branch", "Git：切换分支", "branch", 0},
-		{"cmd-git-history", "Git：历史", "segment", 1},
+		{"cmd-git-commit", "Git：提交", "commit"},
+		{"cmd-git-push", "Git：推送", "push"},
+		{"cmd-git-pull", "Git：拉取", "pull"},
+		{"cmd-git-fetch", "Git：抓取", "fetch"},
+		{"cmd-git-switch-branch", "Git：切换分支", "branch"},
+		{"cmd-git-history", "Git：历史", "history"},
 	} {
 		command := command
 		items = append(items, paletteItem{id: command.id, kind: "command", title: command.title, run: func(cs *chatState) {
+			if command.action == "commit" {
+				openReviewUncommitted(cs, "")
+				return
+			}
 			inspectorSelect(cs, sidePaneGitID, false)
 			ps := getGitPaneState(cs)
 			if ps == nil {
 				return
 			}
 			switch command.action {
-			case "segment":
-				ps.mu.Lock()
-				ps.segment = command.segment
-				ps.mu.Unlock()
+			case "history":
 				cs.invalidate()
 			case "branch":
 				ps.branchOpen = true

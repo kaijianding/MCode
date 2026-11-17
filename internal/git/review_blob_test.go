@@ -65,6 +65,9 @@ func TestReviewMissingBlobAndFixedRevision(t *testing.T) {
 	if err != nil || len(files) != 1 {
 		t.Fatalf("固定版本: %+v %v", files, err)
 	}
+	if files[0].Additions != 1 || files[0].Deletions != 0 {
+		t.Fatalf("增删行数: +%d -%d", files[0].Additions, files[0].Deletions)
+	}
 	_, text, _, _, _, err := r.ReviewTexts(ctx, root, files[0])
 	if err != nil || text != "first\n" {
 		t.Fatalf("快照发生漂移: %q %v", text, err)

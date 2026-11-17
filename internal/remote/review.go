@@ -75,6 +75,9 @@ func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetPa
 	if p.Scope != wire.ReviewScopeTurn && p.TurnID != "" {
 		return result, ExtInvalidParams("turnID 只适用于 turn 作用域")
 	}
+	if p.HeadRevision != "" && (p.Path == "" || !reviewObjectID(p.HeadRevision)) {
+		return result, ExtInvalidParams("headRevision 必须是对象号，且只适用于带 path 的请求")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	state, err := b.diffThreadState(p.ThreadID)
@@ -210,7 +213,10 @@ func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetPa
 			return unavailable("start checkpoint 不可用: " + err.Error())
 		}
 	}
-	if head == "" {
+	if head == "" && p.HeadRevision != "" {
+		// 每个文件都重新快照会把整个工作区重新哈希一遍；单文件请求沿用列表给出的快照。
+		head, err = state.git.ReviewRevision(ctx, root, p.HeadRevision)
+	} else if head == "" {
 		head, untracked, err = state.git.ReviewWorkingTree(ctx, root)
 	} else {
 		head, err = state.git.ReviewRevision(ctx, root, head)
@@ -225,7 +231,7 @@ func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetPa
 	}
 	selected := -1
 	for i, f := range files {
-		result.Files = append(result.Files, wire.ReviewFileMeta{Path: f.Path, OrigPath: f.OrigPath, Status: f.Status, Language: reviewLanguage(f.Path), OldSize: f.OldSize, NewSize: f.NewSize, OldHash: f.OldHash, NewHash: f.NewHash, Binary: f.Binary, TooLarge: f.TooLarge, Missing: f.Missing})
+		result.Files = append(result.Files, wire.ReviewFileMeta{Path: f.Path, OrigPath: f.OrigPath, Status: f.Status, Language: reviewLanguage(f.Path), OldSize: f.OldSize, NewSize: f.NewSize, OldHash: f.OldHash, NewHash: f.NewHash, Binary: f.Binary, TooLarge: f.TooLarge, Missing: f.Missing, Additions: f.Additions, Deletions: f.Deletions})
 		if f.Path == p.Path {
 			selected = i
 		}
@@ -317,6 +323,19 @@ func reviewTurns(ctx context.Context, state diffThreadSnapshot, root, threadID s
 		return a.id < b.id
 	})
 	return result, nil
+}
+
+// reviewObjectID 只接受完整的 SHA-1 或 SHA-256 对象号，不接受分支名等可变引用。
+func reviewObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func reviewLanguage(path string) string {

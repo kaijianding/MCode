@@ -16861,7 +16861,8 @@
           "scope": {"$ref": "#/$defs/RemoteReviewScope"},
           "turnID": {"type": "string", "anyOf": [{"const": ""}, {"format": "uuid"}]},
           "number": {"type": "integer", "minimum": 1},
-          "path": {"type": "string"}
+          "path": {"type": "string"},
+          "headRevision": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$", "description": "仅用于带 path 的工作区请求：沿用列表返回的 headRevision，不重新快照工作区。"}
         },
         "required": ["threadID", "scope"],
         "allOf": [{
@@ -16886,7 +16887,9 @@
           "newHash": {"type": "string"},
           "binary": {"type": "boolean"},
           "tooLarge": {"type": "boolean"},
-          "missing": {"type": "boolean"}
+          "missing": {"type": "boolean"},
+          "additions": {"type": "integer", "minimum": 0},
+          "deletions": {"type": "integer", "minimum": 0}
         },
         "required": ["path", "origPath", "status", "language", "oldSize", "newSize", "oldHash", "newHash", "binary", "tooLarge", "missing"],
         "additionalProperties": false

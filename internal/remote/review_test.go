@@ -207,6 +207,27 @@ func TestReviewSnapshotFullTextAndLimits(t *testing.T) {
 		t.Fatal("快照版本未更新")
 	}
 }
+
+// 单文件请求带上列表的 headRevision 时沿用该快照，不再重新快照工作区。
+func TestReviewFileAtListedHead(t *testing.T) {
+	f := newReviewFixture(t, true)
+	f.write("a.go", "package new\n")
+	list := f.get(wire.ReviewScopeUncommitted, "", "")
+	f.write("a.go", "package newer\n")
+	r, err := f.b.ReviewGet(f.ctx, wire.ThreadsReviewGetParams{ThreadID: f.id, Scope: wire.ReviewScopeUncommitted, Path: "a.go", HeadRevision: list.HeadRevision})
+	if err != nil || r.HeadRevision != list.HeadRevision || r.File == nil || r.File.NewText != "package new\n" {
+		t.Fatalf("未沿用列表快照: %+v %v", r, err)
+	}
+	for _, p := range []wire.ThreadsReviewGetParams{
+		{ThreadID: f.id, Scope: wire.ReviewScopeUncommitted, Path: "a.go", HeadRevision: "main"},
+		{ThreadID: f.id, Scope: wire.ReviewScopeUncommitted, HeadRevision: list.HeadRevision},
+	} {
+		if _, e := f.b.ReviewGet(f.ctx, p); e == nil {
+			t.Fatalf("应拒绝 %+v", p)
+		}
+	}
+}
+
 func TestReviewMissingCheckpointNotWorkingTree(t *testing.T) {
 	f := newReviewFixture(t, true)
 	f.write("a.go", "package dirty\n")

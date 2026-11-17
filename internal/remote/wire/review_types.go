@@ -17,6 +17,8 @@ type ThreadsReviewGetParams struct {
 	TurnID   string      `json:"turnID,omitempty"`
 	Number   int         `json:"number,omitempty"`
 	Path     string      `json:"path,omitempty"`
+	// HeadRevision 只用于带 Path 的工作区请求：沿用列表时的工作区快照，不再重新快照整个工作区。
+	HeadRevision string `json:"headRevision,omitempty"`
 }
 
 // ReviewFileMeta 的大小单位为字节，哈希指向固定快照中的 Git blob。
@@ -32,6 +34,9 @@ type ReviewFileMeta struct {
 	Binary   bool   `json:"binary"`
 	TooLarge bool   `json:"tooLarge"`
 	Missing  bool   `json:"missing"`
+	// Additions 与 Deletions 是文本文件的增删行数，二进制文件为 0。
+	Additions int `json:"additions,omitempty"`
+	Deletions int `json:"deletions,omitempty"`
 }
 
 // ReviewFileContent 只在两侧均可完整读取时返回文本；新增和删除的空侧仍为空文本。

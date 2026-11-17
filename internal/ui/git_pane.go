@@ -68,13 +68,14 @@ func gitPaneHasUnmergedBees(threadID string, state SwarmState) bool {
 }
 
 type gitPaneState struct {
-	mu                           sync.Mutex
-	owner                        *chatState
-	threadID                     string
-	state                        GitState
-	entries                      []git.StatusEntry
-	op                           git.OpState
-	segment                      int
+	mu       sync.Mutex
+	owner    *chatState
+	threadID string
+	state    GitState
+	entries  []git.StatusEntry
+	op       git.OpState
+	// pathsSig 是最近一次状态里改动路径的签名，改动面板据此在文件增删时重取「未提交」。
+	pathsSig                     string
 	syncing                      bool
 	cancel                       context.CancelFunc
 	progress                     git.Progress
@@ -212,6 +213,7 @@ func (ps *gitPaneState) refresh(client gitPaneClient, seq uint64) {
 			if err == nil {
 				ps.state, ps.entries, ps.op = state, entries, op
 				ps.switchStash = switchStash
+				ps.pathsSig = strings.Join(gitChangesPaths(entries), "\x00")
 			}
 			if errors.Is(err, git.ErrNotRepo) {
 				ps.state, ps.entries, ps.op = GitState{}, nil, git.OpState{}
@@ -627,7 +629,7 @@ func renderGitPane(c *ui.Context, s *chatState) {
 	}
 	ps.setVisible(true)
 	ps.mu.Lock()
-	state, syncing, progress, loading, segment := ps.state, ps.syncing, ps.progress, ps.loading, ps.segment
+	state, syncing, progress, loading := ps.state, ps.syncing, ps.progress, ps.loading
 	ps.mu.Unlock()
 	pane := ui.Column(c.Key("git-pane")).Fill().MinWidth(0)
 	width := pane.Bounds().W
@@ -651,11 +653,7 @@ func renderGitPane(c *ui.Context, s *chatState) {
 				renderGitPaneEmpty(c, "不是 Git 仓库", IconGitBranch())
 				return
 			}
-			if segment == 0 {
-				renderGitPaneChanges(c, s, ps.threadID, ps)
-			} else {
-				renderGitPaneHistory(c, s, ps.threadID, ps)
-			}
+			renderGitPaneHistory(c, s, ps.threadID, ps)
 		})
 		renderGitPaneUndo(c, ps)
 	})
@@ -727,32 +725,8 @@ func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state G
 		})
 		ui.Spacer(c)
 		ps.mu.Lock()
-		segment := ps.segment
 		syncing, cancel := ps.syncing, ps.cancel
 		ps.mu.Unlock()
-		ui.Row(c.Key("git-pane-segments")).Gap(Space0).AlignItems(ui.Center).Children(func() {
-			for i, label := range []string{"变更", "历史"} {
-				b := ui.ButtonBase(c.Key(fmt.Sprintf("git-pane-segment-%d", i))).Label(label).Height(ControlMD).Padding(0, Space2).Radius(RadiusSM).Gap(Space1).AlignItems(ui.Center).Transition(motionFeedback(c))
-				scale := motionPressScale(c, b, "git-pane-segment-press", b.Pressed())
-				b.Scale(scale, scale)
-				if i == segment {
-					b.Background(ThemeSelected(c))
-				}
-				if b.Clicked() {
-					ps.mu.Lock()
-					ps.segment = i
-					ps.mu.Unlock()
-					s.invalidate()
-				}
-				b.Children(func() {
-					ui.Text(c, label).FontSize(uiFont(TypeFootnote))
-					if i == 0 {
-						rollingNumber(c, fmt.Sprintf("git-pane-count-%p", ps), state.Changes)
-					}
-				})
-			}
-		})
-		ui.Spacer(c)
 		label, action := gitPaneSyncAction(state)
 		tip := label
 		disabled := !syncing && (state.Detached || state.WorkDir == "")
@@ -928,14 +902,7 @@ func renderGitPaneOpBanner(c *ui.Context, s *chatState, ps *gitPaneState) {
 		ui.Text(c, gitPaneOpTitle(op)).FontSize(uiFont(TypeFootnote)).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 		if len(op.Conflicts) > 0 {
 			Button(c, ButtonOpts{Key: "git-pane-op-conflicts", Text: fmt.Sprintf("· %d 个冲突", len(op.Conflicts)), Variant: ButtonGhost, Size: ControlSM, OnClick: func() {
-				ps.mu.Lock()
-				ps.segment = 0
-				ps.mu.Unlock()
-				st := gitChangesStateFor(ps)
-				st.mu.Lock()
-				st.selected, st.staged, st.group, st.detail = op.Conflicts[0].Path, false, 0, true
-				st.mu.Unlock()
-				s.invalidate()
+				openReviewUncommitted(s, op.Conflicts[0].Path)
 			}})
 		}
 		for _, item := range []struct{ label, action string }{{"中止", "abort"}, {"跳过", "skip"}, {"继续", "continue"}} {

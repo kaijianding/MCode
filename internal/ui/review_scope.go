@@ -101,68 +101,42 @@ func (s *chatState) loadReview(dp *diffPanelState, client reviewClient, threadID
 
 func (s *chatState) selectReviewScope(dp *diffPanelState, scope string) {
 	diffPanelMu.Lock()
-	dp.scope, dp.scopeMenuOpen = reviewScope(scope), false
+	dp.scope = reviewScope(scope)
 	threadID := dp.threadID
 	diffPanelMu.Unlock()
+	// 只有「未提交」需要 Git 状态；离开后停掉文件监听。
+	s.mu.Lock()
+	st := inspectorExistingSessionLocked(s, s.selectedThreadID)
+	s.mu.Unlock()
+	if st != nil {
+		inspectorSyncVisibility(st)
+	}
 	inspectorFollowPause(s, threadID)
 	s.loadDiff(threadID, "")
 }
 
+// renderReviewScope 用分段控件切换范围：本轮、整个会话、未提交，有 PR 时追加 PR。
 func renderReviewScope(c *ui.Context, s *chatState, dp *diffPanelState) {
 	diffPanelMu.Lock()
-	scope, open, number := reviewScope(dp.scope), dp.scopeMenuOpen, dp.prNumber
+	scope, number := reviewScope(dp.scope), dp.prNumber
 	diffPanelMu.Unlock()
-	title := func(value string) string {
+	values := []string{"turn", "session", "uncommitted"}
+	if _, ok := s.client.(reviewPRClient); ok && number > 0 {
+		values = append(values, "pr")
+	}
+	segments := make([]Segment, len(values))
+	selected := 0
+	for i, value := range values {
+		segments[i].Label = reviewScopeTitle(value)
 		if value == "pr" {
-			return fmt.Sprintf("PR #%d", number)
+			segments[i].Label = fmt.Sprintf("PR #%d", number)
 		}
-		return reviewScopeTitle(value)
-	}
-	trigger := ui.ButtonBase(c.Key("review-scope-trigger")).Label(title(scope)).Padding(Space1, Space3).Radius(RadiusSM)
-	triggerScale := motionPressScale(c, trigger, "button-press-scale", trigger.Pressed())
-	trigger.Scale(triggerScale, triggerScale)
-	if trigger.Clicked() {
-		open = !open
-		diffPanelMu.Lock()
-		dp.scopeMenuOpen = open
-		diffPanelMu.Unlock()
-	}
-	trigger.Children(func() {
-		ui.Text(c, title(scope)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
-	})
-	bg := ThemeSurfacePopover(c)
-	native := flyoutHostWindow(c.Services()) != nil
-	host := c.Services()
-	appFlyoutPopover(c, "review-scope-popover", trigger, &open, func() {
-		diffPanelMu.Lock()
-		dp.scopeMenuOpen = false
-		diffPanelMu.Unlock()
-	}, appFlyoutProps{Width: 150, Background: &bg}, func(c *ui.Context) {
-		card := ui.Column(c.Key("review-scope-menu"))
-		if !native {
-			card = popoverCard(c, card)
+		if value == scope {
+			selected = i
 		}
-		card.Transition(motionPopover(c, Space2)).Padding(Space1).Children(func() {
-			values := []string{"turn", "session", "uncommitted"}
-			if _, ok := s.client.(reviewPRClient); ok && number > 0 {
-				values = append(values, "pr")
-			}
-			for _, value := range values {
-				value := value
-				btn := ui.ButtonBase(c.Key("review-scope-"+value)).Label(title(value)).FillWidth().Padding(Space2, Space3).Radius(RadiusXS)
-				if value == scope {
-					btn.Background(ThemeSelected(c))
-				}
-				if btn.Clicked() {
-					closeAppFlyoutPopover(host, "review-scope-popover")
-					s.selectReviewScope(dp, value)
-					host.Invalidate()
-				}
-				btn.Children(func() {
-					ui.Text(c, title(value)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
-				})
-			}
-		})
+	}
+	Segmented(c, "review-scope", &selected, segments, func(i int) {
+		s.selectReviewScope(dp, values[i])
 	})
 }
 

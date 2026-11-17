@@ -180,7 +180,7 @@ func TestReviewPRSubmit(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("没有调用提交接口")
 				}
-				tt := ui.NewTester(func(c *ui.Context) { renderReviewCommentsAction(c, s, dp, "t1") }, 800, 100)
+				tt := ui.NewTester(func(c *ui.Context) { renderReviewPRAction(c, s, dp, "t1") }, 800, 100)
 				tt.Frame()
 				if !tt.HasText("评论") || !tt.HasText("批准") || !tt.HasText("要求修改") {
 					t.Fatal("缺少 PR 审阅按钮")

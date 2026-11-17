@@ -172,7 +172,10 @@ func inspectorSyncVisibility(st *inspectorSessionState) {
 	previewMu.Unlock()
 	fileTreeWatchSetVisible(st.Files, st.Open && st.Active == sidePaneFileID)
 	if st.Git != nil {
-		st.Git.setVisible(st.Open && st.Active == sidePaneGitID)
+		diffPanelMu.Lock()
+		uncommitted := reviewScope(st.Review.scope) == "uncommitted"
+		diffPanelMu.Unlock()
+		st.Git.setVisible(st.Open && (st.Active == sidePaneGitID || st.Active == sidePaneDiffID && uncommitted))
 	}
 }
 

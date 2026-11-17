@@ -4385,6 +4385,7 @@ export type RemoteThreadsReviewGetParams = {
   turnID?: "" | unknown;
   number?: number;
   path?: string;
+  headRevision?: string;
 };
 
 export type RemoteReviewFileMeta = {
@@ -4399,6 +4400,8 @@ export type RemoteReviewFileMeta = {
   binary: boolean;
   tooLarge: boolean;
   missing: boolean;
+  additions?: number;
+  deletions?: number;
 };
 
 export type RemoteReviewFileContent = {
