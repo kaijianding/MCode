@@ -128,18 +128,20 @@ func renderComposerCapsule(c *ui.Context, s *chatState, capsule composerCapsule)
 	}
 }
 
-// renderComposerCapsuleLiveDot 渲染实时状态胶囊前导的脉动圆点：透明度沿用派发占位胶囊的低频三角波，
-// 每周期请求 8 次重绘，表达「进行中」；胶囊消失后本函数不再运行，动画也就自然停下。
+// renderComposerCapsuleLiveDot 以派发占位胶囊的三角波重绘圆点，不重建视图。
 func renderComposerCapsuleLiveDot(c *ui.Context, capsule composerCapsule) {
-	pulse := 1.0
-	if !reduceMotion(c) {
-		pulse = swarmDispatchPulseAlpha(c.Now())
-		c.After(swarmDispatchPulsePeriod / swarmDispatchPulseSteps)
-	}
+	color := ThemeAccent(c)
 	ui.Box(c.Key(capsule.Key+"-live-dot")).
 		Size(composerCapsuleLiveDotSize, composerCapsuleLiveDotSize).
 		Radius(RadiusPill).
-		Background(ThemeAccent(c).Alpha(float32(pulse)))
+		Draw(func(p *ui.Painter, r ui.Rect) {
+			pulse := 1.0
+			if !reduceMotion(c) {
+				pulse = swarmDispatchPulseAlpha(p.Now())
+				p.After(swarmDispatchPulsePeriod / swarmDispatchPulseSteps)
+			}
+			p.Fill(r, color.Alpha(float32(pulse)), r.H/2)
+		})
 }
 
 // renderComposerCapsuleDismiss 渲染胶囊尾随的关闭按钮：点击只关闭胶囊本身。

@@ -158,18 +158,23 @@ func StatusDot(c *ui.Context, key any, st Status, label string) ui.Element {
 		ctx = c.Key(key)
 	}
 	color := statusDotColor(c, st)
+	dot := ui.Box(ctx).Label(label).Size(Space2, Space2).Radius(RadiusPill)
 	if st == StatusRunning {
 		period := animateDuration(c, statusDotPulsePeriod)
-		if period > 0 {
-			const steps = 8
-			step := c.Now().UnixNano() / int64(period/steps) % steps
-			phase := float32(step) / steps
-			if phase > 0.5 {
-				phase = 1 - phase
+		return dot.Draw(func(p *ui.Painter, r ui.Rect) {
+			alpha := float32(1)
+			if period > 0 {
+				const steps = 8
+				step := p.Now().UnixNano() / int64(period/steps) % steps
+				phase := float32(step) / steps
+				if phase > 0.5 {
+					phase = 1 - phase
+				}
+				alpha = 0.35 + 1.3*phase
+				p.After(period / steps)
 			}
-			color = color.Alpha(0.35 + 1.3*phase)
-			c.After(period / steps)
-		}
+			p.Fill(r, color.Alpha(alpha), r.H/2)
+		})
 	}
-	return ui.Box(ctx).Label(label).Size(Space2, Space2).Radius(RadiusPill).Background(color)
+	return dot.Background(color)
 }
