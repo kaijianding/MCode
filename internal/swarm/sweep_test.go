@@ -3,6 +3,7 @@ package swarm
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,65 @@ import (
 	"mcode/internal/git"
 	"mcode/internal/testenv"
 )
+
+func TestSweepDeletesUnreferencedSwarmBranches(t *testing.T) {
+	testenv.TempHome(t)
+	runner, repo := initTestRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, name := range []string{"mcode/swarm/x/0", "mcode/swarm/x/1", "mcode/swarm-x-abc", "feature"} {
+		cmd := exec.CommandContext(ctx, runner.Bin, "branch", name)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("create branch %s: %v: %s", name, err, out)
+		}
+	}
+	checkedOut := filepath.Join(t.TempDir(), "checked-out")
+	stale := filepath.Join(t.TempDir(), "stale")
+	if err := runner.WorktreeAdd(ctx, repo, checkedOut, "mcode/swarm/x/2", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.WorktreeAdd(ctx, repo, stale, "", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(stale); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(Options{Git: runner})
+	m.leads["lead"] = &leadState{leadWorkDir: repo, bees: []Bee{{Branch: "mcode/swarm/x/1"}}}
+	removed, err := m.SweepOrphanCopies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("unexpected removed directories: %v", removed)
+	}
+	branches, err := runner.Branches(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := make(map[string]bool)
+	for _, branch := range branches {
+		remaining[branch.Name] = true
+	}
+	if remaining["mcode/swarm/x/0"] {
+		t.Error("unreferenced swarm branch remains")
+	}
+	for _, name := range []string{"mcode/swarm/x/1", "mcode/swarm/x/2", "mcode/swarm-x-abc", "feature"} {
+		if !remaining[name] {
+			t.Errorf("branch %s was deleted", name)
+		}
+	}
+	worktrees, err := runner.WorktreeList(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, worktree := range worktrees {
+		if sweepPathReferenced(sweepPathSet([]string{stale}), worktree.Path) {
+			t.Errorf("stale worktree remains registered: %s", worktree.Path)
+		}
+	}
+}
 
 // 被 bee 引用的 worktree 保留，未被引用的孤儿副本经 git worktree remove 清理。
 func TestManager_SweepOrphanCopies(t *testing.T) {

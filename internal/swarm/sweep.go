@@ -2,6 +2,7 @@ package swarm
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,12 +31,14 @@ func (m *Manager) SweepOrphanCopies(ctx context.Context) ([]string, error) {
 		roots = append(roots, m.opts.WorktreeDir)
 	}
 	seen := sweepPathSet(roots)
+	repoRoots := make(map[string]struct{})
 	if m.opts.Git != nil {
 		for dir := range leadDirs {
 			repoRoot, err := m.opts.Git.RepoRoot(ctx, dir)
 			if err != nil {
 				continue
 			}
+			repoRoots[repoRoot] = struct{}{}
 			root := filepath.Join(git.WorktreeBase("", repoRoot, config.WorktreeLocationProject), "swarm")
 			if !sweepPathReferenced(seen, root) {
 				roots = append(roots, root)
@@ -65,8 +68,12 @@ func (m *Manager) SweepOrphanCopies(ctx context.Context) ([]string, error) {
 	// 扫描之后再收集引用，保护扫描期间完成启动登记的副本。
 	m.mu.Lock()
 	referenced := make([]string, 0, len(m.startingWorkDirs))
+	referencedBranches := make(map[string]struct{})
 	for _, lead := range m.leads {
 		for _, h := range lead.bees {
+			if h.Branch != "" {
+				referencedBranches[h.Branch] = struct{}{}
+			}
 			if h.WorktreePath != "" {
 				referenced = append(referenced, h.WorktreePath)
 			}
@@ -89,6 +96,47 @@ func (m *Manager) SweepOrphanCopies(ctx context.Context) ([]string, error) {
 			continue
 		}
 		removed = append(removed, dir)
+	}
+	for repoRoot := range repoRoots {
+		if _, err := m.runGitCmd(ctx, repoRoot, "worktree", "prune"); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		branches, err := m.opts.Git.Branches(ctx, repoRoot)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		worktrees, err := m.opts.Git.WorktreeList(ctx, repoRoot)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		checkedOut := make(map[string]struct{}, len(worktrees))
+		for _, worktree := range worktrees {
+			checkedOut[worktree.Branch] = struct{}{}
+		}
+		for _, branch := range branches {
+			if branch.Remote || !strings.HasPrefix(branch.Name, "mcode/swarm/") {
+				continue
+			}
+			if _, ok := referencedBranches[branch.Name]; ok {
+				continue
+			}
+			if _, ok := checkedOut[branch.Name]; ok {
+				continue
+			}
+			if err := m.opts.Git.BranchDelete(ctx, repoRoot, branch.Name, true); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			log.Printf("swarm: 已删除无引用分支 %s（%s）", branch.Name, repoRoot)
+		}
 	}
 	return removed, firstErr
 }
