@@ -194,6 +194,7 @@ func (s *chatState) fetchGitPRList() {
 			return
 		}
 		st.listLoading = false
+		autoSelect := 0
 		if err != nil {
 			st.listErr = "读取 PR 列表失败: " + err.Error()
 		} else {
@@ -215,8 +216,16 @@ func (s *chatState) fetchGitPRList() {
 				st.detailSeq++
 				st.resetActions()
 			}
+			// 列表加载完成时没有选中项就自动选中第一条，只在这里做一次。
+			if st.selected == 0 && len(prs) > 0 {
+				autoSelect = prs[0].Number
+			}
 		}
 		st.mu.Unlock()
+		if autoSelect > 0 {
+			s.selectGitPR(autoSelect)
+			return
+		}
 		s.invalidate()
 	}()
 }
@@ -367,8 +376,16 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 	}
 
 	winW, winH := c.Size()
-	cardW, cardH := modalResizeSize(modalDragGitPR, gitPRDialogWidth, max(400, winH-120), 360, 240, winW, winH)
-	contentH := max(0, cardH-180)
+	// 没有开放的 PR 时收成一张紧凑的空状态卡片；有 PR 时保留用户调整过的尺寸。
+	empty := !listLoading && listErr == "" && len(prs) == 0
+	var cardW, cardH float32
+	if empty {
+		cardW = min(gitPRDialogWidth, winW-modalDragPanelInset)
+		cardH = max(200, min(260, winH-modalDragPanelInset))
+	} else {
+		cardW, cardH = modalResizeSize(modalDragGitPR, gitPRDialogWidth, max(400, winH-120), 360, 240, winW, winH)
+	}
+	contentH := max(0, cardH-72)
 
 	modalDragModal(c, modalDragGitPR, &open, func() {
 		if c.Shortcut(0, ui.KeyEscape) {
@@ -390,7 +407,7 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 				modalDragHandle(c, modalDragGitPR, ui.Row(c.Key("modal-git-pr-title-row")).
 					FillWidth().
 					AlignItems(ui.Center).
-					Gap(Space3).
+					Gap(Space2).
 					Children(func() {
 						ui.Text(c, "Pull Request").
 							FontSize(uiFont(TypeTitle)).
@@ -398,10 +415,27 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 							TextColor(ThemePrimaryText(c)).
 							SingleLine()
 						ui.Spacer(c)
-						if listLoading || detailLoading {
-							LoadingIndicator(c, nil, "", IconSM)
-						}
+						IconButton(c, IconButtonProps{
+							Key:     "modal-git-pr-refresh",
+							Icon:    IconRefreshCw(),
+							Label:   "刷新",
+							Variant: ButtonGhost,
+							Loading: listLoading,
+							OnClick: func() { s.refreshGitPRList() },
+						})
+						IconButton(c, IconButtonProps{
+							Key:     "modal-git-pr-close",
+							Icon:    IconX(),
+							Label:   "关闭",
+							Variant: ButtonGhost,
+							OnClick: func() { s.closeGitPRDialog() },
+						})
 					}))
+
+				if empty {
+					renderGitPREmptyState(c, s, threadID)
+					return
+				}
 
 				ui.Row(c.Key("modal-git-pr-body")).
 					FillWidth().
@@ -409,50 +443,14 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 					AlignItems(ui.Start).
 					Children(func() {
 						renderGitPRListPane(c, s, prs, selected, listLoading, listErr, contentH)
+						ui.Column(c.Key("modal-git-pr-divider")).
+							Width(Hairline).
+							Height(contentH).
+							Shrink(0).
+							Background(ThemeHairline(c))
 						renderGitPRDetailPane(c, s, detail, selected, detailLoading, detailErr, contentH)
 					})
 
-				ui.Row(c.Key("modal-git-pr-actions")).
-					FillWidth().
-					Gap(Space3).
-					AlignItems(ui.Center).
-					Justify(ui.End).
-					Children(func() {
-						ui.Text(c, "Esc 关闭").
-							FontSize(uiFont(TypeCaption)).
-							TextColor(ThemeSecondaryText(c))
-						url := ""
-						if detail != nil {
-							url = detail.URL
-						}
-						if url == "" && selected > 0 {
-							for _, pr := range prs {
-								if pr.Number == selected {
-									url = pr.URL
-									break
-								}
-							}
-						}
-						Button(c, ButtonOpts{
-							Key:      "modal-git-pr-open-browser",
-							Text:     "在浏览器打开",
-							Variant:  ButtonSecondary,
-							Disabled: url == "",
-							OnClick: func() {
-								if url != "" {
-									c.OpenURL(url)
-								}
-							},
-						})
-						Button(c, ButtonOpts{
-							Key:     "modal-git-pr-close",
-							Text:    "关闭",
-							Variant: ButtonPrimary,
-							OnClick: func() {
-								s.closeGitPRDialog()
-							},
-						})
-					})
 				modalResizeGrips(c, modalDragGitPR, cardW, cardH)
 			})
 	})
@@ -462,55 +460,76 @@ func renderGitPRDialog(c *ui.Context, s *chatState) {
 	}
 }
 
-// renderGitPRListPane 渲染左列：标题与刷新按钮、加载/出错/空列表提示、PR 列表。
+// renderGitPREmptyState 渲染没有开放 PR 时的空状态：图标、标题与创建入口。
+func renderGitPREmptyState(c *ui.Context, s *chatState, threadID string) {
+	repoURL := gitPRRemoteURL(s, threadID)
+	tip := ""
+	if repoURL == "" {
+		tip = "没有可用的远端仓库地址"
+	}
+	ui.Column(c.Key("modal-git-pr-empty")).Fill().Center().Children(func() {
+		EmptyState(c, EmptyStateProps{
+			Icon:  IconGitPullRequestCreate(),
+			Title: "没有开放的 PR",
+			Action: func() {
+				Button(c, ButtonOpts{
+					Key:      "modal-git-pr-empty-create",
+					Text:     "创建 PR…",
+					Variant:  ButtonPrimary,
+					Disabled: repoURL == "",
+					Tooltip:  tip,
+					OnClick: func() {
+						s.closeGitPRDialog()
+						openGitPRCreateDialog(s, threadID)
+					},
+				})
+			},
+		})
+	})
+}
+
+// gitPRRemoteURL 返回创建 PR 可用的远端仓库地址；优先用 Git 面板缓存的状态。
+func gitPRRemoteURL(s *chatState, threadID string) string {
+	if s == nil || threadID == "" {
+		return ""
+	}
+	state := s.headerGitState(threadID)
+	if ps := getGitPaneState(s); ps != nil && ps.threadID == threadID {
+		ps.mu.Lock()
+		if ps.state.WorkDir != "" {
+			state = ps.state
+		}
+		ps.mu.Unlock()
+	}
+	return normalizeGitRemoteURL(state.RemoteURL)
+}
+
+// renderGitPRListPane 渲染左列：加载/出错提示与 PR 列表。
 func renderGitPRListPane(c *ui.Context, s *chatState, prs []git.PRSummary, selected int, loading bool, errText string, contentH float32) {
+	listH := contentH
+	if errText != "" && len(prs) > 0 {
+		// 底部留出错误行的高度，避免撑出卡片。
+		listH = max(0, contentH-ControlSM-Space2)
+	}
 	ui.Column(c.Key("modal-git-pr-list-pane")).
 		Width(gitPRListPaneWidth).
+		Shrink(0).
 		Gap(Space2).
 		Children(func() {
-			ui.Row(c.Key("modal-git-pr-list-head")).
-				FillWidth().
-				AlignItems(ui.Center).
-				Gap(Space2).
-				Children(func() {
-					ui.Text(c, "开放的 PR/MR").
-						FontSize(uiFont(TypeCaption)).
-						FontWeight(600).
-						TextColor(ThemeSecondaryText(c)).
-						SingleLine()
-					ui.Spacer(c)
-					Button(c, ButtonOpts{
-						Key:     "modal-git-pr-refresh",
-						Text:    "刷新",
-						Variant: ButtonSecondary,
-						Loading: loading,
-						OnClick: func() {
-							s.refreshGitPRList()
-						},
-					})
-				})
-
 			switch {
 			case loading && len(prs) == 0:
 				ui.Row(c.Key("modal-git-pr-list-loading")).
-					Gap(Space2).
-					AlignItems(ui.Center).
+					FillWidth().
+					Justify(ui.Start).
 					Children(func() {
 						LoadingIndicator(c, nil, "正在读取 PR 列表…", IconSM)
 					})
 			case errText != "" && len(prs) == 0:
-				ui.Text(c, errText).
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeDanger(c)).
-					MaxLines(4)
-			case len(prs) == 0:
-				ui.Text(c, "这个仓库没有开放的 PR/MR").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
+				renderGitPRListError(c, s, errText)
 			default:
 				ui.Scroll(c.Key("modal-git-pr-list-scroll")).
 					FillWidth().
-					MaxHeight(contentH).
+					MaxHeight(listH).
 					Children(func() {
 						ui.Column(c.Key("modal-git-pr-list")).
 							FillWidth().
@@ -525,15 +544,35 @@ func renderGitPRListPane(c *ui.Context, s *chatState, prs []git.PRSummary, selec
 
 			// 列表已有内容时，错误只作为底部提示，不顶掉列表。
 			if errText != "" && len(prs) > 0 {
-				ui.Text(c, errText).
-					FontSize(uiFont(TypeCaption)).
-					TextColor(ThemeDanger(c)).
-					MaxLines(3)
+				renderGitPRListError(c, s, errText)
 			}
 		})
 }
 
-// renderGitPRListRow 渲染列表中的一条：#编号与标题在上，状态/检查标签与作者在下。
+// renderGitPRListError 渲染列表错误：一行灰字加「重试」。
+func renderGitPRListError(c *ui.Context, s *chatState, errText string) {
+	ui.Row(c.Key("modal-git-pr-list-error")).
+		FillWidth().
+		Gap(Space2).
+		AlignItems(ui.Center).
+		Children(func() {
+			ui.Text(c, errText).
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(ThemeSecondaryText(c)).
+				SingleLine().
+				Tooltip(errText).
+				Grow(1)
+			Button(c, ButtonOpts{
+				Key:     "modal-git-pr-list-retry",
+				Text:    "重试",
+				Variant: ButtonGhost,
+				Size:    ControlXS,
+				OnClick: func() { s.refreshGitPRList() },
+			})
+		})
+}
+
+// renderGitPRListRow 渲染列表中的一条：#编号与标题在上，作者与分支在下。
 func renderGitPRListRow(c *ui.Context, s *chatState, pr git.PRSummary, active bool) {
 	key := fmt.Sprintf("modal-git-pr-row-%d", pr.Number)
 	row := ui.ButtonBase(c.Key(key)).
@@ -551,44 +590,46 @@ func renderGitPRListRow(c *ui.Context, s *chatState, pr git.PRSummary, active bo
 	if active {
 		row.Background(ThemeSelected(c))
 	} else if row.Hovered() {
-		row.Background(ThemeHover(c).Alpha(0.6))
+		row.Background(ThemeHover(c))
 	}
 	row.Children(func() {
 		ui.Column(c.Key(key + "-text")).
 			FillWidth().
 			Gap(Space0).
 			Children(func() {
-				ui.Row(c.Key(key + "-title-row")).
-					FillWidth().
-					Gap(Space2).
-					AlignItems(ui.Center).
-					Children(func() {
-						ui.Text(c, fmt.Sprintf("#%d", pr.Number)).
-							FontSize(uiFont(TypeCaption)).
-							TextColor(ThemeSecondaryText(c)).
-							SingleLine()
-						ui.Text(c, pr.Title).
-							FontSize(uiFont(TypeFootnote)).
-							TextColor(ThemePrimaryText(c)).
-							Grow(1).
-							SingleLine()
-					})
-				ui.Row(c.Key(key + "-meta")).
-					FillWidth().
-					Gap(Space1).
-					AlignItems(ui.Center).
-					Children(func() {
-						renderGitPRTag(c, key+"-tag-state", gitPRStateLabel(pr.State, pr.IsDraft))
-						renderGitPRTag(c, key+"-tag-checks", gitPRChecksLabel(pr.ChecksState))
-						if author := strings.TrimSpace(pr.Author); author != "" {
-							ui.Text(c, author).
-								FontSize(uiFont(TypeCaption)).
-								TextColor(ThemeSecondaryText(c)).
-								SingleLine()
-						}
-					})
+				ui.Text(c, fmt.Sprintf("#%d %s", pr.Number, pr.Title)).
+					FontSize(uiFont(TypeFootnote)).
+					TextColor(ThemePrimaryText(c)).
+					SingleLine().
+					FillWidth()
+				if meta := gitPRListMeta(pr); meta != "" {
+					ui.Text(c, meta).
+						FontSize(uiFont(TypeCaption)).
+						TextColor(ThemeSecondaryText(c)).
+						SingleLine().
+						FillWidth()
+				}
 			})
 	})
+}
+
+// gitPRListMeta 拼出列表第二行：作者与分支。
+func gitPRListMeta(pr git.PRSummary) string {
+	var parts []string
+	if author := strings.TrimSpace(pr.Author); author != "" {
+		parts = append(parts, author)
+	}
+	head := strings.TrimSpace(pr.HeadBranch)
+	base := strings.TrimSpace(pr.BaseBranch)
+	switch {
+	case head != "" && base != "":
+		parts = append(parts, head+" → "+base)
+	case head != "":
+		parts = append(parts, head)
+	case base != "":
+		parts = append(parts, "→ "+base)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // renderGitPRTag 渲染一个小号状态标签。
@@ -599,17 +640,21 @@ func renderGitPRTag(c *ui.Context, key, text string) {
 	Badge(c, key, text, ToneNeutral)
 }
 
-// renderGitPRDetailPane 渲染右列：未选中/加载/出错提示，或选中项的详情。
+// renderGitPRDetailPane 渲染右列：加载/出错提示，或选中项的详情。
 func renderGitPRDetailPane(c *ui.Context, s *chatState, detail *git.PRDetail, selected int, loading bool, errText string, contentH float32) {
+	detailH := contentH
+	if errText != "" && detail != nil {
+		// 底部留出错误行的高度，避免撑出卡片。
+		detailH = max(0, contentH-ControlSM-Space3)
+	}
 	ui.Column(c.Key("modal-git-pr-detail-pane")).
 		Grow(1).
+		MinWidth(0).
 		Gap(Space3).
 		Children(func() {
 			switch {
 			case selected == 0:
-				ui.Text(c, "从左侧选择一条 PR 查看详情").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
+				// 列表加载完成后会自动选中第一条；这里只在极短的过渡帧里留空。
 			case loading && detail == nil:
 				ui.Row(c.Key("modal-git-pr-detail-loading")).
 					Gap(Space2).
@@ -623,18 +668,17 @@ func renderGitPRDetailPane(c *ui.Context, s *chatState, detail *git.PRDetail, se
 					TextColor(ThemeDanger(c)).
 					MaxLines(4)
 			case detail == nil:
-				ui.Text(c, "没有可显示的详情").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
+				// 没有可显示的详情：保持空白，不占用位文字。
 			default:
-				renderGitPRDetail(c, s, *detail, contentH)
+				renderGitPRDetail(c, s, *detail, detailH)
 			}
 
 			if errText != "" && detail != nil {
 				ui.Text(c, errText).
 					FontSize(uiFont(TypeCaption)).
 					TextColor(ThemeDanger(c)).
-					MaxLines(3)
+					SingleLine().
+					Tooltip(errText)
 			}
 		})
 }
@@ -649,10 +693,27 @@ func renderGitPRDetail(c *ui.Context, s *chatState, detail git.PRDetail, content
 				FillWidth().
 				Gap(Space3).
 				Children(func() {
-					ui.Text(c, fmt.Sprintf("#%d %s", detail.Number, detail.Title)).
-						FontSize(uiFont(TypeProse)).
-						FontWeight(600).
-						TextColor(ThemePrimaryText(c))
+					ui.Row(c.Key("modal-git-pr-detail-title-row")).
+						FillWidth().
+						Gap(Space2).
+						AlignItems(ui.Start).
+						Children(func() {
+							ui.Text(c, fmt.Sprintf("#%d %s", detail.Number, detail.Title)).
+								FontSize(uiFont(TypeProse)).
+								FontWeight(600).
+								TextColor(ThemePrimaryText(c)).
+								Grow(1)
+							if detail.URL != "" {
+								IconButton(c, IconButtonProps{
+									Key:     "modal-git-pr-open-browser",
+									Icon:    IconExternalLink(),
+									Label:   "在浏览器打开",
+									Variant: ButtonGhost,
+									Size:    ControlSM,
+									OnClick: func() { c.OpenURL(detail.URL) },
+								})
+							}
+						})
 
 					if meta := gitPRMetaLine(detail.PRSummary); meta != "" {
 						ui.Text(c, meta).

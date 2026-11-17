@@ -3,10 +3,13 @@ package mcodeui
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
 	"mcode/internal/git"
+	"mcode/internal/testenv"
 )
 
 func TestGitPRActionsVisible(t *testing.T) {
@@ -208,5 +211,106 @@ func TestGitPRUpdatedLabel(t *testing.T) {
 	}
 	if got := gitPRUpdatedLabel(time.Now().Add(-30 * time.Second)); got != "刚刚" {
 		t.Errorf("30 秒前 = %q, 期望 刚刚", got)
+	}
+}
+
+// gitPRDialogFake 提供可控的 PR 列表与详情，并记录详情请求。
+type gitPRDialogFake struct {
+	*FakeClient
+	prs     []git.PRSummary
+	listErr error
+	mu      sync.Mutex
+	details []int
+}
+
+func (f *gitPRDialogFake) GitPRList(context.Context, string, int) ([]git.PRSummary, error) {
+	return f.prs, f.listErr
+}
+
+func (f *gitPRDialogFake) GitPRDetail(_ context.Context, _ string, number int) (git.PRDetail, error) {
+	f.mu.Lock()
+	f.details = append(f.details, number)
+	f.mu.Unlock()
+	return git.PRDetail{PRSummary: git.PRSummary{Number: number, Title: "详情标题", State: "open"}}, nil
+}
+
+func (f *gitPRDialogFake) detailCalls() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.details...)
+}
+
+func newGitPRDialogTestState(t *testing.T, client *gitPRDialogFake) *chatState {
+	t.Helper()
+	testenv.TempHome(t)
+	s := newChatState(client)
+	s.mu.Lock()
+	s.selectedThreadID = "thread-1"
+	s.threads = []Thread{{ID: "thread-1"}}
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.close()
+		modalDragReset(modalDragGitPR)
+	})
+	return s
+}
+
+func waitGitPRDialog(t *testing.T, s *chatState, check func(*gitPRDialogState) bool) {
+	t.Helper()
+	st := getGitPRDialogState(s)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		st.mu.Lock()
+		ok := check(st)
+		st.mu.Unlock()
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("等待 PR 弹窗状态超时")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestGitPRDialogEmptyStateOffersCreate 覆盖没有开放 PR 时的空状态。
+func TestGitPRDialogEmptyStateOffersCreate(t *testing.T) {
+	s := newGitPRDialogTestState(t, &gitPRDialogFake{FakeClient: NewFakeClient()})
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.listLoading && st.listErr == "" })
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	for _, text := range []string{"开放的 PR/MR", "从左侧选择一条 PR 查看详情", "Esc 关闭"} {
+		if tt.HasText(text) {
+			t.Errorf("空状态不应显示 %q", text)
+		}
+	}
+	for _, text := range []string{"没有开放的 PR", "创建 PR…"} {
+		if !tt.HasText(text) {
+			t.Errorf("空状态缺少 %q", text)
+		}
+	}
+}
+
+// TestGitPRDialogAutoSelectsFirst 覆盖列表加载完成后自动选中第一条并请求详情。
+func TestGitPRDialogAutoSelectsFirst(t *testing.T) {
+	f := &gitPRDialogFake{FakeClient: NewFakeClient(), prs: []git.PRSummary{
+		{Number: 7, Title: "第一条", State: "open"},
+		{Number: 9, Title: "第二条", State: "open"},
+	}}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 7 && st.detail != nil && !st.detailLoading
+	})
+	if calls := f.detailCalls(); len(calls) != 1 || calls[0] != 7 {
+		t.Fatalf("详情请求 = %v，期望只请求第一条 #7", calls)
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if !tt.HasText("第一条") {
+		t.Error("左列没有显示第一条 PR")
 	}
 }
