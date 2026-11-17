@@ -684,6 +684,9 @@ func renderGitSyncSpin(c *ui.Context) {
 	})
 }
 
+// gitPaneMenuWidth 是 Git 面板更多菜单的固定列宽，能放下最长的「合并子代理改动（PR）」。
+const gitPaneMenuWidth = 200
+
 func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state GitState, width float32) {
 	ui.Row(c.Key("git-pane-toolbar")).FillWidth().Height(diffHeaderHeight).Shrink(0).Padding(0, Space3).Gap(Space2).AlignItems(ui.Center).Children(func() {
 		branch := state.Branch
@@ -796,84 +799,97 @@ func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state G
 		})
 		more := IconButton(c, IconButtonProps{Key: "git-pane-more", Icon: IconMoreHorizontal(), Label: "Git 更多操作", Variant: ButtonGhost, Size: ControlMD, OnClick: func() { ps.menuOpen = true }})
 		appPopover(c.Key("git-pane-more-popover"), more, &ps.menuOpen, func() { s.cancelPushPRConfirm() }, func() {
-			popoverCard(c, ui.Column(c.Key("git-pane-menu"))).Padding(Space1).Gap(Space0).Children(func() {
-				for _, item := range []struct{ label, action string }{{"抓取", "fetch"}, {"拉取（变基）", "rebase"}, {"拉取（合并）", "merge"}, {"强制推送…", "force"}, {"贮藏…", "stash"}} {
-					item := item
-					tip := ""
-					blocked := syncing || state.WorkDir == "" || (state.Detached && item.action != "fetch" && item.action != "stash")
-					if state.Detached && item.action != "fetch" && item.action != "stash" {
-						tip = "分离 HEAD 时无法执行此操作"
-					}
-					if state.WorkDir == "" {
-						tip = "Git 状态不可用"
-					}
-					if syncing {
-						tip = "Git 操作进行中"
-					}
-					Button(c, ButtonOpts{Key: "git-pane-menu-" + item.action, Text: item.label, Variant: ButtonGhost, Disabled: blocked, Tooltip: tip, OnClick: func() {
+			repoURL := normalizeGitRemoteURL(state.RemoteURL)
+			hs := getChatHeaderState(s)
+			chatHeaderMu.Lock()
+			pushBusy, pushConfirm := hs.pushBusy, hs.pushConfirm
+			chatHeaderMu.Unlock()
+			swarmPanelMu.Lock()
+			canMergeBees := false
+			if swarm := swarmPanelStates[ps.owner]; swarm != nil {
+				canMergeBees = gitPaneHasUnmergedBees(ps.threadID, swarm.state)
+			}
+			swarmPanelMu.Unlock()
+			popoverCard(c, ui.Column(c.Key("git-pane-menu")).Width(gitPaneMenuWidth)).Padding(Space1).Gap(Space0).Children(func() {
+				// 菜单项左对齐，按同步、贮藏、PR、仓库分组，组间用细分隔线；禁用时保留原因提示。
+				option := func(key, label string, blocked bool, tip string, onClick func()) {
+					el := renderGitMenuOption(c, "git-pane-menu-"+key, label, label, "", false, blocked, func() {
 						ps.menuOpen = false
 						s.cancelPushPRConfirm()
-						switch item.action {
-						case "force":
-							ps.forceBranch, ps.forceOpen = state.Branch, true
-						case "stash":
-							if ps.stash == nil {
-								ps.stash = &gitStashDialog{s: s, threadID: ps.threadID, confirmAt: -1}
-							}
-							ps.stash.openStashDialog()
-						default:
-							ps.run(item.action)
-						}
-					}})
+						onClick()
+					})
+					if tip != "" {
+						el.Tooltip(tip)
+					}
 				}
-				repoURL := normalizeGitRemoteURL(state.RemoteURL)
-				hs := getChatHeaderState(s)
-				chatHeaderMu.Lock()
-				pushBusy, pushConfirm := hs.pushBusy, hs.pushConfirm
-				chatHeaderMu.Unlock()
-				swarmPanelMu.Lock()
-				canMergeBees := false
-				if swarm := swarmPanelStates[ps.owner]; swarm != nil {
-					canMergeBees = gitPaneHasUnmergedBees(ps.threadID, swarm.state)
+				syncTip := ""
+				switch {
+				case syncing:
+					syncTip = "Git 操作进行中"
+				case state.WorkDir == "":
+					syncTip = "Git 状态不可用"
+				case state.Detached:
+					syncTip = "分离 HEAD 时无法执行此操作"
 				}
-				swarmPanelMu.Unlock()
-				for _, item := range []struct{ label, action string }{{"创建 PR…", "pr-create"}, {"合并子代理改动（PR）", "push-pr"}, {"查看 Pull Request…", "pr-view"}, {"打开仓库", "repo"}, {"远端…", "remotes"}} {
-					if item.action == "push-pr" && !canMergeBees {
-						continue
+				option("pull", "拉取", syncTip != "", syncTip, func() { ps.run("pull") })
+				option("force", "强制推送…", syncTip != "", syncTip, func() { ps.forceBranch, ps.forceOpen = state.Branch, true })
+				gitMenuDivider(c)
+				stashTip := ""
+				switch {
+				case syncing:
+					stashTip = "Git 操作进行中"
+				case state.WorkDir == "":
+					stashTip = "Git 状态不可用"
+				}
+				option("stash", "贮藏…", stashTip != "", stashTip, func() {
+					if ps.stash == nil {
+						ps.stash = &gitStashDialog{s: s, threadID: ps.threadID, confirmAt: -1}
 					}
-					if item.action == "repo" && repoURL == "" || item.action == "remotes" && gitPaneRemotesDialog == nil {
-						continue
+					ps.stash.openStashDialog()
+				})
+				gitMenuDivider(c)
+				prTip := ""
+				if repoURL == "" {
+					prTip = "没有可用的远端仓库地址"
+				}
+				option("pr-create", "创建 PR…", prTip != "", prTip, func() {
+					openGitPRCreateDialog(s, ps.threadID)
+					s.invalidate()
+				})
+				if canMergeBees {
+					mergeTip := ""
+					if syncing || pushBusy || state.WorkDir == "" || state.Detached {
+						mergeTip = "Git 操作进行中或分支不可用"
 					}
-					blocked, tip := false, ""
-					if item.action == "pr-create" && repoURL == "" {
-						blocked, tip = true, "没有可用的远端仓库地址"
-					}
-					if item.action == "push-pr" && (syncing || pushBusy || state.WorkDir == "" || state.Detached) {
-						blocked, tip = true, "Git 操作进行中或分支不可用"
-					}
-					Button(c, ButtonOpts{Key: "git-pane-menu-" + item.action, Text: item.label, Variant: ButtonGhost, Disabled: blocked, Tooltip: tip, OnClick: func() {
-						ps.menuOpen = false
-						s.cancelPushPRConfirm()
-						switch item.action {
-						case "pr-create":
-							openGitPRCreateDialog(s, ps.threadID)
-						case "push-pr":
-							ps.menuOpen = true
-							s.requestPushPRConfirm()
-						case "pr-view":
-							s.openGitPRDialog()
-						case "repo":
-							c.OpenURL(repoURL)
-						case "remotes":
-							ps.remotesOpen = true
-						}
+					option("push-pr", "合并子代理改动（PR）", mergeTip != "", mergeTip, func() {
+						ps.menuOpen = true
+						s.requestPushPRConfirm()
 						s.invalidate()
-					}})
+					})
+				}
+				option("pr-view", "查看 Pull Request…", false, "", func() {
+					s.openGitPRDialog()
+					s.invalidate()
+				})
+				showRepo, showRemotes := repoURL != "", gitPaneRemotesDialog != nil
+				if showRepo || showRemotes {
+					gitMenuDivider(c)
+					if showRepo {
+						option("repo", "打开仓库", false, "", func() {
+							c.OpenURL(repoURL)
+							s.invalidate()
+						})
+					}
+					if showRemotes {
+						option("remotes", "远端…", false, "", func() {
+							ps.remotesOpen = true
+							s.invalidate()
+						})
+					}
 				}
 				if pushConfirm {
 					renderGitPushPRConfirm(c, s, state)
 				}
-
 			})
 		})
 	})

@@ -699,6 +699,38 @@ func TestGitPaneMoreMenuConsolidatedActions(t *testing.T) {
 	}
 }
 
+// 拉取合并成一项：菜单里只有「拉取」，点击后按默认策略拉取（strategy 为空）。
+func TestGitPaneMenuSinglePull(t *testing.T) {
+	s, ps, client := gitPaneTestState(t)
+	state := GitState{WorkDir: "/repo", Branch: "feature", HasUpstream: true, Ahead: 1}
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneToolbar(c, s, ps, state, 600) }, 1000, 800)
+	if err := tt.Click("Git 更多操作"); err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{"抓取", "拉取（变基）", "拉取（合并）"} {
+		if _, ok := tt.Access(label); ok {
+			t.Fatalf("菜单不应再有 %q", label)
+		}
+	}
+	if _, ok := tt.Access("拉取"); !ok {
+		t.Fatal("菜单缺少「拉取」")
+	}
+	if err := tt.Click("拉取"); err != nil {
+		t.Fatal(err)
+	}
+	gitPaneWait(t, func() bool {
+		client.paneMu.Lock()
+		defer client.paneMu.Unlock()
+		return len(client.calls) > 0
+	})
+	client.paneMu.Lock()
+	calls := append([]string(nil), client.calls...)
+	client.paneMu.Unlock()
+	if !slices.Equal(calls, []string{"pull:"}) {
+		t.Fatalf("拉取调用 = %v，预期 [pull:]", calls)
+	}
+}
+
 type gitPaneStageFailureClient struct{ *gitChangesFakeClient }
 
 func (f *gitPaneStageFailureClient) GitStageFiles(context.Context, string, []string) error {
