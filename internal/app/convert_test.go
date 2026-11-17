@@ -34,8 +34,8 @@ func TestThreadMessageToUITurnTiming(t *testing.T) {
 }
 
 func TestThreadSummaryToUI_AIDurationAndContext(t *testing.T) {
-	got := ThreadSummaryToUI(wire.ThreadSummary{ID: "t1", AIDurationMs: 1234, ContextUsedTokens: 90_000, ContextWindow: 200_000})
-	if got.AIDuration != 1234*time.Millisecond || got.ContextUsedTokens != 90_000 || got.ContextWindow != 200_000 {
+	got := ThreadSummaryToUI(wire.ThreadSummary{ID: "t1", AIDurationMs: 1234, TotalDurationMs: 5678, ContextUsedTokens: 90_000, ContextWindow: 200_000})
+	if got.AIDuration != 1234*time.Millisecond || got.TotalDuration != 5678*time.Millisecond || got.ContextUsedTokens != 90_000 || got.ContextWindow != 200_000 {
 		t.Fatalf("ThreadSummaryToUI fields = %+v", got)
 	}
 }

@@ -121,6 +121,8 @@ const (
 type memoryThread struct {
 	summary       wire.ThreadSummary
 	aiDuration    time.Duration
+	activity      []store.Interval
+	totalDuration time.Duration
 	sortOrder     int64
 	queueRevision int
 	followUps     []wire.FollowUp
@@ -509,6 +511,7 @@ func (b *MemoryBackend) stewardLocked(td *memoryThread) bool {
 func (b *MemoryBackend) summaryForPublishLocked(td *memoryThread) wire.ThreadSummary {
 	s := td.summary
 	s.AIDurationMs = td.aiDuration.Milliseconds()
+	s.TotalDurationMs = td.totalDuration.Milliseconds()
 	// 有执行轮次或前台正在处理消息时报告运行中；否则纠正异常收尾残留的标记。
 	if td.runTurnID != "" || td.runCancel != nil || td.stewardBusy {
 		s.IsRunning = true
@@ -1673,7 +1676,80 @@ func backgroundTaskDetails(text string) (string, string) {
 func finishBackgroundTaskLocked(td *memoryThread, idx int, status, now string) {
 	td.messages[idx].ToolStatus = &status
 	td.messages[idx].ToolCompletedAt = &now
+	if start, err := time.Parse(time.RFC3339Nano, td.messages[idx].CreatedAt); err == nil {
+		if end, err := time.Parse(time.RFC3339Nano, now); err == nil && end.After(start) {
+			td.activity = append(td.activity, store.Interval{Start: start, End: end})
+		}
+	}
 	td.bgCount.invalidate()
+}
+
+func intervalUnionDuration(intervals []store.Interval) time.Duration {
+	if len(intervals) == 0 {
+		return 0
+	}
+	intervals = append([]store.Interval(nil), intervals...)
+	sort.Slice(intervals, func(i, j int) bool { return intervals[i].Start.Before(intervals[j].Start) })
+	start, end := intervals[0].Start, intervals[0].End
+	var total time.Duration
+	for _, interval := range intervals[1:] {
+		if interval.Start.After(end) {
+			total += end.Sub(start)
+			start, end = interval.Start, interval.End
+		} else if interval.End.After(end) {
+			end = interval.End
+		}
+	}
+	return total + end.Sub(start)
+}
+
+// recomputeTotalDurationLocked 按父子关系汇总本会话与所有后代的活动区间。
+func (b *MemoryBackend) recomputeTotalDurationLocked(threadID string, children map[string][]string) {
+	td := b.threads[threadID]
+	if td == nil {
+		return
+	}
+	intervals := append([]store.Interval(nil), td.activity...)
+	queue := append([]string(nil), children[threadID]...)
+	seen := map[string]struct{}{threadID: {}}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if child := b.threads[id]; child != nil {
+			intervals = append(intervals, child.activity...)
+		}
+		queue = append(queue, children[id]...)
+	}
+	td.totalDuration = intervalUnionDuration(intervals)
+}
+
+func (b *MemoryBackend) recomputeAncestorsLocked(threadID string) []wire.ThreadSummary {
+	children := make(map[string][]string)
+	for id, td := range b.threads {
+		if td.parentThreadID != "" {
+			children[td.parentThreadID] = append(children[td.parentThreadID], id)
+		}
+	}
+	var summaries []wire.ThreadSummary
+	seen := make(map[string]struct{})
+	for id := threadID; id != ""; {
+		if _, ok := seen[id]; ok {
+			break
+		}
+		seen[id] = struct{}{}
+		b.recomputeTotalDurationLocked(id, children)
+		if td := b.threads[id]; td != nil {
+			summaries = append(summaries, b.summaryForPublishLocked(td))
+			id = td.parentThreadID
+		} else {
+			break
+		}
+	}
+	return summaries
 }
 
 // killRunningCommandGrace 是 SIGTERM 到 SIGKILL 之间的宽限期。

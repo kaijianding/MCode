@@ -86,6 +86,85 @@ func TestMemoryBackend_AIDurationAfterTurnFinish(t *testing.T) {
 	}
 }
 
+func TestIntervalUnionDuration(t *testing.T) {
+	base := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name      string
+		intervals []store.Interval
+		want      time.Duration
+	}{
+		{name: "overlap unordered", intervals: []store.Interval{{Start: base.Add(5 * time.Second), End: base.Add(15 * time.Second)}, {Start: base, End: base.Add(10 * time.Second)}}, want: 15 * time.Second},
+		{name: "adjacent", intervals: []store.Interval{{Start: base.Add(10 * time.Second), End: base.Add(20 * time.Second)}, {Start: base, End: base.Add(10 * time.Second)}}, want: 20 * time.Second},
+		{name: "empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := intervalUnionDuration(tc.intervals); got != tc.want {
+				t.Fatalf("union = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTotalDurationAfterChildTurn(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: time.Hour})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	base := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	now := base.Add(10 * time.Second)
+	b.SetClock(func() time.Time { return now })
+	b.AddThread(wire.ThreadSummary{ID: "parent"}, nil)
+	parentID := "parent"
+	b.AddThread(wire.ThreadSummary{ID: "child", ParentThreadID: &parentID}, nil)
+	conn := newMockStreamConn()
+	hub.Subscribe(conn, "parent")
+	b.mu.Lock()
+	b.threads["parent"].turnTiming = map[string]store.Turn{"p-turn": {ID: "p-turn", Status: "running", StartedAt: base}}
+	b.mu.Unlock()
+	b.updateTurnFinish("parent", "p-turn", 0, "completed", "")
+	now = base.Add(20 * time.Second)
+	b.mu.Lock()
+	b.threads["child"].turnTiming = map[string]store.Turn{"c-turn": {ID: "c-turn", Status: "running", StartedAt: base.Add(5 * time.Second)}}
+	b.mu.Unlock()
+	b.updateTurnFinish("child", "c-turn", 0, "completed", "")
+	hub.Flush("parent")
+	parent, err := b.GetThread(context.Background(), "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := b.GetThread(context.Background(), "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.TotalDurationMs != 20000 || parent.AIDurationMs != 10000 || child.TotalDurationMs != 15000 {
+		t.Fatalf("parent=%+v child=%+v", parent, child)
+	}
+	published := false
+	for _, event := range conn.getEvents() {
+		if event.Payload.Thread.TotalDurationMs == 20000 {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatal("child turn completion did not publish updated parent total duration")
+	}
+
+	now = base.Add(30 * time.Second)
+	b.mu.Lock()
+	td := b.threads["child"]
+	td.messages = append(td.messages, wire.ThreadMessage{ID: "tool", Role: "tool", CreatedAt: base.Add(19 * time.Second).Format(time.RFC3339Nano)})
+	finishBackgroundTaskLocked(td, len(td.messages)-1, "completed", now.Format(time.RFC3339Nano))
+	b.recomputeAncestorsLocked("child")
+	b.mu.Unlock()
+	parent, err = b.GetThread(context.Background(), "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.TotalDurationMs != 30000 {
+		t.Fatalf("parent TotalDurationMs = %d, want 30000", parent.TotalDurationMs)
+	}
+}
+
 func TestMemoryBackend_AIDurationAttachStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := store.Open(filepath.Join(t.TempDir(), "ai-duration.db"))
@@ -140,6 +219,52 @@ func TestMemoryBackend_AIDurationAttachStore(t *testing.T) {
 		t.Fatalf("AIDurationMs = %d, want %d", got.AIDurationMs, want)
 	}
 }
+
+func TestTotalDurationAttachStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "total-duration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	base := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	if err := s.UpsertProject(ctx, store.Project{ID: "p", Name: "p", CreatedAt: base, UpdatedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []store.Thread{{ID: "parent", ProjectID: "p", Title: "parent", CreatedAt: base, UpdatedAt: base}, {ID: "child", ProjectID: "p", Title: "child", ParentThreadID: "parent", CreatedAt: base, UpdatedAt: base}} {
+		if err := s.CreateThread(ctx, thread); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, turn := range []store.Turn{
+		{ID: "p-turn", ThreadID: "parent", TurnIndex: 0, Status: "completed", StartedAt: base, CompletedAt: timePtr(base.Add(10 * time.Second))},
+		{ID: "c-turn", ThreadID: "child", TurnIndex: 0, Status: "completed", StartedAt: base.Add(5 * time.Second), CompletedAt: timePtr(base.Add(20 * time.Second))},
+	} {
+		if err := s.CreateTurn(ctx, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hub := NewStreamHub(StreamHubOptions{Interval: time.Hour})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	if err := b.AttachStore(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := b.GetThread(ctx, "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := b.GetThread(ctx, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.TotalDurationMs != 20000 || parent.AIDurationMs != 10000 || child.TotalDurationMs != 15000 {
+		t.Fatalf("parent=%+v child=%+v", parent, child)
+	}
+}
+
+func timePtr(value time.Time) *time.Time { return &value }
 
 func TestTurnTimingProjectionAndHistory(t *testing.T) {
 	started := time.Date(2026, 11, 6, 1, 2, 3, 4_000_000, time.UTC)

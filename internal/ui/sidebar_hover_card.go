@@ -206,6 +206,9 @@ func renderSidebarHoverCardBody(c *ui.Context, s *chatState, thVal Thread) {
 	if thVal.AIDuration > 0 {
 		hoverCardField(c, "hover-card-ai-duration-"+thVal.ID, "AI 用时", formatLiveStatsDuration(thVal.AIDuration))
 	}
+	if thVal.TotalDuration > thVal.AIDuration && formatLiveStatsDuration(thVal.TotalDuration) != formatLiveStatsDuration(thVal.AIDuration) {
+		hoverCardField(c, "hover-card-total-duration-"+thVal.ID, "总用时", formatLiveStatsDuration(thVal.TotalDuration))
+	}
 	if thVal.ContextWindow > 0 && thVal.ContextUsedTokens > 0 {
 		pct := int(math.Round(contextUsagePercent(thVal.ContextUsedTokens, thVal.ContextWindow)))
 		hoverCardField(c, "hover-card-context-"+thVal.ID, "上下文", formatTokenCount(thVal.ContextUsedTokens)+" / "+formatTokenCount(thVal.ContextWindow)+fmt.Sprintf(" · %d%%", pct))

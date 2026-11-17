@@ -497,6 +497,36 @@ func (b *MemoryBackend) AttachStore(ctx context.Context, s *store.Store) error {
 	for id, td := range loadedThreads {
 		td.aiDuration = allDurations[id]
 	}
+	allActivity, activityErr := s.ListAllActivityIntervals(ctx, []string{interruptedToolNotice, backgroundToolNotice, residentExitToolNotice})
+	if activityErr != nil {
+		log.Printf("store list all activity intervals error: %v", activityErr)
+	} else {
+		children := make(map[string][]string)
+		for id, td := range loadedThreads {
+			td.activity = allActivity[id]
+			if td.parentThreadID != "" {
+				children[td.parentThreadID] = append(children[td.parentThreadID], id)
+			}
+		}
+		for id := range loadedThreads {
+			intervals := append([]store.Interval(nil), loadedThreads[id].activity...)
+			queue := append([]string(nil), children[id]...)
+			seen := map[string]struct{}{id: {}}
+			for len(queue) > 0 {
+				childID := queue[0]
+				queue = queue[1:]
+				if _, ok := seen[childID]; ok {
+					continue
+				}
+				seen[childID] = struct{}{}
+				if child := loadedThreads[childID]; child != nil {
+					intervals = append(intervals, child.activity...)
+				}
+				queue = append(queue, children[childID]...)
+			}
+			loadedThreads[id].totalDuration = intervalUnionDuration(intervals)
+		}
+	}
 
 	// 排队审计事件只保留 30 天；启动清理失败不影响加载。
 	pruneCtx, pruneCancel := persistCtx()

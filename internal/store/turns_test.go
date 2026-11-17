@@ -13,6 +13,47 @@ import (
 	"mcode/internal/testenv"
 )
 
+func TestListAllActivityIntervals(t *testing.T) {
+	testenv.TempHome(t)
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "activity.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	base := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "p", CreatedAt: base, UpdatedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateThread(ctx, Thread{ID: "t", ProjectID: "p", Title: "t", CreatedAt: base, UpdatedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	turnEnd := base.Add(10 * time.Second)
+	if err := s.CreateTurn(ctx, Turn{ID: "turn", ThreadID: "t", Status: "completed", StartedAt: base, CompletedAt: &turnEnd}); err != nil {
+		t.Fatal(err)
+	}
+	appendTool := func(id string, created, completed time.Time, text string) {
+		completedText := formatTime(completed)
+		status := "completed"
+		if _, err := s.AppendMessage(ctx, Message{ID: id, ThreadID: "t", TurnID: "turn", Role: "tool", Text: text, CreatedAt: created, ToolStatus: &status, ToolCompletedAt: &completedText}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendTool("background", base.Add(9*time.Second), base.Add(20*time.Second), "background")
+	appendTool("foreground", base.Add(2*time.Second), base.Add(3*time.Second), "foreground")
+	appendTool("restart", base.Add(9*time.Second), base.Add(time.Hour), "工具执行被中断：宿主重启，未收到结果。")
+	got, err := s.ListAllActivityIntervals(ctx, []string{"宿主重启"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["t"]) != 2 {
+		t.Fatalf("intervals = %+v, want turn and background", got["t"])
+	}
+	if !got["t"][0].Start.Equal(base) || !got["t"][0].End.Equal(turnEnd) || !got["t"][1].Start.Equal(base.Add(9*time.Second)) || !got["t"][1].End.Equal(base.Add(20*time.Second)) {
+		t.Fatalf("intervals = %+v", got["t"])
+	}
+}
+
 // TestTurnsAndThreads_NewDB 验证全新数据库中 14 个新列、turns 表及其索引全部存在，user_version 正确。
 func TestTurnsAndThreads_NewDB(t *testing.T) {
 	testenv.TempHome(t)

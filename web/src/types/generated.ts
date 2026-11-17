@@ -562,6 +562,7 @@ export type RemoteThreadSummary = {
   contextUsedTokens?: number;
   contextWindow?: number;
   aiDurationMs?: number;
+  totalDurationMs?: number;
   lastTurnCostUSD?: number;
   fastMode: boolean;
   worktreeRequested: boolean;

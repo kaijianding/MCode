@@ -522,6 +522,7 @@ func (b *MemoryBackend) StopBackgroundTask(ctx context.Context, threadID, messag
 	}
 	now := formatTime(b.nowLocked())
 	finishBackgroundTaskLocked(td, idx, "stopped", now)
+	durationSummaries := b.recomputeAncestorsLocked(threadID)
 	for toolID, id := range td.backgroundTools {
 		if id == messageID {
 			delete(td.backgroundTools, toolID)
@@ -541,6 +542,11 @@ func (b *MemoryBackend) StopBackgroundTask(ctx context.Context, threadID, messag
 	b.mu.Unlock()
 	b.persistMessages(threadID, messages)
 	b.hub.Publish(threadID, messages, nil, summary)
+	for _, ancestorSummary := range durationSummaries {
+		if ancestorSummary.ID != threadID {
+			b.hub.Publish(ancestorSummary.ID, nil, nil, ancestorSummary)
+		}
+	}
 	return true, nil
 }
 

@@ -1101,6 +1101,7 @@ func (b *MemoryBackend) updateTurnFinish(threadID, turnID string, turnIndex int,
 	b.mu.Lock()
 	updateSummary := false
 	var timing store.Turn
+	var durationSummaries []wire.ThreadSummary
 	if td, ok := b.threads[threadID]; ok {
 		turn, exists := td.turnTiming[turnID]
 		if exists && turn.Status != "running" && turn.Status != "starting" {
@@ -1124,6 +1125,8 @@ func (b *MemoryBackend) updateTurnFinish(threadID, turnID string, turnIndex int,
 		turn.Status, turn.CompletedAt = status, &completedAt
 		if !wasCompleted && !turn.StartedAt.IsZero() && completedAt.After(turn.StartedAt) {
 			td.aiDuration += completedAt.Sub(turn.StartedAt)
+			td.activity = append(td.activity, store.Interval{Start: turn.StartedAt, End: completedAt})
+			durationSummaries = b.recomputeAncestorsLocked(threadID)
 		}
 		timing = turn
 		if td.turnTiming == nil {
@@ -1140,6 +1143,9 @@ func (b *MemoryBackend) updateTurnFinish(threadID, turnID string, turnIndex int,
 		}
 	}
 	b.mu.Unlock()
+	for _, summary := range durationSummaries {
+		b.hub.Publish(summary.ID, nil, nil, summary)
+	}
 
 	if b.store == nil {
 		return

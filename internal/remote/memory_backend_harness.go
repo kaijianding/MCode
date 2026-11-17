@@ -521,7 +521,8 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 				streamProject  string
 				// bgPersistMsgs 是后台任务事件改写的工具消息：它们可能属于更早回合，回合末的批量落库
 				// 按 TurnIndex 筛不到它们，必须解锁后单独写穿到 store。
-				bgPersistMsgs []wire.ThreadMessage
+				bgPersistMsgs     []wire.ThreadMessage
+				durationSummaries []wire.ThreadSummary
 			)
 
 			b.mu.Lock()
@@ -1022,6 +1023,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 					td.messages[idx].Text += "\n[后台任务结束：" + e.TaskStatus + "]"
 				}
 				finishBackgroundTaskLocked(td, idx, status, now)
+				durationSummaries = b.recomputeAncestorsLocked(threadID)
 				delete(td.backgroundTools, e.ToolID)
 				delete(td.backgroundPending, e.ToolID)
 				msgToPublish = []wire.ThreadMessage{td.messages[idx]}
@@ -1115,6 +1117,11 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 
 			if len(msgToPublish) > 0 {
 				b.hub.Publish(threadID, msgToPublish, nil, currentSummary)
+			}
+			for _, summary := range durationSummaries {
+				if summary.ID != threadID {
+					b.hub.Publish(summary.ID, nil, nil, summary)
+				}
 			}
 		}
 

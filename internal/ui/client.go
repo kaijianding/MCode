@@ -137,6 +137,7 @@ type Thread struct {
 	BackgroundTasks   int
 	UpdatedAt         time.Time
 	AIDuration        time.Duration
+	TotalDuration     time.Duration
 	ContextUsedTokens int64
 	ContextWindow     int64
 

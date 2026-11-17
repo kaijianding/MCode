@@ -118,7 +118,7 @@ func TestSidebarHoverCardAIDurationAndContext(t *testing.T) {
 	fake := NewFakeClient()
 	fake.SetProjectsAndThreads(
 		[]Project{{ID: "p1", Name: "mcode-test", Path: "/path/to/hovercard"}},
-		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "统计卡会话", AIDuration: 65 * time.Second, ContextUsedTokens: 90_000, ContextWindow: 200_000}}},
+		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "统计卡会话", AIDuration: 65 * time.Second, TotalDuration: 80 * time.Second, ContextUsedTokens: 90_000, ContextWindow: 200_000}}},
 	)
 	_, view := buildRoot(fake)
 	tt := ui.NewTester(view, 1000, 700)
@@ -126,7 +126,7 @@ func TestSidebarHoverCardAIDurationAndContext(t *testing.T) {
 	hoverRow(t, tt, "统计卡会话")
 	tt.Advance(700 * time.Millisecond)
 	tt.Frame()
-	for _, want := range []string{"AI 用时", "1m5s", "上下文", "90k / 200k · 45%"} {
+	for _, want := range []string{"AI 用时", "1m5s", "总用时", "1m20s", "上下文", "90k / 200k · 45%"} {
 		if _, ok := tt.Find(want); !ok {
 			t.Fatalf("expected hover card to contain %q, texts: %q", want, tt.Texts())
 		}
@@ -151,6 +151,21 @@ func TestSidebarHoverCardAIDurationAndContext(t *testing.T) {
 		if _, ok := zeroTT.Find(label); ok {
 			t.Fatalf("zero stats should hide %q, texts: %q", label, zeroTT.Texts())
 		}
+	}
+}
+
+func TestSidebarHoverCardHidesEqualTotalDuration(t *testing.T) {
+	resetSidebarHoverCardForTest()
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads([]Project{{ID: "p1", Name: "mcode-test", Path: "/path/to/hovercard"}}, map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "相同用时", AIDuration: time.Minute, TotalDuration: time.Minute}}})
+	_, view := buildRoot(fake)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("相同用时") })
+	hoverRow(t, tt, "相同用时")
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+	if _, ok := tt.Find("总用时"); ok {
+		t.Fatalf("equal duration should hide total duration: %q", tt.Texts())
 	}
 }
 

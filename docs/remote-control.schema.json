@@ -2900,6 +2900,11 @@
           "minimum": 0,
           "description": "该会话已完成回合的 AI 用时总和（毫秒）"
         },
+        "totalDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "本会话及其全部后代的已完成回合与回合后后台任务活动区间并集长度（毫秒）"
+        },
         "lastTurnCostUSD": {
           "type": "number",
           "minimum": 0,

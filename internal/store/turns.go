@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -211,6 +212,80 @@ func (s *Store) ListTurns(ctx context.Context, threadID string) ([]Turn, error) 
 		return nil, fmt.Errorf("iterate turns: %w", err)
 	}
 	return turns, nil
+}
+
+type Interval struct {
+	Start, End time.Time
+}
+
+// ListAllActivityIntervals 列出已完成回合与回合结束后后台工具的活动区间。
+// shortcut: 收尾消息仅按提示文本排除，新增收尾路径时须同步追加提示文本或升级为专用持久化标记。
+func (s *Store) ListAllActivityIntervals(ctx context.Context, skipNotices []string) (map[string][]Interval, error) {
+	rows, err := s.db.QueryContext(ctx, `
+	SELECT t.thread_id, t.started_at, t.completed_at, NULL, NULL, ''
+	FROM turns t WHERE t.completed_at IS NOT NULL AND t.completed_at <> ''
+	UNION ALL
+	SELECT t.thread_id, NULL, t.completed_at, m.created_at, m.tool_completed_at, m.text
+	FROM messages m JOIN turns t ON t.id = m.turn_id
+	WHERE m.role = 'tool' AND m.tool_completed_at IS NOT NULL AND m.tool_completed_at <> ''
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list all activity intervals: %w", err)
+	}
+	defer rows.Close()
+	intervals := make(map[string][]Interval)
+	for rows.Next() {
+		var threadID string
+		var turnStart, turnEnd, messageStart, messageEnd, messageText sql.NullString
+		if err := rows.Scan(&threadID, &turnStart, &turnEnd, &messageStart, &messageEnd, &messageText); err != nil {
+			return nil, fmt.Errorf("scan activity interval: %w", err)
+		}
+		var startRaw, endRaw string
+		if turnStart.Valid && turnEnd.Valid {
+			startRaw, endRaw = turnStart.String, turnEnd.String
+		} else {
+			if !messageStart.Valid || !messageEnd.Valid {
+				continue
+			}
+			skipped := false
+			for _, notice := range skipNotices {
+				if notice != "" && strings.Contains(messageText.String, notice) {
+					skipped = true
+					break
+				}
+			}
+			if skipped {
+				continue
+			}
+			turnCompleted, err := parseTime(turnEnd.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse activity turn completed_at: %w", err)
+			}
+			toolCompleted, err := parseTime(messageEnd.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse tool completed_at: %w", err)
+			}
+			if !toolCompleted.After(turnCompleted) {
+				continue
+			}
+			startRaw, endRaw = messageStart.String, messageEnd.String
+		}
+		start, err := parseTime(startRaw)
+		if err != nil {
+			return nil, fmt.Errorf("parse activity started_at: %w", err)
+		}
+		end, err := parseTime(endRaw)
+		if err != nil {
+			return nil, fmt.Errorf("parse activity ended_at: %w", err)
+		}
+		if end.After(start) {
+			intervals[threadID] = append(intervals[threadID], Interval{Start: start, End: end})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate activity intervals: %w", err)
+	}
+	return intervals, nil
 }
 
 // shortcut: 孤儿回合按最后活动时间估算用时，需要精确时长时改为排除 interrupted 收尾的回合。
