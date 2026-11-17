@@ -722,15 +722,11 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 					}
 
 					label := "选择元素"
-					if len(snap.annotations) > 0 {
-						label = "添加到对话"
+					if snap.annotating {
+						label = "退出选择"
 					}
 					IconButton(c, IconButtonProps{Key: "preview-annotate-btn", Icon: IconHighlighter(), Label: label, Tooltip: label, Size: ControlXS, Variant: ButtonGhost, Active: snap.annotating, OnClick: func() {
-						if len(snap.annotations) > 0 {
-							previewSendAnnotations(s, snap.token)
-						} else {
-							togglePreviewAnnotate(s, st)
-						}
+						togglePreviewAnnotate(s, st)
 					}})
 					IconButton(c, IconButtonProps{Key: "preview-screenshot-btn", Icon: previewScreenshotIcon, Label: "截图", Tooltip: "截图", Size: ControlXS, Variant: ButtonGhost, OnClick: func() { previewCaptureScreenshot(s, st) }})
 					menuBtn := IconButton(c, IconButtonProps{Key: "preview-capture-menu-btn", Icon: IconMoreHorizontal(), Label: "更多", Tooltip: "更多", Size: ControlXS, Variant: ButtonGhost, OnClick: func() {
@@ -794,7 +790,7 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 					})
 			} else if browserTabVisible(st) {
 				renderPreviewViewport(c, snap)
-				if snap.annotOpen && len(snap.annotations) > 0 {
+				if len(snap.annotations) > 0 {
 					renderPreviewAnnotateDrawer(c, s, snap)
 				}
 				if captureConsole {

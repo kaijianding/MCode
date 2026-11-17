@@ -104,7 +104,6 @@ func TestPreviewSnapshotConcurrentUpdates(t *testing.T) {
 			st.annotations[0].Comment = "更新"
 			st.consoleErrors[0].Message = "更新"
 			st.viewport = previewViewportMobile
-			st.annotOpen = !st.annotOpen
 			st.consoleOpen = !st.consoleOpen
 			previewMu.Unlock()
 		}
@@ -232,7 +231,7 @@ func TestPreviewPollResults(t *testing.T) {
 					}
 				} else if st.annotPolling || (len(st.annotations) > 0) == fail {
 					t.Fatalf("标注采集结果或进行中标记错误: %+v", st)
-				} else if !fail && (st.annotations[0].id == 0 || !st.annotOpen) {
+				} else if !fail && st.annotations[0].id == 0 {
 					t.Fatal("新标注缺少稳定身份或未展开")
 				}
 			})
@@ -307,12 +306,12 @@ func TestPreviewConsoleClearDropsPendingPoll(t *testing.T) {
 func TestPreviewAdvanceGenerationClearsPageData(t *testing.T) {
 	st := &browserTab{
 		consoleErrors: []previewConsoleError{{Message: "旧错误"}}, consoleOpen: true, consolePolling: true,
-		annotations: []previewAnnotation{{Selector: "#old"}}, annotating: true, annotOpen: true, annotPolling: true,
+		annotations: []previewAnnotation{{Selector: "#old"}}, annotating: true, annotPolling: true,
 	}
 	previewMu.Lock()
 	previewAdvanceGenerationLocked(st)
 	defer previewMu.Unlock()
-	if st.generation != 1 || len(st.consoleErrors) != 0 || len(st.annotations) != 0 || st.consoleOpen || st.annotOpen || st.annotating || st.consolePolling || st.annotPolling {
+	if st.generation != 1 || len(st.consoleErrors) != 0 || len(st.annotations) != 0 || st.consoleOpen || st.annotating || st.consolePolling || st.annotPolling {
 		t.Fatalf("换代未清理旧页状态: %+v", st)
 	}
 }

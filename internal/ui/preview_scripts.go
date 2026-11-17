@@ -154,8 +154,11 @@ const previewAnnotateDrainScript = `(function () {
   if (!state) return "null";
   var items = state.queue || [];
   state.queue = [];
-  try { return JSON.stringify(items); } catch (e) { return "[]"; }
+  try { return JSON.stringify({items: items, active: state.active}); } catch (e) { return "null"; }
 })()`
+
+const previewAnnotateClearMarksScript = `window.__mcodeAnnot && window.__mcodeAnnot.clearMarks();`
+const previewAnnotateUnhighlightScript = `window.__mcodeAnnot && window.__mcodeAnnot.unhighlightMark();`
 
 // 预装拾取器只注册监听器，模式开关由短 start/stop 调用控制。
 const previewAnnotateInstallJS = `(function () {
@@ -168,7 +171,73 @@ const previewAnnotateInstallJS = `(function () {
     h5: "heading", h6: "heading", details: "group", dialog: "dialog", fieldset: "group",
     progress: "progressbar", summary: "button", option: "option", p: "paragraph"
   };
-  var state = { active: false, queue: [], hover: null, prevOutline: "", prevOffset: "", clearHover: null };
+  var state = { active: false, queue: [], hover: null, prevOutline: "", prevOffset: "", clearHover: null, nextPID: 0 };
+  var host = document.createElement("div");
+  host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;";
+  var shadow = host.attachShadow({mode: "closed"});
+  var marks = new Map();
+  var highlighted = 0;
+  var pendingFrame = 0;
+  var positionMark = function (mark) {
+    var rect = mark.element.getBoundingClientRect();
+    mark.box.style.display = mark.element.isConnected ? "block" : "none";
+    mark.box.style.left = rect.left + "px";
+    mark.box.style.top = rect.top + "px";
+    mark.box.style.width = rect.width + "px";
+    mark.box.style.height = rect.height + "px";
+  };
+  var schedulePositions = function () {
+    if (pendingFrame || !marks.size) return;
+    pendingFrame = requestAnimationFrame(function () {
+      pendingFrame = 0;
+      marks.forEach(positionMark);
+    });
+  };
+  window.addEventListener("scroll", schedulePositions, true);
+  window.addEventListener("resize", schedulePositions);
+  state.removeMark = function (pid) {
+    var mark = marks.get(pid);
+    if (mark) mark.box.remove();
+    marks.delete(pid);
+    state.queue = state.queue.filter(function (item) { return item.pid !== pid; });
+    if (highlighted === pid) highlighted = 0;
+  };
+  state.clearMarks = function () {
+    marks.forEach(function (mark) { mark.box.remove(); });
+    marks.clear();
+    state.queue = [];
+    highlighted = 0;
+    if (pendingFrame) cancelAnimationFrame(pendingFrame);
+    pendingFrame = 0;
+  };
+  state.unhighlightMark = function () {
+    var mark = marks.get(highlighted);
+    if (mark) { mark.box.style.color = "#2563eb"; mark.box.style.borderWidth = "2px"; }
+    highlighted = 0;
+  };
+  state.highlightMark = function (pid) {
+    state.unhighlightMark();
+    var mark = marks.get(pid);
+    if (mark) { mark.box.style.color = "#ea580c"; mark.box.style.borderWidth = "3px"; highlighted = pid; }
+  };
+  var addMark = function (pid, element) {
+    if (!host.isConnected) document.documentElement.appendChild(host);
+    var box = document.createElement("div");
+    box.style.cssText = "position:absolute;box-sizing:border-box;border:2px solid currentColor;color:#2563eb;pointer-events:none;";
+    var badge = document.createElement("span");
+    badge.textContent = String(pid);
+    badge.style.cssText = "position:absolute;left:-2px;top:-2px;min-width:20px;height:20px;box-sizing:border-box;padding:0 4px;background:currentColor;border-radius:3px;font:600 12px/20px system-ui;text-align:center;";
+    var number = document.createElement("span");
+    number.textContent = String(pid);
+    number.style.color = "white";
+    badge.textContent = "";
+    badge.appendChild(number);
+    box.appendChild(badge);
+    shadow.appendChild(box);
+    var mark = {element: element, box: box};
+    marks.set(pid, mark);
+    positionMark(mark);
+  };
   var clip = function (raw, max) {
     var text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
     var chars = Array.from(text);
@@ -250,6 +319,14 @@ const previewAnnotateInstallJS = `(function () {
     state.hover = null;
   };
   state.clearHover = clearHover;
+  document.addEventListener("keydown", function (event) {
+    if (!state.active || event.key !== "Escape") return;
+    state.active = false;
+    clearHover();
+    if (document.documentElement) document.documentElement.style.cursor = "";
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
   document.addEventListener("mousemove", function (event) {
     if (!state.active) { return; }
     var el = event.target;
@@ -269,7 +346,10 @@ const previewAnnotateInstallJS = `(function () {
     event.stopPropagation();
     if (event.stopImmediatePropagation) { event.stopImmediatePropagation(); }
     var rect = el.getBoundingClientRect();
+    var pid = ++state.nextPID;
+    addMark(pid, el);
     state.queue.push({
+      pid: pid,
       selector: selectorFor(el),
       tag: el.tagName ? el.tagName.toLowerCase() : "",
       role: roleFor(el),
@@ -283,7 +363,8 @@ const previewAnnotateInstallJS = `(function () {
         h: Math.round(rect.height)
       }
     });
-    if (state.queue.length > 200) { state.queue.shift(); }
+    // 与本地列表保持同一上限，drain 前被淘汰的标记也必须消失。
+    if (marks.size > 32) state.removeMark(marks.keys().next().value);
     clearHover();
   }, true);
   window.__mcodeAnnot = state;

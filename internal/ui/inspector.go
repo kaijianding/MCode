@@ -261,10 +261,10 @@ func hideBrowserTab(s *chatState, st *browserTab) {
 	}
 	previewMu.Lock()
 	page, off, picking := st.page, st.pageOff, st.annotating
-	annotations, annotOpen := st.annotations, st.annotOpen
+	annotations := st.annotations
 	errors, consoleOpen := st.consoleErrors, st.consoleOpen
 	previewAdvanceGenerationLocked(st)
-	st.annotations, st.annotOpen = annotations, annotOpen
+	st.annotations = annotations
 	st.consoleErrors, st.consoleOpen = errors, consoleOpen
 	st.visible = false
 	st.pageOff = nil

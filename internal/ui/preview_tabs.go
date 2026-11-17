@@ -55,7 +55,9 @@ type browserTab struct {
 	consoleLastPoll             time.Time
 	annotating                  bool
 	annotations                 []previewAnnotation
-	annotOpen, annotPolling     bool
+	annotPolling, annotSending  bool
+	annotOps                    previewAnnotationOps
+	annotHighlight, annotFocus  uint64
 	annotLastPoll               time.Time
 	pollDone                    chan struct{}
 	pollCancel                  context.CancelFunc

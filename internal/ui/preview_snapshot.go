@@ -58,7 +58,8 @@ type previewSnapshot struct {
 	consoleSelected                  map[uint64]bool
 	annotating                       bool
 	annotations                      []previewAnnotation
-	annotOpen                        bool
+	annotSending                     bool
+	annotFocus                       uint64
 }
 
 // previewSnapshotLocked 调用方须持有 previewMu。
@@ -75,7 +76,7 @@ func previewSnapshotLocked(st *browserTab) previewSnapshot {
 		consoleErrors: append([]previewConsoleError(nil), st.consoleErrors...),
 		consoleOpen:   st.consoleOpen, annotating: st.annotating,
 		consoleFilter: st.consoleFilter, consoleSelected: selected,
-		annotations: append([]previewAnnotation(nil), st.annotations...), annotOpen: st.annotOpen,
+		annotations: append([]previewAnnotation(nil), st.annotations...), annotSending: st.annotSending, annotFocus: st.annotFocus,
 	}
 }
 
