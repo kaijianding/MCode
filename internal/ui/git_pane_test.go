@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -991,6 +992,32 @@ func TestGitPaneConflictOpensFirstFile(t *testing.T) {
 	diffPanelMu.Unlock()
 	if !inspectorPaneOpen(s, sidePaneDiffID) || scope != "uncommitted" || detail != "first.go" {
 		t.Fatalf("冲突跳转：open=%v scope=%q detail=%q", inspectorPaneOpen(s, sidePaneDiffID), scope, detail)
+	}
+}
+
+func TestGitPaneOpBannerAIResolve(t *testing.T) {
+	s, ps, fake := gitPaneTestState(t)
+	ps.op = git.OpState{Kind: git.OpRebase, Conflicts: []git.ConflictFile{{Path: "first.go"}, {Path: "second.go"}}}
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPaneOpBanner(c, s, ps) }, 800, 120)
+	if _, ok := tt.Access("交给 AI 解决"); !ok {
+		t.Fatal("有冲突时缺少交给 AI 解决")
+	}
+	if err := tt.Click("交给 AI 解决"); err != nil {
+		t.Fatal(err)
+	}
+	gitPaneWait(t, func() bool { return fake.SendCalls() > 0 })
+	sent := fake.LastSentText()
+	for _, want := range []string{"- first.go", "- second.go", "不要执行 merge --continue"} {
+		if !strings.Contains(sent, want) {
+			t.Fatalf("草稿缺少 %q：%q", want, sent)
+		}
+	}
+	ps.mu.Lock()
+	ps.op.Conflicts = nil
+	ps.mu.Unlock()
+	tt.Frame()
+	if _, ok := tt.Access("交给 AI 解决"); ok {
+		t.Fatal("无冲突时不应显示交给 AI 解决")
 	}
 }
 

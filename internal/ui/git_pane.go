@@ -890,6 +890,16 @@ func gitPaneOpTitle(op git.OpState) string {
 	return title
 }
 
+// gitPaneAIResolvePrompt 生成交给 AI 的冲突解决草稿：列出全部冲突文件，并要求只解决冲突、不推进操作。
+func gitPaneAIResolvePrompt(conflicts []git.ConflictFile) string {
+	var b strings.Builder
+	b.WriteString("请解决以下文件的 Git 冲突，保留双方意图，删除所有冲突标记（<<<<<<<、=======、>>>>>>>），解决后用 git add 标记已解决。不要执行 merge --continue、commit 或 push，我会检查后再继续。\n\n")
+	for _, file := range conflicts {
+		b.WriteString("- " + file.Path + "\n")
+	}
+	return b.String()
+}
+
 func renderGitPaneOpBanner(c *ui.Context, s *chatState, ps *gitPaneState) {
 	ps.mu.Lock()
 	op, syncing := ps.op, ps.syncing
@@ -903,6 +913,17 @@ func renderGitPaneOpBanner(c *ui.Context, s *chatState, ps *gitPaneState) {
 		if len(op.Conflicts) > 0 {
 			Button(c, ButtonOpts{Key: "git-pane-op-conflicts", Text: fmt.Sprintf("· %d 个冲突", len(op.Conflicts)), Variant: ButtonGhost, Size: ControlSM, OnClick: func() {
 				openReviewUncommitted(s, op.Conflicts[0].Path)
+			}})
+			// 禁用条件与「中止」一致：Git 操作进行中或 Agent 正在修改工作区。
+			tip := ""
+			if syncing {
+				tip = "Git 操作进行中"
+			}
+			if busy {
+				tip = "Agent 正在修改此工作区"
+			}
+			Button(c, ButtonOpts{Key: "git-pane-op-ai-resolve", Text: "交给 AI 解决", Variant: ButtonGhost, Size: ControlSM, Disabled: syncing || busy, Tooltip: tip, OnClick: func() {
+				s.sendDraft(ps.threadID, gitPaneAIResolvePrompt(op.Conflicts))
 			}})
 		}
 		for _, item := range []struct{ label, action string }{{"中止", "abort"}, {"跳过", "skip"}, {"继续", "continue"}} {
