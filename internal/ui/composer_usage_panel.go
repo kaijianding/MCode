@@ -719,7 +719,6 @@ func renderUsagePanel(c *ui.Context, s *chatState, th *Thread) {
 								pct := int(math.Round(contextUsagePercent(used, limit)))
 								txt := fmt.Sprintf("%s / %s (%d%%)", formatTokenCount(used), formatTokenCount(limit), pct)
 								ui.Text(c, txt).
-									FontFeatures("tnum").
 									FontSize(uiFont(TypeFootnote)).
 									TextColor(ThemeSecondaryText(c))
 							}

@@ -410,6 +410,7 @@ var appThemeCache struct {
 }
 
 func applyAppTheme(c *ui.Context) {
+	c.Root().FontFeatures("tnum")
 	base := c.Theme()
 	if base == nil {
 		return

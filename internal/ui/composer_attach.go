@@ -1132,7 +1132,6 @@ func renderAttachmentUploadBar(c *ui.Context, a composerAttachment) {
 		}).Grow(1)
 		ui.Text(c, fmt.Sprintf("%d%%", int(progress*100+0.5))).
 			FontSize(uiFont(TypeCaption)).
-			FontFeatures("tnum").
 			TextColor(ThemePrimaryText(c))
 	})
 }

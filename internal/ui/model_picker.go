@@ -2265,7 +2265,6 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 						quotaText := fmt.Sprintf("已使用 %d%%", int(math.Round(clamped)))
 						ui.Text(c, quotaText).
 							FontSize(uiFont(TypeCaption)).
-							FontFeatures("tnum").
 							TextColor(quotaPercentColor(c, clamped))
 					}
 				}

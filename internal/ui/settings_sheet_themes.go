@@ -247,7 +247,7 @@ func renderThemeColor(c *ui.Context, st *SettingsState, page *themesSheetState, 
 	if follows {
 		label = "系统"
 	}
-	ui.Text(c, label).FontSize(uiFont(TypeFootnote)).FontFeatures("tnum").TextColor(ThemeSecondaryText(c))
+	ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 	// 颜色地址必须跨帧保留，供拾色面板持续写入。
 	valueKey := id + "/" + key
 	value := page.colors[valueKey]
@@ -296,7 +296,7 @@ func renderThemeFont(c *ui.Context, st *SettingsState, page *themesSheetState, i
 	if config.IsThemeScaleFont(key) {
 		label = fmt.Sprintf("%d%%", value)
 	}
-	ui.Text(c, label).MinWidth(settingsPreviewTileW).FontSize(uiFont(TypeFootnote)).FontFeatures("tnum").TextColor(ThemeSecondaryText(c))
+	ui.Text(c, label).MinWidth(settingsPreviewTileW).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 }
 
 func renderThemeReset(c *ui.Context, key string, changed bool, reset func()) {
