@@ -954,12 +954,36 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 	if h.ReadOnly || len(h.ChangedFiles) == 0 || len(h.Acceptance) == 0 {
 		return true, ""
 	}
+	setProgress := func(step int, startedAt *time.Time) {
+		m.mu.Lock()
+		found := false
+		if lead := m.leads[leadThreadID]; lead != nil {
+			for i := range lead.bees {
+				if lead.bees[i].ThreadID == h.ThreadID {
+					if step > 0 && (lead.bees[i].MergeDiscarded || lead.bees[i].Status == StatusStopped) {
+						break
+					}
+					lead.bees[i].AcceptanceStep = step
+					lead.bees[i].AcceptanceStartedAt = startedAt
+					found = true
+					break
+				}
+			}
+		}
+		m.mu.Unlock()
+		if found {
+			m.notifyChange(leadThreadID)
+		}
+	}
+	defer setProgress(0, nil)
 	timeout := m.reviewProjectRuntime(ctx, leadThreadID, h.WorktreePath).timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
 	const marker = "\nmcode-acceptance-exit:"
-	for _, command := range h.Acceptance {
+	for i, command := range h.Acceptance {
+		now := time.Now()
+		setProgress(i+1, &now)
 		executed := command
 		// 主代理常用绝对路径 cd 到主工作区，验收必须在副本中执行。
 		if filepath.IsAbs(h.TargetWorkDir) && h.WorktreePath != "" {

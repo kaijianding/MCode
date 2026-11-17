@@ -901,6 +901,7 @@ func renderSwarmPanelCard(c *ui.Context, s *chatState, f swarmFloatFrame, id pan
 			})
 			// 子线程的提问与审批卡片停靠在嵌入输入框的正上方。
 			renderApproval(c, child)
+			renderAcceptanceProgress(c, *cur)
 			renderComposer(c, child)
 		})
 		renderSwarmGrips(c, s, f, key, slot, size)

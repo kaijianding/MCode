@@ -1,11 +1,66 @@
 package mcodeui
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestAcceptanceProgressText(t *testing.T) {
+	b := SwarmBee{Acceptance: []string{"true", "go test ./internal/ui/", "go vet ./...", "go build ./..."}}
+	for _, step := range []int{-1, 0, 5} {
+		b.AcceptanceStep = step
+		if text, ok := acceptanceProgressText(b, time.Second); ok || text != "" {
+			t.Fatalf("无效序号 %d 仍显示进度: %q", step, text)
+		}
+	}
+	b.AcceptanceStep = 2
+	text, ok := acceptanceProgressText(b, 65*time.Second)
+	if !ok || !strings.Contains(text, "验收 2/4") || !strings.Contains(text, b.Acceptance[1]) || !strings.Contains(text, "1m05s") {
+		t.Fatalf("验收文案不符: %q, %v", text, ok)
+	}
+}
+
+func TestBeeWindowAcceptanceProgressStopsFrames(t *testing.T) {
+	for _, reduced := range []bool{false, true} {
+		t.Run(fmt.Sprint(reduced), func(t *testing.T) {
+			setAppReduceMotion(t, reduced)
+			bee := SwarmBee{ThreadID: "bee", Acceptance: []string{"true"}, AcceptanceStep: 1}
+			builds := 0
+			tt := ui.NewTester(func(c *ui.Context) {
+				builds++
+				if bee.AcceptanceStartedAt.IsZero() {
+					bee.AcceptanceStartedAt = c.Now().Truncate(time.Second)
+				}
+				renderAcceptanceProgress(c, bee)
+			}, 500, 100)
+			tt.Frame()
+			if !tt.HasText("验收 1/1 · true · 0s") {
+				t.Fatalf("未显示进度: %v", tt.Texts())
+			}
+			_, shimmer := tt.Find("验收进度扫光")
+			if shimmer == reduced {
+				t.Fatalf("扫光未遵守减少动效偏好: %v", reduced)
+			}
+			tt.Advance(time.Second)
+			if !tt.HasText("验收 1/1 · true · 1s") {
+				t.Fatalf("计时未刷新: %v", tt.Texts())
+			}
+			bee.AcceptanceStep = 0
+			tt.Frame()
+			tt.Advance(2 * time.Second)
+			settledBuilds := builds
+			tt.Advance(2 * time.Second)
+			if tt.HasText("验收") || tt.FramePending() || builds != settledBuilds {
+				t.Fatal("验收结束后仍有进度条或整窗帧")
+			}
+		})
+	}
+}
 
 // TestBeeWindowStripInsetsDarwin 验证 macOS 顶栏左侧让出整个交通灯区域，并与人设图标留出间隙。
 func TestBeeWindowStripInsetsDarwin(t *testing.T) {

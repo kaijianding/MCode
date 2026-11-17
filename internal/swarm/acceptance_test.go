@@ -150,6 +150,109 @@ func TestRunAcceptanceStopsAndSkips(t *testing.T) {
 	}
 }
 
+func TestRunAcceptanceReportsProgress(t *testing.T) {
+	for _, outcome := range []string{"通过", "失败", "取消", "超时"} {
+		t.Run(outcome, func(t *testing.T) {
+			m := NewManager(Options{ReviewProjectConfig: func(string, string) (reviewcheck.ProjectConfig, error) {
+				return reviewcheck.ProjectConfig{TimeoutSeconds: 1}, nil
+			}})
+			dir := t.TempDir()
+			command := "touch started; i=0; while [ ! -f finish ] && [ $i -lt 300 ]; do sleep 0.01; i=$((i+1)); done; test -f finish"
+			if outcome == "失败" {
+				command += "; exit 7"
+			}
+			h := Bee{ThreadID: "bee", WorktreePath: dir, ChangedFiles: []string{"a.go"}, Acceptance: []string{"true", command}}
+			m.leads["lead"] = &leadState{leadThreadID: "lead", bees: []Bee{h}}
+			updates := make(chan Bee, 4)
+			m.SetOnChange(func(id string) { updates <- m.State(id).Bees[0] })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			type result struct {
+				passed bool
+				detail string
+			}
+			done := make(chan result, 1)
+			go func() {
+				passed, detail := m.runAcceptance(ctx, "lead", h)
+				done <- result{passed, detail}
+			}()
+			// 失败时也取消并等待，避免验收子进程或通知回调遗留到下一用例。
+			finished := false
+			defer func() {
+				cancel()
+				if !finished {
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						t.Error("验收取消后未退出")
+					}
+				}
+			}()
+			for step := 1; step <= 2; step++ {
+				select {
+				case b := <-updates:
+					if b.AcceptanceStep != step || b.AcceptanceStartedAt == nil {
+						t.Fatalf("命令进度不符: %+v", b)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("未收到验收进度通知")
+				}
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				if _, err := os.Stat(filepath.Join(dir, "started")); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("第 2 条命令未启动")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			b := m.State("lead").Bees[0]
+			if b.AcceptanceStep != 2 || b.AcceptanceStartedAt == nil {
+				t.Fatalf("运行中的进度不符: %+v", b)
+			}
+			// UI 快照保留进度并隔离时间指针，JSON 持久化则丢弃瞬时状态。
+			*b.AcceptanceStartedAt = time.Time{}
+			if m.State("lead").Bees[0].AcceptanceStartedAt.IsZero() {
+				t.Fatal("快照未独立复制验收时间")
+			}
+			data, err := json.Marshal(m.State("lead").Bees[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored Bee
+			if err := json.Unmarshal(data, &restored); err != nil || restored.AcceptanceStep != 0 || restored.AcceptanceStartedAt != nil {
+				t.Fatalf("持久化恢复了瞬时进度: %+v, %v", restored, err)
+			}
+			switch outcome {
+			case "通过", "失败":
+				if err := os.WriteFile(filepath.Join(dir, "finish"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "取消":
+				cancel()
+			}
+			select {
+			case got := <-done:
+				finished = true
+				if got.passed != (outcome == "通过") || (outcome == "超时" && !strings.Contains(got.detail, "超时")) {
+					t.Fatalf("验收结果不符: %+v", got)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("验收未结束")
+			}
+			b = m.State("lead").Bees[0]
+			if b.AcceptanceStep != 0 || b.AcceptanceStartedAt != nil {
+				t.Fatalf("验收结束未清理进度: %+v", b)
+			}
+			if b := <-updates; b.AcceptanceStep != 0 || b.AcceptanceStartedAt != nil {
+				t.Fatalf("未通知进度清理: %+v", b)
+			}
+		})
+	}
+}
+
 func TestRunAcceptanceRewritesAbsoluteCdToWorktree(t *testing.T) {
 	parent := t.TempDir()
 	source := filepath.Join(parent, "source")
@@ -459,6 +562,9 @@ func TestAcceptanceOffStoppedBeeDoesNotMerge(t *testing.T) {
 					m.BeeThreadDeleted(ctx, bee.ThreadID)
 				}
 				before := beeByThread(t, m, "lead-stop-acceptance", bee.ThreadID)
+				if before.AcceptanceStep != 0 || before.AcceptanceStartedAt != nil {
+					t.Fatal("停止或删除后仍显示验收进度")
+				}
 				if err := os.WriteFile(filepath.Join(bee.WorktreePath, "release"), nil, 0644); err != nil {
 					t.Fatal(err)
 				}

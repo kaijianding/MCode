@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -218,7 +219,50 @@ func renderBeeWindow(c *ui.Context, parent *chatState, beeID string, child *chat
 			}
 		})
 
+		renderAcceptanceProgress(c, bee)
 		renderComposer(c, child)
+	})
+}
+
+func acceptanceProgressText(b SwarmBee, elapsed time.Duration) (string, bool) {
+	if b.AcceptanceStep <= 0 || b.AcceptanceStep > len(b.Acceptance) {
+		return "", false
+	}
+	return fmt.Sprintf("验收 %d/%d · %s · %s", b.AcceptanceStep, len(b.Acceptance),
+		b.Acceptance[b.AcceptanceStep-1], formatToolRunDuration(elapsed)), true
+}
+
+// renderAcceptanceProgress 复用后台等待条的扫光组件，验收结束后卸载计时与扫光。
+func renderAcceptanceProgress(c *ui.Context, b SwarmBee) ui.Element {
+	var elapsed time.Duration
+	if !b.AcceptanceStartedAt.IsZero() {
+		elapsed = c.Now().Sub(b.AcceptanceStartedAt)
+	}
+	text, ok := acceptanceProgressText(b, elapsed)
+	if !ok {
+		return ui.Element{}
+	}
+	afterNextSecond(c)
+	commands := make([]string, len(b.Acceptance))
+	for i, command := range b.Acceptance {
+		prefix := "· "
+		if i+1 < b.AcceptanceStep {
+			prefix = "✓ "
+		} else if i+1 == b.AcceptanceStep {
+			prefix = "▸ "
+		}
+		commands[i] = prefix + command
+	}
+	key := "bee-acceptance-" + b.ThreadID
+	return ui.Row(c.Key(key)).FillWidth().Padding(Space0, Space4).
+		Label("验收进度").Tooltip(strings.Join(commands, "\n")).Children(func() {
+		renderShimmerTitle(c, key+"/shimmer", "验收进度扫光", true, func() ui.Element {
+			return ui.Row(c.Key(key + "/line")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, IconClock()).Size(11, 11).TextColor(ThemeAccent(c))
+				ui.Text(c, text).Grow(1).MinWidth(0).FontSize(scaledFont(TypeFootnote)).
+					TextColor(ThemeSecondaryText(c)).SingleLine()
+			})
+		}).Grow(1).MinWidth(0)
 	})
 }
 

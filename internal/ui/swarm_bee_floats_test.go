@@ -94,6 +94,32 @@ func TestRenderSwarmBeeFloats_StripShowsRunningBee(t *testing.T) {
 	}
 }
 
+func TestSwarmFloatAcceptanceProgress(t *testing.T) {
+	s := newFloatTestState(t)
+	hp := getSwarmPanelState(s)
+	setStep := func(step int) {
+		swarmPanelMu.Lock()
+		st := hp.state
+		st.Bees = slices.Clone(st.Bees)
+		st.Bees[0].Acceptance = []string{"true", "go test ./internal/ui/"}
+		st.Bees[0].AcceptanceStep = step
+		st.Bees[0].AcceptanceStartedAt = time.Now()
+		hp.setStateLocked(st)
+		swarmPanelMu.Unlock()
+	}
+	setStep(2)
+	tt := ui.NewTester(func(c *ui.Context) { renderSwarmBeeFloats(c, s) }, 1600, 900)
+	tt.Frame()
+	if !tt.HasText("验收 2/2 · go test ./internal/ui/") {
+		t.Fatalf("浮窗未显示验收进度: %v", tt.Texts())
+	}
+	setStep(0)
+	tt.Frame()
+	if _, ok := tt.Find("验收进度"); ok {
+		t.Fatal("验收结束后浮窗仍显示进度条")
+	}
+}
+
 // TestSwarmFloatFrameReservesSpaceBesideComposer 验证面板按场景从聊天列右侧让出宽度，关闭后归还。
 func TestSwarmFloatFrameReservesSpaceBesideComposer(t *testing.T) {
 	s := newFloatTestState(t)

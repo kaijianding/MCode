@@ -4797,6 +4797,8 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 	target.Status = StatusStopped
 	target.FinishedAt = &now
 	target.MergeWaitSince = nil
+	target.AcceptanceStep = 0
+	target.AcceptanceStartedAt = nil
 	if accepting {
 		target.PendingMerge = false
 		target.MergeDiscarded = true
@@ -4845,6 +4847,8 @@ func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
 			lead.bees[i].Reported = true
 			lead.bees[i].FinishedAt = &now
 			lead.bees[i].MergeWaitSince = nil
+			bee.AcceptanceStep = 0
+			bee.AcceptanceStartedAt = nil
 			if accepting {
 				bee.PendingMerge = false
 				bee.MergeDiscarded = true
@@ -4947,6 +4951,8 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 				target.ReviewApplyPending = false
 			}
 		}
+		target.AcceptanceStep = 0
+		target.AcceptanceStartedAt = nil
 		delete(m.beeProgress, threadID)
 		m.mu.Unlock()
 

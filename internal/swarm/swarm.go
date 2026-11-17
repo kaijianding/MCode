@@ -139,16 +139,19 @@ type Bee struct {
 	TargetWorkDir string `json:"targetWorkDir"`
 	Reported      bool   `json:"reported"`
 	// 合并前审查的进度与产物：ReviewState 为空表示未进入审查，其余字段记录审查会话与补丁。
-	ReviewState       ReviewState `json:"reviewState,omitempty"`
-	ReviewReason      string      `json:"reviewReason,omitempty"`
-	ReviewThreadID    string      `json:"reviewThreadId,omitempty"`
-	ReviewPatchPath   string      `json:"reviewPatchPath,omitempty"`
-	ReviewPatchSHA    string      `json:"reviewPatchSha,omitempty"`
-	ReviewStartedAt   *time.Time  `json:"reviewStartedAt,omitempty"`
-	ReviewFingerprint string      `json:"reviewFingerprint,omitempty"`
-	ReviewProvider    string      `json:"reviewProvider,omitempty"`
-	ReviewModel       string      `json:"reviewModel,omitempty"`
-	ReviewEffort      string      `json:"reviewEffort,omitempty"`
+	ReviewState     ReviewState `json:"reviewState,omitempty"`
+	ReviewReason    string      `json:"reviewReason,omitempty"`
+	ReviewThreadID  string      `json:"reviewThreadId,omitempty"`
+	ReviewPatchPath string      `json:"reviewPatchPath,omitempty"`
+	ReviewPatchSHA  string      `json:"reviewPatchSha,omitempty"`
+	ReviewStartedAt *time.Time  `json:"reviewStartedAt,omitempty"`
+	// 验收命令的瞬时进度不持久化，重启后不恢复过期状态。
+	AcceptanceStep      int        `json:"-"`
+	AcceptanceStartedAt *time.Time `json:"-"`
+	ReviewFingerprint   string     `json:"reviewFingerprint,omitempty"`
+	ReviewProvider      string     `json:"reviewProvider,omitempty"`
+	ReviewModel         string     `json:"reviewModel,omitempty"`
+	ReviewEffort        string     `json:"reviewEffort,omitempty"`
 	// 审查漏斗的调度状态与结论：ReviewStage 只在内部使用，不进入远程协议。
 	ReviewStage           ReviewStage `json:"reviewStage,omitempty"`
 	ReviewLayer           string      `json:"reviewLayer,omitempty"` // l0 | l1 | l2 | l3 | human
@@ -482,6 +485,10 @@ type Options struct {
 func (h Bee) clone() Bee {
 	cp := h
 	cp.Acceptance = append([]string(nil), h.Acceptance...)
+	if h.AcceptanceStartedAt != nil {
+		t := *h.AcceptanceStartedAt
+		cp.AcceptanceStartedAt = &t
+	}
 	cp.MergePatch = append([]byte(nil), h.MergePatch...)
 	if h.FinishedAt != nil {
 		t := *h.FinishedAt

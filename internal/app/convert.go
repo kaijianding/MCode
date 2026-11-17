@@ -782,6 +782,10 @@ func AutomationInputToSpec(in mcodeui.AutomationInput, base automation.Spec) aut
 
 // swarmBeeToUI 将 swarm.Bee 转换为 mcodeui.SwarmBee。
 func swarmBeeToUI(h swarm.Bee) mcodeui.SwarmBee {
+	var acceptanceStartedAt time.Time
+	if h.AcceptanceStartedAt != nil {
+		acceptanceStartedAt = *h.AcceptanceStartedAt
+	}
 	var finishedAt *time.Time
 	if h.FinishedAt != nil {
 		t := *h.FinishedAt
@@ -825,6 +829,9 @@ func swarmBeeToUI(h swarm.Bee) mcodeui.SwarmBee {
 		ReviewReason:          h.ReviewReason,
 		ReviewThreadID:        h.ReviewThreadID,
 		ReviewLayer:           h.ReviewLayer,
+		Acceptance:            append([]string(nil), h.Acceptance...),
+		AcceptanceStep:        h.AcceptanceStep,
+		AcceptanceStartedAt:   acceptanceStartedAt,
 		ReviewConcerns:        append([]string(nil), h.ReviewConcerns...),
 		ReviewTokens:          h.ReviewTokens,
 		ReviewTokensEstimated: h.ReviewTokensEstimated,

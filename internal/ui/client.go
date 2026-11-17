@@ -492,6 +492,10 @@ type SwarmBee struct {
 	ReviewThreadID string
 	// 审查决定层：l0/l1/l2/l3/human，空串表示未进入审查
 	ReviewLayer string
+	// 验收命令及当前命令的瞬时进度。
+	Acceptance          []string
+	AcceptanceStep      int
+	AcceptanceStartedAt time.Time
 	// 审查疑点，每条通常为 path:line 加一句话
 	ReviewConcerns []string
 	// 审查消耗的 token 数
