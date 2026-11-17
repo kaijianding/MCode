@@ -115,6 +115,19 @@ func TestFetchPRHead(t *testing.T) {
 	}
 }
 
+func TestSaveReadPRBaseRef(t *testing.T) {
+	runner, dir := newRevertTestRepo(t)
+	ctx := context.Background()
+	commit := runTestGit(t, dir, "rev-parse", "HEAD")
+	if err := runner.SavePRBase(ctx, dir, 1, commit); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runner.ReadPRBaseRef(ctx, dir, 1)
+	if err != nil || got != commit {
+		t.Fatalf("base = %q, want %q: %v", got, commit, err)
+	}
+}
+
 func TestCommitPaths_OnlyCommitsGivenPaths(t *testing.T) {
 	testenv.TempHome(t)
 	runner, dir := newRevertTestRepo(t)

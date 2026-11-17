@@ -235,7 +235,7 @@ func TestReviewPathMustBeInScope(t *testing.T) {
 	}
 }
 
-func TestReviewPRSnapshotAndRevertRejected(t *testing.T) {
+func TestReviewGetPRFileUsesSavedRefs(t *testing.T) {
 	f := newReviewFixture(t, true)
 	bare := filepath.Join(t.TempDir(), "origin.git")
 	f.git("branch", "-M", "main")
@@ -252,6 +252,10 @@ func TestReviewPRSnapshotAndRevertRejected(t *testing.T) {
 	r, err := f.b.ReviewGet(f.ctx, wire.ThreadsReviewGetParams{ThreadID: f.id, Scope: wire.ReviewScopePR, Number: 1})
 	if err != nil || r.Unavailable != "" || r.Number != 1 || r.HeadRevision != commit || !reflect.DeepEqual(reviewPaths(r), []string{"a.go"}) {
 		t.Fatalf("PR 文件列表: %+v, %v", r, err)
+	}
+	f.b.prBaseRef = func(context.Context, string, int) (string, error) {
+		t.Fatal("读取缓存文件时不应查询 PR base")
+		return "", nil
 	}
 	r, err = f.b.ReviewGet(f.ctx, wire.ThreadsReviewGetParams{ThreadID: f.id, Scope: wire.ReviewScopePR, Number: 1, Path: "a.go"})
 	if err != nil || r.Unavailable != "" || r.File == nil || r.File.OldText != "package old\n" || r.File.NewText != "package pr\n" {

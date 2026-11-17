@@ -31,6 +31,30 @@ func (r *Runner) FetchPRHead(ctx context.Context, root string, forge Forge, numb
 // PRHeadRef 返回 PR/MR 在本地的私有审阅引用。
 func PRHeadRef(number int) string { return "refs/mcode/pr/" + strconv.Itoa(number) }
 
+// PRBaseRef 返回 PR/MR merge-base 的私有审阅引用。
+func PRBaseRef(number int) string { return "refs/mcode/pr-base/" + strconv.Itoa(number) }
+
+// SavePRBase 保存 PR/MR 的 merge-base。
+func (r *Runner) SavePRBase(ctx context.Context, root string, number int, commit string) error {
+	if number <= 0 {
+		return fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	_, err := r.run(ctx, root, nil, "update-ref", PRBaseRef(number), commit)
+	return err
+}
+
+// ReadPRBaseRef 读取已保存的 PR/MR merge-base。
+func (r *Runner) ReadPRBaseRef(ctx context.Context, root string, number int) (string, error) {
+	if number <= 0 {
+		return "", fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	out, err := r.run(ctx, root, nil, "rev-parse", "--verify", PRBaseRef(number)+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // ReadPRHeadRef 读取已抓取的 PR/MR head；ref 不存在时返回 git 错误。
 func (r *Runner) ReadPRHeadRef(ctx context.Context, root string, number int) (string, error) {
 	if number <= 0 {

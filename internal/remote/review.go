@@ -101,42 +101,44 @@ func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetPa
 	var base, head string
 	var untracked map[string]bool
 	if p.Scope == wire.ReviewScopePR {
-		remoteURL, e := state.git.RemoteURL(ctx, root)
-		if e != nil {
-			return unavailable("无法读取 origin 远端: " + e.Error())
-		}
-		forge := git.DetectForge(remoteURL)
-		if forge == git.ForgeUnknown {
-			return unavailable(git.ErrForgeUnsupported.Error())
-		}
-		if p.Path == "" {
-			head, err = state.git.FetchPRHead(ctx, root, forge, p.Number)
-		} else {
+		if p.Path != "" {
 			head, err = state.git.ReadPRHeadRef(ctx, root, p.Number)
+			if err == nil {
+				base, err = state.git.ReadPRBaseRef(ctx, root, p.Number)
+			}
+		}
+		if p.Path == "" || err != nil {
+			remoteURL, e := state.git.RemoteURL(ctx, root)
+			if e != nil {
+				return unavailable("无法读取 origin 远端: " + e.Error())
+			}
+			forge := git.DetectForge(remoteURL)
+			if forge == git.ForgeUnknown {
+				return unavailable(git.ErrForgeUnsupported.Error())
+			}
+			head, err = state.git.FetchPRHead(ctx, root, forge, p.Number)
 			if err != nil {
-				head, err = state.git.FetchPRHead(ctx, root, forge, p.Number)
+				return unavailable("无法读取 PR head: " + err.Error())
 			}
-		}
-		if err != nil {
-			return unavailable("无法读取 PR head: " + err.Error())
-		}
-		baseRef := b.prBaseRef
-		if baseRef == nil {
-			baseRef = func(ctx context.Context, root string, number int) (string, error) {
-				detail, err := state.git.PRDetail(ctx, root, number)
-				return detail.BaseBranch, err
+			baseRef := b.prBaseRef
+			if baseRef == nil {
+				baseRef = func(ctx context.Context, root string, number int) (string, error) {
+					detail, err := state.git.PRDetail(ctx, root, number)
+					return detail.BaseBranch, err
+				}
 			}
-		}
-		branch, e := baseRef(ctx, root, p.Number)
-		if e != nil {
-			return unavailable("无法读取 PR base: " + e.Error())
-		}
-		if branch == "" {
-			return unavailable("PR base 分支为空")
-		}
-		base, err = state.git.ReviewPRBase(ctx, root, branch, head)
-		if err != nil {
-			return unavailable("无法计算 PR merge-base: " + err.Error())
+			branch, e := baseRef(ctx, root, p.Number)
+			if e != nil {
+				return unavailable("无法读取 PR base: " + e.Error())
+			}
+			if branch == "" {
+				return unavailable("PR base 分支为空")
+			}
+			base, err = state.git.ReviewPRBase(ctx, root, branch, head)
+			if err != nil {
+				return unavailable("无法计算 PR merge-base: " + err.Error())
+			}
+			_ = state.git.SavePRBase(ctx, root, p.Number, base)
 		}
 	} else if p.Scope == wire.ReviewScopeUncommitted {
 		base, err = state.git.ReviewRevision(ctx, root, "HEAD")
