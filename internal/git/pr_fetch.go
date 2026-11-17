@@ -171,6 +171,8 @@ func (r *Runner) mergePRBase(ctx context.Context, path, base string) error {
 }
 
 // PRWorktreeKeepReason 返回阻止自动清理 PR worktree 的原因。
+// worktree 还在时检查未提交改动与未完成的合并；只要本地分支 mcode/pr-<N> 存在，
+// 不论 worktree 是否已被删除，都检查是否有未推送的提交。
 func (r *Runner) PRWorktreeKeepReason(ctx context.Context, root, path string, forge Forge, number int) (string, error) {
 	worktrees, err := r.WorktreeList(ctx, root)
 	if err != nil {
@@ -194,21 +196,29 @@ func (r *Runner) PRWorktreeKeepReason(ctx context.Context, root, path string, fo
 		if state.Kind != "" {
 			return "合并尚未完成", nil
 		}
-		if _, err := r.FetchPRHead(ctx, root, forge, number); err != nil {
-			return "", err
-		}
-		out, err = r.run(ctx, root, nil, "rev-list", "--count", PRHeadRef(number)+"..mcode/pr-"+strconv.Itoa(number))
-		if err != nil {
-			return "", err
-		}
-		count, err := strconv.Atoi(strings.TrimSpace(string(out)))
-		if err != nil {
-			return "", err
-		}
-		if count > 0 {
-			return "有未推送的提交", nil
-		}
 		break
+	}
+
+	branch := "mcode/pr-" + strconv.Itoa(number)
+	if _, err := r.run(ctx, root, nil, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		if isExitCode(err, 1) {
+			return "", nil
+		}
+		return "", err
+	}
+	if _, err := r.FetchPRHead(ctx, root, forge, number); err != nil {
+		return "", err
+	}
+	out, err := r.run(ctx, root, nil, "rev-list", "--count", PRHeadRef(number)+".."+branch)
+	if err != nil {
+		return "", err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", err
+	}
+	if count > 0 {
+		return "有未推送的提交", nil
 	}
 	return "", nil
 }

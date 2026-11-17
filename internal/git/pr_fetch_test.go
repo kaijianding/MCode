@@ -109,6 +109,33 @@ func TestPRWorktreeKeepReason(t *testing.T) {
 	}
 }
 
+func TestPRWorktreeKeepReasonBranchWithoutWorktree(t *testing.T) {
+	runner, dir, _ := setupPRConflict(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pr-1")
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.AbortOp(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, "seed.txt", "resolution\n")
+	runTestGit(t, path, "commit", "-qam", "resolution")
+	if err := runner.WorktreeRemove(ctx, dir, path, false); err != nil {
+		t.Fatal(err)
+	}
+
+	reason, err := runner.PRWorktreeKeepReason(ctx, dir, path, ForgeGitHub, 1)
+	if err != nil || reason != "有未推送的提交" {
+		t.Fatalf("原因 = %q，错误 = %v", reason, err)
+	}
+
+	runTestGit(t, dir, "branch", "-D", "mcode/pr-1")
+	if reason, err := runner.PRWorktreeKeepReason(ctx, dir, path, ForgeGitHub, 1); err != nil || reason != "" {
+		t.Fatalf("分支不存在时原因 = %q，错误 = %v", reason, err)
+	}
+}
+
 func TestPRRemoveWorktree(t *testing.T) {
 	for _, branchOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(branchOnly), func(t *testing.T) {
