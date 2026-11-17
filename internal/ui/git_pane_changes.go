@@ -242,11 +242,11 @@ func gitFileMenu(m *ui.Menu, c *ui.Context, s *chatState, threadID string, ps *g
 }
 
 // renderGitCommitComposer 是「未提交」改动底部的提交框：AI 生成提交信息、提交、提交并推送与修改上次提交。
-// ⌘⏎ 注册在 host 上；工作区干净且不在修改上次提交时只保留确认弹窗。
+// ⌘⏎ 注册在 host 上；工作区干净且不在修改上次提交时只保留确认弹窗，有远端时原地换成同步按钮。
 func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *gitPaneState, host ui.Element) {
 	ps.mu.Lock()
 	entries := append([]git.StatusEntry(nil), ps.entries...)
-	state := ps.state
+	state, syncing := ps.state, ps.syncing
 	ps.mu.Unlock()
 	client, ok := s.client.(gitChangesClient)
 	if !ok {
@@ -325,6 +325,22 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 		generate()
 	}
 	if len(entries) == 0 && !amend && !success {
+		label, action := gitPaneSyncAction(state)
+		if action == "fetch" || state.RemoteURL == "" || state.Detached {
+			return
+		}
+		ui.Column(c.Key("git-changes-sync-card")).FillWidth().Shrink(0).Padding(Space3).BorderWidth(Hairline, 0, 0, 0).BorderColor(ThemeBorder(c)).Transition(motionCollapse(c)).Children(func() {
+			b := ui.ButtonBase(c.Key("git-changes-sync")).Label(label).FillWidth().Height(ControlLG).Gap(Space2).AlignItems(ui.Center).Radius(RadiusSM).Disabled(syncing).Background(ThemeAccent(c)).Transition(motionFeedback(c))
+			scale := motionPressScale(c, b, "git-changes-sync-press", !syncing && b.Pressed())
+			b.Scale(scale, scale)
+			b.OnClick(func() { ps.run(action) })
+			b.Children(func() {
+				if syncing {
+					LoadingIndicator(c, "git-changes-sync-loading", "", IconSM, ThemeOnAccent(c))
+				}
+				ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(ThemeOnAccent(c))
+			})
+		})
 		return
 	}
 	commit := func(push bool) {

@@ -399,6 +399,53 @@ func TestGitChangesCommitButtons(t *testing.T) {
 	}
 }
 
+func TestGitCommitComposerShowsSyncWhenClean(t *testing.T) {
+	t.Run("push", func(t *testing.T) {
+		s, ps, base := gitPaneTestState(t)
+		s.client = &gitChangesFakeClient{gitPaneFakeClient: base}
+		ps.state = GitState{WorkDir: t.TempDir(), HasUpstream: true, Ahead: 2, RemoteURL: "git@example.com:a/b.git"}
+		tt := ui.NewTester(func(c *ui.Context) { renderGitComposerForTest(c, s, ps) }, 600, 500)
+		tt.Frame()
+		tt.Frame()
+		r, ok := tt.Find("推送 ↑2")
+		if !ok || r.W <= 0 || r.H <= 0 {
+			t.Fatalf("同步按钮尺寸 = %+v，存在 = %v", r, ok)
+		}
+		if err := tt.Click("推送 ↑2"); err != nil {
+			t.Fatal(err)
+		}
+		gitPaneWait(t, func() bool { base.paneMu.Lock(); defer base.paneMu.Unlock(); return len(base.calls) > 0 })
+		base.paneMu.Lock()
+		calls := append([]string(nil), base.calls...)
+		base.paneMu.Unlock()
+		if !reflect.DeepEqual(calls, []string{"push"}) {
+			t.Fatalf("调用 = %v，期望 [push]", calls)
+		}
+	})
+	t.Run("up to date", func(t *testing.T) {
+		s, ps, base := gitPaneTestState(t)
+		s.client = &gitChangesFakeClient{gitPaneFakeClient: base}
+		ps.state = GitState{WorkDir: t.TempDir(), HasUpstream: true, RemoteURL: "git@example.com:a/b.git"}
+		tt := ui.NewTester(func(c *ui.Context) { renderGitComposerForTest(c, s, ps) }, 600, 500)
+		tt.Frame()
+		tt.Frame()
+		if _, ok := tt.Find("抓取"); ok {
+			t.Fatal("无差异时不应渲染同步按钮")
+		}
+	})
+	t.Run("no remote", func(t *testing.T) {
+		s, ps, base := gitPaneTestState(t)
+		s.client = &gitChangesFakeClient{gitPaneFakeClient: base}
+		ps.state = GitState{WorkDir: t.TempDir(), HasUpstream: true, Ahead: 2}
+		tt := ui.NewTester(func(c *ui.Context) { renderGitComposerForTest(c, s, ps) }, 600, 500)
+		tt.Frame()
+		tt.Frame()
+		if _, ok := tt.Find("推送 ↑2"); ok {
+			t.Fatal("无远端时不应渲染同步按钮")
+		}
+	})
+}
+
 func TestGitChangesCommitConfirmationAndShortcut(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
