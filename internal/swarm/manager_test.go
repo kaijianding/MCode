@@ -147,6 +147,42 @@ func initTestRepo(t *testing.T) (*git.Runner, string) {
 	return runner, dir
 }
 
+func TestBeeCopyDetached(t *testing.T) {
+	t.Parallel()
+	runner, repo := initTestRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	mgr := NewManager(Options{Git: runner, Driver: newFakeDriver(), WorktreeDir: t.TempDir()})
+	bees, err := mgr.Dispatch(ctx, DispatchRequest{
+		LeadThreadID: "lead-detached", ProjectID: "project", LeadWorkDir: repo,
+		Bees: []BeeSpec{{Name: "Aspen", Task: "detached copy", Prompt: "detached copy"}},
+	})
+	if err != nil || len(bees) != 1 {
+		t.Fatalf("Dispatch: bees=%+v, err=%v", bees, err)
+	}
+	h := bees[0]
+	if h.Branch != "" {
+		t.Fatalf("新副本不应创建命名分支：%q", h.Branch)
+	}
+	if stat, err := os.Stat(h.WorktreePath); err != nil || !stat.IsDir() {
+		t.Fatalf("副本目录应存在：%v", err)
+	}
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, gitBin, "branch", "--list", "mcode/swarm/*")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil || len(strings.TrimSpace(string(out))) != 0 {
+		t.Fatalf("不应留下 bee 分支：%q, %v", out, err)
+	}
+	cmd = exec.CommandContext(ctx, gitBin, "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = h.WorktreePath
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "HEAD" {
+		t.Fatalf("副本应使用 detached HEAD：%q, %v", out, err)
+	}
+}
+
 // (a) 两个 bee 改不同文件，Tick 后两者都 Merged，主工作区出现两处改动，ConflictFiles 为空
 func TestManager_TwoBees_DifferentFiles(t *testing.T) {
 	t.Parallel()
@@ -421,7 +457,6 @@ func TestManager_ClearFinished(t *testing.T) {
 
 	h := bees[0]
 	wtPath := h.WorktreePath
-	branch := h.Branch
 
 	// 确认 worktree 目录存在
 	if _, err := os.Stat(wtPath); err != nil {
@@ -462,16 +497,16 @@ func TestManager_ClearFinished(t *testing.T) {
 		}
 	}
 
-	// 验证 3：对应分支已被删除
+	// 验证 3：没有创建 bee 分支
 	gitBin, _ := exec.LookPath("git")
-	cmdBranch := exec.CommandContext(ctx, gitBin, "branch", "--list", branch)
+	cmdBranch := exec.CommandContext(ctx, gitBin, "branch", "--list", "mcode/swarm/*")
 	cmdBranch.Dir = dir
 	out, err := cmdBranch.Output()
 	if err != nil {
 		t.Fatalf("git branch --list failed: %v", err)
 	}
 	if strings.TrimSpace(string(out)) != "" {
-		t.Errorf("expected branch %s to be deleted, found: %s", branch, string(out))
+		t.Errorf("expected no bee branches, found: %s", string(out))
 	}
 
 	// 验证 4：state 中的 bees 已被清空

@@ -1360,10 +1360,10 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		if abs, err := filepath.Abs(wtPath); err == nil {
 			wtPath = abs
 		}
-		branch = fmt.Sprintf("mcode/swarm/%s/%d", leadPrefix, index)
-
 		if err := m.opts.Git.WorktreeAdd(ctx, beeWorkDir, wtPath, branch, baseCommit, git.WithCloneReferenced(spec.Prompt+"\n"+strings.Join(spec.Acceptance, "\n"))); err != nil {
-			_ = m.opts.Git.BranchDelete(ctx, beeWorkDir, branch, true)
+			if branch != "" {
+				_ = m.opts.Git.BranchDelete(ctx, beeWorkDir, branch, true)
+			}
 			_ = os.RemoveAll(wtPath)
 			return Bee{}, fmt.Errorf("worktree add failed for bee %d: %w", index, err)
 		}
@@ -1413,7 +1413,9 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		// 复用的 worktree 里是上一个子代理的半成品，启动失败也要保留现场。
 		if !isShared && !reusedWorktree {
 			_ = m.opts.Git.WorktreeRemove(ctx, beeWorkDir, wtPath, true)
-			_ = m.opts.Git.BranchDelete(ctx, beeWorkDir, branch, true)
+			if branch != "" {
+				_ = m.opts.Git.BranchDelete(ctx, beeWorkDir, branch, true)
+			}
 			_ = os.RemoveAll(wtPath)
 		}
 		return Bee{}, fmt.Errorf("start session failed for bee %d: %w", index, err)
@@ -2590,7 +2592,9 @@ func (m *Manager) Tick(ctx context.Context) {
 					} else if tgt.bee.WorktreePath != "" {
 						if m.opts.Git != nil {
 							_ = m.opts.Git.WorktreeRemove(ctx, tgt.targetWorkDir, tgt.bee.WorktreePath, true)
-							_ = m.opts.Git.BranchDelete(ctx, tgt.targetWorkDir, tgt.bee.Branch, true)
+							if tgt.bee.Branch != "" {
+								_ = m.opts.Git.BranchDelete(ctx, tgt.targetWorkDir, tgt.bee.Branch, true)
+							}
 						}
 						_ = os.RemoveAll(tgt.bee.WorktreePath)
 					}
@@ -2718,7 +2722,9 @@ func (m *Manager) Tick(ctx context.Context) {
 				tgt.bee.MergeError = "只读档子代理改动了文件，改动已丢弃，未合并"
 				if m.opts.Git != nil && tgt.bee.WorktreePath != "" {
 					_ = m.opts.Git.WorktreeRemove(ctx, tgt.targetWorkDir, tgt.bee.WorktreePath, true)
-					_ = m.opts.Git.BranchDelete(ctx, tgt.targetWorkDir, tgt.bee.Branch, true)
+					if tgt.bee.Branch != "" {
+						_ = m.opts.Git.BranchDelete(ctx, tgt.targetWorkDir, tgt.bee.Branch, true)
+					}
 				}
 				if tgt.bee.WorktreePath != "" {
 					_ = os.RemoveAll(tgt.bee.WorktreePath)
@@ -2900,7 +2906,7 @@ func (m *Manager) detectReactivatedBees(ctx context.Context) {
 			}
 		}
 		// 解锁期间状态可能已被 stopBee/clearFinished 改变，以锁内最新状态为准。
-		if bee == nil || bee.Status == StatusRunning || !bee.Reported {
+		if bee == nil || bee.Status == StatusRunning || !bee.Reported || bee.WorktreePath == "" {
 			m.mu.Unlock()
 			continue
 		}
@@ -5108,7 +5114,7 @@ func (m *Manager) approveMerge(ctx context.Context, leadThreadID, beeThreadID st
 		m.mu.Unlock()
 		return Bee{}, ErrBeeNotFound
 	}
-	if !target.PendingMerge {
+	if !target.PendingMerge || target.WorktreePath == "" {
 		m.mu.Unlock()
 		return Bee{}, ErrNoPendingMerge
 	}
@@ -5478,7 +5484,9 @@ func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error 
 		}
 		if m.opts.Git != nil && h.WorktreePath != "" {
 			_ = m.opts.Git.WorktreeRemove(ctx, targetDir, h.WorktreePath, true)
-			_ = m.opts.Git.BranchDelete(ctx, targetDir, h.Branch, true)
+			if h.Branch != "" {
+				_ = m.opts.Git.BranchDelete(ctx, targetDir, h.Branch, true)
+			}
 		}
 		if h.WorktreePath != "" {
 			_ = os.RemoveAll(h.WorktreePath)
@@ -5680,7 +5688,7 @@ func (m *Manager) beeCopyReclaimDecisionLocked(h *Bee, now time.Time) beeCopyRec
 	if m.beeCopyReclaimableLocked(h, now) {
 		return beeCopyRemove
 	}
-	if h.WorktreePath == "" || h.Status == StatusRunning || h.PendingMerge || h.ReviewState == ReviewRunning {
+	if h.WorktreePath == "" || h.Status == StatusRunning || h.ReviewState == ReviewRunning {
 		return beeCopyKeep
 	}
 	endedAt := h.StartedAt
@@ -5746,6 +5754,16 @@ func (m *Manager) clearBeeCopy(c reclaimCandidate, patchPath string) bool {
 		if patchPath != "" {
 			h.ArchivedPatchPath = patchPath
 		}
+		if c.needsArchive && (h.PendingMerge || h.Interrupted) {
+			h.PendingMerge = false
+			h.Interrupted = false
+			if h.MergeError == "" {
+				h.MergeError = "超过 24 小时未处理，副本已回收"
+				if patchPath != "" {
+					h.MergeError += "，补丁已保存到 " + h.ArchivedPatchPath
+				}
+			}
+		}
 		return true
 	}
 	return false
@@ -5754,9 +5772,13 @@ func (m *Manager) clearBeeCopy(c reclaimCandidate, patchPath string) bool {
 // removeBeeCopy 删除单个 bee 副本：先在目标仓库里摘掉 worktree 与分支，再删除残留目录。
 func (m *Manager) removeBeeCopy(ctx context.Context, targetDir, worktreePath, branch string) bool {
 	if m.opts.Git != nil && worktreePath != "" {
-		_ = m.opts.Git.WorktreeRemove(ctx, targetDir, worktreePath, true)
+		if err := m.opts.Git.WorktreeRemove(ctx, targetDir, worktreePath, true); err != nil {
+			log.Printf("swarm: 移除 bee 副本 %s 失败: %v", worktreePath, err)
+		}
 		if branch != "" {
-			_ = m.opts.Git.BranchDelete(ctx, targetDir, branch, true)
+			if err := m.opts.Git.BranchDelete(ctx, targetDir, branch, true); err != nil {
+				log.Printf("swarm: 删除 bee 分支 %s 失败: %v", branch, err)
+			}
 		}
 	}
 	if worktreePath == "" {
@@ -6078,6 +6100,17 @@ func (m *Manager) ResumeAllInterrupted(ctx context.Context) {
 // 并把重启前排队、尚未启动的条目重新排入派发队列；返回成功续跑或重新入队的条目总数。
 // 没有待续跑条目时返回 0 且不报错；全部续跑失败时返回 0 和合并后的错误。
 func (m *Manager) ResumeInterrupted(ctx context.Context, leadThreadID string) (int, error) {
+	// 驱动回调可能重入续跑，先跳过已在处理的 lead，避免重入合并锁。
+	m.mu.Lock()
+	resuming := m.leads[leadThreadID] != nil && m.leads[leadThreadID].resuming
+	m.mu.Unlock()
+	if resuming {
+		return 0, nil
+	}
+	// 与副本回收串行，避免续接或重派使用回收前的快照。
+	mergeMu := m.getLeadMergeMutex(leadThreadID)
+	mergeMu.Lock()
+	defer mergeMu.Unlock()
 	m.mu.Lock()
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
@@ -6353,7 +6386,9 @@ func (m *Manager) respawnBeeWithHandoff(ctx context.Context, leadThreadID string
 		if partial.WorktreePath != "" {
 			if m.opts.Git != nil {
 				_ = m.opts.Git.WorktreeRemove(ctx, workDir, partial.WorktreePath, true)
-				_ = m.opts.Git.BranchDelete(ctx, workDir, partial.Branch, true)
+				if partial.Branch != "" {
+					_ = m.opts.Git.BranchDelete(ctx, workDir, partial.Branch, true)
+				}
 			}
 			_ = os.RemoveAll(partial.WorktreePath)
 		}

@@ -239,6 +239,9 @@ func TestManager_RetryBee_FallsBackWhenWorktreeGone(t *testing.T) {
 	if _, statErr := os.Stat(newBee.WorktreePath); statErr != nil {
 		t.Fatalf("新建的 worktree 应该真实存在：%v", statErr)
 	}
+	if newBee.Branch != "" {
+		t.Fatalf("新建副本应使用 detached HEAD：branch=%q", newBee.Branch)
+	}
 	if newBee.BaseCommit == "abc123" {
 		t.Fatalf("新建 worktree 应重新取基线，实际沿用了旧基线 %q", newBee.BaseCommit)
 	}

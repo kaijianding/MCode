@@ -495,6 +495,9 @@ func TestManager_ResumeInterrupted_ReplacesInterruptedBee(t *testing.T) {
 		t.Fatalf("期望替换后仍有 1 个 bee，实际 %d", len(st.Bees))
 	}
 	resumed := st.Bees[0]
+	if resumed.Branch != "" {
+		t.Fatalf("新建续跑副本应使用 detached HEAD：branch=%q", resumed.Branch)
+	}
 	if resumed.ThreadID == "bee-old" {
 		t.Fatalf("旧 bee 应被新 bee 替换，实际仍是 %s", resumed.ThreadID)
 	}

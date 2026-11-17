@@ -1,9 +1,11 @@
 package swarm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -250,6 +252,10 @@ func TestManager_ReclaimBeeCopies_ArchivesStaleUnmerged(t *testing.T) {
 			want := h.clone()
 			want.WorktreePath, want.Branch = "", ""
 			want.ArchivedPatchPath = patchPath
+			if want.Interrupted {
+				want.Interrupted = false
+				want.MergeError = "超过 24 小时未处理，副本已回收，补丁已保存到 " + patchPath
+			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("回收只能更新副本引用与存档路径，got=%+v want=%+v", got, want)
 			}
@@ -278,12 +284,84 @@ func TestManager_ReclaimBeeCopies_ArchivesStaleUnmerged(t *testing.T) {
 	}
 }
 
+func TestReclaimExpiresPendingMerge(t *testing.T) {
+	testReclaimExpires(t, Bee{Status: StatusCompleted, PendingMerge: true})
+}
+
+func TestReclaimExpiresInterrupted(t *testing.T) {
+	testReclaimExpires(t, Bee{Status: StatusStopped, Interrupted: true})
+}
+
+func testReclaimExpires(t *testing.T, bee Bee) {
+	t.Helper()
+	for _, tc := range []struct {
+		name       string
+		useStarted bool
+		mergeError string
+	}{
+		{name: "finished-at"},
+		{name: "started-at", useStarted: true},
+		{name: "existing-error", mergeError: "existing merge failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReclaimFixture(t)
+			path, base := f.addCopy(t, "lead-expired-0", "")
+			if err := os.WriteFile(filepath.Join(path, "new.txt"), []byte("expired bee changes\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			h := bee.clone()
+			h.ThreadID, h.WorktreePath, h.BaseCommit = "bee-expired", path, base
+			h.MergeError = tc.mergeError
+			h.StartedAt = f.clock.Now().Add(-48 * time.Hour)
+			h.FinishedAt = f.finishedAtAgo(beeCopyStaleIdle - time.Minute)
+			if tc.useStarted {
+				h.StartedAt, h.FinishedAt = *h.FinishedAt, nil
+			}
+			f.setBees(h)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			f.mgr.reclaimBeeCopies(ctx)
+			if got := f.bee(t, h.ThreadID); !reflect.DeepEqual(got, h.clone()) {
+				t.Fatalf("未满 24 小时应保留状态：%+v", got)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("未满 24 小时应保留副本：%v", err)
+			}
+			f.clock.Advance(time.Minute)
+			f.mgr.reclaimBeeCopies(ctx)
+			f.assertCopyGone(t, path, "")
+			got := f.bee(t, h.ThreadID)
+			if got.WorktreePath != "" || got.Branch != "" || got.PendingMerge || got.Interrupted || got.MergeError == "" {
+				t.Fatalf("过期回收应清空副本与待处理标记并说明原因：%+v", got)
+			}
+			patch, err := os.ReadFile(got.ArchivedPatchPath)
+			if err != nil || !strings.Contains(string(patch), "+expired bee changes") {
+				t.Fatalf("真实改动必须已存档：%q, %v", patch, err)
+			}
+			if tc.mergeError != "" && got.MergeError != tc.mergeError {
+				t.Fatalf("应保留已有错误：%q", got.MergeError)
+			}
+			if tc.mergeError == "" && !strings.Contains(got.MergeError, got.ArchivedPatchPath) {
+				t.Fatalf("回收原因应包含存档路径：%q", got.MergeError)
+			}
+			if _, err := f.mgr.ApproveMerge(ctx, f.leadID, h.ThreadID); !errors.Is(err, ErrNoPendingMerge) {
+				t.Fatalf("已回收的 bee 不可批准合并：%v", err)
+			}
+			if n, err := f.mgr.ResumeInterrupted(ctx, f.leadID); err != nil || n != 0 {
+				t.Fatalf("已回收的 bee 不可续跑：n=%d, err=%v", n, err)
+			}
+			if after := f.bee(t, h.ThreadID); !reflect.DeepEqual(after, got) {
+				t.Fatalf("合并与续跑入口不应改变已回收状态：%+v", after)
+			}
+		})
+	}
+}
+
 func TestManager_ReclaimBeeCopies_StaleActiveBeesKept(t *testing.T) {
 	f := newReclaimFixture(t)
 	f.setBees()
 	for i, h := range []Bee{
 		{Status: StatusRunning},
-		{Status: StatusCompleted, PendingMerge: true},
 		{Status: StatusCompleted, ReviewState: ReviewRunning},
 	} {
 		name := fmt.Sprintf("active-%d", i)
@@ -295,10 +373,10 @@ func TestManager_ReclaimBeeCopies_StaleActiveBeesKept(t *testing.T) {
 		f.appendBee(h)
 	}
 	f.mgr.reclaimBeeCopies(context.Background())
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		h := f.bee(t, fmt.Sprintf("active-%d", i))
 		if _, err := os.Stat(h.WorktreePath); err != nil || h.ArchivedPatchPath != "" {
-			t.Fatalf("运行中、待合并或审查中的副本不应回收：%+v, %v", h, err)
+			t.Fatalf("运行中或审查中的副本不应回收：%+v, %v", h, err)
 		}
 	}
 }
@@ -896,4 +974,89 @@ func TestManager_BeeThreadDeleted_ArchivesUnmergedBeeWithStaleChangedFiles(t *te
 		t.Fatalf("存档补丁应包含真实改动文件，实际 %q", string(patch))
 	}
 	f.assertCopyGone(t, stalePath, "mcode/test-stale/0")
+}
+
+func TestManager_RemoveBeeCopy_LogsGitErrors(t *testing.T) {
+	f := newReclaimFixture(t)
+	path := filepath.Join(f.wtRoot, "unregistered-copy")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// 在非仓库目录调用 Git 必然失败，目录清理仍以 RemoveAll 的结果为准。
+	if !f.mgr.removeBeeCopy(ctx, t.TempDir(), path, "legacy-branch") {
+		t.Fatal("Git 清理失败不应改变目录删除的返回值")
+	}
+	f.assertCopyGone(t, path, "")
+	if !strings.Contains(output.String(), "swarm: 移除 bee 副本 "+path+" 失败:") ||
+		!strings.Contains(output.String(), "swarm: 删除 bee 分支 legacy-branch 失败:") {
+		t.Fatalf("应记录带路径、分支和错误的日志：%q", output.String())
+	}
+}
+
+func TestManager_ReclaimBeeCopies_ResumingInterrupted(t *testing.T) {
+	f := newReclaimFixture(t)
+	path, base := f.addCopy(t, "lead-resuming-0", "")
+	f.setBees(Bee{ThreadID: "bee-resuming", Status: StatusStopped, Interrupted: true,
+		WorktreePath: path, BaseCommit: base, FinishedAt: f.finishedAtAgo(beeCopyStaleIdle)})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	driver := f.mgr.opts.Driver.(*fakeDriver)
+	following := make(chan struct{})
+	release := make(chan struct{})
+	driver.onFollowUp = func(string, string) error {
+		close(following)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	resumeDone := make(chan struct{})
+	go func() {
+		defer close(resumeDone)
+		if n, err := f.mgr.ResumeInterrupted(ctx, f.leadID); err != nil || n != 1 {
+			t.Errorf("续跑失败：n=%d, err=%v", n, err)
+		}
+	}()
+	select {
+	case <-following:
+	case <-ctx.Done():
+		t.Fatal("续跑未进入投递")
+	}
+	reclaimDone := make(chan struct{})
+	go func() {
+		defer close(reclaimDone)
+		f.mgr.reclaimBeeCopies(ctx)
+	}()
+	for {
+		f.mgr.mu.Lock()
+		collected := !f.mgr.lastBeeCopyReclaim.IsZero()
+		f.mgr.mu.Unlock()
+		if collected {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("回收未收集候选")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	for _, done := range []<-chan struct{}{resumeDone, reclaimDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Fatal("续跑或回收未结束")
+		}
+	}
+	h := f.bee(t, "bee-resuming")
+	if _, err := os.Stat(path); err != nil || h.WorktreePath != path || h.Status != StatusRunning || h.Interrupted {
+		t.Fatalf("续跑中的副本不能被过期回收：%+v, %v", h, err)
+	}
 }
