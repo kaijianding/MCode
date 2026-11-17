@@ -94,3 +94,55 @@ func TestThreadCache_EvictColdArchivedThreads(t *testing.T) {
 		t.Fatalf("messagesEvicted should be cleared after reload")
 	}
 }
+
+func TestSessionStatusKeepsMessagesEvicted(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "status.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	hub := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	if err := backend.AttachStore(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	backend.AddProject(wire.ProjectSummary{ID: "p", Name: "project", Path: t.TempDir()})
+	status := "interrupted"
+	backend.AddThread(wire.ThreadSummary{ID: "lead", ProjectID: "p", LastStatus: &status}, []wire.ThreadMessage{
+		{ID: "reply", Role: "assistant", Text: "hello", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+	})
+	backend.mu.Lock()
+	td := backend.threads["lead"]
+	td.messages = nil
+	td.messagesEvicted = true
+	td.pending["approval"] = &pendingRequest{req: wire.RemoteRequest{Kind: "question"}, done: make(chan struct{})}
+	lastAccess := td.lastAccess
+	backend.mu.Unlock()
+
+	got, err := backend.SessionStatus(ctx, "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.mu.Lock()
+	if !td.messagesEvicted || len(td.messages) != 0 || td.lastAccess != lastAccess {
+		t.Error("SessionStatus 不应回载消息或更新访问时间")
+	}
+	backend.mu.Unlock()
+	if got.LastAssistantText != "" || got.Progress != "" || got.Running || !got.Interrupted || !got.AwaitingApproval || !got.AwaitingInput {
+		t.Fatalf("状态不符合预期: %+v", got)
+	}
+	full, err := backend.SessionState(ctx, "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.LastAssistantText != "hello" || full.Progress == "" {
+		t.Fatalf("SessionState 应回载消息并填充消息字段: %+v", full)
+	}
+	full.LastAssistantText, full.Progress = "", ""
+	if got != full {
+		t.Fatalf("状态不一致: status=%+v state=%+v", got, full)
+	}
+}

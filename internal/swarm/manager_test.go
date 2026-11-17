@@ -2941,3 +2941,31 @@ func TestProcessQueueHoldsOverlappingEntry(t *testing.T) {
 		t.Fatalf("前一个条目结束后应放行下一个：%d", got)
 	}
 }
+
+type sessionStatusDriver struct {
+	*fakeDriver
+	stateCalls  int
+	statusCalls int
+}
+
+func (d *sessionStatusDriver) SessionState(ctx context.Context, threadID string) (kanban.SessionState, error) {
+	d.stateCalls++
+	return d.fakeDriver.SessionState(ctx, threadID)
+}
+
+func (d *sessionStatusDriver) SessionStatus(ctx context.Context, threadID string) (kanban.SessionState, error) {
+	d.statusCalls++
+	return d.fakeDriver.SessionState(ctx, threadID)
+}
+
+func TestTickIdleLeadUsesSessionStatus(t *testing.T) {
+	driver := &sessionStatusDriver{fakeDriver: newFakeDriver()}
+	driver.setSessionState("lead", kanban.SessionState{})
+	idleCalls := 0
+	mgr := NewManager(Options{Driver: driver, Git: &git.Runner{}, OnBeesIdle: func(context.Context, string) { idleCalls++ }})
+	mgr.leads["lead"] = &leadState{}
+	mgr.Tick(context.Background())
+	if idleCalls != 1 || driver.statusCalls != 1 || driver.stateCalls != 0 {
+		t.Fatalf("idle=%d SessionStatus=%d SessionState=%d", idleCalls, driver.statusCalls, driver.stateCalls)
+	}
+}

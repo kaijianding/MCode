@@ -224,6 +224,37 @@ func (b *MemoryBackend) SessionState(ctx context.Context, threadID string) (kanb
 	}
 	b.touchThreadLocked(td)
 
+	state := b.sessionStatusLocked(ctx, threadID, td)
+	state.LastAssistantText = lastAssistantReplyText(td.messages)
+
+	// 进展指纹：拼入消息条数、最后一条消息的标识与文本长度（流式增量会持续变长）、
+	// 工具触碰过的文件数、待审批请求数，以及会话更新时间与活动文案。
+	// 任一项变化都说明会话有新输出，因此 bee 在流式写文本或调用工具时指纹每隔几秒就会变。
+	lastMsgID := ""
+	lastMsgLen := 0
+	if n := len(td.messages); n > 0 {
+		lastMsgID = td.messages[n-1].ID
+		lastMsgLen = len(td.messages[n-1].Text)
+	}
+	state.Progress = fmt.Sprintf("%d|%s|%d|%d|%d|%s|%s",
+		len(td.messages), lastMsgID, lastMsgLen, len(td.touchedPaths), len(td.pending),
+		td.summary.UpdatedAt, derefString(td.summary.LastActivityText))
+	return state, nil
+}
+
+// SessionStatus 查询不依赖历史消息的会话状态。
+func (b *MemoryBackend) SessionStatus(ctx context.Context, threadID string) (kanban.SessionState, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	td, ok := b.threads[threadID]
+	if !ok {
+		return kanban.SessionState{}, store.ErrNotFound
+	}
+	return b.sessionStatusLocked(ctx, threadID, td), nil
+}
+
+// sessionStatusLocked 的调用方需持有 b.mu。
+func (b *MemoryBackend) sessionStatusLocked(ctx context.Context, threadID string, td *memoryThread) kanban.SessionState {
 	// 没有真实运行实例时（runTurnID 为空且未在取消收尾）不能判定为运行中：
 	// 异常收尾遗留的 summary.IsRunning 粘滞标记以实际运行实例为准纠正，
 	// 避免 Swarm 调度看门狗将已结束的子代理永久视作 running。
@@ -283,33 +314,16 @@ func (b *MemoryBackend) SessionState(ctx context.Context, threadID string) (kanb
 		interrupted = interruptedTurnStatus(recentTurn.Status)
 	}
 
-	lastAssistantText := lastAssistantReplyText(td.messages)
-
-	// 进展指纹：拼入消息条数、最后一条消息的标识与文本长度（流式增量会持续变长）、
-	// 工具触碰过的文件数、待审批请求数，以及会话更新时间与活动文案。
-	// 任一项变化都说明会话有新输出，因此 bee 在流式写文本或调用工具时指纹每隔几秒就会变。
-	lastMsgID := ""
-	lastMsgLen := 0
-	if n := len(td.messages); n > 0 {
-		lastMsgID = td.messages[n-1].ID
-		lastMsgLen = len(td.messages[n-1].Text)
-	}
-	progress := fmt.Sprintf("%d|%s|%d|%d|%d|%s|%s",
-		len(td.messages), lastMsgID, lastMsgLen, len(td.touchedPaths), len(td.pending),
-		td.summary.UpdatedAt, derefString(td.summary.LastActivityText))
-
 	return kanban.SessionState{
 		Running:              running,
 		Failed:               failed,
 		AwaitingApproval:     awaitingApproval,
 		AwaitingInput:        awaitingInput,
 		FailureReason:        failureReason,
-		LastAssistantText:    lastAssistantText,
 		Interrupted:          interrupted,
-		Progress:             progress,
 		LastFileChangeAt:     td.lastFileChangeAt,
 		HostToolsUnavailable: b.hostToolsUnavailableLocked(td.summary.Provider),
-	}, nil
+	}
 }
 
 // hostToolsUnavailableLocked 按线程实际使用的 provider 查 harness，报告它的会话是否能调到

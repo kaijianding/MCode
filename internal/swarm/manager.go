@@ -3201,11 +3201,20 @@ func (m *Manager) checkReports(ctx context.Context) {
 
 // leadSessionState 查询主会话自身的运行时状态；未接入 Driver 或驱动不认识该会话时
 // 返回 ok=false，保持与不检查时一致的行为。
+// lead 探测只用状态位，不应触发历史消息回载。
 func (m *Manager) leadSessionState(ctx context.Context, leadThreadID string) (kanban.SessionState, bool) {
 	if m.opts.Driver == nil || leadThreadID == "" {
 		return kanban.SessionState{}, false
 	}
-	st, err := m.opts.Driver.SessionState(ctx, leadThreadID)
+	var st kanban.SessionState
+	var err error
+	if driver, ok := m.opts.Driver.(interface {
+		SessionStatus(context.Context, string) (kanban.SessionState, error)
+	}); ok {
+		st, err = driver.SessionStatus(ctx, leadThreadID)
+	} else {
+		st, err = m.opts.Driver.SessionState(ctx, leadThreadID)
+	}
 	if err != nil {
 		return kanban.SessionState{}, false
 	}
