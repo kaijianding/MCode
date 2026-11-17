@@ -648,6 +648,35 @@ func TestOpenInWindows(t *testing.T) {
 	}
 }
 
+func TestHeaderOpenInSkipsAppStatWhileClosed(t *testing.T) {
+	testenv.TempHome(t)
+	fake := newGitFakeClient()
+	s, root := buildRoot(fake)
+	t.Cleanup(s.close)
+	st := NewSettingsState(settingsTestDir(t), nil, s)
+	st.cfg.Workbench.OpenInApps = []config.OpenInAppConfig{{Name: "Cursor", AppPath: "/Applications/Cursor.app", Enabled: true}}
+	setChatSettings(s, st)
+	tt := ui.NewTester(root, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("feature/login") })
+
+	origStat := openInStatFn
+	t.Cleanup(func() { openInStatFn = origStat })
+	stats := 0
+	openInStatFn = func(path string) bool {
+		stats++
+		return path == "/Applications/Cursor.app"
+	}
+	tt.Frame()
+	if stats != 0 {
+		t.Fatalf("菜单关闭时检测应用 %d 次，期望 0 次", stats)
+	}
+	getChatHeaderState(s).openInMenuOpen = true
+	tt.Frame()
+	if stats == 0 || !tt.HasText("Cursor") {
+		t.Fatalf("菜单打开时检测次数 = %d，菜单文本 = %q", stats, tt.Texts())
+	}
+}
+
 // 打开方式菜单：点访达传目录，点应用传 -a 加应用路径，复制路径写入剪贴板并 toast。
 func TestChatHeaderOpenInMenu(t *testing.T) {
 	origGOOS := openInGOOS

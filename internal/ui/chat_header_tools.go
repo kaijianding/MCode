@@ -299,7 +299,6 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 		return
 	}
 	hs := getChatHeaderState(s)
-	apps := installedOpenInApps(currentWorkbenchConfig(s), openInStatFn)
 
 	trigger := IconButton(c.Key("chat-header-open-in-btn-unified"), IconButtonProps{
 		Icon:   IconSquareArrowOutUpRight(),
@@ -326,6 +325,7 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 	appPopover(c.Key("chat-header-open-in-popover-unified"), trigger, &hs.openInMenuOpen, func() {
 		hs.openInMenuOpen = false
 	}, func() {
+		apps := installedOpenInApps(currentWorkbenchConfig(s), openInStatFn)
 		popoverCard(c, ui.Column(c.Key("chat-header-open-in-menu-unified"))).
 			Gap(Space0).
 			Padding(Space1).
