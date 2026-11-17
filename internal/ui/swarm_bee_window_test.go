@@ -51,31 +51,36 @@ func TestBeeWindowStripCentersTrafficLights(t *testing.T) {
 	}
 }
 
-// TestBeeStatusText 验证子代理顶栏的状态文字：运行中补后台项数，已结束但后台还在跑时改成等待后台。
+// TestBeeStatusText 验证子代理顶栏的状态文字：运行中补后台项数，已结束但后台还在跑时改成等待后台，
+// 结束后进入自动审查或等待审查时反映审查状态。
 func TestBeeStatusText(t *testing.T) {
 	tests := []struct {
 		name         string
-		status       string
+		bee          SwarmBee
 		childRunning bool
 		background   int
 		want         string
 		wantWaiting  bool
 	}{
-		{"运行中无后台", "running", true, 0, "正在工作", false},
-		{"运行中有后台", "running", true, 2, "正在工作 · 后台 2 项", false},
-		{"已完成有后台且子会话空闲", "completed", false, 1, "等待后台 · 1 项", true},
-		{"已完成有后台但子会话运行中", "completed", true, 1, "已完成", false},
-		{"已完成无后台", "completed", false, 0, "已完成", false},
-		{"失败有后台且子会话空闲", "failed", false, 3, "等待后台 · 3 项", true},
-		{"未知状态归一到空闲", "weird", false, 0, "空闲", false},
+		{"运行中无后台", SwarmBee{Status: "running"}, true, 0, "正在工作", false},
+		{"运行中有后台", SwarmBee{Status: "running"}, true, 2, "正在工作 · 后台 2 项", false},
+		{"已完成有后台且子会话空闲", SwarmBee{Status: "completed"}, false, 1, "等待后台 · 1 项", true},
+		{"已完成有后台但子会话运行中", SwarmBee{Status: "completed"}, true, 1, "已完成", false},
+		{"已完成无后台", SwarmBee{Status: "completed"}, false, 0, "已完成", false},
+		{"失败有后台且子会话空闲", SwarmBee{Status: "failed"}, false, 3, "等待后台 · 3 项", true},
+		{"未知状态归一到空闲", SwarmBee{Status: "weird"}, false, 0, "空闲", false},
+		{"自动审查中", SwarmBee{Status: "completed", PendingMerge: true, ReviewState: "running"}, false, 0, "审查中", false},
+		{"待审查合并", SwarmBee{Status: "completed", PendingMerge: true}, false, 0, "待审查", false},
+		{"待人工审查", SwarmBee{Status: "completed", ReviewState: "needs_human"}, false, 0, "待审查", false},
+		{"运行中待审查仍显示正在工作", SwarmBee{Status: "running", PendingMerge: true}, true, 0, "正在工作", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := beeStatusText(tc.status, tc.childRunning, tc.background); got != tc.want {
-				t.Errorf("beeStatusText(%q, %v, %d) = %q, want %q", tc.status, tc.childRunning, tc.background, got, tc.want)
+			if got := beeStatusText(tc.bee, tc.childRunning, tc.background); got != tc.want {
+				t.Errorf("beeStatusText(%+v, %v, %d) = %q, want %q", tc.bee, tc.childRunning, tc.background, got, tc.want)
 			}
-			if got := beeWaitingBackground(tc.status, tc.childRunning, tc.background); got != tc.wantWaiting {
-				t.Errorf("beeWaitingBackground(%q, %v, %d) = %v, want %v", tc.status, tc.childRunning, tc.background, got, tc.wantWaiting)
+			if got := beeWaitingBackground(tc.bee.Status, tc.childRunning, tc.background); got != tc.wantWaiting {
+				t.Errorf("beeWaitingBackground(%q, %v, %d) = %v, want %v", tc.bee.Status, tc.childRunning, tc.background, got, tc.wantWaiting)
 			}
 		})
 	}

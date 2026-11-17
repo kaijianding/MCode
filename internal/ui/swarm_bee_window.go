@@ -188,7 +188,7 @@ func renderBeeWindow(c *ui.Context, parent *chatState, beeID string, child *chat
 					return
 				}
 				persona := findSwarmPersona(bee.Name)
-				statusText := beeStatusText(bee.Status, childRunning, background)
+				statusText := beeStatusText(bee, childRunning, background)
 				statusColor := ThemeSecondaryText(c)
 				// 等待后台时用强调色，和仍在工作的 bee 区分开。
 				if beeWaitingBackground(bee.Status, childRunning, background) {
@@ -244,18 +244,25 @@ func beeWaitingBackground(status string, childRunning bool, background int) bool
 	return status != "running" && !childRunning && background > 0
 }
 
-// beeStatusText 拼出子代理顶栏的状态文字：运行中补上后台项数，已结束但后台还在跑时改成等待后台。
-func beeStatusText(status string, childRunning bool, background int) string {
-	if status == "running" {
+// beeStatusText 拼出子代理顶栏的状态文字：运行中补上后台项数，已结束但后台还在跑时改成等待后台，
+// 结束后进入自动审查或等待审查时反映审查状态。
+func beeStatusText(b SwarmBee, childRunning bool, background int) string {
+	if b.Status == "running" {
 		if background > 0 {
 			return fmt.Sprintf("正在工作 · 后台 %d 项", background)
 		}
 		return "正在工作"
 	}
-	if beeWaitingBackground(status, childRunning, background) {
+	if beeWaitingBackground(b.Status, childRunning, background) {
 		return fmt.Sprintf("等待后台 · %d 项", background)
 	}
-	return swarmStatusLabel(status)
+	if b.ReviewState == "running" {
+		return "审查中"
+	}
+	if MapSwarmBeeStatus(b) == swarmStatusWaitingReview {
+		return swarmStatusLabel(swarmStatusWaitingReview)
+	}
+	return swarmStatusLabel(b.Status)
 }
 
 // beeWindowChildRunning 报告窗口自己的子会话里这个 bee 的会话是否仍在运行。

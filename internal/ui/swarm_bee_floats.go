@@ -988,7 +988,7 @@ func renderSwarmPanelStrip(c *ui.Context, s *chatState, f swarmFloatFrame, id pa
 		persona := findSwarmPersona(cur.Name)
 		childRunning := beeWindowChildRunning(child, cur.ThreadID)
 		background := beeBackgroundTaskCount(child, cur.ThreadID)
-		statusText := beeStatusText(cur.Status, childRunning, background)
+		statusText := beeStatusText(cur, childRunning, background)
 		statusColor := ThemeSecondaryText(c)
 		// 等待后台时用强调色，和仍在工作的 bee 区分开。
 		if beeWaitingBackground(cur.Status, childRunning, background) {
