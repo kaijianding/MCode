@@ -60,8 +60,8 @@ func TestParser_ContextTokensFromLastRequest(t *testing.T) {
 	if want := int64(1000 + 20000 + 500 + 340); usage.ContextTokens != want {
 		t.Errorf("ContextTokens = %d, want %d", usage.ContextTokens, want)
 	}
-	if usage.InputTokens != 2500 || usage.OutputTokens != 900 || usage.CachedTokens != 40000 {
-		t.Errorf("累计用量应取自 result.usage, got %+v", usage)
+	if usage.InputTokens != 2500+40000 || usage.OutputTokens != 900 || usage.CachedTokens != 40000 {
+		t.Errorf("累计用量应取自 result.usage，输入并入缓存读写, got %+v", usage)
 	}
 }
 

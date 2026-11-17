@@ -912,9 +912,10 @@ func (p *parser) handleResult(line []byte, emit func(harness.Event)) {
 		APIErrorStatus int     `json:"api_error_status"`
 		TotalCostUSD   float64 `json:"total_cost_usd"`
 		Usage          *struct {
-			InputTokens          int64 `json:"input_tokens"`
-			OutputTokens         int64 `json:"output_tokens"`
-			CacheReadInputTokens int64 `json:"cache_read_input_tokens"`
+			InputTokens              int64 `json:"input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 		ModelUsage map[string]modelUsageInfo `json:"modelUsage"`
 	}
@@ -930,12 +931,15 @@ func (p *parser) handleResult(line []byte, emit func(harness.Event)) {
 			samples = make([]harness.RequestSpeed, len(p.requests))
 			copy(samples, p.requests)
 		}
+		// CLI 的 input_tokens 不含缓存读写，这里并入 InputTokens（与 omp/pi/codex 同一口径：
+		// InputTokens 是整段提示词），CachedTokens 记缓存读写合计，缓存命中率按 Cached/Input 算。
+		cached := res.Usage.CacheReadInputTokens + res.Usage.CacheCreationInputTokens
 		_ = harness.Emit(emit, harness.Event{
 			Type: harness.EventUsage,
 			Usage: &harness.Usage{
-				InputTokens:   res.Usage.InputTokens,
+				InputTokens:   res.Usage.InputTokens + cached,
 				OutputTokens:  res.Usage.OutputTokens,
-				CachedTokens:  res.Usage.CacheReadInputTokens,
+				CachedTokens:  cached,
 				ContextTokens: p.ctxSnapshot.total(),
 				ContextWindow: maxContextWindow(res.ModelUsage),
 				CostUSD:       res.TotalCostUSD,

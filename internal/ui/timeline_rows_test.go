@@ -2049,6 +2049,27 @@ func TestAppendTurnEndClock(t *testing.T) {
 	}
 }
 
+// TestTurnCacheHitRate 验证缓存命中率的口径：缓存 / 输入（输入已含缓存读写），
+// 旧数据缓存大于输入时封顶 100%，没有缓存或输入为 0 时不显示。
+func TestTurnCacheHitRate(t *testing.T) {
+	cases := []struct {
+		name  string
+		usage TokenUsage
+		want  string
+	}{
+		{"omp 真实占比", TokenUsage{Input: 5_582_400, Cached: 5_385_200}, "96.5%"},
+		{"四分之一命中", TokenUsage{Input: 1_200, Cached: 300}, "25.0%"},
+		{"无缓存", TokenUsage{Input: 800}, ""},
+		{"无输入", TokenUsage{Cached: 800}, ""},
+		{"旧数据缓存大于输入", TokenUsage{Input: 3_700, Cached: 8_400}, "100.0%"},
+	}
+	for _, tc := range cases {
+		if got := turnCacheHitRate(tc.usage); got != tc.want {
+			t.Errorf("%s：命中率 = %q，想要 %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestFormatTurnFinishedTooltip 验证完成行 Tooltip 的多行内容：token 明细、缓存命中率、
 // 估算费用、常用工具 Top3 与起止时间；没有数据时整行省略。
 func TestFormatTurnFinishedTooltip(t *testing.T) {
@@ -2062,7 +2083,7 @@ func TestFormatTurnFinishedTooltip(t *testing.T) {
 		end:     start.Add(35 * time.Second),
 	}
 	want := "输入 1.2k · 输出 456 · 缓存 300 tokens\n" +
-		"缓存命中 20.0% · 估算 ≈ $0.01\n" +
+		"缓存命中 25.0% · 估算 ≈ $0.01\n" +
 		"工具 bash×2 · edit_file×2\n" +
 		"开始 " + start.Local().Format("01-02 15:04:05") + " · 结束 " + start.Add(35*time.Second).Local().Format("01-02 15:04:05")
 	if got := formatTurnFinishedTooltip(info); got != want {

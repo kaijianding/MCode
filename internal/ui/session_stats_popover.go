@@ -192,9 +192,8 @@ func collectSessionStats(s *chatState, threadID string, now time.Time) sessionSt
 	} else {
 		st.speed = formatTokensPerSecond(int(st.usage.Total.Output), st.totalDuration)
 	}
-	if total := st.usage.Total.Input + st.usage.Total.Cached; total > 0 && st.usage.Total.Cached > 0 {
-		st.cacheHit = fmt.Sprintf("%.1f%%", float64(st.usage.Total.Cached)*100/float64(total))
-	}
+	// 缓存命中率与会话统计浮层、完成行 Tooltip 共用同一口径：缓存 / 输入（输入已含缓存）。
+	st.cacheHit = turnCacheHitRate(st.usage.Total)
 
 	if add, del, files, ok := threadChangeStatsFor(s, threadID); ok {
 		st.additions, st.deletions, st.changedFiles = add, del, files
