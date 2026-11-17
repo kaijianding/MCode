@@ -82,7 +82,7 @@ func TestMotionTimelineSkeletonAndShimmer(t *testing.T) {
 		normal := ui.NewTester(view, 200, 100)
 		normal.Frame()
 		normal.Advance(50 * time.Millisecond)
-		if _, ok := normal.Find("扫光"); !ok || !normal.FramePending() {
+		if _, ok := normal.Find("扫光"); !ok || normal.FramePending() {
 			t.Fatal("正常模式下扫光应运行")
 		}
 		appReduceMotion.Store(true)

@@ -13,6 +13,11 @@ import (
 	"unicode"
 )
 
+// afterNextSecond 对齐整秒，避免中间重建推迟计时刷新。
+func afterNextSecond(c *ui.Context) {
+	c.After(time.Second - time.Duration(c.Now().UnixNano()%int64(time.Second)))
+}
+
 // toolBackgroundRunDuration 计算后台任务从创建到现在的运行时长，并按秒请求下一帧，
 // 让时长像运行中的命令一样每秒刷新；时间戳缺失或解析失败时 ok 为 false。
 func toolBackgroundRunDuration(c *ui.Context, m Message) (string, bool) {
@@ -24,7 +29,7 @@ func toolBackgroundRunDuration(c *ui.Context, m Message) (string, bool) {
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	c.After(time.Second)
+	afterNextSecond(c)
 	return formatToolRunDuration(elapsed), true
 }
 
@@ -177,7 +182,7 @@ func (s *chatState) runningCommandBadge(c *ui.Context, m Message) (text string, 
 	// 状态明确为 running 的工具照旧每秒刷新时长；其余靠兜底判为运行中的工具，
 	// 只有当前会话仍在跑（IsRunning 或 SwarmBusy）时才继续每秒重建。
 	if isToolRunning(m) || s.threadIsBusy(selectedThreadIDSnapshot(s)) {
-		c.After(time.Second)
+		afterNextSecond(c)
 	}
 	text = formatToolRunDuration(elapsed)
 	if len(activity.steps) >= 2 && activity.maxStep > 0 {

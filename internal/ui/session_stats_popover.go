@@ -422,7 +422,7 @@ func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string
 	// 主回合仍在执行时每秒重渲染读秒；起点 0 秒也要安排下一帧。
 	// 浮层关闭后内容不再渲染，终态不再续帧；读秒与 ReduceMotion 无关。
 	if st.liveRunning {
-		c.After(time.Second)
+		afterNextSecond(c)
 	}
 
 	var tokenRows, activityRows, toolRows, timeRows, changeRows, beeRows [][2]string

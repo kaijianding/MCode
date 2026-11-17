@@ -232,7 +232,7 @@ func renderTurnWorkItem(c *ui.Context, s *chatState, item timelineItem, usage To
 							return ui.Text(c, headerText).FontSize(scaledFont(TypeBody)).TextColor(textColor).SingleLine()
 						})
 					// 只有运行态需要每秒重建这一行来更新计时；结束态不再持续重绘。
-					c.After(time.Second)
+					afterNextSecond(c)
 					return
 				}
 				renderTurnWorkHeaderText(c, item, counts, textColor)

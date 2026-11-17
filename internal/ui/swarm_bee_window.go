@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -161,7 +160,7 @@ func renderBeeWindow(c *ui.Context, parent *chatState, beeID string, child *chat
 	}
 	// bee 已经结束但子会话里的后台任务还在跑时也要继续跟随，否则窗口会停在旧状态上。
 	if !found || !swarmBeeDormant(bee, swarmBeeWaiting(parent, bee)) || childRunning || background > 0 {
-		c.After(time.Second)
+		afterNextSecond(c)
 	}
 
 	ui.Column(c.Key("bee-window-root")).Fill().Background(ThemeWindowBg(c)).Clip().Gap(0).Children(func() {

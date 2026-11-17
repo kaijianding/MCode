@@ -516,7 +516,7 @@ func renderToolGroupItem(c *ui.Context, s *chatState, tools []Message, groupID s
 				// running 成立即保证组内至少有一条消息，首条消息 ID 在同一视图内唯一。
 				renderRunningGlyph(c, "tool-group-run-"+tools[0].ID, 12, ThemeSecondaryText(c))
 				// 实时耗时每秒走一格，请求下一秒再重绘一行
-				c.After(time.Second)
+				afterNextSecond(c)
 			}
 			// 摘要已带上“工作中 · / 用时 Xs · ”前缀，耗时不再单独显示一次
 			ui.Text(c, headerText).FontSize(scaledFont(TypeBody)).TextColor(textColor)

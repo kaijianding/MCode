@@ -239,7 +239,7 @@ func renderBackgroundWaitBar(c *ui.Context, s *chatState, key string) ui.Element
 	var elapsed time.Duration
 	if hasStart {
 		elapsed = c.Now().Sub(start)
-		c.After(time.Second)
+		afterNextSecond(c)
 	}
 	// 总数已经写在前面，状态文案不再带「+N」，避免重复计数。
 	text := fmt.Sprintf("等待 %d 个后台任务 · %s", data.total(),
@@ -464,7 +464,7 @@ func renderBackgroundTaskRow(c *ui.Context, s *chatState, key, threadID string, 
 		c.After(DurFast)
 	}
 	if expanded {
-		c.After(time.Second)
+		afterNextSecond(c)
 		requestBackgroundTaskLog(c, s, threadID, m.ID)
 		requestCommandActivity(c, s, threadID, c.Now())
 	}
@@ -600,8 +600,8 @@ func renderBackgroundBeeRow(c *ui.Context, s *chatState, key string, index int, 
 		})
 		if duration := formatSwarmShortDuration(h.StartedAt, nil); duration != "" {
 			// 按秒请求下一帧，让子智能体时长与后台任务一样每秒刷新：
-			// 减少动效时没有扫光也不会停住（做法同 timeline_rows.go 中 toolBackgroundRunDuration 的 c.After(time.Second)）。
-			c.After(time.Second)
+			// 减少动效时没有扫光也不会停住（做法同 timeline_rows.go 中 toolBackgroundRunDuration 的 afterNextSecond(c)）。
+			afterNextSecond(c)
 			ui.Text(c, duration).FontSize(scaledFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).SingleLine()
 		}
 		ui.Icon(c, IconChevronRight()).Size(9, 9).TextColor(ThemeSecondaryText(c))
@@ -614,37 +614,34 @@ func backgroundTasksBeeLabel(name string) string {
 	return "打开子智能体 " + name + " 的浮窗"
 }
 
-// renderShimmerTitle 在标题上扫过一道浅色高光，提示内容仍在运行。running 为假或用户要求减少动效时
-// 直接调用 fn，不注册循环；运行中才由框架逐帧推进这一个元素，不轮询、不重建整条时间线。
-// key 与 bandLabel 由调用方给出：前者保证同页多个微光元素互不冲突，后者供测试定位扫光条。
+// renderShimmerTitle 在运行中的标题上绘制扫光，只重绘装饰层；停止或减少动效时直接显示标题。
 func renderShimmerTitle(c *ui.Context, key, bandLabel string, running bool, fn func() ui.Element) ui.Element {
 	if !running || reduceMotion(c) {
 		return fn()
 	}
 	row := ui.Row(c.Key(key)).Clip()
 	row.Children(func() {
-		title := fn()
-		width := title.LayoutBounds().W
-		if width <= 0 {
-			return
-		}
-		// 一个 motionSweep 周期从左走到右；只在运行中出现。
-		k := motionLoop(c, title, key+"/shimmer-pos", motionSweep, ui.Linear)
-		x := k*(width+2*toolVerbShimmerWidth) - toolVerbShimmerWidth
-		// 三段渐变：中间是扫光，两头透明，扫过时像一道高光从文字上滑过。
+		fn()
 		tint := ThemeAccent(c).Alpha(0.22)
 		ui.Box(c.Key(key + "/shimmer-band")).
 			Label(bandLabel).
 			Absolute().
 			Top(0).
-			Left(x).
-			Width(toolVerbShimmerWidth).
+			Left(0).
+			Right(0).
 			Height(toolChipHeight).
-			LinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-				{Color: tint.Alpha(0), At: 0},
-				{Color: tint, At: 0.5},
-				{Color: tint.Alpha(0), At: 1},
-			}})
+			Draw(func(p *ui.Painter, r ui.Rect) {
+				k := float32(p.Now().UnixNano()%int64(motionSweep)) / float32(motionSweep)
+				x := k*(r.W+2*toolVerbShimmerWidth) - toolVerbShimmerWidth
+				p.Clip(r, 0, func() {
+					p.FillGradient(ui.Rect{X: r.X + x, Y: r.Y, W: toolVerbShimmerWidth, H: toolChipHeight}, ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+						{Color: tint.Alpha(0), At: 0},
+						{Color: tint, At: 0.5},
+						{Color: tint.Alpha(0), At: 1},
+					}}, 0)
+				})
+				p.After(33 * time.Millisecond)
+			})
 	})
 	return row
 }

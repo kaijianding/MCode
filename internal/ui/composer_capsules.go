@@ -250,7 +250,7 @@ func composerBackgroundTasksCapsule(c *ui.Context, s *chatState, threadID string
 		elapsed = now.Sub(start)
 		if c != nil {
 			// 计时每秒刷新一次，与浮层里后台任务行的时长口径一致。
-			c.After(time.Second)
+			afterNextSecond(c)
 		}
 	}
 	return composerCapsule{
