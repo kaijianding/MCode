@@ -104,6 +104,7 @@ const ghPRViewJSON = `{
     {"__typename": "StatusContext", "context": "ci/lint", "state": "PENDING"}
   ],
   "body": "  正文第一行\n正文第二行  ",
+  "isCrossRepository": false,
   "additions": 120,
   "deletions": 8,
   "changedFiles": 5,
@@ -125,6 +126,9 @@ func TestParseGHPRDetail(t *testing.T) {
 	}
 	if detail.Body != "正文第一行\n正文第二行" {
 		t.Errorf("正文 = %q", detail.Body)
+	}
+	if detail.CrossRepo {
+		t.Error("同仓库 PR 的 CrossRepo 应为 false")
 	}
 	if detail.Additions != 120 || detail.Deletions != 8 || detail.ChangedFiles != 5 {
 		t.Errorf("行数 = +%d -%d %d 文件", detail.Additions, detail.Deletions, detail.ChangedFiles)
@@ -317,6 +321,30 @@ func TestParseGHPRListInvalid(t *testing.T) {
 		t.Fatal("非法 JSON 应返回错误")
 	} else if !strings.Contains(err.Error(), "解析 gh pr list 输出失败") {
 		t.Errorf("错误信息 = %q", err.Error())
+	}
+}
+
+// TestParsePRDetailCrossRepo 覆盖 gh 的 isCrossRepository 与 glab 的源/目标项目号比较。
+func TestParsePRDetailCrossRepo(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, input string
+		want        bool
+		parse       func([]byte) (PRDetail, error)
+	}{
+		{"gh 同仓库", `{"isCrossRepository":false}`, false, parseGHPRDetail},
+		{"gh fork", `{"isCrossRepository":true}`, true, parseGHPRDetail},
+		{"gh 缺字段", `{}`, false, parseGHPRDetail},
+		{"glab 同项目", `{"source_project_id":7,"target_project_id":7}`, false, parseGLabMRDetail},
+		{"glab fork", `{"source_project_id":8,"target_project_id":7}`, true, parseGLabMRDetail},
+		{"glab 缺字段", `{}`, false, parseGLabMRDetail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detail, err := tc.parse([]byte(tc.input))
+			if err != nil || detail.CrossRepo != tc.want {
+				t.Fatalf("CrossRepo = %v, err = %v，期望 %v", detail.CrossRepo, err, tc.want)
+			}
+		})
 	}
 }
 

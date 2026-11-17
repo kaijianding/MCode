@@ -59,6 +59,7 @@ type PRComment struct {
 type PRDetail struct {
 	PRSummary
 	Mergeable    string // MERGEABLE / CONFLICTING / UNKNOWN，未知为空
+	CrossRepo    bool   // 源分支来自 fork（跨仓库 PR/MR）
 	Body         string
 	Additions    int
 	Deletions    int
@@ -71,7 +72,7 @@ type PRDetail struct {
 const ghPRListFields = "number,title,state,isDraft,author,headRefName,baseRefName,url,updatedAt,reviewDecision,statusCheckRollup"
 
 // ghPRViewFields 是 gh pr view --json 请求的字段。
-const ghPRViewFields = ghPRListFields + ",body,additions,deletions,changedFiles,comments,mergeable,mergeStateStatus"
+const ghPRViewFields = ghPRListFields + ",body,additions,deletions,changedFiles,comments,mergeable,mergeStateStatus,isCrossRepository"
 
 // PRList 列出仓库当前开放的 PR/MR；limit<=0 时默认 30 条。
 // GitHub 走 gh pr list，GitLab 走 glab mr list -F json（该命令不接受条数参数，结果在这里截断）。
@@ -247,6 +248,7 @@ type ghPR struct {
 	ChangedFiles      int         `json:"changedFiles"`
 	Mergeable         string      `json:"mergeable"`
 	MergeStateStatus  string      `json:"mergeStateStatus"`
+	IsCrossRepository bool        `json:"isCrossRepository"`
 	Comments          []ghComment `json:"comments"`
 }
 
@@ -292,6 +294,7 @@ func parseGHPRDetail(out []byte) (PRDetail, error) {
 	}
 	return PRDetail{
 		Mergeable:    mergeable,
+		CrossRepo:    item.IsCrossRepository,
 		PRSummary:    item.summary(),
 		Body:         strings.TrimSpace(item.Body),
 		Additions:    item.Additions,
@@ -422,21 +425,23 @@ type glabPipeline struct {
 
 // glabMR 是 glab 输出的 MR 主体；列表与详情共用，详情多带 description。
 type glabMR struct {
-	IID            int           `json:"iid"`
-	Number         int           `json:"number"`
-	Title          string        `json:"title"`
-	State          string        `json:"state"`
-	Draft          bool          `json:"draft"`
-	WorkInProgress bool          `json:"work_in_progress"`
-	Author         glabAuthor    `json:"author"`
-	SourceBranch   string        `json:"source_branch"`
-	TargetBranch   string        `json:"target_branch"`
-	WebURL         string        `json:"web_url"`
-	UpdatedAt      string        `json:"updated_at"`
-	Description    string        `json:"description"`
-	HasConflicts   *bool         `json:"has_conflicts"`
-	MergeStatus    string        `json:"merge_status"`
-	HeadPipeline   *glabPipeline `json:"head_pipeline"`
+	IID             int           `json:"iid"`
+	Number          int           `json:"number"`
+	Title           string        `json:"title"`
+	State           string        `json:"state"`
+	Draft           bool          `json:"draft"`
+	WorkInProgress  bool          `json:"work_in_progress"`
+	Author          glabAuthor    `json:"author"`
+	SourceBranch    string        `json:"source_branch"`
+	TargetBranch    string        `json:"target_branch"`
+	WebURL          string        `json:"web_url"`
+	UpdatedAt       string        `json:"updated_at"`
+	Description     string        `json:"description"`
+	SourceProjectID int           `json:"source_project_id"`
+	TargetProjectID int           `json:"target_project_id"`
+	HasConflicts    *bool         `json:"has_conflicts"`
+	MergeStatus     string        `json:"merge_status"`
+	HeadPipeline    *glabPipeline `json:"head_pipeline"`
 }
 
 // summary 把 glab 的 MR 主体折算成摘要；glab 没有评审结论字段，留空。
@@ -507,6 +512,7 @@ func parseGLabMRDetail(out []byte) (PRDetail, error) {
 	}
 	return PRDetail{
 		Mergeable: mergeable,
+		CrossRepo: item.SourceProjectID != 0 && item.TargetProjectID != 0 && item.SourceProjectID != item.TargetProjectID,
 		PRSummary: item.summary(),
 		Body:      strings.TrimSpace(item.Description),
 	}, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -69,6 +70,46 @@ func (c *Client) GitPRSubmitReview(ctx context.Context, threadID string, number 
 		return err
 	}
 	return git.NewForgeClient(nil).SubmitPullRequestReview(callCtx, root, git.DetectForge(remoteURL), number, event, body, comments)
+}
+
+// GitPRConflicts 计算 PR/MR head 与目标分支之间的冲突文件；无冲突时返回空切片。
+func (c *Client) GitPRConflicts(ctx context.Context, threadID string, number int, base string) ([]string, error) {
+	if number <= 0 {
+		return nil, fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	runner, root, err := c.gitStashTarget(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	remoteURL, err := runner.RemoteURL(callCtx, root)
+	if err != nil {
+		return nil, err
+	}
+	return runner.PRConflicts(callCtx, root, git.DetectForge(remoteURL), number, base)
+}
+
+// GitPRResolveWorktree 为 PR/MR 创建冲突解决 worktree，返回 worktree 路径。
+func (c *Client) GitPRResolveWorktree(ctx context.Context, threadID string, number int, head, base string) (string, error) {
+	if number <= 0 {
+		return "", fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	dataDir := c.effectiveDataDir()
+	if dataDir == "" {
+		return "", errors.New("数据目录未初始化，无法创建 Worktree")
+	}
+	runner, root, err := c.gitStashTarget(ctx, threadID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dataDir, "worktrees", filepath.Base(root)+"-pr-"+strconv.Itoa(number))
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := runner.PRResolveWorktree(callCtx, root, path, number, head, base); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // GitPRDetail 读取单条 PR/MR 的详情。
