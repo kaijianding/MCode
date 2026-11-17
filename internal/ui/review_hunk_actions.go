@@ -64,7 +64,10 @@ func reviewContentHash(text string) string {
 
 func configureReviewHunkActions(c *ui.Context, s *chatState, dp *diffPanelState, tid string, snapshot ReviewSnapshot, file ReviewFile, content ReviewFileContent, view *reviewDiffView) {
 	client, ok := s.client.(reviewHunkReverter)
-	if !ok || snapshot.Running || file.Binary || file.OrigPath != "" || file.Status == "A" || file.Status == "D" || file.Status == "R" || content.Binary || content.TooLarge || content.Missing {
+	diffPanelMu.Lock()
+	isPR := dp.scope == "pr" || snapshot.Scope == "pr"
+	diffPanelMu.Unlock()
+	if !ok || isPR || snapshot.Running || file.Binary || file.OrigPath != "" || file.Status == "A" || file.Status == "D" || file.Status == "R" || content.Binary || content.TooLarge || content.Missing {
 		view.state.HunkActions = false
 		view.state.RenderHunkActions = nil
 		return

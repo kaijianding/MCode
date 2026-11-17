@@ -13,7 +13,10 @@ const reviewDiffCacheLimit = 8
 const reviewWideWidth float32 = 640
 
 // 键含工作区和两端版本；不同轮次、作用域不能误用相同路径的正文。
-type reviewDiffKey struct{ workspace, threadID, scope, turnID, base, head, path, surface string }
+type reviewDiffKey struct {
+	workspace, threadID, scope, turnID, base, head, path, surface string
+	prNumber                                                      int
+}
 type reviewContentEntry struct {
 	loading bool
 	err     string
@@ -108,7 +111,7 @@ func renderReviewDiffView(c *ui.Context, key string, view *reviewDiffView, split
 }
 
 func reviewKey(s *chatState, threadID string, snapshot ReviewSnapshot, path string) reviewDiffKey {
-	return reviewDiffKey{workspace: reviewWorkspace(s, threadID), threadID: threadID, scope: reviewScope(snapshot.Scope), turnID: snapshot.TurnID, base: snapshot.BaseRevision, head: snapshot.HeadRevision, path: path}
+	return reviewDiffKey{workspace: reviewWorkspace(s, threadID), threadID: threadID, scope: reviewScope(snapshot.Scope), turnID: snapshot.TurnID, base: snapshot.BaseRevision, head: snapshot.HeadRevision, path: path, prNumber: snapshot.Number}
 }
 
 // 异步评论固定来源会话，不能从当前选中的另一个会话推导工作区。
@@ -187,7 +190,7 @@ func reviewContentFor(s *chatState, dp *diffPanelState, key reviewDiffKey) revie
 		delete(dp.contents, dp.contentOrder[0])
 		dp.contentOrder = dp.contentOrder[1:]
 	}
-	gen := dp.requestGen
+	gen, number := dp.requestGen, dp.prNumber
 	diffPanelMu.Unlock()
 	client, ok := s.client.(reviewClient)
 	if !ok {
@@ -196,7 +199,7 @@ func reviewContentFor(s *chatState, dp *diffPanelState, key reviewDiffKey) revie
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		snapshot, err := client.ReviewGet(ctx, key.threadID, key.scope, key.turnID, key.path)
+		snapshot, err := getReview(ctx, client, key.threadID, key.scope, key.turnID, key.prNumber, key.path)
 		result := reviewContentEntry{}
 		switch {
 		case err != nil:
@@ -212,7 +215,7 @@ func reviewContentFor(s *chatState, dp *diffPanelState, key reviewDiffKey) revie
 			result.content = &content
 		}
 		diffPanelMu.Lock()
-		if dp.requestGen == gen && dp.contents[key] == entry {
+		if dp.requestGen == gen && dp.prNumber == number && dp.contents[key] == entry {
 			*entry = result
 		}
 		diffPanelMu.Unlock()

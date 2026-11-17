@@ -2,6 +2,7 @@ package mcodeui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -9,7 +10,7 @@ import (
 
 func reviewScope(scope string) string {
 	switch scope {
-	case "session", "uncommitted":
+	case "session", "uncommitted", "pr":
 		return scope
 	default:
 		return "turn"
@@ -18,6 +19,8 @@ func reviewScope(scope string) string {
 
 func reviewScopeTitle(scope string) string {
 	switch reviewScope(scope) {
+	case "pr":
+		return "PR"
 	case "session":
 		return "整个会话"
 	case "uncommitted":
@@ -30,7 +33,7 @@ func reviewScopeTitle(scope string) string {
 func (s *chatState) loadReview(dp *diffPanelState, client reviewClient, threadID, turnID string) {
 	loadReviewPreference(s, dp, threadID)
 	diffPanelMu.Lock()
-	scope := reviewScope(dp.scope)
+	scope, number := reviewScope(dp.scope), dp.prNumber
 	if scope != "turn" {
 		turnID = ""
 	}
@@ -57,9 +60,9 @@ func (s *chatState) loadReview(dp *diffPanelState, client reviewClient, threadID
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		snapshot, err := client.ReviewGet(ctx, threadID, scope, turnID, "")
+		snapshot, err := getReview(ctx, client, threadID, scope, turnID, number, "")
 		diffPanelMu.Lock()
-		if dp.requestGen != gen || dp.threadID != threadID || reviewScope(dp.scope) != scope || dp.turnID != turnID {
+		if dp.requestGen != gen || dp.threadID != threadID || reviewScope(dp.scope) != scope || dp.turnID != turnID || dp.prNumber != number {
 			diffPanelMu.Unlock()
 			return
 		}
@@ -68,6 +71,9 @@ func (s *chatState) loadReview(dp *diffPanelState, client reviewClient, threadID
 			dp.err = err.Error()
 		} else {
 			snapshot.Scope = scope
+			if scope == "pr" {
+				snapshot.Number = number
+			}
 			if scope == "turn" && snapshot.TurnID == "" {
 				snapshot.TurnID = turnID
 			}
@@ -104,9 +110,15 @@ func (s *chatState) selectReviewScope(dp *diffPanelState, scope string) {
 
 func renderReviewScope(c *ui.Context, s *chatState, dp *diffPanelState) {
 	diffPanelMu.Lock()
-	scope, open := reviewScope(dp.scope), dp.scopeMenuOpen
+	scope, open, number := reviewScope(dp.scope), dp.scopeMenuOpen, dp.prNumber
 	diffPanelMu.Unlock()
-	trigger := ui.ButtonBase(c.Key("review-scope-trigger")).Label(reviewScopeTitle(scope)).Padding(Space1, Space3).Radius(RadiusSM)
+	title := func(value string) string {
+		if value == "pr" {
+			return fmt.Sprintf("PR #%d", number)
+		}
+		return reviewScopeTitle(value)
+	}
+	trigger := ui.ButtonBase(c.Key("review-scope-trigger")).Label(title(scope)).Padding(Space1, Space3).Radius(RadiusSM)
 	triggerScale := motionPressScale(c, trigger, "button-press-scale", trigger.Pressed())
 	trigger.Scale(triggerScale, triggerScale)
 	if trigger.Clicked() {
@@ -116,7 +128,7 @@ func renderReviewScope(c *ui.Context, s *chatState, dp *diffPanelState) {
 		diffPanelMu.Unlock()
 	}
 	trigger.Children(func() {
-		ui.Text(c, reviewScopeTitle(scope)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
+		ui.Text(c, title(scope)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
 	})
 	bg := ThemeSurfacePopover(c)
 	native := flyoutHostWindow(c.Services()) != nil
@@ -131,9 +143,13 @@ func renderReviewScope(c *ui.Context, s *chatState, dp *diffPanelState) {
 			card = popoverCard(c, card)
 		}
 		card.Transition(motionPopover(c, Space2)).Padding(Space1).Children(func() {
-			for _, value := range []string{"turn", "session", "uncommitted"} {
+			values := []string{"turn", "session", "uncommitted"}
+			if _, ok := s.client.(reviewPRClient); ok && number > 0 {
+				values = append(values, "pr")
+			}
+			for _, value := range values {
 				value := value
-				btn := ui.ButtonBase(c.Key("review-scope-"+value)).Label(reviewScopeTitle(value)).FillWidth().Padding(Space2, Space3).Radius(RadiusXS)
+				btn := ui.ButtonBase(c.Key("review-scope-"+value)).Label(title(value)).FillWidth().Padding(Space2, Space3).Radius(RadiusXS)
 				if value == scope {
 					btn.Background(ThemeSelected(c))
 				}
@@ -143,7 +159,7 @@ func renderReviewScope(c *ui.Context, s *chatState, dp *diffPanelState) {
 					host.Invalidate()
 				}
 				btn.Children(func() {
-					ui.Text(c, reviewScopeTitle(value)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
+					ui.Text(c, title(value)).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
 				})
 			}
 		})

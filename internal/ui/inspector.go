@@ -127,6 +127,16 @@ func inspectorSelect(s *chatState, id string, toggle bool) bool {
 	}
 	open := st.Open
 	s.mu.Unlock()
+	if open && id == sidePaneDiffID && (!wasOpen || wasActive != id) {
+		diffPanelMu.Lock()
+		if dp := st.Review; dp.scope == "pr" {
+			dp.scope, dp.threadID = "turn", ""
+			dp.requestGen++
+			dp.snapshot = ReviewSnapshot{}
+			dp.selectedPath, dp.pendingPath = "", ""
+		}
+		diffPanelMu.Unlock()
+	}
 	if wasBrowser && (!open || id != sidePanePreviewID) {
 		hidePreviewState(s, st.Browser)
 		browserServerDiscoveryStop(s)

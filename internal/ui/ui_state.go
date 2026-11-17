@@ -205,7 +205,7 @@ func loadReviewPreference(s *chatState, dp *diffPanelState, tid string) {
 	pref := normalizeReviewPreference(file.ReviewSessions[tid])
 	diffPanelMu.Lock()
 	dp.readKeys = pref.ReadKeys
-	if dp.selectedPath == "" && dp.pendingPath == "" {
+	if dp.scope != "pr" && dp.selectedPath == "" && dp.pendingPath == "" {
 		dp.selectedPath = pref.SelectedPath
 	}
 	diffPanelMu.Unlock()
@@ -216,6 +216,10 @@ func rememberReviewPreference(s *chatState, dp *diffPanelState, tid string) {
 		return
 	}
 	diffPanelMu.Lock()
+	if dp.scope == "pr" {
+		diffPanelMu.Unlock()
+		return
+	}
 	pref := normalizeReviewPreference(reviewPreference{SelectedPath: dp.selectedPath, ReadKeys: dp.readKeys})
 	diffPanelMu.Unlock()
 	lastModelSelectionMu.Lock()

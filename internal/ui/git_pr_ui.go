@@ -671,10 +671,12 @@ func renderGitPRDetail(c *ui.Context, s *chatState, detail git.PRDetail, content
 							if gitPRMergeBlocked(detail) {
 								renderGitPRTag(c, "modal-git-pr-detail-tag-conflict", "冲突")
 							}
-							ui.Text(c, gitPRChangeStats(detail.Additions, detail.Deletions, detail.ChangedFiles)).
-								FontSize(uiFont(TypeCaption)).
-								TextColor(ThemeSecondaryText(c)).
-								SingleLine()
+							stats := gitPRChangeStats(detail.Additions, detail.Deletions, detail.ChangedFiles)
+							if _, ok := s.client.(reviewPRClient); ok && detail.ChangedFiles > 0 {
+								Button(c, ButtonOpts{Key: "modal-git-pr-open-diff", Text: stats, Variant: ButtonGhost, Size: ControlXS, OnClick: func() { openReviewPR(s, detail.Number) }})
+							} else {
+								ui.Text(c, stats).FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).SingleLine()
+							}
 						})
 
 					if len(detail.Checks) > 0 {
@@ -720,6 +722,25 @@ func renderGitPRDetail(c *ui.Context, s *chatState, detail git.PRDetail, content
 					}
 				})
 		})
+}
+
+func openReviewPR(s *chatState, number int) {
+	if _, ok := s.client.(reviewPRClient); !ok {
+		return
+	}
+	s.closeGitPRDialog()
+	inspectorSelect(s, sidePaneDiffID, false)
+	dp := getDiffPanelState(s)
+	if dp == nil {
+		return
+	}
+	tid := s.gitPRThreadID()
+	inspectorFollowPause(s, tid)
+	diffPanelMu.Lock()
+	dp.scope, dp.prNumber = "pr", number
+	dp.selectedPath, dp.pendingPath = "", ""
+	diffPanelMu.Unlock()
+	s.loadDiff(tid, "")
 }
 
 func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {

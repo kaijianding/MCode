@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"mcode/internal/git"
 )
 
 const reviewReadMarkerLimit = 1024
@@ -56,7 +57,7 @@ func reviewSelectedText(content ReviewFileContent, lines editor.DiffLineRange) (
 }
 
 func reviewSameFile(a, b reviewDiffKey) bool {
-	return a.workspace == b.workspace && a.threadID == b.threadID && a.scope == b.scope && a.turnID == b.turnID && a.path == b.path
+	return a.workspace == b.workspace && a.threadID == b.threadID && a.scope == b.scope && a.prNumber == b.prNumber && a.turnID == b.turnID && a.path == b.path
 }
 
 func reviewCommentMatches(comment reviewComment, content ReviewFileContent) bool {
@@ -261,7 +262,7 @@ func reviewCommentsAddToConversation(s *chatState, dp *diffPanelState, threadID 
 	diffPanelMu.Lock()
 	var comments []reviewComment
 	for _, comment := range dp.comments {
-		if !comment.added && !comment.stale && comment.attachmentID == "" {
+		if comment.key.scope != "pr" && !comment.added && !comment.stale && comment.attachmentID == "" {
 			comments = append(comments, *comment)
 		}
 	}
@@ -291,7 +292,7 @@ func reviewCommentsAddToConversation(s *chatState, dp *diffPanelState, threadID 
 			snapshot, found := checked[key]
 			if !found {
 				var err error
-				snapshot, err = client.ReviewGet(ctx, threadID, key.scope, key.turnID, key.path)
+				snapshot, err = getReview(ctx, client, threadID, key.scope, key.turnID, key.prNumber, key.path)
 				if err != nil {
 					s.setAttachmentNotice("无法读取评论对应的文件: " + err.Error())
 					return
@@ -360,11 +361,18 @@ func reviewCommentOriginCurrent(s *chatState, key reviewDiffKey) bool {
 }
 
 func renderReviewCommentsAction(c *ui.Context, s *chatState, dp *diffPanelState, tid string) {
+	diffPanelMu.Lock()
+	isPR := reviewScope(dp.scope) == "pr"
+	diffPanelMu.Unlock()
+	if isPR {
+		renderReviewPRAction(c, s, dp, tid)
+		return
+	}
 	reconcileReviewCommentAttachments(s, dp, tid)
 	diffPanelMu.Lock()
 	count, queueable, busy := 0, 0, dp.commentBatch
 	for _, comment := range dp.comments {
-		if !comment.added && !comment.stale {
+		if comment.key.scope != "pr" && !comment.added && !comment.stale {
 			count++
 			if comment.attachmentID == "" {
 				queueable++
@@ -384,6 +392,97 @@ func renderReviewCommentsAction(c *ui.Context, s *chatState, dp *diffPanelState,
 	button.Children(func() { ui.Text(c, fmt.Sprintf("添加到对话 %d", count)).FontSize(uiFont(TypeFootnote)) })
 }
 
+func reviewCommentsToPR(comments []reviewComment) []git.PRReviewComment {
+	result := make([]git.PRReviewComment, 0, len(comments))
+	for _, comment := range comments {
+		side := "RIGHT"
+		if comment.lines.Side == editor.DiffOld {
+			side = "LEFT"
+		}
+		result = append(result, git.PRReviewComment{Path: comment.key.path, Line: comment.lines.End + 1, Side: side, Body: comment.body})
+	}
+	return result
+}
+
+// 调用方持有 diffPanelMu；草稿按 PR 和工作区隔离，不能混入本地审阅评论。
+func reviewPRComments(dp *diffPanelState, tid, workspace string) []reviewComment {
+	var comments []reviewComment
+	for _, comment := range dp.comments {
+		if comment.key.scope == "pr" && comment.key.prNumber == dp.prNumber && comment.key.threadID == tid && comment.key.workspace == workspace && !comment.stale && !comment.added {
+			comments = append(comments, *comment)
+		}
+	}
+	return comments
+}
+
+func submitReviewPR(s *chatState, dp *diffPanelState, tid, event string) bool {
+	client, ok := s.client.(reviewPRClient)
+	if !ok || tid == "" {
+		return false
+	}
+	workspace := reviewWorkspace(s, tid)
+	diffPanelMu.Lock()
+	comments := reviewPRComments(dp, tid, workspace)
+	if dp.scope != "pr" || dp.prNumber <= 0 || dp.prReviewEvent != "" || len(comments) == 0 {
+		diffPanelMu.Unlock()
+		return false
+	}
+	number := dp.prNumber
+	dp.prReviewNumber, dp.prReviewEvent, dp.prReviewErr = number, event, ""
+	diffPanelMu.Unlock()
+	s.invalidate()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := client.GitPRSubmitReview(ctx, tid, number, event, "", reviewCommentsToPR(comments))
+		diffPanelMu.Lock()
+		dp.prReviewEvent = ""
+		if err != nil {
+			dp.prReviewErr = err.Error()
+		} else {
+			// 仅删除本批次；提交期间新增或其他 PR 的草稿必须保留。
+			ids := make(map[uint64]bool, len(comments))
+			for _, comment := range comments {
+				ids[comment.id] = true
+			}
+			dp.comments = slices.DeleteFunc(dp.comments, func(comment *reviewComment) bool { return ids[comment.id] })
+		}
+		diffPanelMu.Unlock()
+		s.invalidate()
+	}()
+	return true
+}
+
+func renderReviewPRAction(c *ui.Context, s *chatState, dp *diffPanelState, tid string) {
+	if _, ok := s.client.(reviewPRClient); !ok {
+		return
+	}
+	workspace := reviewWorkspace(s, tid)
+	diffPanelMu.Lock()
+	count := len(reviewPRComments(dp, tid, workspace))
+	busy, errText := dp.prReviewEvent, dp.prReviewErr
+	current := dp.prReviewNumber == dp.prNumber
+	if !current {
+		errText = ""
+	}
+	diffPanelMu.Unlock()
+	if count == 0 {
+		return
+	}
+	ui.Row(c.Key("review-pr-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
+		for _, action := range []struct{ event, title string }{{"comment", "评论"}, {"approve", "批准"}, {"request-changes", "要求修改"}} {
+			variant := ButtonSecondary
+			if action.event == "comment" {
+				variant = ButtonPrimary
+			}
+			Button(c, ButtonOpts{Key: "review-pr-" + action.event, Text: action.title, Variant: variant, Size: ControlSM, Loading: current && busy == action.event, Disabled: busy != "" && (!current || busy != action.event), OnClick: func() { submitReviewPR(s, dp, tid, action.event) }})
+		}
+		if errText != "" {
+			ui.Text(c, errText).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c))
+		}
+	})
+}
+
 func reviewReadKey(key reviewDiffKey, file ReviewFile) string {
 	fingerprint := file.NewHash
 	if fingerprint == "" {
@@ -392,7 +491,11 @@ func reviewReadKey(key reviewDiffKey, file ReviewFile) string {
 			fingerprint = key.base + "\x00" + key.head
 		}
 	}
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%q", []string{key.workspace, key.scope, key.path, fingerprint}))))
+	parts := []string{key.workspace, key.scope, key.path, fingerprint}
+	if key.scope == "pr" {
+		parts = append(parts, fmt.Sprint(key.prNumber))
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%q", parts))))
 }
 
 func toggleReviewRead(dp *diffPanelState, key string) {

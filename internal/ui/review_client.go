@@ -1,6 +1,10 @@
 package mcodeui
 
-import "context"
+import (
+	"context"
+
+	"mcode/internal/git"
+)
 
 // ReviewSnapshot 包含固定版本的文件列表，以及按需获取的完整文本。
 type ReviewSnapshot struct {
@@ -45,6 +49,21 @@ type ReviewFileContent struct {
 // reviewClient 是可选能力，旧 Client 实现不必提供审阅接口。
 type reviewClient interface {
 	ReviewGet(ctx context.Context, threadID, scope, turnID, path string) (ReviewSnapshot, error)
+}
+
+type reviewPRClient interface {
+	ReviewGetPR(ctx context.Context, threadID string, number int, path string) (ReviewSnapshot, error)
+	GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error
+}
+
+func getReview(ctx context.Context, client reviewClient, threadID, scope, turnID string, number int, path string) (ReviewSnapshot, error) {
+	if scope == "pr" {
+		if pr, ok := client.(reviewPRClient); ok {
+			return pr.ReviewGetPR(ctx, threadID, number, path)
+		}
+		return ReviewSnapshot{Scope: scope, Number: number, Unavailable: "PR 审阅不可用"}, nil
+	}
+	return client.ReviewGet(ctx, threadID, scope, turnID, path)
 }
 
 type ReviewRevertHunkParams struct {

@@ -42,6 +42,7 @@ var (
 type diffPanelState struct {
 	// 审阅正文与编辑器均有上限；编辑器只在 UI 线程创建和使用。
 	scope         string
+	prNumber      int
 	scopeMenuOpen bool
 	snapshot      ReviewSnapshot
 	selectedPath  string
@@ -85,6 +86,10 @@ type diffPanelState struct {
 	// 首次从「没有 worktree」变成「有 worktree」时只重取一次改动，
 	// 之后只认非空路径之间的切换，识别短暂返回空串不触发重取。
 	worktreeResolved bool
+
+	prReviewEvent  string
+	prReviewNumber int
+	prReviewErr    string
 }
 
 func getDiffPanelState(s *chatState) *diffPanelState {
