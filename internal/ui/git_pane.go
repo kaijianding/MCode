@@ -669,6 +669,21 @@ func renderGitPane(c *ui.Context, s *chatState) {
 	}
 }
 
+func renderGitSyncSpin(c *ui.Context) {
+	if reduceMotion(c) {
+		ui.Icon(c, IconRefreshCw()).Size(IconSM, IconSM)
+		return
+	}
+	color := c.Theme().Text
+	ui.Box(c).Size(IconSM, IconSM).Draw(func(p *ui.Painter, r ui.Rect) {
+		angle := float32(p.Now().UnixNano()%int64(4*DurBase)) / float32(4*DurBase) * 360
+		p.Transform(ui.Rotation(angle), r.X+r.W/2, r.Y+r.H/2, func() {
+			p.Icon(IconRefreshCw(), r, color)
+		})
+		p.AnimationFrameRate(30)
+	})
+}
+
 func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state GitState, width float32) {
 	ui.Row(c.Key("git-pane-toolbar")).FillWidth().Height(diffHeaderHeight).Shrink(0).Padding(0, Space3).Gap(Space2).AlignItems(ui.Center).Children(func() {
 		branch := state.Branch
@@ -768,8 +783,7 @@ func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state G
 			case stop:
 				ui.Icon(c, IconSquare()).Size(IconSM, IconSM)
 			case syncing:
-				icon := ui.Icon(c, IconRefreshCw()).Size(IconSM, IconSM)
-				icon.Rotate(motionLoop(c, icon, "git-sync-spin", 4*DurBase, ui.Linear) * 360)
+				renderGitSyncSpin(c)
 			default:
 				ui.Icon(c, IconRefreshCw()).Size(IconSM, IconSM)
 			}

@@ -12,16 +12,26 @@ func renderSkeletonRows(c *ui.Context, key string, rows int, rowHeight, gap floa
 		for i := 0; i < rows; i++ {
 			line := ui.Box(c.Key(key + "-" + strconv.Itoa(i))).
 				WidthPercent(widths[i%len(widths)]).Height(rowHeight).
-				Radius(timelineSkeletonRadius).Background(ThemeHover(c).Alpha(timelineSkeletonFillAlpha))
-			if reduceMotion(c) {
-				line.Opacity(1)
-				continue
-			}
-			line.Opacity(line.Keyframes(key+"-breath", []ui.Keyframe{
-				{At: 0, Value: 0.55, Ease: motionEaseStandard},
-				{At: motionSweep, Value: 1, Ease: motionEaseStandard},
-			}, ui.KeyframeOptions{Repeat: ui.RepeatForever, Alternate: true}))
+				Radius(timelineSkeletonRadius)
+			drawSkeletonLine(c, line)
 		}
+	})
+}
+
+func drawSkeletonLine(c *ui.Context, line ui.Element) {
+	color := ThemeHover(c).Alpha(timelineSkeletonFillAlpha)
+	reduced := reduceMotion(c)
+	line.Draw(func(p *ui.Painter, r ui.Rect) {
+		alpha := float32(1)
+		if !reduced {
+			phase := float32(p.Now().UnixNano()%int64(2*motionSweep)) / float32(motionSweep)
+			if phase > 1 {
+				phase = 2 - phase
+			}
+			alpha = 0.55 + 0.45*motionEaseStandard(phase)
+			p.AnimationFrameRate(30)
+		}
+		p.Fill(r, color.Alpha(alpha), timelineSkeletonRadius)
 	})
 }
 
@@ -58,19 +68,8 @@ func renderTimelineSkeleton(c *ui.Context) {
 					WidthPercent(row.width).
 					Height(row.height).
 					Radius(timelineSkeletonRadius).
-					Background(ThemeHover(c).Alpha(timelineSkeletonFillAlpha)).
 					AlignSelf(row.align)
-				// 透明度在 0.55 与 1 之间来回呼吸：Alternate 让每遍反向播放。
-				// 减少动效时不注册循环关键帧，直接停在 35% 填充（透明度 1）。
-				if reduceMotion(c) {
-					line.Opacity(1)
-					continue
-				}
-				breath := line.Keyframes("timeline-skeleton-breath", []ui.Keyframe{
-					{At: 0, Value: 0.55, Ease: motionEaseStandard},
-					{At: motionSweep, Value: 1, Ease: motionEaseStandard},
-				}, ui.KeyframeOptions{Repeat: ui.RepeatForever, Alternate: true})
-				line.Opacity(breath)
+				drawSkeletonLine(c, line)
 			}
 		})
 }
