@@ -73,6 +73,16 @@ func (s *remoteGitService) GitPRDetail(ctx context.Context, threadID string, num
 	return s.client.GitPRDetail(ctx, threadID, number)
 }
 
+// GitPRMerge 合入指定 PR/MR。
+func (s *remoteGitService) GitPRMerge(ctx context.Context, threadID string, number int, method string) error {
+	return s.client.GitPRMerge(ctx, threadID, number, method)
+}
+
+// GitPRReview 提交指定 PR/MR 的审查。
+func (s *remoteGitService) GitPRReview(ctx context.Context, threadID string, number int, event, body string) error {
+	return s.client.GitPRReview(ctx, threadID, number, event, body)
+}
+
 // GitPush 推送会话所在仓库的当前分支到远程。
 func (s *remoteGitService) GitPush(ctx context.Context, threadID string) error {
 	return s.client.GitPush(ctx, threadID)

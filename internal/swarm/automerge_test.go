@@ -288,6 +288,9 @@ func TestPipeline_AutoPushPushesAndOpensThenMerges(t *testing.T) {
 	if len(calls[1]) < 4 || calls[1][3] != prURL {
 		t.Errorf("merge 应使用 create 返回的 URL，实际 %v", calls[1])
 	}
+	if !reflect.DeepEqual(calls[1][4:], []string{"--squash"}) {
+		t.Errorf("automerge 合并参数应保持 --squash 且不删除分支，实际 %v", calls[1])
+	}
 	if !anyContains(notified, prURL) {
 		t.Errorf("通知应包含 PR URL，实际 %v", notified)
 	}

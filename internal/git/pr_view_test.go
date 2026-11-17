@@ -319,3 +319,29 @@ func TestParseGHPRListInvalid(t *testing.T) {
 		t.Errorf("错误信息 = %q", err.Error())
 	}
 }
+
+func TestParsePRDetailMergeable(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		parse             func([]byte) (PRDetail, error)
+	}{
+		{"gh mergeable", `{"mergeable":"mergeable"}`, "MERGEABLE", parseGHPRDetail},
+		{"gh conflicting", `{"mergeable":"CONFLICTING"}`, "CONFLICTING", parseGHPRDetail},
+		{"gh dirty", `{"mergeable":"MERGEABLE","mergeStateStatus":"DIRTY"}`, "CONFLICTING", parseGHPRDetail},
+		{"gh unknown", `{"mergeable":"UNKNOWN"}`, "UNKNOWN", parseGHPRDetail},
+		{"gh absent", `{}`, "", parseGHPRDetail},
+		{"glab mergeable", `{"has_conflicts":false}`, "MERGEABLE", parseGLabMRDetail},
+		{"glab conflicting", `{"has_conflicts":true,"merge_status":"can_be_merged"}`, "CONFLICTING", parseGLabMRDetail},
+		{"glab status mergeable", `{"merge_status":"can_be_merged"}`, "MERGEABLE", parseGLabMRDetail},
+		{"glab status conflicting", `{"merge_status":"cannot_be_merged"}`, "CONFLICTING", parseGLabMRDetail},
+		{"glab checking", `{"has_conflicts":false,"merge_status":"checking"}`, "UNKNOWN", parseGLabMRDetail},
+		{"glab absent", `{}`, "", parseGLabMRDetail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detail, err := tc.parse([]byte(tc.input))
+			if err != nil || detail.Mergeable != tc.want {
+				t.Fatalf("Mergeable = %q, err = %v，期望 %q", detail.Mergeable, err, tc.want)
+			}
+		})
+	}
+}

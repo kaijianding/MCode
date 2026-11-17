@@ -58,6 +58,7 @@ type PRComment struct {
 // PRDetail 是 PR/MR 详情：摘要之外还有正文、增删行数与检查、评论。
 type PRDetail struct {
 	PRSummary
+	Mergeable    string // MERGEABLE / CONFLICTING / UNKNOWN，未知为空
 	Body         string
 	Additions    int
 	Deletions    int
@@ -70,7 +71,7 @@ type PRDetail struct {
 const ghPRListFields = "number,title,state,isDraft,author,headRefName,baseRefName,url,updatedAt,reviewDecision,statusCheckRollup"
 
 // ghPRViewFields 是 gh pr view --json 请求的字段。
-const ghPRViewFields = ghPRListFields + ",body,additions,deletions,changedFiles,comments"
+const ghPRViewFields = ghPRListFields + ",body,additions,deletions,changedFiles,comments,mergeable,mergeStateStatus"
 
 // PRList 列出仓库当前开放的 PR/MR；limit<=0 时默认 30 条。
 // GitHub 走 gh pr list，GitLab 走 glab mr list -F json（该命令不接受条数参数，结果在这里截断）。
@@ -244,6 +245,8 @@ type ghPR struct {
 	Additions         int         `json:"additions"`
 	Deletions         int         `json:"deletions"`
 	ChangedFiles      int         `json:"changedFiles"`
+	Mergeable         string      `json:"mergeable"`
+	MergeStateStatus  string      `json:"mergeStateStatus"`
 	Comments          []ghComment `json:"comments"`
 }
 
@@ -283,7 +286,12 @@ func parseGHPRDetail(out []byte) (PRDetail, error) {
 	if err := json.Unmarshal(out, &item); err != nil {
 		return PRDetail{}, fmt.Errorf("解析 gh pr view 输出失败: %w", err)
 	}
+	mergeable := strings.ToUpper(item.Mergeable)
+	if strings.EqualFold(item.MergeStateStatus, "DIRTY") {
+		mergeable = "CONFLICTING"
+	}
 	return PRDetail{
+		Mergeable:    mergeable,
 		PRSummary:    item.summary(),
 		Body:         strings.TrimSpace(item.Body),
 		Additions:    item.Additions,
@@ -426,6 +434,8 @@ type glabMR struct {
 	WebURL         string        `json:"web_url"`
 	UpdatedAt      string        `json:"updated_at"`
 	Description    string        `json:"description"`
+	HasConflicts   *bool         `json:"has_conflicts"`
+	MergeStatus    string        `json:"merge_status"`
 	HeadPipeline   *glabPipeline `json:"head_pipeline"`
 }
 
@@ -478,7 +488,25 @@ func parseGLabMRDetail(out []byte) (PRDetail, error) {
 	if err := json.Unmarshal(out, &item); err != nil {
 		return PRDetail{}, fmt.Errorf("解析 glab mr view 输出失败: %w", err)
 	}
+	mergeable := ""
+	switch strings.ToLower(item.MergeStatus) {
+	case "can_be_merged":
+		mergeable = "MERGEABLE"
+	case "cannot_be_merged":
+		mergeable = "CONFLICTING"
+	case "":
+	default:
+		mergeable = "UNKNOWN"
+	}
+	if item.HasConflicts != nil {
+		if *item.HasConflicts {
+			mergeable = "CONFLICTING"
+		} else if mergeable == "" {
+			mergeable = "MERGEABLE"
+		}
+	}
 	return PRDetail{
+		Mergeable: mergeable,
 		PRSummary: item.summary(),
 		Body:      strings.TrimSpace(item.Description),
 	}, nil

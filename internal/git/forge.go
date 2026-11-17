@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"mcode/internal/procattr"
@@ -165,19 +166,37 @@ func (f *ForgeClient) CreatePullRequest(ctx context.Context, dir string, forge F
 	}
 }
 
-// MergePullRequest 对已创建的 PR/MR 执行 squash 合入。
-// GitHub 使用 gh pr merge --squash，GitLab 使用 glab mr merge --yes --squash --remove-source-branch。
+// MergePullRequest 按 squash / merge / rebase 合入 PR/MR；空 method 默认 squash。
+// GitHub 仅在显式指定 method 时删除分支；automerge 传空值并自行管理分支。
 // 未知平台返回 ErrForgeUnsupported。
-func (f *ForgeClient) MergePullRequest(ctx context.Context, dir string, forge Forge, ref string) error {
+func (f *ForgeClient) MergePullRequest(ctx context.Context, dir string, forge Forge, ref, method string) error {
+	deleteBranch := method != ""
+	if method == "" {
+		method = "squash"
+	}
+	switch method {
+	case "squash", "merge", "rebase":
+	default:
+		return fmt.Errorf("无效的合并方式: %s", method)
+	}
 	switch forge {
 	case ForgeGitHub:
-		out, err := f.exec(ctx, dir, "gh", "pr", "merge", ref, "--squash")
+		args := []string{"pr", "merge", ref, "--" + method}
+		if deleteBranch {
+			args = append(args, "--delete-branch")
+		}
+		out, err := f.exec(ctx, dir, "gh", args...)
 		if err != nil {
 			return commandError("gh", "pr merge", out, err)
 		}
 		return nil
 	case ForgeGitLab:
-		out, err := f.exec(ctx, dir, "glab", "mr", "merge", ref, "--yes", "--squash", "--remove-source-branch")
+		args := []string{"mr", "merge", ref, "--yes"}
+		if method != "merge" {
+			args = append(args, "--"+method)
+		}
+		args = append(args, "--remove-source-branch")
+		out, err := f.exec(ctx, dir, "glab", args...)
 		if err != nil {
 			return commandError("glab", "mr merge", out, err)
 		}
@@ -185,6 +204,50 @@ func (f *ForgeClient) MergePullRequest(ctx context.Context, dir string, forge Fo
 	default:
 		return ErrForgeUnsupported
 	}
+}
+
+// ReviewPullRequest 提交 approve / request-changes / comment 审查。
+// GitLab 的请求修改先发送评论，再尝试撤销批准；撤销失败不影响评论结果。
+func (f *ForgeClient) ReviewPullRequest(ctx context.Context, dir string, forge Forge, number int, event, body string) error {
+	if forge != ForgeGitHub && forge != ForgeGitLab {
+		return ErrForgeUnsupported
+	}
+	if number <= 0 {
+		return fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	switch event {
+	case "approve":
+	case "request-changes", "comment":
+		if strings.TrimSpace(body) == "" {
+			return errors.New("请求修改或评论时正文不能为空")
+		}
+	default:
+		return fmt.Errorf("无效的审查事件: %s", event)
+	}
+	ref := strconv.Itoa(number)
+	if forge == ForgeGitHub {
+		args := []string{"pr", "review", ref, "--" + event}
+		if body != "" {
+			args = append(args, "-b", body)
+		}
+		out, err := f.exec(ctx, dir, "gh", args...)
+		if err != nil {
+			return commandError("gh", "pr review", out, err)
+		}
+		return nil
+	}
+	args := []string{"mr", "approve", ref}
+	if event != "approve" {
+		args = []string{"mr", "note", ref, "-m", body}
+	}
+	out, err := f.exec(ctx, dir, "glab", args...)
+	if err != nil {
+		return commandError("glab", "mr "+args[1], out, err)
+	}
+	if event == "request-changes" {
+		_, _ = f.exec(ctx, dir, "glab", "mr", "revoke", ref)
+	}
+	return nil
 }
 
 // IsRetryableForgeError 判断远端阶段失败是否值得延时重试：

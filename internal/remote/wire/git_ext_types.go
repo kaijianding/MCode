@@ -115,6 +115,21 @@ type GitExtPRDetailParams struct {
 	Number   int    `json:"number"`
 }
 
+// GitExtPRMergeParams 对应 git.pr.merge 请求参数。
+type GitExtPRMergeParams struct {
+	ThreadID string `json:"threadID"`
+	Number   int    `json:"number"`
+	Method   string `json:"method"`
+}
+
+// GitExtPRReviewParams 对应 git.pr.review 请求参数。
+type GitExtPRReviewParams struct {
+	ThreadID string `json:"threadID"`
+	Number   int    `json:"number"`
+	Event    string `json:"event"`
+	Body     string `json:"body,omitempty"`
+}
+
 // GitExtPRCheck 是一条 CI 检查及其汇总后的状态。
 type GitExtPRCheck struct {
 	Name  string `json:"name"`
@@ -131,6 +146,7 @@ type GitExtPRComment struct {
 // GitExtPRDetail 对应 git.pr.detail 成功返回：摘要字段内联展开，另加正文、行数、检查与评论。
 type GitExtPRDetail struct {
 	GitExtPRSummary
+	Mergeable    string            `json:"mergeable,omitempty"`
 	Body         string            `json:"body"`
 	Additions    int               `json:"additions"`
 	Deletions    int               `json:"deletions"`

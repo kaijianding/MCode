@@ -48,6 +48,8 @@ type gitExtService interface {
 	GitStashDrop(ctx context.Context, threadID string, index int) error
 	GitPRList(ctx context.Context, threadID string, limit int) ([]git.PRSummary, error)
 	GitPRDetail(ctx context.Context, threadID string, number int) (git.PRDetail, error)
+	GitPRMerge(ctx context.Context, threadID string, number int, method string) error
+	GitPRReview(ctx context.Context, threadID string, number int, event, body string) error
 	GitPush(ctx context.Context, threadID string) error
 	GitPull(ctx context.Context, threadID string) error
 	GitFetch(ctx context.Context, threadID string) error
@@ -85,6 +87,8 @@ func init() {
 	RegisterMethod("git.stash.drop", handleGitExtStashDrop)
 	RegisterMethod("git.pr.list", handleGitExtPRList)
 	RegisterMethod("git.pr.detail", handleGitExtPRDetail)
+	RegisterMethod("git.pr.merge", handleGitExtPRMerge)
+	RegisterMethod("git.pr.review", handleGitExtPRReview)
 	RegisterMethod("git.push", handleGitExtPush)
 	RegisterMethod("git.pull", handleGitExtPull)
 	RegisterMethod("git.fetch", handleGitExtFetch)
@@ -205,6 +209,7 @@ func gitExtPRDetail(detail git.PRDetail) wire.GitExtPRDetail {
 	out := wire.GitExtPRDetail{
 		GitExtPRSummary: gitExtPRSummary(detail.PRSummary),
 		Body:            detail.Body,
+		Mergeable:       detail.Mergeable,
 		Additions:       detail.Additions,
 		Deletions:       detail.Deletions,
 		ChangedFiles:    detail.ChangedFiles,
@@ -462,6 +467,68 @@ func handleGitExtPRDetail(ctx context.Context, d *Dispatcher, c Conn, params jso
 		return nil, err
 	}
 	return gitExtPRDetail(detail), nil
+}
+
+// handleGitExtPRMerge 实现 git.pr.merge：按指定方式合入 PR/MR。
+func handleGitExtPRMerge(ctx context.Context, d *Dispatcher, c Conn, params json.RawMessage) (any, error) {
+	var p wire.GitExtPRMergeParams
+	if err := decodeExtParams(params, &p); err != nil {
+		return nil, err
+	}
+	if err := gitExtThreadIDParam(p.ThreadID); err != nil {
+		return nil, err
+	}
+	if p.Number <= 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be positive")
+	}
+	switch p.Method {
+	case "squash", "merge", "rebase":
+	default:
+		return nil, ExtInvalidParams("无效的合并方式")
+	}
+	svc, ok := gitExtServiceFrom(d)
+	if !ok {
+		return nil, ExtNotImplemented()
+	}
+	callCtx, cancel := context.WithTimeout(ctx, gitExtNetworkTimeout)
+	defer cancel()
+	if err := svc.GitPRMerge(callCtx, p.ThreadID, p.Number, p.Method); err != nil {
+		return nil, err
+	}
+	return wire.GitExtWriteActionResult{OK: true}, nil
+}
+
+// handleGitExtPRReview 实现 git.pr.review：提交 PR/MR 审查。
+func handleGitExtPRReview(ctx context.Context, d *Dispatcher, c Conn, params json.RawMessage) (any, error) {
+	var p wire.GitExtPRReviewParams
+	if err := decodeExtParams(params, &p); err != nil {
+		return nil, err
+	}
+	if err := gitExtThreadIDParam(p.ThreadID); err != nil {
+		return nil, err
+	}
+	if p.Number <= 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be positive")
+	}
+	switch p.Event {
+	case "approve":
+	case "request-changes", "comment":
+		if strings.TrimSpace(p.Body) == "" {
+			return nil, ExtInvalidParams("请求修改或评论时正文不能为空")
+		}
+	default:
+		return nil, ExtInvalidParams("无效的审查事件")
+	}
+	svc, ok := gitExtServiceFrom(d)
+	if !ok {
+		return nil, ExtNotImplemented()
+	}
+	callCtx, cancel := context.WithTimeout(ctx, gitExtNetworkTimeout)
+	defer cancel()
+	if err := svc.GitPRReview(callCtx, p.ThreadID, p.Number, p.Event, p.Body); err != nil {
+		return nil, err
+	}
+	return wire.GitExtWriteActionResult{OK: true}, nil
 }
 
 // handleGitExtPush 实现 git.push：推送当前分支到远程（网络操作，套超时）。

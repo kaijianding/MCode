@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,12 @@ type gitExtFakeService struct {
 	prs           []git.PRSummary
 	prLimit       int
 	prDetail      git.PRDetail
+	prMethod      string
+	prEvent       string
+	prReviewBody  string
+	prThreadID    string
+	prDeadline    bool
+	prCalls       int
 	prNumber      int
 	err           error
 
@@ -87,6 +94,20 @@ func (s *gitExtFakeService) GitPRDetail(ctx context.Context, threadID string, nu
 	}
 	s.prNumber = number
 	return s.prDetail, nil
+}
+
+func (s *gitExtFakeService) GitPRMerge(ctx context.Context, threadID string, number int, method string) error {
+	s.prCalls++
+	s.prThreadID, s.prNumber, s.prMethod = threadID, number, method
+	_, s.prDeadline = ctx.Deadline()
+	return s.err
+}
+
+func (s *gitExtFakeService) GitPRReview(ctx context.Context, threadID string, number int, event, body string) error {
+	s.prCalls++
+	s.prThreadID, s.prNumber, s.prEvent, s.prReviewBody = threadID, number, event, body
+	_, s.prDeadline = ctx.Deadline()
+	return s.err
 }
 
 func (s *gitExtFakeService) GitPush(ctx context.Context, threadID string) error {
@@ -415,6 +436,7 @@ func TestGitExtPRMethods(t *testing.T) {
 		prDetail: git.PRDetail{
 			PRSummary:    git.PRSummary{Number: 12, Title: "拆分 git 面板", Author: "larch"},
 			Body:         "正文",
+			Mergeable:    "CONFLICTING",
 			Additions:    10,
 			Deletions:    2,
 			ChangedFiles: 3,
@@ -450,7 +472,7 @@ func TestGitExtPRMethods(t *testing.T) {
 	resp = callExtension(t, d, conn, `{"jsonrpc":"2.0","method":"git.pr.detail","params":{"threadID":"`+gitExtTestThreadID+`","number":12},"id":3}`)
 	var detail wire.GitExtPRDetail
 	gitExtResult(t, resp, &detail)
-	if svc.prNumber != 12 || detail.Title != "拆分 git 面板" || detail.Additions != 10 {
+	if svc.prNumber != 12 || detail.Title != "拆分 git 面板" || detail.Additions != 10 || detail.Mergeable != "CONFLICTING" {
 		t.Fatalf("unexpected detail: %+v (service number=%d)", detail, svc.prNumber)
 	}
 	if len(detail.Checks) != 1 || detail.Checks[0].Name != "build" {
@@ -474,5 +496,121 @@ func TestGitExtPRMethods(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error.Message, "gh") {
 		t.Fatalf("original error text should be preserved, got %q", resp.Error.Message)
+	}
+}
+
+func TestGitExtPRWriteMethods(t *testing.T) {
+	for _, tc := range []struct {
+		method, field string
+		values        []string
+	}{
+		{"git.pr.merge", "method", []string{"squash", "merge", "rebase"}},
+		{"git.pr.review", "event", []string{"approve", "request-changes", "comment"}},
+	} {
+		for _, value := range tc.values {
+			t.Run(tc.method+"/"+value, func(t *testing.T) {
+				svc := &gitExtFakeService{}
+				backend := &gitExtTestBackend{services: map[string]any{GitExtServiceName: svc}}
+				d, conn := newGitExtTestDispatcher(backend)
+				params := map[string]any{"threadID": gitExtTestThreadID, "number": 12, tc.field: value}
+				if tc.method == "git.pr.review" {
+					params["body"] = "正文"
+				}
+				request, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": tc.method, "params": params})
+				resp := callExtension(t, d, conn, string(request))
+				var result wire.GitExtWriteActionResult
+				gitExtResult(t, resp, &result)
+				if !result.OK || svc.prCalls != 1 || svc.prThreadID != gitExtTestThreadID || svc.prNumber != 12 || !svc.prDeadline {
+					t.Fatalf("调用不符: %+v %+v", result, svc)
+				}
+				if tc.field == "method" && svc.prMethod != value {
+					t.Fatalf("合并方式 = %q", svc.prMethod)
+				}
+				if tc.field == "event" && (svc.prEvent != value || svc.prReviewBody != "正文") {
+					t.Fatalf("审查参数不符: %+v", svc)
+				}
+				svc.err = errors.New("forge 写入失败")
+				resp = callExtension(t, d, conn, string(request))
+				if resp.Error == nil || resp.Error.Code != wire.InternalError {
+					t.Fatalf("错误未返回: %+v", resp)
+				}
+				backend.services = nil
+				resp = callExtension(t, d, conn, string(request))
+				if resp.Error == nil || resp.Error.Code != wire.MethodNotFound {
+					t.Fatalf("缺少服务错误不符: %+v", resp)
+				}
+			})
+		}
+	}
+}
+
+func TestGitExtPRWriteInvalidParams(t *testing.T) {
+	for _, tc := range []struct{ method, params string }{
+		{"git.pr.merge", `{"number":12,"method":"squash"}`},
+		{"git.pr.merge", `{"threadID":" ","number":12,"method":"squash"}`},
+		{"git.pr.merge", `{"threadID":"` + gitExtTestThreadID + `","number":0,"method":"squash"}`},
+		{"git.pr.merge", `{"threadID":"` + gitExtTestThreadID + `","number":-1,"method":"squash"}`},
+		{"git.pr.merge", `{"threadID":"` + gitExtTestThreadID + `","number":12}`},
+		{"git.pr.merge", `{"threadID":"` + gitExtTestThreadID + `","number":12,"method":"invalid"}`},
+		{"git.pr.review", `{"number":12,"event":"approve"}`},
+		{"git.pr.review", `{"threadID":"` + gitExtTestThreadID + `","number":0,"event":"approve"}`},
+		{"git.pr.review", `{"threadID":"` + gitExtTestThreadID + `","number":12,"event":"invalid"}`},
+		{"git.pr.review", `{"threadID":"` + gitExtTestThreadID + `","number":12,"event":"comment"}`},
+		{"git.pr.review", `{"threadID":"` + gitExtTestThreadID + `","number":12,"event":"request-changes","body":"  "}`},
+		{"git.pr.review", `{"threadID":"` + gitExtTestThreadID + `","number":"12","event":"approve"}`},
+	} {
+		t.Run(tc.method+tc.params, func(t *testing.T) {
+			svc := &gitExtFakeService{}
+			d, conn := newGitExtTestDispatcher(&gitExtTestBackend{services: map[string]any{GitExtServiceName: svc}})
+			resp := callExtension(t, d, conn, `{"jsonrpc":"2.0","id":1,"method":"`+tc.method+`","params":`+tc.params+`}`)
+			if resp.Error == nil || resp.Error.Code != wire.InvalidParams || svc.prCalls != 0 {
+				t.Fatalf("无效参数未拦截: %+v，调用 %d 次", resp, svc.prCalls)
+			}
+		})
+	}
+}
+
+func TestGitExtPRWriteSchema(t *testing.T) {
+	data, err := os.ReadFile("../../docs/remote-control.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"RemoteGitPRMerge", "RemoteGitPRReview"} {
+		for _, kind := range []string{"Request", "Response"} {
+			if strings.Count(string(data), `"$ref": "#/$defs/`+name+kind+`"`) != 2 {
+				t.Fatalf("%s%s 未加入顶层和批量 schema", name, kind)
+			}
+		}
+		var request struct {
+			Properties struct {
+				Method struct {
+					Const string `json:"const"`
+				} `json:"method"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(doc.Defs[name+"Request"], &request); err != nil {
+			t.Fatal(err)
+		}
+		registered := false
+		for _, method := range ImplementedMethods() {
+			if method == request.Properties.Method.Const {
+				registered = true
+				break
+			}
+		}
+		if !registered {
+			t.Fatalf("schema 方法未注册: %s", request.Properties.Method.Const)
+		}
+		for _, kind := range []string{"Params", "Request", "Response"} {
+			if len(doc.Defs[name+kind]) == 0 {
+				t.Fatalf("schema 缺少 %s%s", name, kind)
+			}
+		}
 	}
 }

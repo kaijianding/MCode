@@ -641,7 +641,7 @@ func (p *Pipeline) runRemote(ctx context.Context, b LandedBatch, manual bool, pr
 	}
 
 	if start <= StageMerging {
-		if err := p.forge.MergePullRequest(ctx, root, prep.forge, prep.prURL); err != nil {
+		if err := p.forge.MergePullRequest(ctx, root, prep.forge, prep.prURL, ""); err != nil {
 			return p.remoteFailure(b, manual, prep, StageMerging, attempt, err)
 		}
 		p.notifyf(b.LeadThreadID, NoticePrefix+"已合入合并请求：%s", prep.prURL)

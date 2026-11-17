@@ -213,24 +213,108 @@ func TestForgeClient_GitLabCreateErrorDoesNotReuseURL(t *testing.T) {
 }
 
 func TestForgeClient_MergePullRequest(t *testing.T) {
-	testenv.TempHome(t)
+	for _, forge := range []Forge{ForgeGitHub, ForgeGitLab} {
+		for _, method := range []string{"squash", "merge", "rebase", "", "invalid"} {
+			t.Run(string(forge)+"/"+method, func(t *testing.T) {
+				exec := &fakeForgeExecutor{}
+				err := exec.client().MergePullRequest(context.Background(), "/work", forge, "42", method)
+				if method == "invalid" {
+					if err == nil || len(exec.calls) != 0 {
+						t.Fatalf("非法方式未被拦截: %v %v", err, exec.calls)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				name := "gh"
+				flag := method
+				if flag == "" {
+					flag = "squash"
+				}
+				want := []string{"pr", "merge", "42", "--" + flag}
+				if method != "" {
+					want = append(want, "--delete-branch")
+				}
+				if forge == ForgeGitLab {
+					name = "glab"
+					want = []string{"mr", "merge", "42", "--yes"}
+					if flag != "merge" {
+						want = append(want, "--"+flag)
+					}
+					want = append(want, "--remove-source-branch")
+				}
+				if len(exec.calls) != 1 || exec.calls[0].dir != "/work" || exec.calls[0].name != name || !reflect.DeepEqual(exec.calls[0].args, want) {
+					t.Fatalf("调用 = %v，期望 %s %v", exec.calls, name, want)
+				}
+			})
+		}
+	}
+	for _, forge := range []Forge{ForgeGitHub, ForgeGitLab} {
+		exec := &fakeForgeExecutor{handler: func(string, []string) ([]byte, error) { return []byte("merge failed"), errors.New("exit 1") }}
+		if err := exec.client().MergePullRequest(context.Background(), "/work", forge, "42", "squash"); err == nil || !strings.Contains(err.Error(), "merge failed") {
+			t.Fatalf("未保留失败输出: %v", err)
+		}
+	}
+}
 
-	githubExec := &fakeForgeExecutor{}
-	if err := githubExec.client().MergePullRequest(context.Background(), "/work", ForgeGitHub, "42"); err != nil {
-		t.Fatalf("gh merge failed: %v", err)
-	}
-	wantGitHub := []string{"pr", "merge", "42", "--squash"}
-	if len(githubExec.calls) != 1 || githubExec.calls[0].name != "gh" || !reflect.DeepEqual(githubExec.calls[0].args, wantGitHub) {
-		t.Errorf("gh merge 调用 = %v, want %v", githubExec.calls, wantGitHub)
-	}
-
-	gitlabExec := &fakeForgeExecutor{}
-	if err := gitlabExec.client().MergePullRequest(context.Background(), "/work", ForgeGitLab, "7"); err != nil {
-		t.Fatalf("glab merge failed: %v", err)
-	}
-	wantGitLab := []string{"mr", "merge", "7", "--yes", "--squash", "--remove-source-branch"}
-	if len(gitlabExec.calls) != 1 || gitlabExec.calls[0].name != "glab" || !reflect.DeepEqual(gitlabExec.calls[0].args, wantGitLab) {
-		t.Errorf("glab merge 调用 = %v, want %v", gitlabExec.calls, wantGitLab)
+func TestForgeClient_ReviewPullRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		forge       Forge
+		number      int
+		event, body string
+		want        [][]string
+		failCommand string
+		wantErr     bool
+	}{
+		{name: "gh approve", forge: ForgeGitHub, number: 42, event: "approve", want: [][]string{{"pr", "review", "42", "--approve"}}},
+		{name: "gh approve body", forge: ForgeGitHub, number: 42, event: "approve", body: "正文", want: [][]string{{"pr", "review", "42", "--approve", "-b", "正文"}}},
+		{name: "gh changes", forge: ForgeGitHub, number: 42, event: "request-changes", body: "正文", want: [][]string{{"pr", "review", "42", "--request-changes", "-b", "正文"}}},
+		{name: "gh comment", forge: ForgeGitHub, number: 42, event: "comment", body: "正文", want: [][]string{{"pr", "review", "42", "--comment", "-b", "正文"}}},
+		{name: "glab approve", forge: ForgeGitLab, number: 42, event: "approve", want: [][]string{{"mr", "approve", "42"}}},
+		{name: "glab comment", forge: ForgeGitLab, number: 42, event: "comment", body: "正文", want: [][]string{{"mr", "note", "42", "-m", "正文"}}},
+		{name: "glab changes", forge: ForgeGitLab, number: 42, event: "request-changes", body: "正文", want: [][]string{{"mr", "note", "42", "-m", "正文"}, {"mr", "revoke", "42"}}},
+		{name: "revoke failure", forge: ForgeGitLab, number: 42, event: "request-changes", body: "正文", failCommand: "revoke", want: [][]string{{"mr", "note", "42", "-m", "正文"}, {"mr", "revoke", "42"}}},
+		{name: "note failure", forge: ForgeGitLab, number: 42, event: "request-changes", body: "正文", failCommand: "note", wantErr: true, want: [][]string{{"mr", "note", "42", "-m", "正文"}}},
+		{name: "approve failure", forge: ForgeGitLab, number: 42, event: "approve", failCommand: "approve", wantErr: true, want: [][]string{{"mr", "approve", "42"}}},
+		{name: "gh failure", forge: ForgeGitHub, number: 42, event: "approve", failCommand: "review", wantErr: true, want: [][]string{{"pr", "review", "42", "--approve"}}},
+		{name: "unknown forge", forge: ForgeUnknown, number: 42, event: "approve", wantErr: true},
+		{name: "invalid number", forge: ForgeGitHub, event: "approve", wantErr: true},
+		{name: "invalid event", forge: ForgeGitHub, number: 42, event: "invalid", wantErr: true},
+		{name: "empty comment", forge: ForgeGitHub, number: 42, event: "comment", wantErr: true},
+		{name: "blank changes", forge: ForgeGitLab, number: 42, event: "request-changes", body: "  ", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &fakeForgeExecutor{handler: func(_ string, args []string) ([]byte, error) {
+				if args[1] == tc.failCommand {
+					return []byte("审查失败"), errors.New("exit 1")
+				}
+				return nil, nil
+			}}
+			err := exec.client().ReviewPullRequest(context.Background(), "/work", tc.forge, tc.number, tc.event, tc.body)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("错误 = %v", err)
+			}
+			if tc.forge == ForgeUnknown && !errors.Is(err, ErrForgeUnsupported) {
+				t.Fatalf("未知平台错误 = %v", err)
+			}
+			if tc.failCommand != "" && tc.wantErr && !strings.Contains(err.Error(), "审查失败") {
+				t.Fatalf("未保留命令输出: %v", err)
+			}
+			if len(exec.calls) != len(tc.want) {
+				t.Fatalf("调用 = %v，期望 %v", exec.calls, tc.want)
+			}
+			name := "gh"
+			if tc.forge == ForgeGitLab {
+				name = "glab"
+			}
+			for i, call := range exec.calls {
+				if call.dir != "/work" || call.name != name || !reflect.DeepEqual(call.args, tc.want[i]) {
+					t.Fatalf("调用 = %v，期望 %v", call, tc.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -242,7 +326,7 @@ func TestForgeClient_UnsupportedForge(t *testing.T) {
 	if _, err := client.CreatePullRequest(context.Background(), "/work", ForgeUnknown, PullRequestSpec{}); !errors.Is(err, ErrForgeUnsupported) {
 		t.Errorf("未知平台创建应返回 ErrForgeUnsupported，实际 %v", err)
 	}
-	if err := client.MergePullRequest(context.Background(), "/work", ForgeUnknown, "1"); !errors.Is(err, ErrForgeUnsupported) {
+	if err := client.MergePullRequest(context.Background(), "/work", ForgeUnknown, "1", ""); !errors.Is(err, ErrForgeUnsupported) {
 		t.Errorf("未知平台合入应返回 ErrForgeUnsupported，实际 %v", err)
 	}
 	if len(exec.calls) != 0 {
