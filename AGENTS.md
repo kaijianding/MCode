@@ -11,9 +11,10 @@
 7. **适当动效**：状态变化要让用户看得见，例如展开与收起、浮层升起、选中与焦点切换、列表增删、数字变化、加载与完成反馈。动效优先复用 `internal/ui/motion_presets.go`（场景过渡、弹簧、motionLoop 等）、`internal/ui/motion.go` 与 `internal/ui/tokens.go` 里的预设和时长 token，可以参考 lobe-mygo（https://github.com/lobehub/lobe-mygo，MIT）`pkg/motion` 的弹簧与过渡写法。唯一硬性要求：所有动效（包括循环动画）都必须尊重 `ReduceMotion` 偏好，减少动效时关闭或直接到终点。
 8. **新组件先查现成实现**：需要新 UI 组件时，先查看 CrychicUI（https://github.com/ELY-Open-Source/CrychicUI，MIT，纯 Go，基于同一个 `github.com/egoist/mygo/ui`，1500 个组件、38 个包）是否已有合适的组件。有合适的就直接复用对应包，不从头自研；没有合适的再自己开发。引入时注意：该库的 `sound` 包默认开启，必须统一关闭或接入 mcode 的提示音配置；弹窗与浮层不使用其 `overlay` 包，仍按第 5 条用 `ui.DialogBase` / `ui.PopoverBase`；接入后要在 dev 版本里确认减少动效（`ReduceMotion`）时会关闭。变更说明里要写明引入的包路径与版本。
 9. **约束须有证据**：没有证据（明确需求、真实报告、真实日志或事故、可复现的真实失败）时，不加臆想的场景、限制、防护、路径、测试或验收标准。本文件已规定的要求、信任边界校验、防止数据丢失的错误处理、安全，以及覆盖本次改动行为的测试，都不在此限。
-10. **静止时不重绘**：mygo 只要还有一个动画没结束，就会每帧重建并重绘整个窗口；界面静止时不得有任何动画在跑。这条来自真实事故：额度小仪表把随时间变化的进度直接传给 `AnimateTo`，空闲时窗口以 60 帧/秒全量重绘，CPU 长期 40% 以上。
+10. **静止时不重绘**：mygo 只要还有一个组件级动画（`AnimateTo`、`Transition`、`Loop`、`Keyframes` 等）没结束，就会每帧重建整棵组件树并重绘整个窗口；界面静止时不得有任何动画在跑。这条来自真实事故：额度小仪表把随时间变化的进度直接传给 `AnimateTo`，空闲时窗口以 60 帧/秒全量重绘，CPU 长期 40% 以上。
    - `AnimateTo` / `AnimateWith` / `Transition` 的目标值在显示不变时必须保持不变：不要直接传 `time.Now`、`usagePanelNow()`、布局测量等连续变化的值，先按像素量化（如按条宽 `math.Round(v*w)/w`）。
-   - `motionLoop`、`Loop`、`RepeatForever` 只在状态确实在进行时挂载（运行中、加载中），状态结束即卸载；不要把运行态写死为 `true`。
+   - 持续性动画（运行中图标、扫光、旋转、骨架屏、脉冲等会循环或持续数秒以上的动画）不用 `motionLoop` / `Loop` / `Keyframes` 配 `RepeatForever`，它们每帧都会重建整棵组件树。改在 `Draw` 回调里按 `p.Now()` 算相位，用 `p.After` 或 `p.AnimationFrameRate` 请求重画，mygo 只重画该图形、不重建组件树；帧率够用即可，参考 `internal/ui/sidebar_bees.go` 的 `renderRunningGlyph`（200ms 一步）。同样要尊重 `ReduceMotion`。
+   - 实在只能用组件级循环动画时，只在状态确实在进行时挂载（运行中、加载中），状态结束即卸载；不要把运行态写死为 `true`。
    - 渲染函数每帧都会执行，里面不得做文件系统、子进程、SQLite、`config.Load` 等 IO，也不得对全部线程做拷贝或排序；只在弹层打开、点击时计算，或在数据变化时缓存。后台定时任务同理，不得按周期全量回载历史数据。
    - 新增或改动动画时，在 headless 测试里推进时钟跑到动画结束，断言不再请求下一帧。怀疑空闲重绘时，用 `MCODE_PPROF` 抓 CPU profile，看 `runFrame` 是否常驻。
 
