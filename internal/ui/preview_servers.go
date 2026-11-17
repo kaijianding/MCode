@@ -35,6 +35,7 @@ type browserServerDiscovery struct {
 	cancel              context.CancelFunc
 	lastProbe           time.Time
 	newCount            int
+	generation          uint64
 }
 
 var browserServerDiscoveries = struct {
@@ -144,6 +145,7 @@ func (d *browserServerDiscovery) addLocked(tid, workspace, origin, source string
 	c.source = source
 }
 func (d *browserServerDiscovery) stopLocked() {
+	d.generation++
 	d.visible = false
 	if d.cancel != nil {
 		d.cancel()
@@ -192,51 +194,77 @@ func browserServerDiscoveryTick(c *ui.Context, s *chatState, threadID string) {
 		return
 	}
 	d := browserServerDiscoveryFor(s)
-	now := c.Now()
 	d.mu.Lock()
 	if d.threadID != threadID || !d.visible {
 		d.stopLocked()
 		d.mu.Unlock()
 		return
 	}
-	for k, candidate := range d.candidates {
-		if !candidate.alive && now.Sub(candidate.lastSeen) > browserServerExpiry {
-			delete(d.candidates, k)
-		}
+	if d.cancel != nil || len(d.candidates) == 0 {
+		d.mu.Unlock()
+		return
 	}
-	if d.cancel == nil && now.Sub(d.lastProbe) >= browserServerProbeInterval {
-		var target string
-		for _, x := range d.candidates {
-			if x.evidence {
-				target = x.url
-				break
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancel = cancel
+	generation := d.generation
+	d.mu.Unlock()
+	go func() {
+		defer cancel()
+		defer func() {
+			d.mu.Lock()
+			if d.generation == generation {
+				d.cancel = nil
 			}
-		}
-		if target != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), browserServerProbeTimeout)
-			d.cancel = cancel
-			d.lastProbe = now
-			go func() {
-				alive := browserServerProbe(ctx, target)
-				d.mu.Lock()
-				if d.visible && d.threadID == threadID {
-					if x := d.candidates[target]; x != nil {
-						x.alive = alive
-					}
+			d.mu.Unlock()
+		}()
+		for {
+			d.mu.Lock()
+			if ctx.Err() != nil || !d.visible || d.generation != generation {
+				d.mu.Unlock()
+				return
+			}
+			now := time.Now()
+			var targets []*browserServerCandidate
+			for key, candidate := range d.candidates {
+				if !candidate.alive && now.Sub(candidate.lastSeen) > browserServerExpiry {
+					delete(d.candidates, key)
+				} else if candidate.evidence {
+					targets = append(targets, candidate)
 				}
-				if d.cancel != nil {
-					d.cancel = nil
+			}
+			if len(targets) == 0 {
+				d.mu.Unlock()
+				return
+			}
+			d.lastProbe = now
+			d.mu.Unlock()
+			for _, candidate := range targets {
+				alive := browserServerProbe(ctx, candidate.url)
+				d.mu.Lock()
+				live := ctx.Err() == nil && d.visible && d.generation == generation && d.candidates[candidate.url] == candidate
+				changed := live && candidate.alive != alive
+				if live {
+					candidate.alive = alive
 				}
 				d.mu.Unlock()
-			}()
+				if !live {
+					return
+				}
+				if changed {
+					s.invalidate()
+				}
+			}
+			timer := time.NewTimer(browserServerProbeInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
-	}
-	busy := d.cancel != nil
-	d.mu.Unlock()
-	if busy {
-		c.After(browserServerProbeInterval)
-	}
+	}()
 }
+
 func renderBrowserServerCandidates(c *ui.Context, s *chatState, threadID string, quickPorts []string) {
 	if s != nil && threadID != "" {
 		s.mu.Lock()

@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"mcode/internal/config"
 )
 
 func TestPreviewEmptyState(t *testing.T) {
 	s := sidePaneTestState(t)
 	defer s.close()
 	tt := ui.NewTester(func(c *ui.Context) { renderPreviewPanel(c, s) }, 800, 600)
-	if !tt.HasText("未打开网页") {
+	if !tt.HasText("3000") {
 		t.Fatal("缺少网页空状态")
 	}
 }
@@ -449,28 +448,6 @@ func TestPreviewConsoleErrorHelpers(t *testing.T) {
 	}
 	if previewConsoleErrorsEqual(base, nil) {
 		t.Error("expected length mismatch to be different")
-	}
-}
-
-// TestPreviewStartURLDefault 验证配置只作显式导航入口，不自动访问网站。
-func TestPreviewStartURLDefault(t *testing.T) {
-	s := &chatState{}
-	st := getPreviewState(s)
-	if st.addr != "" || previewStartURL(s) != config.DefaultBrowserStartURL {
-		t.Fatal("空态自动恢复了地址，或默认配置丢失")
-	}
-}
-
-// TestPreviewStartURLFromSettings 验证配置的起始地址优先于内置默认值。
-func TestPreviewStartURLFromSettings(t *testing.T) {
-	s := &chatState{}
-	settings := NewSettingsState(settingsTestDir(t), nil, s)
-	settings.cfg.Workbench.BrowserStartURL = "http://localhost:4321"
-	setChatSettings(s, settings)
-
-	st := getPreviewState(s)
-	if st.addr != "" || previewStartURL(s) != "http://localhost:4321" {
-		t.Fatal("空态自动恢复了地址，或自定义配置丢失")
 	}
 }
 

@@ -130,14 +130,6 @@ func previewWorkbenchSettings(s *chatState) config.WorkbenchConfig {
 	return config.WorkbenchConfig{}
 }
 
-// previewStartURL 返回预览面板的默认起始地址，未配置时使用内置默认值。
-func previewStartURL(s *chatState) string {
-	if raw := strings.TrimSpace(previewWorkbenchSettings(s).BrowserStartURL); raw != "" {
-		return raw
-	}
-	return config.DefaultBrowserStartURL
-}
-
 // previewConsoleCaptureEnabled 返回预览面板是否启用控制台采集。
 func previewConsoleCaptureEnabled(s *chatState) bool {
 	return previewWorkbenchSettings(s).BrowserConsoleCaptureEnabled()
@@ -628,6 +620,18 @@ func togglePreview(s *chatState) {
 	s.invalidate()
 }
 
+var previewScreenshotIcon = parseLucideSVG(`<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="4"/>`)
+
+func previewExternalURL(snap previewSnapshot) string {
+	if snap.url != "" {
+		return snap.url
+	}
+	if snap.addr != "html-preview" {
+		return normalizePreviewURL(snap.addr)
+	}
+	return ""
+}
+
 // renderPreviewPanel 渲染右侧 Web 预览面板。
 func renderPreviewPanel(c *ui.Context, s *chatState) {
 	if s == nil {
@@ -647,7 +651,7 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 	if hasContent {
 		ensureWebView(s, st)
 	}
-	browserMaybeSyncNavigation(s, st)
+	browserStartPolling(s, st)
 	previewMu.Lock()
 	snap := previewSnapshotLocked(st)
 	previewMu.Unlock()
@@ -664,7 +668,8 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 			ui.Row(c.Key("preview-toolbar")).
 				Height(previewToolbarHeight).
 				Padding(0, Space3).
-				Gap(Space2).
+				Gap(Space1).
+				Shrink(0).
 				AlignItems(ui.Center).
 				BorderWidth(0, 0, Hairline, 0).
 				BorderColor(ThemeBorder(c)).
@@ -676,6 +681,7 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 						Label("地址").
 						Placeholder("输入地址").
 						FontSize(uiFont(TypeFootnote)).
+						MinWidth(0).
 						Grow(1)
 					if addr != snap.addr || in.Focused() != snap.addressEditing {
 						previewMu.Lock()
@@ -688,53 +694,7 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 					if in.Submitted() {
 						openPreviewURL(s, addr)
 					}
-				})
-
-			ui.Row(c.Key("preview-page-tools")).
-				Height(previewToolbarHeight).
-				Shrink(0).
-				Padding(0, Space3).
-				Gap(Space2).
-				AlignItems(ui.Center).
-				Children(func() {
-					// 视口分段选择：桌面 / 平板 / 手机
-					for _, mode := range previewViewportModes() {
-						mode := mode
-						selected := snap.viewport == mode
-						viewportBtn := ui.ButtonBase(c.Key("preview-viewport-"+string(mode))).
-							Label(previewViewportLabel(mode)).
-							Tooltip(previewViewportLabel(mode)+"视口").
-							Radius(RadiusXS).
-							Padding(Space0, Space2).
-							Background(ThemeOverlay(c, 0.06))
-						viewportBtnScale := motionPressScale(c, viewportBtn, "button-press-scale", viewportBtn.Pressed())
-						viewportBtn.Scale(viewportBtnScale, viewportBtnScale)
-						if selected {
-							viewportBtn.Background(ThemeSelected(c))
-						}
-						if viewportBtn.Hovered() {
-							viewportBtn.Background(ThemeHover(c))
-						}
-						if viewportBtn.Clicked() {
-							setPreviewViewport(s, st, mode)
-						}
-						viewportBtn.Children(func() {
-							color := ThemeSecondaryText(c)
-							if selected {
-								color = ThemeAccent(c)
-							}
-							ui.Text(c, previewViewportLabel(mode)).
-								FontSize(uiFont(TypeCaption)).
-								FontWeight(500).
-								TextColor(color)
-						})
-					}
-
-					// 快捷端口胶囊
-					quickPorts := getBrowserQuickPorts(s)
-					renderBrowserServerCandidates(c, s, threadID, quickPorts)
-
-					if captureConsole {
+					if captureConsole && previewConsoleErrorCount(snap.consoleErrors) > 0 {
 						badgeBtn := ui.ButtonBase(c.Key("preview-console-badge")).
 							Label("控制台").
 							Tooltip("展开或收起控制台").
@@ -761,97 +721,50 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 						})
 					}
 
-					// 标注与截图共用附件入口。
-					annotBtn := ui.ButtonBase(c.Key("preview-annotate-btn")).
-						Label(func() string {
-							if len(snap.annotations) > 0 {
-								return "添加到对话"
-							}
-							return "选择元素"
-						}()).
-						Radius(RadiusXS).
-						Padding(Space0, Space2).
-						Background(ThemeOverlay(c, 0.06))
-					annotBtnScale := motionPressScale(c, annotBtn, "button-press-scale", annotBtn.Pressed())
-					annotBtn.Scale(annotBtnScale, annotBtnScale)
-					if snap.annotating {
-						annotBtn.Background(ThemeSelected(c))
+					label := "选择元素"
+					if len(snap.annotations) > 0 {
+						label = "添加到对话"
 					}
-					if annotBtn.Hovered() {
-						annotBtn.Background(ThemeHover(c))
-					}
-					if annotBtn.Clicked() {
+					IconButton(c, IconButtonProps{Key: "preview-annotate-btn", Icon: IconHighlighter(), Label: label, Tooltip: label, Size: ControlXS, Variant: ButtonGhost, Active: snap.annotating, OnClick: func() {
 						if len(snap.annotations) > 0 {
 							previewSendAnnotations(s, snap.token)
 						} else {
 							togglePreviewAnnotate(s, st)
 						}
-					}
-					annotBtn.Children(func() {
-						color := ThemeSecondaryText(c)
-						if snap.annotating {
-							color = ThemeAccent(c)
-						}
-						ui.Row(c.Key("preview-annotate-btn-row")).Gap(Space0).AlignItems(ui.Center).Children(func() {
-							ui.Icon(c, IconHighlighter()).Size(IconSM, IconSM).TextColor(color)
-							label := "选择元素"
-							if len(snap.annotations) > 0 {
-								label = "添加到对话"
-							}
-							ui.Text(c, label).FontSize(uiFont(TypeCaption)).FontWeight(600).TextColor(color)
-						})
-					})
-					menuBtn := ui.ButtonBase(c.Key("preview-capture-menu-btn")).Label("截图与元素菜单").Tooltip("更多").Padding(Space0, Space1)
-					menuBtnScale := motionPressScale(c, menuBtn, "button-press-scale", menuBtn.Pressed())
-					menuBtn.Scale(menuBtnScale, menuBtnScale)
-					menuBtn.Children(func() { ui.Icon(c, IconChevronDown()).Size(IconSM, IconSM).TextColor(ThemeSecondaryText(c)) })
-					if menuBtn.Clicked() {
+					}})
+					IconButton(c, IconButtonProps{Key: "preview-screenshot-btn", Icon: previewScreenshotIcon, Label: "截图", Tooltip: "截图", Size: ControlXS, Variant: ButtonGhost, OnClick: func() { previewCaptureScreenshot(s, st) }})
+					menuBtn := IconButton(c, IconButtonProps{Key: "preview-capture-menu-btn", Icon: IconMoreHorizontal(), Label: "更多", Tooltip: "更多", Size: ControlXS, Variant: ButtonGhost, OnClick: func() {
 						st.owner.captureMenuOpen = !st.owner.captureMenuOpen
-					}
+					}})
 					background := ThemeSurfacePopover(c)
 					native := flyoutHostWindow(c.Services()) != nil
-					appFlyoutPopover(c, "preview-capture-menu", menuBtn, &st.owner.captureMenuOpen, func() { st.owner.captureMenuOpen = false }, appFlyoutProps{Width: 150, Background: &background}, func(fc *ui.Context) {
+					appFlyoutPopover(c, "preview-capture-menu", menuBtn, &st.owner.captureMenuOpen, func() { st.owner.captureMenuOpen = false }, appFlyoutProps{Width: 180, Background: &background}, func(fc *ui.Context) {
 						card := ui.Column(fc.Key("preview-capture-menu-panel"))
 						if !native {
 							card = popoverCard(fc, card)
 						}
 						card.Padding(Space1).Transition(motionPopover(fc, motionRiseOffset)).Children(func() {
-							for _, action := range []struct{ label, key string }{{"截图", "capture"}, {"选择元素", "annotate"}} {
-								a := action
-								Button(fc.Key("preview-capture-menu-"+a.key), ButtonOpts{Text: a.label, Variant: ButtonGhost, OnClick: func() {
+							for _, mode := range previewViewportModes() {
+								var icon *ui.SVG
+								if snap.viewport == mode {
+									icon = IconCheck()
+								}
+								Button(fc.Key("preview-viewport-"+string(mode)), ButtonOpts{Text: previewViewportLabel(mode), Icon: icon, Variant: ButtonGhost, OnClick: func() {
 									st.owner.captureMenuOpen = false
-									if a.key == "capture" {
-										previewCaptureScreenshot(s, st)
-									} else {
-										togglePreviewAnnotate(s, st)
-									}
+									setPreviewViewport(s, st, mode)
+								}})
+							}
+							Button(fc.Key("browser-new-tab"), ButtonOpts{Text: "新建标签", Variant: ButtonGhost, OnClick: func() {
+								st.owner.captureMenuOpen = false
+								browserNewTab(s)
+							}})
+							if target := previewExternalURL(snap); target != "" {
+								Button(fc.Key("preview-open-external-btn"), ButtonOpts{Text: "在系统浏览器打开", Variant: ButtonGhost, OnClick: func() {
+									st.owner.captureMenuOpen = false
+									fc.OpenURL(target)
 								}})
 							}
 						})
-					})
-
-					// 在系统浏览器打开按钮
-					openExternalBtn := ui.ButtonBase(c.Key("preview-open-external-btn")).
-						Tooltip("在系统浏览器打开").
-						Label("在系统浏览器打开").
-						Radius(RadiusXS).
-						Padding(Space1, Space2)
-					openExternalBtnScale := motionPressScale(c, openExternalBtn, "button-press-scale", openExternalBtn.Pressed())
-					openExternalBtn.Scale(openExternalBtnScale, openExternalBtnScale)
-					if openExternalBtn.Hovered() {
-						openExternalBtn.Background(ThemeHover(c))
-					}
-					if openExternalBtn.Clicked() {
-						target := snap.url
-						if target == "" && snap.addr != "" && snap.addr != "html-preview" {
-							target = normalizePreviewURL(snap.addr)
-						}
-						if target != "" {
-							c.OpenURL(target)
-						}
-					}
-					openExternalBtn.Children(func() {
-						ui.Icon(c, IconGlobe()).Size(IconSM, IconSM).TextColor(ThemeSecondaryText(c))
 					})
 
 				})
@@ -871,12 +784,15 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 						if msg == "" {
 							msg = "未打开网页"
 						}
-						EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg})
+						if snap.url == "" && snap.html == "" {
+							ui.Column(c.Key("preview-server-candidates")).Gap(Space2).AlignItems(ui.Center).Children(func() {
+								renderBrowserServerCandidates(c, s, threadID, getBrowserQuickPorts(s))
+							})
+						} else {
+							EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg})
+						}
 					})
 			} else if browserTabVisible(st) {
-				// 没有推送通道，只按最小间隔 drain 预装的控制台与拾取队列。
-				previewMaybePollConsoleErrors(s, st, false)
-				previewMaybePollAnnotations(s, st, false)
 				renderPreviewViewport(c, snap)
 				if snap.annotOpen && len(snap.annotations) > 0 {
 					renderPreviewAnnotateDrawer(c, s, snap)

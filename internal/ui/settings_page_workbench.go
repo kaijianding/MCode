@@ -182,12 +182,6 @@ var pageWorkbench = settingsPage{
 			Title: "Web 预览",
 			Rows: []setting{
 				{
-					ID:      "row-browser-start-url",
-					Title:   "起始地址",
-					Aliases: []string{"浏览器", "地址", "URL", "localhost", "预览", "初始"},
-					Control: text(val(func(c *config.Config) *string { return &c.Workbench.BrowserStartURL }, ""), config.DefaultBrowserStartURL),
-				},
-				{
 					ID:      "row-browser-console-capture",
 					Title:   "捕获控制台输出",
 					Aliases: []string{"浏览器", "控制台", "console", "日志", "错误", "js"},

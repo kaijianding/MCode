@@ -121,7 +121,6 @@ const (
 	MaxContextInjectMaxCharacters     = 128000
 	KanbanViewKanban                  = "kanban"
 	KanbanViewList                    = "list"
-	DefaultBrowserStartURL            = "http://localhost:3000"
 	DefaultEditorFontSize             = 12
 	MinEditorFontSize                 = 10
 	MaxEditorFontSize                 = 18
@@ -928,7 +927,6 @@ type WorkbenchConfig struct {
 	KanbanRunInWorktree        *bool    `json:"kanban_run_in_worktree,omitempty"`     // 看板任务在 worktree 中执行，nil 视为开启
 	KanbanMCPEnabled           *bool    `json:"kanban_mcp_enabled,omitempty"`         // 注册看板 MCP 工具，nil 视为开启
 	KanbanEntryOrdinary        *bool    `json:"kanban_entry_ordinary,omitempty"`      // 普通会话暴露单一 kanban 入口工具，nil 视为开启
-	BrowserStartURL            string   `json:"browser_start_url"`                    // 浏览器起始地址，默认 "http://localhost:3000"
 	BrowserConsoleCapture      *bool    `json:"browser_console_capture,omitempty"`    // 捕获浏览器控制台输出，nil 视为开启
 	// OpenInApps 标题栏「打开方式」里可选的应用；为空时使用 DefaultOpenInApps()。
 	OpenInApps []OpenInAppConfig `json:"open_in_apps,omitempty"`
@@ -1778,10 +1776,6 @@ func Normalize(cfg Config) Config {
 		cfg.Workbench.KanbanDefaultView = KanbanViewKanban
 	}
 
-	cfg.Workbench.BrowserStartURL = strings.TrimSpace(cfg.Workbench.BrowserStartURL)
-	if cfg.Workbench.BrowserStartURL == "" {
-		cfg.Workbench.BrowserStartURL = DefaultBrowserStartURL
-	}
 	// 打开方式：不预填默认列表，保持“未配置即用默认”的语义；只清理空项与两端空白。
 	cfg.Workbench.OpenInApps = normalizeOpenInApps(cfg.Workbench.OpenInApps)
 
@@ -2299,7 +2293,6 @@ func Defaults() Config {
 			KanbanRunInWorktree:        boolPtr(true),
 			KanbanMCPEnabled:           boolPtr(true),
 			KanbanEntryOrdinary:        boolPtr(true),
-			BrowserStartURL:            DefaultBrowserStartURL,
 			BrowserConsoleCapture:      boolPtr(true),
 		},
 		SourceControl: SourceControlConfig{

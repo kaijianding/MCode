@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestBrowserServerDiscoveryStopsOnThreadChange(t *testing.T) {
 	}
 }
 
-func TestBrowserServerCandidatesRenderedInToolbar(t *testing.T) {
+func TestBrowserServerCandidatesRenderedInBlankPage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	defer srv.Close()
 	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
@@ -84,12 +85,15 @@ func TestBrowserServerCandidatesRenderedInToolbar(t *testing.T) {
 	s := sidePaneTestState(t)
 	defer s.close()
 	tab, page := browserAttachTestPage(s, "https://example.test/start")
+	previewMu.Lock()
+	tab.url, tab.addr = "", ""
+	previewMu.Unlock()
 	inspectorSelect(s, sidePanePreviewID, false)
 	tester := ui.NewTester(func(c *ui.Context) { renderPreviewPanel(c, s) }, 1800, 600)
 	tester.Frame()
 	tester.Advance(DurSheet + 50*time.Millisecond)
 	if _, ok := tester.Find("3000"); !ok {
-		t.Fatal("工具条缺少快捷端口")
+		t.Fatal("空白页缺少快捷端口")
 	}
 	browserServerObserveToolOutput(s, ThreadUpdate{ThreadID: "t1", Messages: []Message{{Role: "tool", Text: "ready at " + target}}})
 	tester.Frame()
@@ -111,9 +115,9 @@ func TestBrowserServerCandidatesRenderedInToolbar(t *testing.T) {
 	tester.Frame()
 	tester.Advance(DurSheet + 50*time.Millisecond)
 	if _, ok := tester.Find(target); !ok {
-		t.Fatal("工具条缺少已发现的服务器")
+		t.Fatal("空白页缺少已发现的服务器")
 	}
-	if tab.url != "https://example.test/start" || page.loaded.Load() != 0 {
+	if tab.url != "" || page.loaded.Load() != 0 {
 		t.Fatal("发现服务器时不应导航")
 	}
 	if err := tester.Click(target); err != nil {
@@ -122,6 +126,9 @@ func TestBrowserServerCandidatesRenderedInToolbar(t *testing.T) {
 	tester.Frame()
 	if tab.url != target || page.loaded.Load() != 1 {
 		t.Fatalf("点击服务器未导航：%s", tab.url)
+	}
+	if _, ok := tester.Find("3000"); ok {
+		t.Fatal("已打开网页仍显示快捷端口")
 	}
 }
 
@@ -183,4 +190,42 @@ func testContext(t *testing.T) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+func TestBrowserServerProbeChangesInvalidateWithoutTicks(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	s := sidePaneTestState(t)
+	defer s.close()
+	inspectorSelect(s, sidePanePreviewID, false)
+	tester := ui.NewTester(func(c *ui.Context) {
+		s.setUIServices(c.Services())
+		renderPreviewPanel(c, s)
+	}, 800, 600)
+	tester.Advance(time.Second)
+	browserServerObserveToolOutput(s, ThreadUpdate{ThreadID: "t1", Messages: []Message{{Role: "tool", Text: srv.URL}}})
+	tester.Frame()
+	tester.Advance(time.Second)
+	deadline := time.Now().Add(3 * time.Second)
+	for requests.Load() < 2 {
+		// 第一次结果变化允许一次重绘，后续相同结果必须静止。
+		if tester.FramePending() {
+			tester.Advance(time.Second)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("后台探测没有继续")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !tester.HasText(srv.URL) {
+		t.Fatal("探测结果变化没有 invalidate")
+	}
+	tester.Advance(3 * browserServerProbeInterval)
+	if tester.FramePending() {
+		t.Fatal("稳定探测结果仍请求帧")
+	}
 }

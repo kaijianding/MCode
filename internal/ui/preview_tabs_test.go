@@ -269,6 +269,10 @@ func TestBrowserCloseLastTabShowsEmptyAddress(t *testing.T) {
 	if empty.webFailed || empty.err != "" {
 		t.Fatal("空态仍尝试创建原生页面")
 	}
+	if err := tester.Click("更多"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(DurSheet + 50*time.Millisecond)
 	if err := tester.Click("新建标签"); err != nil {
 		t.Fatal(err)
 	}
@@ -410,4 +414,64 @@ func TestBrowserSPANavigationFixture(t *testing.T) {
 		t.Fatal(response.Status)
 	}
 	t.Log("未驱动真实 WebView，pushState/replaceState/hashchange 的 OnDidNavigate 覆盖未核实")
+}
+
+func TestBrowserToolbarAndConditionalTabs(t *testing.T) {
+	s := &chatState{}
+	defer inspectorDisposeAllSessions(s)
+	first := browserNewTab(s)
+	inspectorSelect(s, sidePanePreviewID, false)
+	tester := ui.NewTester(func(c *ui.Context) { renderPreviewPanel(c, s) }, 800, 600)
+	tester.Advance(time.Second)
+	if _, ok := tester.AccessByRole(ui.RoleTab, "新标签"); ok {
+		t.Fatal("单标签仍渲染 browser-tabs-row")
+	}
+	for _, label := range []string{"地址", "选择元素", "截图", "更多"} {
+		rect, ok := tester.Find(label)
+		if !ok || rect.Y >= previewToolbarHeight {
+			t.Fatalf("%s 未放在第一行工具栏：%+v", label, rect)
+		}
+	}
+	for _, label := range []string{"桌面", "平板", "手机", "新建标签", "控制台"} {
+		if _, ok := tester.Find(label); ok {
+			t.Fatalf("%s 仍显示在工具栏第二行或空徽标中", label)
+		}
+	}
+	browserNewTab(s)
+	tester.Frame()
+	tester.Advance(time.Second)
+	if _, ok := tester.AccessByRole(ui.RoleTab, "新标签"); !ok {
+		t.Fatal("双标签没有渲染 browser-tabs-row")
+	}
+	browserCloseTab(s, first.owner, first.tabID)
+	tester.Frame()
+	tester.Advance(time.Second)
+	if _, ok := tester.AccessByRole(ui.RoleTab, "新标签"); ok {
+		t.Fatal("关闭到单标签后仍渲染标签条")
+	}
+}
+
+func TestBrowserHTMLPreviewMenuHasNoExternalURL(t *testing.T) {
+	for _, target := range []string{"", "https://example.test/"} {
+		s := &chatState{}
+		tab := getPreviewState(s)
+		previewMu.Lock()
+		tab.addr, tab.url, tab.html, tab.webFailed = "html-preview", target, "<p>preview</p>", true
+		previewMu.Unlock()
+		tester := ui.NewTester(func(c *ui.Context) { renderPreviewPanel(c, s) }, 800, 600)
+		if err := tester.Click("更多"); err != nil {
+			t.Fatal(err)
+		}
+		tester.Advance(time.Second)
+		_, external := tester.Find("在系统浏览器打开")
+		if external != (target != "") {
+			t.Fatalf("目标 %q 系统浏览器菜单可见=%v", target, external)
+		}
+		for _, label := range []string{"桌面", "平板", "手机", "新建标签"} {
+			if _, ok := tester.Find(label); !ok {
+				t.Fatalf("更多菜单缺少 %s", label)
+			}
+		}
+		inspectorDisposeAllSessions(s)
+	}
 }

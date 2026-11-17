@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -56,6 +57,8 @@ type browserTab struct {
 	annotations                 []previewAnnotation
 	annotOpen, annotPolling     bool
 	annotLastPoll               time.Time
+	pollDone                    chan struct{}
+	pollCancel                  context.CancelFunc
 }
 
 type previewState struct {
@@ -194,6 +197,9 @@ func browserCloseFromMenu(s *chatState) bool {
 }
 
 func browserPageHistory(page previewPage) (bool, bool) {
+	if polling, ok := page.(browserPollingPage); ok {
+		page = polling.previewPage
+	}
 	if p, ok := page.(browserHistoryPage); ok {
 		return p.CanGoBack(), p.CanGoForward()
 	}
@@ -216,11 +222,15 @@ func browserBindTitle(s *chatState, token previewPageToken, page previewPage) fu
 	return p.OnPageTitleUpdated(func(e *mygo.TitleEvent) {
 		e.PreventDefault()
 		previewMu.Lock()
-		if tab := previewStateForTokenLocked(s, token); tab != nil {
+		changed := false
+		if tab := previewStateForTokenLocked(s, token); tab != nil && tab.title != e.Title {
 			tab.title = e.Title
+			changed = true
 		}
 		previewMu.Unlock()
-		s.invalidate()
+		if changed {
+			s.invalidate()
+		}
 	})
 }
 
@@ -323,8 +333,95 @@ func renderBrowserHistory(c *ui.Context, s *chatState, tab *browserTab, snap pre
 	IconButton(c, IconButtonProps{Key: "preview-reload-btn", Icon: icon, Label: label, Size: ControlXS, Variant: ButtonGhost, Disabled: snap.url == "" && snap.html == "", OnClick: func() { browserReloadOrStop(s, tab) }})
 }
 
-func browserNeedsTickLocked(tab *browserTab, capture bool) bool {
+func browserNeedsPollingLocked(tab *browserTab, capture bool) bool {
 	return tab.visible && tab.page != nil && (tab.loading || tab.annotating || capture)
+}
+
+type browserPollingPage struct {
+	previewPage
+	ctx context.Context
+}
+
+func (p browserPollingPage) Eval(script string) (any, error) {
+	if page, ok := p.previewPage.(interface {
+		EvalContext(context.Context, string) (any, error)
+	}); ok {
+		// 隐藏保留原生页；页面不响应时也必须让周期任务有机会检查生命周期。
+		ctx, cancel := context.WithTimeout(p.ctx, previewConsolePollInterval)
+		defer cancel()
+		return page.EvalContext(ctx, script)
+	}
+	return p.previewPage.Eval(script)
+}
+
+// 设置和窗口状态先读完再取 previewMu；持锁期间不进入页面 API 或 UI 回调。
+func browserStartPolling(s *chatState, tab *browserTab) {
+	capture := previewConsoleCaptureEnabled(s)
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	previewMu.Lock()
+	if closed || tab.pollDone != nil || !browserNeedsPollingLocked(tab, capture) {
+		previewMu.Unlock()
+		return
+	}
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	tab.pollDone, tab.pollCancel = done, cancel
+	token := previewPageTokenLocked(tab)
+	previewMu.Unlock()
+	go func() {
+		defer cancel()
+		defer func() {
+			previewMu.Lock()
+			tab.pollDone, tab.pollCancel = nil, nil
+			close(done)
+			previewMu.Unlock()
+			// 状态变化可能已渲染过；退出时按最新条件接管，避免漏掉重启。
+			browserStartPolling(s, tab)
+		}()
+		ticker := time.NewTicker(previewConsolePollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			capture := previewConsoleCaptureEnabled(s)
+			s.mu.Lock()
+			closed := s.closed
+			s.mu.Unlock()
+			previewMu.Lock()
+			if closed || previewStateForTokenLocked(s, token) == nil || !browserNeedsPollingLocked(tab, capture) {
+				previewMu.Unlock()
+				return
+			}
+			page := browserPollingPage{previewPage: tab.page, ctx: ctx}
+			console := capture && !tab.loading && !tab.consolePolling
+			current := previewPageTokenLocked(tab)
+			if console {
+				tab.consolePolling = true
+				tab.consoleLastPoll = time.Now()
+			}
+			previewMu.Unlock()
+			if console {
+				previewPollConsoleErrors(s, current, page)
+			}
+			previewMu.Lock()
+			// 同步读取两个队列，整个标签只保留一个周期任务。
+			annotate := previewStateForTokenLocked(s, token) != nil && tab.visible && tab.annotating && !tab.annotPolling
+			current = previewPageTokenLocked(tab)
+			if annotate {
+				tab.annotPolling = true
+				tab.annotLastPoll = time.Now()
+			}
+			previewMu.Unlock()
+			if annotate {
+				previewPollAnnotations(s, current, page)
+			}
+		}
+	}()
 }
 
 func renderBrowserTabs(c *ui.Context, s *chatState, st *previewState) {
@@ -349,6 +446,9 @@ func renderBrowserTabs(c *ui.Context, s *chatState, st *previewState) {
 		}
 	}
 	previewMu.Unlock()
+	if len(items) < 2 {
+		return
+	}
 	row := ui.Row(c.Key("browser-tabs-row")).FillWidth().Height(ControlMD).Shrink(0)
 	selection := ui.Local(row, "selection", func() int { return selected })
 	*selection = selected
@@ -375,19 +475,11 @@ func renderBrowserTabs(c *ui.Context, s *chatState, st *previewState) {
 				})
 			}
 		})
-		IconButton(c, IconButtonProps{Key: "browser-new-tab", Icon: IconPlus(), Label: "新建标签", Size: ControlXS, Variant: ButtonGhost, OnClick: func() { browserNewTab(s) }})
 	})
 	if closeID != 0 {
 		browserCloseTab(s, st, closeID)
 	} else if *selection >= 0 && *selection < len(items) && *selection != selected {
 		browserActivateTab(s, st, items[*selection].id)
-	}
-	capture := previewConsoleCaptureEnabled(s)
-	previewMu.Lock()
-	needsTick := browserNeedsTickLocked(browserActiveTabLocked(st), capture)
-	previewMu.Unlock()
-	if needsTick {
-		c.After(previewConsolePollInterval)
 	}
 }
 
@@ -436,6 +528,9 @@ func browserEnforceSessionLimit(s *chatState) {
 func browserReleaseView(tab *browserTab) {
 	previewMu.Lock()
 	page, web, off := tab.page, tab.web, tab.pageOff
+	if tab.pollCancel != nil {
+		tab.pollCancel()
+	}
 	previewAdvanceGenerationLocked(tab)
 	tab.page, tab.web, tab.pageOff = nil, nil, nil
 	tab.webCreating, tab.webFailed = false, false

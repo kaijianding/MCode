@@ -54,8 +54,8 @@ func previewApplyConsoleDrainLocked(tab *browserTab, packet previewConsoleDrain,
 	if tab.consoleDocument != packet.Document {
 		tab.consoleDocument = packet.Document
 		tab.consoleWatermark, tab.locationSequence = 0, 0
+		changed = len(tab.consoleErrors) > 0 || len(tab.consoleSelected) > 0
 		tab.consoleErrors, tab.consoleSelected = nil, nil
-		changed = true
 	}
 	tab.consoleAvailable = true
 	for _, entry := range packet.Entries {
@@ -92,6 +92,10 @@ func previewApplyConsoleDrainLocked(tab *browserTab, packet previewConsoleDrain,
 			tab.annotPolling = false
 			changed = true
 		}
+	}
+	if tab.canGoBack != back || tab.canGoForward != forward {
+		tab.canGoBack, tab.canGoForward = back, forward
+		changed = true
 	}
 	return changed
 }

@@ -2213,9 +2213,6 @@ func TestWorkbenchContextAndKanbanDefaults(t *testing.T) {
 	if !cfg.Workbench.KanbanEntryOrdinarySessions() {
 		t.Error("expected KanbanEntryOrdinarySessions default true")
 	}
-	if cfg.Workbench.BrowserStartURL != DefaultBrowserStartURL {
-		t.Errorf("BrowserStartURL = %q, want %q", cfg.Workbench.BrowserStartURL, DefaultBrowserStartURL)
-	}
 	if !cfg.Workbench.BrowserConsoleCaptureEnabled() {
 		t.Error("expected BrowserConsoleCaptureEnabled default true")
 	}
@@ -2260,7 +2257,6 @@ func TestNormalizeWorkbenchContextAndKanbanFields(t *testing.T) {
 	cfg := Defaults()
 	cfg.Workbench.ContextInjectMaxCharacters = 999999
 	cfg.Workbench.KanbanDefaultView = "timeline"
-	cfg.Workbench.BrowserStartURL = "   "
 
 	cfg.Workbench.StuckNudgeTimeout = 100
 
@@ -2270,9 +2266,6 @@ func TestNormalizeWorkbenchContextAndKanbanFields(t *testing.T) {
 	}
 	if norm.Workbench.KanbanDefaultView != KanbanViewKanban {
 		t.Errorf("KanbanDefaultView = %q, want fallback %q", norm.Workbench.KanbanDefaultView, KanbanViewKanban)
-	}
-	if norm.Workbench.BrowserStartURL != DefaultBrowserStartURL {
-		t.Errorf("BrowserStartURL = %q, want %q", norm.Workbench.BrowserStartURL, DefaultBrowserStartURL)
 	}
 	if norm.Workbench.StuckNudgeTimeout != MinStuckNudgeTimeout {
 		t.Errorf("StuckNudgeTimeout = %d, want clamp %d", norm.Workbench.StuckNudgeTimeout, MinStuckNudgeTimeout)
@@ -2284,7 +2277,6 @@ func TestNormalizeWorkbenchContextAndKanbanFields(t *testing.T) {
 	zeroed := Defaults()
 	zeroed.Workbench.ContextInjectMaxCharacters = 0
 	zeroed.Workbench.KanbanDefaultView = ""
-	zeroed.Workbench.BrowserStartURL = ""
 
 	normZero := Normalize(zeroed)
 	if normZero.Workbench.ContextInjectMaxCharacters != DefaultContextInjectMaxCharacters {
@@ -2292,9 +2284,6 @@ func TestNormalizeWorkbenchContextAndKanbanFields(t *testing.T) {
 	}
 	if normZero.Workbench.KanbanDefaultView != KanbanViewKanban {
 		t.Errorf("KanbanDefaultView = %q, want default %q", normZero.Workbench.KanbanDefaultView, KanbanViewKanban)
-	}
-	if normZero.Workbench.BrowserStartURL != DefaultBrowserStartURL {
-		t.Errorf("BrowserStartURL = %q, want default %q", normZero.Workbench.BrowserStartURL, DefaultBrowserStartURL)
 	}
 
 	lower := Defaults()
@@ -3514,5 +3503,23 @@ func TestLoadLegacyAppearanceMotion(t *testing.T) {
 	}
 	if cfg.Appearance.ReduceMotion {
 		t.Fatal("旧配置默认应显示动效")
+	}
+}
+
+func TestLoadIgnoresRemovedBrowserStartURL(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(ConfigPath(dir), []byte(`{"workbench":{"browser_start_url":"http://localhost:4321","browser_console_capture":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, warnings, err := LoadWithWarnings(dir)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("旧浏览器起始地址未被忽略：warnings=%v err=%v", warnings, err)
+	}
+	if cfg.Workbench.BrowserConsoleCaptureEnabled() {
+		t.Fatal("保留的控制台设置没有加载")
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil || strings.Contains(string(data), "browser_start_url") {
+		t.Fatalf("废弃设置仍被序列化：%v", err)
 	}
 }

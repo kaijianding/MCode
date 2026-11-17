@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -170,22 +171,22 @@ func TestBrowserIdleDoesNotScheduleTick(t *testing.T) {
 	previewMu.Lock()
 	defer previewMu.Unlock()
 	tab := &browserTab{visible: true}
-	if browserNeedsTickLocked(tab, true) {
+	if browserNeedsPollingLocked(tab, true) {
 		t.Fatal("空标签仍安排定时重绘")
 	}
 	tab.page = &previewTestPage{}
-	if browserNeedsTickLocked(tab, false) {
+	if browserNeedsPollingLocked(tab, false) {
 		t.Fatal("闲置且关闭采集仍安排定时重绘")
 	}
-	if !browserNeedsTickLocked(tab, true) {
+	if !browserNeedsPollingLocked(tab, true) {
 		t.Fatal("采集开启缺少定时 drain")
 	}
 	tab.loading = true
-	if !browserNeedsTickLocked(tab, false) {
+	if !browserNeedsPollingLocked(tab, false) {
 		t.Fatal("加载时缺少定时检查")
 	}
 	tab.visible = false
-	if browserNeedsTickLocked(tab, true) {
+	if browserNeedsPollingLocked(tab, true) {
 		t.Fatal("隐藏页仍安排定时重绘")
 	}
 }
@@ -397,4 +398,194 @@ func TestBrowserConsoleDrawerFiltersCopyAndAdd(t *testing.T) {
 	req := inspectorUpload(t, client)
 	req.finish <- nil
 	waitInspectorContext(t, s, func() bool { return len(s.attachments) == 1 && s.attachments[0].ID != "" })
+}
+
+// 假页真实计时轮询；headless 时钟单独推进，确保 JS drain 不再驱动整窗帧。
+func TestBrowserVisibleIdleNoFrames(t *testing.T) {
+	s := &chatState{}
+	defer inspectorDisposeAllSessions(s)
+	tab := getPreviewState(s)
+	polled := make(chan struct{}, 8)
+	page := &previewTestPage{eval: func(string) (any, error) {
+		polled <- struct{}{}
+		return `{"document":"idle","sequence":0,"entries":[]}`, nil
+	}}
+	previewMu.Lock()
+	browserPromoteTabLocked(tab)
+	tab.page, tab.url, tab.addr = page, "https://example.test/idle", "https://example.test/idle"
+	previewMu.Unlock()
+	inspectorSelect(s, sidePanePreviewID, false)
+	frames := 0
+	tester := ui.NewTester(func(c *ui.Context) {
+		frames++
+		s.setUIServices(c.Services())
+		renderPreviewPanel(c, s)
+	}, 800, 600)
+	tester.Advance(time.Second)
+	initial := frames
+	for range 3 {
+		select {
+		case <-polled:
+		case <-time.After(2 * previewConsolePollInterval):
+			t.Fatal("可见空闲页没有在后台轮询")
+		}
+		tester.Advance(2 * previewConsolePollInterval)
+		if tester.FramePending() || frames != initial {
+			t.Fatalf("无新记录仍请求了帧：%d -> %d", initial, frames)
+		}
+	}
+	previewMu.Lock()
+	done := tab.pollDone
+	previewMu.Unlock()
+	browserReleaseView(tab)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("释放页面后轮询未退出")
+	}
+}
+
+func TestBrowserPollingNewRecordInvalidates(t *testing.T) {
+	s := &chatState{}
+	defer inspectorDisposeAllSessions(s)
+	tab := getPreviewState(s)
+	var calls atomic.Int32
+	page := &previewTestPage{eval: func(string) (any, error) {
+		calls.Add(1)
+		return `{"document":"new","sequence":1,"entries":[{"sequence":1,"kind":"error","message":"新增错误"}]}`, nil
+	}}
+	previewMu.Lock()
+	browserPromoteTabLocked(tab)
+	tab.page, tab.url = page, "https://example.test/new"
+	previewMu.Unlock()
+	inspectorSelect(s, sidePanePreviewID, false)
+	tester := ui.NewTester(func(c *ui.Context) {
+		s.setUIServices(c.Services())
+		renderPreviewPanel(c, s)
+	}, 800, 600)
+	tester.Advance(time.Second)
+	deadline := time.Now().Add(2 * previewConsolePollInterval)
+	for !tester.FramePending() {
+		if time.Now().After(deadline) {
+			t.Fatal("新记录没有触发 invalidate")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	tester.Advance(time.Second)
+	if _, ok := tester.Find("控制台"); !ok || calls.Load() == 0 {
+		t.Fatal("新错误未显示徽标，或页面没有轮询")
+	}
+	// 同一水位的重复回包不再请求帧。
+	time.Sleep(previewConsolePollInterval + 20*time.Millisecond)
+	if tester.FramePending() {
+		t.Fatal("重复记录触发了 invalidate")
+	}
+}
+
+func TestBrowserPollingStopsAndRestarts(t *testing.T) {
+	for _, action := range []string{"hidden", "close", "generation", "window"} {
+		t.Run(action, func(t *testing.T) {
+			s := &chatState{}
+			defer inspectorDisposeAllSessions(s)
+			tab := getPreviewState(s)
+			var calls atomic.Int32
+			page := &previewTestPage{eval: func(string) (any, error) {
+				calls.Add(1)
+				return `{"document":"idle","sequence":0,"entries":[]}`, nil
+			}}
+			previewMu.Lock()
+			browserPromoteTabLocked(tab)
+			tab.page = page
+			previewMu.Unlock()
+			inspectorSelect(s, sidePanePreviewID, false)
+			browserStartPolling(s, tab)
+			previewMu.Lock()
+			done := tab.pollDone
+			previewMu.Unlock()
+			browserStartPolling(s, tab)
+			previewMu.Lock()
+			if done == nil || done != tab.pollDone {
+				t.Error("重复启动创建了多个轮询任务")
+			}
+			previewMu.Unlock()
+			switch action {
+			case "hidden":
+				hideBrowserTab(s, tab)
+			case "close":
+				browserCloseTab(s, tab.owner, tab.tabID)
+			case "generation":
+				previewMu.Lock()
+				previewAdvanceGenerationLocked(tab)
+				previewMu.Unlock()
+			case "window":
+				s.mu.Lock()
+				s.closed = true
+				s.mu.Unlock()
+			}
+			select {
+			case <-done:
+			case <-time.After(2 * previewConsolePollInterval):
+				t.Fatal("生命周期变化后旧轮询未退出")
+			}
+			if action == "hidden" {
+				inspectorSelect(s, sidePanePreviewID, false)
+				browserStartPolling(s, tab)
+			}
+			if action == "hidden" || action == "generation" {
+				deadline := time.Now().Add(2 * previewConsolePollInterval)
+				for calls.Load() == 0 {
+					if time.Now().After(deadline) {
+						t.Fatal("重新可见或换代后没有恢复轮询")
+					}
+					time.Sleep(time.Millisecond)
+				}
+			} else if calls.Load() != 0 {
+				t.Fatal("关闭后仍调用了 Eval")
+			}
+		})
+	}
+}
+
+type browserBlockedPollingPage struct {
+	previewTestPage
+	started chan struct{}
+}
+
+func (p *browserBlockedPollingPage) EvalContext(ctx context.Context, _ string) (any, error) {
+	p.started <- struct{}{}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestBrowserPollingUnresponsivePageExits(t *testing.T) {
+	for _, action := range []string{"hidden", "released"} {
+		t.Run(action, func(t *testing.T) {
+			s := &chatState{}
+			defer inspectorDisposeAllSessions(s)
+			tab := getPreviewState(s)
+			page := &browserBlockedPollingPage{started: make(chan struct{}, 1)}
+			previewMu.Lock()
+			tab.page, tab.visible = page, true
+			previewMu.Unlock()
+			browserStartPolling(s, tab)
+			previewMu.Lock()
+			done := tab.pollDone
+			previewMu.Unlock()
+			select {
+			case <-page.started:
+			case <-time.After(2 * previewConsolePollInterval):
+				t.Fatal("没有通过 EvalContext 轮询")
+			}
+			if action == "hidden" {
+				hideBrowserTab(s, tab)
+			} else {
+				browserReleaseView(tab)
+			}
+			select {
+			case <-done:
+			case <-time.After(2 * previewConsolePollInterval):
+				t.Fatal("无响应页面使后台轮询泄漏")
+			}
+		})
+	}
 }

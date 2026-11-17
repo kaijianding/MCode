@@ -211,7 +211,6 @@ section workbench.terminal 终端
 row row-terminal-shell 默认终端
 row row-command-shell 命令 shell
 section workbench.preview Web 预览
-row row-browser-start-url 起始地址
 row row-browser-console-capture 捕获控制台输出
 section workbench.editor 编辑器与文件树
 row row-editor-auto-save 自动保存
