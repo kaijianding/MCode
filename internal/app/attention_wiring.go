@@ -280,8 +280,9 @@ func (w *attentionWiring) record(input attention.Input) bool {
 		return false
 	}
 	if created && w.notify != nil {
+		// bee 失败只进收件箱不推送：主会话会在汇报里处理，推到手机只是噪音。
 		switch input.Kind {
-		case attention.KindKanbanReview, attention.KindKanbanFailed, attention.KindBeeFailed:
+		case attention.KindKanbanReview, attention.KindKanbanFailed:
 			w.notify(input.Title, input.Detail, input.ThreadID)
 		}
 	}

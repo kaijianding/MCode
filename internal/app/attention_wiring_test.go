@@ -193,8 +193,13 @@ func TestAttentionWiringNotifiesUserEventsOnce(t *testing.T) {
 			t.Fatalf("expected first record only for %s", input.Kind)
 		}
 	}
-	if len(got) != len(inputs) {
-		t.Fatalf("got %d notifications, want %d: %v", len(got), len(inputs), got)
+	if len(got) != 2 {
+		t.Fatalf("got %d notifications, want 2: %v", len(got), got)
+	}
+	for _, notification := range got {
+		if strings.HasPrefix(notification, "Bee 任务|") {
+			t.Fatalf("bee 失败不应推送: %v", got)
+		}
 	}
 }
 
