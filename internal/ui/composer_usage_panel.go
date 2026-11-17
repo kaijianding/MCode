@@ -1542,6 +1542,8 @@ func renderComposerQuotaMiniGauge(c *ui.Context, key string, used float64, reset
 			}
 			usedRatio := float64(used) / 100
 			paceKnown := used >= paceMinUsedPercent && elapsed >= paceMinElapsedRatio
+			usedRatio = math.Round(usedRatio*float64(contentWidth)) / float64(contentWidth)
+			elapsed = math.Round(elapsed*float64(contentWidth)) / float64(contentWidth)
 			segs := quotaBarSegments(usedRatio, elapsed, paceKnown, false)
 			for i, seg := range segs {
 				segKey := fmt.Sprintf("composer-quota-gauge-%s-seg-%d", key, i)

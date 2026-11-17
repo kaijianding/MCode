@@ -12,6 +12,32 @@ import (
 	"mcode/internal/testenv"
 )
 
+func TestQuotaMiniGaugeSettlesWhileClockAdvances(t *testing.T) {
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	now := start
+	oldNow := usagePanelNow
+	usagePanelNow = func() time.Time { return now }
+	t.Cleanup(func() { usagePanelNow = oldNow })
+	used := 20.0
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderComposerQuotaMiniGauge(c, "test", used, start.Add(150*time.Minute), 300)
+	}, 100, 30)
+	tt.Frame()
+	used = 40
+	tt.Frame()
+	if !tt.FramePending() {
+		t.Fatal("用量变化后应启动动画")
+	}
+	for i := 0; i < 100; i++ {
+		now = now.Add(16 * time.Millisecond)
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+	}
+	if tt.FramePending() {
+		t.Fatal("时间在同一像素内推进时动画应结束")
+	}
+}
+
 func TestRenderComposerQuotaStrip_WithWindows(t *testing.T) {
 	testenv.TempHome(t)
 

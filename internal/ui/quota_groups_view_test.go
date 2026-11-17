@@ -54,3 +54,31 @@ func TestQuotaBarMotion(t *testing.T) {
 		})
 	}
 }
+
+func TestQuotaBarSettlesWhileClockAdvances(t *testing.T) {
+	for _, wide := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wide=%v", wide), func(t *testing.T) {
+			elapsed := 0.4
+			used := 20.0
+			tt := ui.NewTester(func(c *ui.Context) {
+				win := trayQuotaWindowModel{ShortLabel: "5h", UsedPercent: used, Wide: wide, elapsedRatio: elapsed, hasElapsed: true, paceKnown: true}
+				groups := []trayQuotaGroupModel{{Accounts: []trayQuotaAccountModel{{Windows: []trayQuotaWindowModel{win}}}}}
+				renderQuotaGroupList(c, "test-", groups, quotaGroupListOptions{})
+			}, 500, 300)
+			tt.Frame()
+			used = 30
+			tt.Frame()
+			if !tt.FramePending() {
+				t.Fatal("用量变化后应启动动画")
+			}
+			for i := 0; i < 100; i++ {
+				elapsed += 16.0 / (300 * 60 * 1000)
+				tt.Advance(16 * time.Millisecond)
+				tt.Frame()
+			}
+			if tt.FramePending() {
+				t.Fatal("时间在同一像素内推进时动画应结束")
+			}
+		})
+	}
+}

@@ -155,7 +155,14 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 										return
 									}
 									// 有时间信息时按分段渲染：竖线落在时间进度上，整条用同一分档色，悬停时叠加同色虚影。
-									renderQuotaBarSegments(c, winKey, quotaBarSegments(clamped/100, win.elapsedRatio, win.paceKnown, projected), quotaLevelColor(c, win.UsedPercent), keyPrefix+"pace-marker")
+									width := bar.Bounds().W
+									if width <= 0 {
+										width = max(fixedWidth, ControlSM)
+									}
+									pixels := math.Max(1, float64(width-quotaMarkerWidth))
+									used := math.Round(clamped/100*pixels) / pixels
+									elapsed := math.Round(win.elapsedRatio*pixels) / pixels
+									renderQuotaBarSegments(c, winKey, quotaBarSegments(used, elapsed, win.paceKnown, projected), quotaLevelColor(c, win.UsedPercent), keyPrefix+"pace-marker")
 								})
 							}
 
