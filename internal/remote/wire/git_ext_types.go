@@ -130,6 +130,23 @@ type GitExtPRReviewParams struct {
 	Body     string `json:"body,omitempty"`
 }
 
+// GitExtPRSubmitReviewParams 对应 git.pr.submitReview 请求参数。
+type GitExtPRSubmitReviewParams struct {
+	ThreadID string                  `json:"threadID"`
+	Number   int                     `json:"number"`
+	Event    string                  `json:"event"`
+	Body     string                  `json:"body,omitempty"`
+	Comments []GitExtPRReviewComment `json:"comments,omitempty"`
+}
+
+// GitExtPRReviewComment 是 PR 行内评论。
+type GitExtPRReviewComment struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Side string `json:"side"`
+	Body string `json:"body"`
+}
+
 // GitExtPRCheck 是一条 CI 检查及其汇总后的状态。
 type GitExtPRCheck struct {
 	Name  string `json:"name"`

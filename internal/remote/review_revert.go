@@ -26,6 +26,9 @@ var reviewWorkspaceLocks sync.Map
 
 func (b *MemoryBackend) ReviewRevertHunk(ctx context.Context, p wire.ThreadsReviewRevertHunkParams) (wire.ThreadsReviewRevertHunkResult, error) {
 	var result wire.ThreadsReviewRevertHunkResult
+	if p.Scope == wire.ReviewScopePR {
+		return result, errors.New("PR 审阅不支持撤销")
+	}
 	if !reviewScopeValid(p.Scope) || p.Path == "" || p.BaseRevision == "" || p.HeadRevision == "" || p.StartLine < 1 || p.LineCount < 0 || p.HunkHash == "" || p.ExpectedFileHash == "" {
 		return result, errors.New("参数无效")
 	}
@@ -142,6 +145,9 @@ func reviewRevertParams(raw json.RawMessage) (wire.ThreadsReviewRevertHunkParams
 	}
 	if !isValidUUID(p.ThreadID) {
 		return p, ExtInvalidParams("Invalid params: 'threadID' must be a valid UUID")
+	}
+	if p.Scope == wire.ReviewScopePR {
+		return p, ExtInvalidParams("PR 审阅不支持撤销")
 	}
 	if p.Scope != wire.ReviewScopeTurn && p.Scope != wire.ReviewScopeSession && p.Scope != wire.ReviewScopeUncommitted {
 		return p, ExtInvalidParams("Invalid params: 'scope' is invalid")

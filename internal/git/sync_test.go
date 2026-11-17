@@ -98,6 +98,23 @@ func TestDefaultRemoteBranch(t *testing.T) {
 	})
 }
 
+func TestFetchPRHead(t *testing.T) {
+	runner, dir, bare := initSyncRemote(t)
+	commit := runTestGit(t, dir, "rev-parse", "HEAD")
+	runTestGit(t, bare, "update-ref", "refs/pull/1/head", commit)
+	got, err := runner.FetchPRHead(context.Background(), dir, ForgeGitHub, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != commit {
+		t.Fatalf("head = %s, want %s", got, commit)
+	}
+	ref := runTestGit(t, dir, "rev-parse", "refs/mcode/pr/1")
+	if ref != commit {
+		t.Fatalf("private ref = %s, want %s", ref, commit)
+	}
+}
+
 func TestCommitPaths_OnlyCommitsGivenPaths(t *testing.T) {
 	testenv.TempHome(t)
 	runner, dir := newRevertTestRepo(t)

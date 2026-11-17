@@ -2,8 +2,10 @@ package git
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -209,6 +211,44 @@ func TestForgeClient_GitLabCreateErrorDoesNotReuseURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Unauthorized") {
 		t.Errorf("错误应保留命令输出，实际 %v", err)
+	}
+}
+
+func TestForgeClient_SubmitPullRequestReview(t *testing.T) {
+	var payload map[string]any
+	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
+		if name != "gh" || len(args) != 6 || !reflect.DeepEqual(args[:5], []string{"api", "--method", "POST", "repos/{owner}/{repo}/pulls/9/reviews", "--input"}) {
+			t.Fatalf("gh args = %v", args)
+		}
+		data, err := os.ReadFile(args[5])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nil, json.Unmarshal(data, &payload)
+	}}
+	comments := []PRReviewComment{{Path: "a.go", Line: 8, Side: "RIGHT", Body: "fix"}}
+	if err := exec.client().SubmitPullRequestReview(context.Background(), "/work", ForgeGitHub, 9, "request-changes", "", comments); err != nil {
+		t.Fatal(err)
+	}
+	if payload["event"] != "REQUEST_CHANGES" || payload["body"] != "" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	got, _ := json.Marshal(payload["comments"])
+	var decoded []PRReviewComment
+	if err := json.Unmarshal(got, &decoded); err != nil || !reflect.DeepEqual(decoded, comments) {
+		t.Fatalf("comments = %s, err = %v", got, err)
+	}
+}
+
+func TestForgeClient_SubmitPullRequestReviewValidation(t *testing.T) {
+	client := NewForgeClient(func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil })
+	for _, c := range []PRReviewComment{{Path: "", Line: 1, Side: "RIGHT", Body: "x"}, {Path: "a", Line: 0, Side: "RIGHT", Body: "x"}, {Path: "a", Line: 1, Side: "RIGHT", Body: " "}} {
+		if err := client.SubmitPullRequestReview(context.Background(), "/work", ForgeGitHub, 2, "approve", "", []PRReviewComment{c}); err == nil {
+			t.Fatalf("comment 未校验: %+v", c)
+		}
+	}
+	if err := client.SubmitPullRequestReview(context.Background(), "/work", ForgeGitLab, 2, "approve", "", []PRReviewComment{{Path: "a", Line: 1, Side: "RIGHT", Body: "x"}}); err == nil || !strings.Contains(err.Error(), "GitLab 暂不支持行内评论") {
+		t.Fatalf("GitLab error = %v", err)
 	}
 }
 

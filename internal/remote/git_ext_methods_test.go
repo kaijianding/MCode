@@ -18,21 +18,22 @@ const gitExtTestThreadID = "11111111-1111-1111-1111-111111111111"
 
 // gitExtFakeService 是 git 扩展服务（app 层注入）的假实现，记录入参供断言。
 type gitExtFakeService struct {
-	stashEntries  []git.StashEntry
-	stashMessages []string
-	stashApplied  []int
-	stashDropped  []int
-	prs           []git.PRSummary
-	prLimit       int
-	prDetail      git.PRDetail
-	prMethod      string
-	prEvent       string
-	prReviewBody  string
-	prThreadID    string
-	prDeadline    bool
-	prCalls       int
-	prNumber      int
-	err           error
+	stashEntries   []git.StashEntry
+	stashMessages  []string
+	stashApplied   []int
+	stashDropped   []int
+	prs            []git.PRSummary
+	prLimit        int
+	prDetail       git.PRDetail
+	prMethod       string
+	prEvent        string
+	prReviewBody   string
+	prThreadID     string
+	prDeadline     bool
+	prCalls        int
+	prNumber       int
+	submitComments []git.PRReviewComment
+	err            error
 
 	// 写操作：pushes 统计推送次数（含失败），pushErr 只让推送失败，
 	// 其余字段记录入参与返回，供新方法的断言使用。
@@ -106,6 +107,14 @@ func (s *gitExtFakeService) GitPRMerge(ctx context.Context, threadID string, num
 func (s *gitExtFakeService) GitPRReview(ctx context.Context, threadID string, number int, event, body string) error {
 	s.prCalls++
 	s.prThreadID, s.prNumber, s.prEvent, s.prReviewBody = threadID, number, event, body
+	_, s.prDeadline = ctx.Deadline()
+	return s.err
+}
+
+func (s *gitExtFakeService) GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error {
+	s.prCalls++
+	s.prThreadID, s.prNumber, s.prEvent, s.prReviewBody = threadID, number, event, body
+	s.submitComments = comments
 	_, s.prDeadline = ctx.Deadline()
 	return s.err
 }
@@ -541,6 +550,18 @@ func TestGitExtPRWriteMethods(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestGitExtPRSubmitReview(t *testing.T) {
+	svc := &gitExtFakeService{}
+	d, conn := newGitExtTestDispatcher(&gitExtTestBackend{services: map[string]any{GitExtServiceName: svc}})
+	request := `{"jsonrpc":"2.0","id":1,"method":"git.pr.submitReview","params":{"threadID":"` + gitExtTestThreadID + `","number":4,"event":"request-changes","comments":[{"path":"a.go","line":7,"side":"RIGHT","body":"fix"}]}}`
+	resp := callExtension(t, d, conn, request)
+	var result wire.GitExtWriteActionResult
+	gitExtResult(t, resp, &result)
+	if !result.OK || svc.prCalls != 1 || svc.prNumber != 4 || len(svc.submitComments) != 1 || !svc.prDeadline {
+		t.Fatalf("提交参数不符: %+v %+v", result, svc)
 	}
 }
 

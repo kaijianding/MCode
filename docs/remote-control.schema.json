@@ -616,6 +616,9 @@
       "$ref": "#/$defs/RemoteGitPRReviewRequest"
     },
     {
+      "$ref": "#/$defs/RemoteGitPRSubmitReviewRequest"
+    },
+    {
       "$ref": "#/$defs/RemoteGitPushRequest"
     },
     {
@@ -716,6 +719,9 @@
     },
     {
       "$ref": "#/$defs/RemoteGitPRReviewResponse"
+    },
+    {
+      "$ref": "#/$defs/RemoteGitPRSubmitReviewResponse"
     },
     {
       "$ref": "#/$defs/RemoteGitPushResponse"
@@ -11045,6 +11051,9 @@
             "$ref": "#/$defs/RemoteGitPRReviewRequest"
           },
           {
+            "$ref": "#/$defs/RemoteGitPRSubmitReviewRequest"
+          },
+          {
             "$ref": "#/$defs/RemoteGitPushRequest"
           },
           {
@@ -11492,6 +11501,9 @@
           },
           {
             "$ref": "#/$defs/RemoteGitPRReviewResponse"
+          },
+          {
+            "$ref": "#/$defs/RemoteGitPRSubmitReviewResponse"
           },
           {
             "$ref": "#/$defs/RemoteGitPushResponse"
@@ -13232,6 +13244,35 @@
         "result",
         "id"
       ],
+      "additionalProperties": false
+    },
+    "RemoteGitPRSubmitReviewParams": {
+      "type": "object",
+      "properties": {
+        "threadID": {"$ref": "#/$defs/UUID"},
+        "number": {"type": "integer", "minimum": 1},
+        "event": {"type": "string", "enum": ["approve", "request-changes", "comment"]},
+        "body": {"type": "string"},
+        "comments": {"type": "array", "items": {"type": "object", "properties": {
+          "path": {"type": "string", "pattern": "\\S"},
+          "line": {"type": "integer", "minimum": 1},
+          "side": {"type": "string", "enum": ["LEFT", "RIGHT"]},
+          "body": {"type": "string", "pattern": "\\S"}
+        }, "required": ["path", "line", "side", "body"], "additionalProperties": false}}
+      },
+      "required": ["threadID", "number", "event"],
+      "additionalProperties": false
+    },
+    "RemoteGitPRSubmitReviewRequest": {
+      "type": "object",
+      "properties": {"jsonrpc": {"const": "2.0"}, "method": {"const": "git.pr.submitReview"}, "params": {"$ref": "#/$defs/RemoteGitPRSubmitReviewParams"}, "id": {"$ref": "#/$defs/JSONRPCId"}},
+      "required": ["jsonrpc", "method", "params", "id"],
+      "additionalProperties": false
+    },
+    "RemoteGitPRSubmitReviewResponse": {
+      "type": "object",
+      "properties": {"jsonrpc": {"const": "2.0"}, "result": {"$ref": "#/$defs/RemoteGitWriteActionResult"}, "id": {"$ref": "#/$defs/JSONRPCId"}},
+      "required": ["jsonrpc", "result", "id"],
       "additionalProperties": false
     },
     "RemoteGitPRDetailParams": {
@@ -16810,7 +16851,7 @@
 ,
       "RemoteReviewScope": {
         "type": "string",
-        "enum": ["turn", "session", "uncommitted"]
+        "enum": ["turn", "session", "uncommitted", "pr"]
       },
       "RemoteThreadsReviewGetParams": {
         "type": "object",
@@ -16819,12 +16860,16 @@
           "threadID": {"type": "string", "format": "uuid"},
           "scope": {"$ref": "#/$defs/RemoteReviewScope"},
           "turnID": {"type": "string", "anyOf": [{"const": ""}, {"format": "uuid"}]},
+          "number": {"type": "integer", "minimum": 1},
           "path": {"type": "string"}
         },
         "required": ["threadID", "scope"],
         "allOf": [{
-          "if": {"properties": {"scope": {"enum": ["session", "uncommitted"]}}},
+          "if": {"properties": {"scope": {"enum": ["session", "uncommitted", "pr"]}}},
           "then": {"properties": {"turnID": {"const": ""}}}
+        }, {
+          "if": {"properties": {"scope": {"const": "pr"}}},
+          "then": {"required": ["number"]}
         }],
         "additionalProperties": false
       },
@@ -16867,6 +16912,7 @@
         "properties": {
           "scope": {"$ref": "#/$defs/RemoteReviewScope"},
           "turnID": {"type": "string"},
+          "number": {"type": "integer"},
           "baseRevision": {"type": "string"},
           "headRevision": {"type": "string"},
           "running": {"type": "boolean"},
@@ -16874,7 +16920,7 @@
           "files": {"type": "array", "items": {"$ref": "#/$defs/RemoteReviewFileMeta"}},
           "file": {"$ref": "#/$defs/RemoteReviewFileContent"}
         },
-        "required": ["scope", "turnID", "baseRevision", "headRevision", "running", "unavailable", "files"],
+        "required": ["scope", "turnID", "number", "baseRevision", "headRevision", "running", "unavailable", "files"],
         "additionalProperties": false
       },
       "RemoteThreadsReviewGetRequest": {
@@ -16892,7 +16938,7 @@
         "type": "object",
         "properties": {
           "threadID": {"$ref": "#/$defs/UUID"},
-          "scope": {"$ref": "#/$defs/RemoteReviewScope"},
+          "scope": {"type": "string", "enum": ["turn", "session", "uncommitted"]},
           "turnID": {"type": "string"},
           "path": {"type": "string"},
           "baseRevision": {"type": "string"},

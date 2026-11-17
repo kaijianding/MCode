@@ -6,6 +6,7 @@ import "context"
 type ReviewSnapshot struct {
 	Scope        string
 	TurnID       string
+	Number       int
 	BaseRevision string
 	HeadRevision string
 	Running      bool

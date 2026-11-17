@@ -260,6 +260,7 @@ type MemoryBackend struct {
 	harnessWorkDir  string
 	harnessMode     harness.PermissionMode
 	git             *git.Runner
+	prBaseRef       func(context.Context, string, int) (string, error)
 	// projectCloner 是 projects.clone 的 git 执行器，nil 时用默认的 git 子进程实现。
 	projectCloner projectCloneRunner
 	// appVersion 是对外声明的桌面端版本号（与「关于」页同源），由 app 层注入。

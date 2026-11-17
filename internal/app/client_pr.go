@@ -56,6 +56,21 @@ func (c *Client) GitPRReview(ctx context.Context, threadID string, number int, e
 	return git.NewForgeClient(nil).ReviewPullRequest(callCtx, root, git.DetectForge(remoteURL), number, event, body)
 }
 
+// GitPRSubmitReview 提交包含行内评论的一次 PR/MR 审查。
+func (c *Client) GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error {
+	runner, root, err := c.gitStashTarget(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	remoteURL, err := runner.RemoteURL(callCtx, root)
+	if err != nil {
+		return err
+	}
+	return git.NewForgeClient(nil).SubmitPullRequestReview(callCtx, root, git.DetectForge(remoteURL), number, event, body, comments)
+}
+
 // GitPRDetail 读取单条 PR/MR 的详情。
 func (c *Client) GitPRDetail(ctx context.Context, threadID string, number int) (git.PRDetail, error) {
 	runner, root, err := c.gitStashTarget(ctx, threadID)

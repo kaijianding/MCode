@@ -266,7 +266,7 @@ func TestReviewSchemaAndInvalidParams(t *testing.T) {
 	if e = json.Unmarshal(schema.Defs["RemoteReviewScope"], &scope); e != nil {
 		t.Fatal(e)
 	}
-	if !reflect.DeepEqual(scope.Enum, []string{"turn", "session", "uncommitted"}) {
+	if !reflect.DeepEqual(scope.Enum, []string{"turn", "session", "uncommitted", "pr"}) {
 		t.Fatal("scope schema 不符")
 	}
 }

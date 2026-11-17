@@ -7,6 +7,7 @@ const (
 	ReviewScopeTurn        ReviewScope = "turn"
 	ReviewScopeSession     ReviewScope = "session"
 	ReviewScopeUncommitted ReviewScope = "uncommitted"
+	ReviewScopePR          ReviewScope = "pr"
 )
 
 // ThreadsReviewGetParams 不带 Path 时只获取文件元数据。
@@ -14,6 +15,7 @@ type ThreadsReviewGetParams struct {
 	ThreadID string      `json:"threadID"`
 	Scope    ReviewScope `json:"scope"`
 	TurnID   string      `json:"turnID,omitempty"`
+	Number   int         `json:"number,omitempty"`
 	Path     string      `json:"path,omitempty"`
 }
 
@@ -48,6 +50,7 @@ type ReviewFileContent struct {
 type ThreadsReviewGetResult struct {
 	Scope        ReviewScope        `json:"scope"`
 	TurnID       string             `json:"turnID"`
+	Number       int                `json:"number"`
 	BaseRevision string             `json:"baseRevision"`
 	HeadRevision string             `json:"headRevision"`
 	Running      bool               `json:"running"`

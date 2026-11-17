@@ -2,8 +2,10 @@ package git
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -246,6 +248,72 @@ func (f *ForgeClient) ReviewPullRequest(ctx context.Context, dir string, forge F
 	}
 	if event == "request-changes" {
 		_, _ = f.exec(ctx, dir, "glab", "mr", "revoke", ref)
+	}
+	return nil
+}
+
+// PRReviewComment 是提交 PR 行内评论所需的 diff 坐标与正文。
+type PRReviewComment struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Side string `json:"side"`
+	Body string `json:"body"`
+}
+
+// SubmitPullRequestReview 一次提交审查事件和可选的行内评论。
+func (f *ForgeClient) SubmitPullRequestReview(ctx context.Context, dir string, forge Forge, number int, event, body string, comments []PRReviewComment) error {
+	if len(comments) == 0 {
+		return f.ReviewPullRequest(ctx, dir, forge, number, event, body)
+	}
+	if number <= 0 {
+		return fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	var ghEvent string
+	switch event {
+	case "approve":
+		ghEvent = "APPROVE"
+	case "request-changes":
+		ghEvent = "REQUEST_CHANGES"
+	case "comment":
+		ghEvent = "COMMENT"
+	default:
+		return fmt.Errorf("无效的审查事件: %s", event)
+	}
+	if event == "comment" && strings.TrimSpace(body) == "" {
+		return errors.New("请求修改或评论时正文不能为空")
+	}
+	for _, c := range comments {
+		if strings.TrimSpace(c.Path) == "" || strings.TrimSpace(c.Body) == "" || c.Line <= 0 || (c.Side != "LEFT" && c.Side != "RIGHT") {
+			return errors.New("行内评论参数无效")
+		}
+	}
+	if forge == ForgeGitLab {
+		return errors.New("GitLab 暂不支持行内评论")
+	}
+	if forge != ForgeGitHub {
+		return ErrForgeUnsupported
+	}
+	input, err := os.CreateTemp("", "mcode-pr-review-*.json")
+	if err != nil {
+		return err
+	}
+	name := input.Name()
+	defer os.Remove(name)
+	payload := struct {
+		Event    string            `json:"event"`
+		Body     string            `json:"body"`
+		Comments []PRReviewComment `json:"comments"`
+	}{ghEvent, body, comments}
+	if err := json.NewEncoder(input).Encode(payload); err != nil {
+		_ = input.Close()
+		return err
+	}
+	if err := input.Close(); err != nil {
+		return err
+	}
+	out, err := f.exec(ctx, dir, "gh", "api", "--method", "POST", "repos/{owner}/{repo}/pulls/"+strconv.Itoa(number)+"/reviews", "--input", name)
+	if err != nil {
+		return commandError("gh", "api", out, err)
 	}
 	return nil
 }

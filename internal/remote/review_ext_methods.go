@@ -25,7 +25,16 @@ func handleThreadsReviewGet(ctx context.Context, d *Dispatcher, c Conn, params j
 		return nil, ExtInvalidParams("Invalid params: 'threadID' must be a valid UUID")
 	}
 	if !reviewScopeValid(p.Scope) {
-		return nil, ExtInvalidParams("Invalid params: 'scope' must be turn, session or uncommitted")
+		return nil, ExtInvalidParams("Invalid params: 'scope' must be turn, session, uncommitted or pr")
+	}
+	if p.Scope == wire.ReviewScopePR && p.Number <= 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be positive in pr scope")
+	}
+	if p.Scope != wire.ReviewScopePR && p.Number != 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' only applies to pr scope")
+	}
+	if p.Scope == wire.ReviewScopePR && p.TurnID != "" {
+		return nil, ExtInvalidParams("Invalid params: 'turnID' must be empty in pr scope")
 	}
 	if p.TurnID != "" && (!isValidUUID(p.TurnID) || p.Scope != wire.ReviewScopeTurn) {
 		return nil, ExtInvalidParams("Invalid params: 'turnID' must be a valid UUID in turn scope")
@@ -39,6 +48,9 @@ func handleThreadsReviewGet(ctx context.Context, d *Dispatcher, c Conn, params j
 		if raw, ok := fields[key]; ok && string(raw) == "null" {
 			return nil, ExtInvalidParams("Invalid params: '" + key + "' must be a string")
 		}
+	}
+	if raw, ok := fields["number"]; ok && string(raw) == "null" {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be an integer")
 	}
 	backend, ok := d.backend.(reviewExtBackend)
 	if !ok {

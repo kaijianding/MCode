@@ -83,6 +83,11 @@ func (s *remoteGitService) GitPRReview(ctx context.Context, threadID string, num
 	return s.client.GitPRReview(ctx, threadID, number, event, body)
 }
 
+// GitPRSubmitReview 提交指定 PR/MR 的审查与行内评论。
+func (s *remoteGitService) GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error {
+	return s.client.GitPRSubmitReview(ctx, threadID, number, event, body, comments)
+}
+
 // GitPush 推送会话所在仓库的当前分支到远程。
 func (s *remoteGitService) GitPush(ctx context.Context, threadID string) error {
 	return s.client.GitPush(ctx, threadID)

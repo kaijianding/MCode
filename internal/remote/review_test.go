@@ -235,6 +235,34 @@ func TestReviewPathMustBeInScope(t *testing.T) {
 	}
 }
 
+func TestReviewPRSnapshotAndRevertRejected(t *testing.T) {
+	f := newReviewFixture(t, true)
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	f.git("branch", "-M", "main")
+	f.git("init", "--bare", "-q", bare)
+	f.git("remote", "add", "origin", bare)
+	f.git("config", "url.file://github.com"+filepath.Dir(bare)+"/.insteadOf", filepath.Dir(bare)+"/")
+	f.git("push", "-q", "origin", "main")
+	f.write("a.go", "package pr\n")
+	f.git("add", "--", "a.go")
+	f.git("commit", "-m", "pr head")
+	commit := f.git("rev-parse", "HEAD")
+	f.git("push", "-q", "origin", "HEAD:refs/pull/1/head")
+	f.b.prBaseRef = func(context.Context, string, int) (string, error) { return "main", nil }
+	r, err := f.b.ReviewGet(f.ctx, wire.ThreadsReviewGetParams{ThreadID: f.id, Scope: wire.ReviewScopePR, Number: 1})
+	if err != nil || r.Unavailable != "" || r.Number != 1 || r.HeadRevision != commit || !reflect.DeepEqual(reviewPaths(r), []string{"a.go"}) {
+		t.Fatalf("PR 文件列表: %+v, %v", r, err)
+	}
+	r, err = f.b.ReviewGet(f.ctx, wire.ThreadsReviewGetParams{ThreadID: f.id, Scope: wire.ReviewScopePR, Number: 1, Path: "a.go"})
+	if err != nil || r.Unavailable != "" || r.File == nil || r.File.OldText != "package old\n" || r.File.NewText != "package pr\n" {
+		t.Fatalf("PR 文件全文: %+v, %v", r, err)
+	}
+	_, err = f.b.ReviewRevertHunk(f.ctx, wire.ThreadsReviewRevertHunkParams{ThreadID: f.id, Scope: wire.ReviewScopePR})
+	if err == nil || !strings.Contains(err.Error(), "PR 审阅不支持撤销") {
+		t.Fatalf("PR revert error = %v", err)
+	}
+}
+
 func TestReviewRenameDeleteSymlinkAndNetChanges(t *testing.T) {
 	f := newReviewFixture(t, true)
 	f.write("delete.txt", "remove\n")

@@ -50,6 +50,7 @@ type gitExtService interface {
 	GitPRDetail(ctx context.Context, threadID string, number int) (git.PRDetail, error)
 	GitPRMerge(ctx context.Context, threadID string, number int, method string) error
 	GitPRReview(ctx context.Context, threadID string, number int, event, body string) error
+	GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error
 	GitPush(ctx context.Context, threadID string) error
 	GitPull(ctx context.Context, threadID string) error
 	GitFetch(ctx context.Context, threadID string) error
@@ -89,6 +90,7 @@ func init() {
 	RegisterMethod("git.pr.detail", handleGitExtPRDetail)
 	RegisterMethod("git.pr.merge", handleGitExtPRMerge)
 	RegisterMethod("git.pr.review", handleGitExtPRReview)
+	RegisterMethod("git.pr.submitReview", handleGitExtPRSubmitReview)
 	RegisterMethod("git.push", handleGitExtPush)
 	RegisterMethod("git.pull", handleGitExtPull)
 	RegisterMethod("git.fetch", handleGitExtFetch)
@@ -526,6 +528,48 @@ func handleGitExtPRReview(ctx context.Context, d *Dispatcher, c Conn, params jso
 	callCtx, cancel := context.WithTimeout(ctx, gitExtNetworkTimeout)
 	defer cancel()
 	if err := svc.GitPRReview(callCtx, p.ThreadID, p.Number, p.Event, p.Body); err != nil {
+		return nil, err
+	}
+	return wire.GitExtWriteActionResult{OK: true}, nil
+}
+
+// handleGitExtPRSubmitReview 实现 git.pr.submitReview：一次提交审查与行内评论。
+func handleGitExtPRSubmitReview(ctx context.Context, d *Dispatcher, c Conn, params json.RawMessage) (any, error) {
+	var p wire.GitExtPRSubmitReviewParams
+	if err := decodeExtParams(params, &p); err != nil {
+		return nil, err
+	}
+	if err := gitExtThreadIDParam(p.ThreadID); err != nil {
+		return nil, err
+	}
+	if p.Number <= 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be positive")
+	}
+	switch p.Event {
+	case "approve", "request-changes", "comment":
+	default:
+		return nil, ExtInvalidParams("无效的审查事件")
+	}
+	if p.Event == "comment" && strings.TrimSpace(p.Body) == "" {
+		return nil, ExtInvalidParams("评论时正文不能为空")
+	}
+	if p.Event == "request-changes" && strings.TrimSpace(p.Body) == "" && len(p.Comments) == 0 {
+		return nil, ExtInvalidParams("请求修改时必须提供正文或行内评论")
+	}
+	comments := make([]git.PRReviewComment, len(p.Comments))
+	for i, c := range p.Comments {
+		if strings.TrimSpace(c.Path) == "" || strings.TrimSpace(c.Body) == "" || c.Line <= 0 || (c.Side != "LEFT" && c.Side != "RIGHT") {
+			return nil, ExtInvalidParams("行内评论参数无效")
+		}
+		comments[i] = git.PRReviewComment{Path: c.Path, Line: c.Line, Side: c.Side, Body: c.Body}
+	}
+	svc, ok := gitExtServiceFrom(d)
+	if !ok {
+		return nil, ExtNotImplemented()
+	}
+	callCtx, cancel := context.WithTimeout(ctx, gitExtNetworkTimeout)
+	defer cancel()
+	if err := svc.GitPRSubmitReview(callCtx, p.ThreadID, p.Number, p.Event, p.Body, comments); err != nil {
 		return nil, err
 	}
 	return wire.GitExtWriteActionResult{OK: true}, nil

@@ -56,14 +56,21 @@ type reviewTurn struct {
 }
 
 func reviewScopeValid(scope wire.ReviewScope) bool {
-	return scope == wire.ReviewScopeTurn || scope == wire.ReviewScopeSession || scope == wire.ReviewScopeUncommitted
+	return scope == wire.ReviewScopeTurn || scope == wire.ReviewScopeSession || scope == wire.ReviewScopeUncommitted || scope == wire.ReviewScopePR
 }
 
 // ReviewGet 返回固定版本的只读审阅快照，全文只按改动列表中的路径取用。
 func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetParams) (wire.ThreadsReviewGetResult, error) {
-	result := wire.ThreadsReviewGetResult{Scope: p.Scope, TurnID: p.TurnID, Files: []wire.ReviewFileMeta{}}
+	result := wire.ThreadsReviewGetResult{Scope: p.Scope, TurnID: p.TurnID, Number: p.Number, Files: []wire.ReviewFileMeta{}}
 	if !reviewScopeValid(p.Scope) {
-		return result, ExtInvalidParams("scope 必须为 turn、session 或 uncommitted")
+		return result, ExtInvalidParams("scope 必须为 turn、session、uncommitted 或 pr")
+	}
+	if p.Scope == wire.ReviewScopePR {
+		if p.Number <= 0 || p.TurnID != "" {
+			return result, ExtInvalidParams("PR 作用域要求正数 number，且 turnID 必须为空")
+		}
+	} else if p.Number != 0 {
+		return result, ExtInvalidParams("number 只适用于 PR 作用域")
 	}
 	if p.Scope != wire.ReviewScopeTurn && p.TurnID != "" {
 		return result, ExtInvalidParams("turnID 只适用于 turn 作用域")
@@ -93,7 +100,45 @@ func (b *MemoryBackend) ReviewGet(ctx context.Context, p wire.ThreadsReviewGetPa
 	}
 	var base, head string
 	var untracked map[string]bool
-	if p.Scope == wire.ReviewScopeUncommitted {
+	if p.Scope == wire.ReviewScopePR {
+		remoteURL, e := state.git.RemoteURL(ctx, root)
+		if e != nil {
+			return unavailable("无法读取 origin 远端: " + e.Error())
+		}
+		forge := git.DetectForge(remoteURL)
+		if forge == git.ForgeUnknown {
+			return unavailable(git.ErrForgeUnsupported.Error())
+		}
+		if p.Path == "" {
+			head, err = state.git.FetchPRHead(ctx, root, forge, p.Number)
+		} else {
+			head, err = state.git.ReadPRHeadRef(ctx, root, p.Number)
+			if err != nil {
+				head, err = state.git.FetchPRHead(ctx, root, forge, p.Number)
+			}
+		}
+		if err != nil {
+			return unavailable("无法读取 PR head: " + err.Error())
+		}
+		baseRef := b.prBaseRef
+		if baseRef == nil {
+			baseRef = func(ctx context.Context, root string, number int) (string, error) {
+				detail, err := state.git.PRDetail(ctx, root, number)
+				return detail.BaseBranch, err
+			}
+		}
+		branch, e := baseRef(ctx, root, p.Number)
+		if e != nil {
+			return unavailable("无法读取 PR base: " + e.Error())
+		}
+		if branch == "" {
+			return unavailable("PR base 分支为空")
+		}
+		base, err = state.git.ReviewPRBase(ctx, root, branch, head)
+		if err != nil {
+			return unavailable("无法计算 PR merge-base: " + err.Error())
+		}
+	} else if p.Scope == wire.ReviewScopeUncommitted {
 		base, err = state.git.ReviewRevision(ctx, root, "HEAD")
 		if err != nil {
 			return unavailable("无法读取 HEAD: " + err.Error())
