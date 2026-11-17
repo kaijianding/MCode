@@ -2824,9 +2824,9 @@ export type ScriptsSetFavoriteResponse = {
   id: JSONRPCId;
 };
 
-export type JSONRPCBatchRequest = Array<SessionPairRequest | SessionAuthenticateRequest | SessionNewPairingCodeRequest | SessionRevokeDeviceRequest | SessionRenameDeviceRequest | KanbanGetBoardRequest | KanbanCreateTaskRequest | KanbanMoveTaskRequest | KanbanStartTaskRequest | KanbanReviewTaskRequest | GoalCreateRequest | GoalStartRequest | GoalPauseRequest | GoalCancelRequest | GoalReplanRequest | GoalRetryTaskRequest | GoalSkipTaskRequest | KanbanGetDiffRequest | RemoteThreadsCreateRequest | RemoteProvidersListRequest | RemoteProvidersRememberSelectionRequest | RemoteThreadsSendMessageRequest | RemoteThreadsSplitSessionRequest | RemoteThreadsActionStatusRequest | RemoteThreadsQueueListRequest | RemoteThreadsQueueMutationRequest | RemoteThreadsQueueMoveRequest | RemoteThreadsMCPDisabledSetRequest | RemoteThreadsQueueInterruptAndSendRequest | RemoteAttachmentUploadRequest | RemoteRequestsListRequest | RemoteRequestsRespondRequest | RemoteThreadsInterruptRequest | RemoteThreadsKillRunningCommandRequest | RemoteThreadsBackgroundTaskLogRequest | RemoteThreadsToolOutputRequest | RemoteThreadsCommandActivityRequest | RemoteThreadsStopBackgroundTaskRequest | RemoteProvidersPersonasRequest | RemoteThreadsSetPersonaRequest | RemoteThreadsTurnRecallRequest | RemoteThreadsGetRequest | RemoteThreadsGetDiffRequest | RemoteFilesListRequest | RemoteFilesReadRequest | RemoteFilesSearchRequest | RemoteThreadsMediaReadRequest | RemoteGitStatusRequest | RemoteGitBranchesRequest | ScriptsListRequest | ScriptsRunRequest | ScriptsRunStatusRequest | ScriptsSetFavoriteRequest | RemoteThreadsBranchRequest | RemoteThreadsContinueRequest | RemoteThreadsCommandsRequest | RemoteThreadsSwarmStopAllRequest | RemoteThreadsSwarmClearFinishedRequest | RuntimeQueueEditRequest | RuntimeLimitTextRequest | RuntimeWorktreePreviewRequest | RuntimeWorktreeExecuteRequest | RuntimeCompactRequest | RemoteMessagesSearchRequest | RemoteGitChangedFilesRequest | RemoteGitCommitSelectedRequest | RemoteGitStashListRequest | RemoteGitStashPushRequest | RemoteGitStashPopRequest | RemoteGitStashApplyRequest | RemoteGitStashDropRequest | RemoteGitPRListRequest | RemoteGitPRDetailRequest | RemoteGitPushRequest | RemoteGitPanelMethod0Request | RemoteGitPanelMethod1Request | RemoteGitPanelMethod2Request | RemoteGitPanelMethod3Request | RemoteGitPanelMethod4Request | RemoteGitPanelMethod5Request | RemoteGitPanelMethod6Request | RemoteGitPanelMethod7Request | RemoteGitPanelMethod8Request | RemoteGitPanelMethod9Request | RemoteGitPanelMethod10Request | RemoteGitPanelMethod11Request | RemoteGitPanelMethod12Request | RemoteGitPanelMethod13Request | RemoteGitPanelMethod14Request | RemoteGitPanelMethod15Request | RemoteGitPanelMethod16Request | RemoteGitPanelMethod17Request | RemoteGitPanelMethod18Request | RemoteGitPanelMethod19Request | RemoteGitPanelMethod20Request | RemoteGitPanelMethod21Request | RemoteGitPanelMethod22Request | RemoteGitPullRequest | RemoteGitFetchRequest | RemoteGitCheckoutRequest | RemoteGitCreateBranchRequest | RemoteGitMergeRequest | RemoteGitGenerateCommitMessageRequest | RemoteGitPRCreateURLRequest | RemoteThreadsRevertPreviewRequest | RemoteThreadsReviewGetRequest | RemoteThreadsReviewRevertHunkRequest | RemoteThreadsRevertApplyRequest | RemoteThreadsSwarmInterruptedRequest | RemoteThreadsSwarmResumeRequest | RemoteThreadsSwarmDismissInterruptedRequest | RemoteThreadsSwarmRetryBeeRequest | RemoteRequestsAlwaysAllowedListRequest | RemoteRequestsAlwaysAllowedRevokeRequest | RemoteMemoryProposalsListRequest | RemoteMemoryProposalsAcceptRequest | RemoteMemoryProposalsRejectRequest | RemoteAttentionListRequest | RemoteAttentionResolveRequest | RemoteAttentionConfirmSuggestionRequest | RemoteStewardDecisionsListRequest | RemoteStewardDecisionsAnswerRequest | RemoteStewardOpenRequest | RemoteStewardResetRequest | RemoteAutomationsPreviewRequest | RemoteAutomationsListRequest | RemoteAutomationsRunsRequest | RemoteAutomationsRunRequest | RemoteAutomationsMarkReadRequest | RemoteAutomationsArchiveRunRequest | RemoteAutomationsCreateRequest | RemoteAutomationsUpdateRequest | RemoteAutomationsDeleteRequest | RemoteAutomationsSetEnabledRequest | RemoteAutomationsResetRequest | RemoteProjectsAddRequest | RemoteProjectsValidatePathRequest | RemoteSettingsGetRequest | RemoteSettingsSetRequest | RemoteThreadsSwarmReportRequest | RemoteMCPServersListRequest | AppUpdateGetRequest | AppUpdateCheckRequest | AppUpdateInstallRequest | SessionDevicesListRequest | SessionDevicesRevokeRequest | RemoteFilesWriteRequest | RemoteFilesCreateRequest | RemoteFilesRenameRequest | RemoteFilesTrashRequest | RemoteFilesDuplicateRequest | RemoteProjectsCloneRequest | RemoteProjectsListDirRequest | ScriptsSaveRequest | KanbanDeleteTaskRequest | KanbanUpdateTaskRequest | KanbanRescueTaskRequest | RemoteMemoryCreateRequest | RemoteMemorySearchRequest>;
+export type JSONRPCBatchRequest = Array<SessionPairRequest | SessionAuthenticateRequest | SessionNewPairingCodeRequest | SessionRevokeDeviceRequest | SessionRenameDeviceRequest | KanbanGetBoardRequest | KanbanCreateTaskRequest | KanbanMoveTaskRequest | KanbanStartTaskRequest | KanbanReviewTaskRequest | GoalCreateRequest | GoalStartRequest | GoalPauseRequest | GoalCancelRequest | GoalReplanRequest | GoalRetryTaskRequest | GoalSkipTaskRequest | KanbanGetDiffRequest | RemoteThreadsCreateRequest | RemoteProvidersListRequest | RemoteProvidersRememberSelectionRequest | RemoteThreadsSendMessageRequest | RemoteThreadsSplitSessionRequest | RemoteThreadsActionStatusRequest | RemoteThreadsQueueListRequest | RemoteThreadsQueueMutationRequest | RemoteThreadsQueueMoveRequest | RemoteThreadsMCPDisabledSetRequest | RemoteThreadsQueueInterruptAndSendRequest | RemoteAttachmentUploadRequest | RemoteRequestsListRequest | RemoteRequestsRespondRequest | RemoteThreadsInterruptRequest | RemoteThreadsKillRunningCommandRequest | RemoteThreadsBackgroundTaskLogRequest | RemoteThreadsToolOutputRequest | RemoteThreadsCommandActivityRequest | RemoteThreadsStopBackgroundTaskRequest | RemoteProvidersPersonasRequest | RemoteThreadsSetPersonaRequest | RemoteThreadsTurnRecallRequest | RemoteThreadsGetRequest | RemoteThreadsGetDiffRequest | RemoteFilesListRequest | RemoteFilesReadRequest | RemoteFilesSearchRequest | RemoteThreadsMediaReadRequest | RemoteGitStatusRequest | RemoteGitBranchesRequest | ScriptsListRequest | ScriptsRunRequest | ScriptsRunStatusRequest | ScriptsSetFavoriteRequest | RemoteThreadsBranchRequest | RemoteThreadsContinueRequest | RemoteThreadsCommandsRequest | RemoteThreadsSwarmStopAllRequest | RemoteThreadsSwarmClearFinishedRequest | RuntimeQueueEditRequest | RuntimeLimitTextRequest | RuntimeWorktreePreviewRequest | RuntimeWorktreeExecuteRequest | RuntimeCompactRequest | RemoteMessagesSearchRequest | RemoteGitChangedFilesRequest | RemoteGitCommitSelectedRequest | RemoteGitStashListRequest | RemoteGitStashPushRequest | RemoteGitStashPopRequest | RemoteGitStashApplyRequest | RemoteGitStashDropRequest | RemoteGitPRListRequest | RemoteGitPRDetailRequest | RemoteGitPRMergeRequest | RemoteGitPRReviewRequest | RemoteGitPRSubmitReviewRequest | RemoteGitPushRequest | RemoteGitPanelMethod0Request | RemoteGitPanelMethod1Request | RemoteGitPanelMethod2Request | RemoteGitPanelMethod3Request | RemoteGitPanelMethod4Request | RemoteGitPanelMethod5Request | RemoteGitPanelMethod6Request | RemoteGitPanelMethod7Request | RemoteGitPanelMethod8Request | RemoteGitPanelMethod9Request | RemoteGitPanelMethod10Request | RemoteGitPanelMethod11Request | RemoteGitPanelMethod12Request | RemoteGitPanelMethod13Request | RemoteGitPanelMethod14Request | RemoteGitPanelMethod15Request | RemoteGitPanelMethod16Request | RemoteGitPanelMethod17Request | RemoteGitPanelMethod18Request | RemoteGitPanelMethod19Request | RemoteGitPanelMethod20Request | RemoteGitPanelMethod21Request | RemoteGitPanelMethod22Request | RemoteGitPullRequest | RemoteGitFetchRequest | RemoteGitCheckoutRequest | RemoteGitCreateBranchRequest | RemoteGitMergeRequest | RemoteGitGenerateCommitMessageRequest | RemoteGitPRCreateURLRequest | RemoteThreadsRevertPreviewRequest | RemoteThreadsReviewGetRequest | RemoteThreadsReviewRevertHunkRequest | RemoteThreadsRevertApplyRequest | RemoteThreadsSwarmInterruptedRequest | RemoteThreadsSwarmResumeRequest | RemoteThreadsSwarmDismissInterruptedRequest | RemoteThreadsSwarmRetryBeeRequest | RemoteRequestsAlwaysAllowedListRequest | RemoteRequestsAlwaysAllowedRevokeRequest | RemoteMemoryProposalsListRequest | RemoteMemoryProposalsAcceptRequest | RemoteMemoryProposalsRejectRequest | RemoteAttentionListRequest | RemoteAttentionResolveRequest | RemoteAttentionConfirmSuggestionRequest | RemoteStewardDecisionsListRequest | RemoteStewardDecisionsAnswerRequest | RemoteStewardOpenRequest | RemoteStewardResetRequest | RemoteAutomationsPreviewRequest | RemoteAutomationsListRequest | RemoteAutomationsRunsRequest | RemoteAutomationsRunRequest | RemoteAutomationsMarkReadRequest | RemoteAutomationsArchiveRunRequest | RemoteAutomationsCreateRequest | RemoteAutomationsUpdateRequest | RemoteAutomationsDeleteRequest | RemoteAutomationsSetEnabledRequest | RemoteAutomationsResetRequest | RemoteProjectsAddRequest | RemoteProjectsValidatePathRequest | RemoteSettingsGetRequest | RemoteSettingsSetRequest | RemoteThreadsSwarmReportRequest | RemoteMCPServersListRequest | AppUpdateGetRequest | AppUpdateCheckRequest | AppUpdateInstallRequest | SessionDevicesListRequest | SessionDevicesRevokeRequest | RemoteFilesWriteRequest | RemoteFilesCreateRequest | RemoteFilesRenameRequest | RemoteFilesTrashRequest | RemoteFilesDuplicateRequest | RemoteProjectsCloneRequest | RemoteProjectsListDirRequest | ScriptsSaveRequest | KanbanDeleteTaskRequest | KanbanUpdateTaskRequest | KanbanRescueTaskRequest | RemoteMemoryCreateRequest | RemoteMemorySearchRequest>;
 
-export type JSONRPCBatchResponse = Array<JSONRPCErrorResponse | SessionPairResponse | SessionAuthenticateResponse | SessionNewPairingCodeResponse | SessionRevokeDeviceResponse | SessionRenameDeviceResponse | KanbanGetBoardResponse | KanbanTaskMutationResponse | KanbanGetDiffResponse | RemoteThreadsCreateResponse | RemoteProvidersListResponse | RemoteProvidersRememberSelectionResponse | RemoteThreadsSendMessageResponse | RemoteThreadsSplitSessionResponse | RemoteThreadsActionStatusResponse | RemoteThreadsQueueListResponse | RemoteThreadsQueueMutationResponse | RemoteThreadsQueueMoveResponse | RemoteThreadsMCPDisabledSetResponse | RemoteThreadsQueueInterruptAndSendResponse | RemoteAttachmentUploadResponse | RemoteRequestsListResponse | RemoteRequestsRespondResponse | RemoteThreadsInterruptResponse | RemoteThreadsKillRunningCommandResponse | RemoteThreadsBackgroundTaskLogResponse | RemoteThreadsToolOutputResponse | RemoteThreadsCommandActivityResponse | RemoteThreadsStopBackgroundTaskResponse | RemoteProvidersPersonasResponse | RemoteThreadsSetPersonaResponse | RemoteThreadsTurnRecallResponse | RemoteThreadsGetResponse | RemoteThreadsGetDiffResponse | RemoteFilesListResponse | RemoteFilesReadResponse | RemoteFilesSearchResponse | RemoteThreadsMediaReadResponse | RemoteGitStatusResponse | RemoteGitBranchesResponse | ScriptsListResponse | ScriptsRunResponse | ScriptsRunStatusResponse | ScriptsSetFavoriteResponse | RemoteThreadsBranchResponse | RemoteThreadsContinueResponse | RemoteThreadsCommandsResponse | RemoteThreadsSwarmResponse | RemoteThreadsSwarmSetBeeTiersResponse | RuntimeQueueEditResponse | RuntimeLimitTextResponse | RuntimeWorktreePreviewResponse | RuntimeWorktreeExecuteResponse | RuntimeCompactResponse | RemoteMessagesSearchResponse | RemoteGitChangedFilesResponse | RemoteGitCommitSelectedResponse | RemoteGitStashListResponse | RemoteGitStashPushResponse | RemoteGitStashPopResponse | RemoteGitStashApplyResponse | RemoteGitStashDropResponse | RemoteGitPRListResponse | RemoteGitPRDetailResponse | RemoteGitPushResponse | RemoteGitPanelMethod0Response | RemoteGitPanelMethod1Response | RemoteGitPanelMethod2Response | RemoteGitPanelMethod3Response | RemoteGitPanelMethod4Response | RemoteGitPanelMethod5Response | RemoteGitPanelMethod6Response | RemoteGitPanelMethod7Response | RemoteGitPanelMethod8Response | RemoteGitPanelMethod9Response | RemoteGitPanelMethod10Response | RemoteGitPanelMethod11Response | RemoteGitPanelMethod12Response | RemoteGitPanelMethod13Response | RemoteGitPanelMethod14Response | RemoteGitPanelMethod15Response | RemoteGitPanelMethod16Response | RemoteGitPanelMethod17Response | RemoteGitPanelMethod18Response | RemoteGitPanelMethod19Response | RemoteGitPanelMethod20Response | RemoteGitPanelMethod21Response | RemoteGitPanelMethod22Response | RemoteGitPullResponse | RemoteGitFetchResponse | RemoteGitCheckoutResponse | RemoteGitCreateBranchResponse | RemoteGitMergeResponse | RemoteGitGenerateCommitMessageResponse | RemoteGitPRCreateURLResponse | RemoteThreadsRevertPreviewResponse | RemoteThreadsReviewGetResponse | RemoteThreadsReviewRevertHunkResponse | RemoteThreadsRevertApplyResponse | RemoteThreadsSwarmInterruptedResponse | RemoteThreadsSwarmResumeResponse | RemoteThreadsSwarmDismissInterruptedResponse | RemoteThreadsSwarmRetryBeeResponse | RemoteRequestsAlwaysAllowedListResponse | RemoteRequestsAlwaysAllowedRevokeResponse | RemoteMemoryProposalsListResponse | RemoteMemoryProposalsAcceptResponse | RemoteMemoryProposalsRejectResponse | RemoteAttentionListResponse | RemoteAttentionResolveResponse | RemoteAttentionConfirmSuggestionResponse | RemoteStewardDecisionsListResponse | RemoteStewardDecisionsAnswerResponse | RemoteStewardOpenResponse | RemoteStewardResetResponse | RemoteAutomationsPreviewResponse | RemoteAutomationsListResponse | RemoteAutomationsRunsResponse | RemoteAutomationsRunResponse | RemoteAutomationsMarkReadResponse | RemoteAutomationsArchiveRunResponse | RemoteAutomationsCreateResponse | RemoteAutomationsUpdateResponse | RemoteAutomationsDeleteResponse | RemoteAutomationsSetEnabledResponse | RemoteAutomationsResetResponse | RemoteProjectsAddResponse | RemoteProjectsValidatePathResponse | RemoteSettingsGetResponse | RemoteSettingsSetResponse | RemoteThreadsSwarmReportResponse | RemoteMCPServersListResponse | AppUpdateGetResponse | AppUpdateCheckResponse | AppUpdateInstallResponse | SessionDevicesListResponse | SessionDevicesRevokeResponse | RemoteFilesWriteResponse | RemoteFilesCreateResponse | RemoteFilesRenameResponse | RemoteFilesTrashResponse | RemoteFilesDuplicateResponse | RemoteProjectsCloneResponse | RemoteProjectsListDirResponse | ScriptsSaveResponse | RemoteMemoryCreateResponse | RemoteMemorySearchResponse>;
+export type JSONRPCBatchResponse = Array<JSONRPCErrorResponse | SessionPairResponse | SessionAuthenticateResponse | SessionNewPairingCodeResponse | SessionRevokeDeviceResponse | SessionRenameDeviceResponse | KanbanGetBoardResponse | KanbanTaskMutationResponse | KanbanGetDiffResponse | RemoteThreadsCreateResponse | RemoteProvidersListResponse | RemoteProvidersRememberSelectionResponse | RemoteThreadsSendMessageResponse | RemoteThreadsSplitSessionResponse | RemoteThreadsActionStatusResponse | RemoteThreadsQueueListResponse | RemoteThreadsQueueMutationResponse | RemoteThreadsQueueMoveResponse | RemoteThreadsMCPDisabledSetResponse | RemoteThreadsQueueInterruptAndSendResponse | RemoteAttachmentUploadResponse | RemoteRequestsListResponse | RemoteRequestsRespondResponse | RemoteThreadsInterruptResponse | RemoteThreadsKillRunningCommandResponse | RemoteThreadsBackgroundTaskLogResponse | RemoteThreadsToolOutputResponse | RemoteThreadsCommandActivityResponse | RemoteThreadsStopBackgroundTaskResponse | RemoteProvidersPersonasResponse | RemoteThreadsSetPersonaResponse | RemoteThreadsTurnRecallResponse | RemoteThreadsGetResponse | RemoteThreadsGetDiffResponse | RemoteFilesListResponse | RemoteFilesReadResponse | RemoteFilesSearchResponse | RemoteThreadsMediaReadResponse | RemoteGitStatusResponse | RemoteGitBranchesResponse | ScriptsListResponse | ScriptsRunResponse | ScriptsRunStatusResponse | ScriptsSetFavoriteResponse | RemoteThreadsBranchResponse | RemoteThreadsContinueResponse | RemoteThreadsCommandsResponse | RemoteThreadsSwarmResponse | RemoteThreadsSwarmSetBeeTiersResponse | RuntimeQueueEditResponse | RuntimeLimitTextResponse | RuntimeWorktreePreviewResponse | RuntimeWorktreeExecuteResponse | RuntimeCompactResponse | RemoteMessagesSearchResponse | RemoteGitChangedFilesResponse | RemoteGitCommitSelectedResponse | RemoteGitStashListResponse | RemoteGitStashPushResponse | RemoteGitStashPopResponse | RemoteGitStashApplyResponse | RemoteGitStashDropResponse | RemoteGitPRListResponse | RemoteGitPRDetailResponse | RemoteGitPRMergeResponse | RemoteGitPRReviewResponse | RemoteGitPRSubmitReviewResponse | RemoteGitPushResponse | RemoteGitPanelMethod0Response | RemoteGitPanelMethod1Response | RemoteGitPanelMethod2Response | RemoteGitPanelMethod3Response | RemoteGitPanelMethod4Response | RemoteGitPanelMethod5Response | RemoteGitPanelMethod6Response | RemoteGitPanelMethod7Response | RemoteGitPanelMethod8Response | RemoteGitPanelMethod9Response | RemoteGitPanelMethod10Response | RemoteGitPanelMethod11Response | RemoteGitPanelMethod12Response | RemoteGitPanelMethod13Response | RemoteGitPanelMethod14Response | RemoteGitPanelMethod15Response | RemoteGitPanelMethod16Response | RemoteGitPanelMethod17Response | RemoteGitPanelMethod18Response | RemoteGitPanelMethod19Response | RemoteGitPanelMethod20Response | RemoteGitPanelMethod21Response | RemoteGitPanelMethod22Response | RemoteGitPullResponse | RemoteGitFetchResponse | RemoteGitCheckoutResponse | RemoteGitCreateBranchResponse | RemoteGitMergeResponse | RemoteGitGenerateCommitMessageResponse | RemoteGitPRCreateURLResponse | RemoteThreadsRevertPreviewResponse | RemoteThreadsReviewGetResponse | RemoteThreadsReviewRevertHunkResponse | RemoteThreadsRevertApplyResponse | RemoteThreadsSwarmInterruptedResponse | RemoteThreadsSwarmResumeResponse | RemoteThreadsSwarmDismissInterruptedResponse | RemoteThreadsSwarmRetryBeeResponse | RemoteRequestsAlwaysAllowedListResponse | RemoteRequestsAlwaysAllowedRevokeResponse | RemoteMemoryProposalsListResponse | RemoteMemoryProposalsAcceptResponse | RemoteMemoryProposalsRejectResponse | RemoteAttentionListResponse | RemoteAttentionResolveResponse | RemoteAttentionConfirmSuggestionResponse | RemoteStewardDecisionsListResponse | RemoteStewardDecisionsAnswerResponse | RemoteStewardOpenResponse | RemoteStewardResetResponse | RemoteAutomationsPreviewResponse | RemoteAutomationsListResponse | RemoteAutomationsRunsResponse | RemoteAutomationsRunResponse | RemoteAutomationsMarkReadResponse | RemoteAutomationsArchiveRunResponse | RemoteAutomationsCreateResponse | RemoteAutomationsUpdateResponse | RemoteAutomationsDeleteResponse | RemoteAutomationsSetEnabledResponse | RemoteAutomationsResetResponse | RemoteProjectsAddResponse | RemoteProjectsValidatePathResponse | RemoteSettingsGetResponse | RemoteSettingsSetResponse | RemoteThreadsSwarmReportResponse | RemoteMCPServersListResponse | AppUpdateGetResponse | AppUpdateCheckResponse | AppUpdateInstallResponse | SessionDevicesListResponse | SessionDevicesRevokeResponse | RemoteFilesWriteResponse | RemoteFilesCreateResponse | RemoteFilesRenameResponse | RemoteFilesTrashResponse | RemoteFilesDuplicateResponse | RemoteProjectsCloneResponse | RemoteProjectsListDirResponse | ScriptsSaveResponse | RemoteMemoryCreateResponse | RemoteMemorySearchResponse>;
 
 export type RuntimeDraft = {
   text: string;
@@ -3051,6 +3051,7 @@ export type RemoteGitPRComment = {
 };
 
 export type RemoteGitPRDetail = {
+  mergeable?: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
   number: number;
   title: string;
   state: string;
@@ -3210,6 +3211,71 @@ export type RemoteGitPRListRequest = {
 export type RemoteGitPRListResponse = {
   jsonrpc: "2.0";
   result: RemoteGitPRListResult;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRMergeParams = {
+  threadID: UUID;
+  number: number;
+  method: "squash" | "merge" | "rebase";
+};
+
+export type RemoteGitPRMergeRequest = {
+  jsonrpc: "2.0";
+  method: "git.pr.merge";
+  params: RemoteGitPRMergeParams;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRMergeResponse = {
+  jsonrpc: "2.0";
+  result: RemoteGitWriteActionResult;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRReviewParams = {
+  threadID: UUID;
+  number: number;
+  event: "approve" | "request-changes" | "comment";
+  body?: string;
+};
+
+export type RemoteGitPRReviewRequest = {
+  jsonrpc: "2.0";
+  method: "git.pr.review";
+  params: RemoteGitPRReviewParams;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRReviewResponse = {
+  jsonrpc: "2.0";
+  result: RemoteGitWriteActionResult;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRSubmitReviewParams = {
+  threadID: UUID;
+  number: number;
+  event: "approve" | "request-changes" | "comment";
+  body?: string;
+  comments?: Array<{
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
+}>;
+};
+
+export type RemoteGitPRSubmitReviewRequest = {
+  jsonrpc: "2.0";
+  method: "git.pr.submitReview";
+  params: RemoteGitPRSubmitReviewParams;
+  id: JSONRPCId;
+};
+
+export type RemoteGitPRSubmitReviewResponse = {
+  jsonrpc: "2.0";
+  result: RemoteGitWriteActionResult;
   id: JSONRPCId;
 };
 
@@ -4311,12 +4377,13 @@ export type RemoteProjectsChangedNotification = {
   params: RemoteProjectExtChangedParams;
 };
 
-export type RemoteReviewScope = "turn" | "session" | "uncommitted";
+export type RemoteReviewScope = "turn" | "session" | "uncommitted" | "pr";
 
 export type RemoteThreadsReviewGetParams = {
   threadID: string;
   scope: RemoteReviewScope;
   turnID?: "" | unknown;
+  number?: number;
   path?: string;
 };
 
@@ -4348,6 +4415,7 @@ export type RemoteReviewFileContent = {
 export type RemoteThreadsReviewGetResult = {
   scope: RemoteReviewScope;
   turnID: string;
+  number: number;
   baseRevision: string;
   headRevision: string;
   running: boolean;
@@ -4365,7 +4433,7 @@ export type RemoteThreadsReviewGetRequest = {
 
 export type RemoteThreadsReviewRevertHunkParams = {
   threadID: UUID;
-  scope: RemoteReviewScope;
+  scope: "turn" | "session" | "uncommitted";
   turnID?: string;
   path: string;
   baseRevision: string;
