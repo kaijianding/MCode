@@ -65,7 +65,7 @@ func normalizeInspectorPreference(pref InspectorPreference) InspectorPreference 
 	if pref.Width <= 0 || math.IsNaN(float64(pref.Width)) || math.IsInf(float64(pref.Width), 0) {
 		pref.Width = inspectorDefaultWidth
 	} else {
-		pref.Width = min(max(pref.Width, inspectorMinWidth), inspectorMaxWidth)
+		pref.Width = max(pref.Width, inspectorMinWidth)
 	}
 	pref.FileExpanded = normalizeInspectorPaths(pref.FileExpanded)
 	pref.FileActive = normalizeInspectorPath(pref.FileActive)

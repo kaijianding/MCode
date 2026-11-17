@@ -325,7 +325,7 @@ func TestInspectorPreferenceInvalidValues(t *testing.T) {
 	t.Cleanup(waitUIStateWrites)
 	for _, tc := range []struct{ width, want float32 }{
 		{float32(math.NaN()), 480}, {float32(math.Inf(1)), 480}, {float32(math.Inf(-1)), 480},
-		{-1, 480}, {0, 480}, {100, 320}, {900, 800}, {620, 620},
+		{-1, 480}, {0, 480}, {100, 320}, {900, 900}, {620, 620},
 	} {
 		s := newChatState(NewFakeClient())
 		applyUIState(s, UIState{InspectorSessions: map[string]InspectorPreference{

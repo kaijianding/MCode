@@ -161,6 +161,7 @@ func TestInspectorNarrowLayout(t *testing.T) {
 		overlay                     bool
 	}{
 		{600, 480, 480, true}, {300, 480, 300, true}, {687, 800, 320, false}, {1200, 800, 800, false},
+		{1600, 1200, 1200, false},
 	} {
 		overlay, width := inspectorLayout(tc.available, tc.preferred)
 		if overlay != tc.overlay || width != tc.width {
@@ -196,6 +197,23 @@ func TestInspectorNarrowLayout(t *testing.T) {
 	panel, ok := tester.Find("关闭右栏")
 	if !ok || panel.X < 160 {
 		t.Fatal("覆盖卡片侵入项目侧栏")
+	}
+}
+
+func TestInspectorLayoutFollowsWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		available, preferred, want float32
+	}{
+		{"宽窗口", 1600, 1200, 1200},
+		{"保留聊天最小宽度", 1031, 1200, 1031 - inspectorChatMinWidth - sidePaneHandleWidth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overlay, width := inspectorLayout(tc.available, tc.preferred)
+			if overlay || width != tc.want {
+				t.Fatalf("布局得到 overlay=%v width=%v, want overlay=false width=%v", overlay, width, tc.want)
+			}
+		})
 	}
 }
 

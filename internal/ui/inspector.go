@@ -10,7 +10,6 @@ import (
 const (
 	inspectorMinWidth     float32 = 320
 	inspectorDefaultWidth float32 = 480
-	inspectorMaxWidth     float32 = 800
 	inspectorChatMinWidth float32 = 360
 )
 
@@ -88,7 +87,7 @@ func inspectorInitialWidth(s *chatState) float32 {
 	defer sidePanePrefsMu.Unlock()
 	for _, id := range []string{sidePanePreviewID, sidePaneFileID, sidePaneDiffID, sidePaneGitID} {
 		if w := sidePanePrefs[s][id]; w > 0 && !math.IsNaN(float64(w)) && !math.IsInf(float64(w), 0) {
-			return min(max(w, inspectorMinWidth), inspectorMaxWidth)
+			return max(w, inspectorMinWidth)
 		}
 	}
 	return inspectorDefaultWidth
@@ -439,7 +438,7 @@ func inspectorDisposeAllSessions(s *chatState) {
 }
 
 func inspectorLayout(available, preferred float32) (overlay bool, width float32) {
-	width = min(max(preferred, inspectorMinWidth), inspectorMaxWidth)
+	width = max(preferred, inspectorMinWidth)
 	if available < inspectorChatMinWidth+sidePaneHandleWidth+inspectorMinWidth {
 		return true, max(0, min(width, available))
 	}

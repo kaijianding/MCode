@@ -130,8 +130,8 @@ func (p *sidePane) close(s *chatState) {
 	}
 }
 
-// widthPointer 在面板锁内把宽度夹取到该面板允许的范围并返回字段指针，供分栏直接读写：
-// 小于最小值时回落到默认宽度（拖到极窄后回弹），大于最大值时取上限。
+// widthPointer 在面板锁内把宽度夹取到面板最小值并返回字段指针，供分栏直接读写：
+// 小于最小值时回落到默认宽度（拖到极窄后回弹）。
 // 面板状态不存在时返回 nil，调用方按无侧栏处理。
 func (p *sidePane) widthPointer(s *chatState) *float32 {
 	ptr := p.rawWidthPointer(s)
@@ -140,8 +140,6 @@ func (p *sidePane) widthPointer(s *chatState) *float32 {
 	}
 	if *ptr < inspectorMinWidth || math.IsNaN(float64(*ptr)) || math.IsInf(float64(*ptr), 0) {
 		*ptr = inspectorDefaultWidth
-	} else if *ptr > inspectorMaxWidth {
-		*ptr = inspectorMaxWidth
 	}
 	return ptr
 }
@@ -306,7 +304,8 @@ func inspectorTopInset(c *ui.Context) float32 {
 // 为什么不用 ui.Split：它的分隔条与手柄是内部节点，既拿不到悬停/拖动状态，也改不了
 // 「悬停 150ms 才亮」的延迟和 2 DIP 的线宽；而且它的 *size 是第一个窗格（会话主区）的宽度，
 // 与这里的字段名正好相反（见并行的 ui.Split 实现：first 取 Width(*size)）。
-func renderSidePaneHandle(c *ui.Context, s *chatState, p *sidePane, width *float32) {
+func renderSidePaneHandle(c *ui.Context, s *chatState, p *sidePane, width *float32, maxWidth float32) {
+	maxWidth = max(maxWidth, inspectorMinWidth)
 	key := p.splitKey + "/handle"
 	handle := ui.Box(c.Key(key)).
 		Width(sidePaneHandleWidth).
@@ -331,11 +330,11 @@ func renderSidePaneHandle(c *ui.Context, s *chatState, p *sidePane, width *float
 		sidePaneHandles.setDragging(c, p.splitKey, true)
 		if dx != 0 {
 			// 上限在拖动中也不越：越过的部分直接夹掉，松手时就不会突然被拉回。
-			*width = min(sidePaneDraggedWidth(*width, dx), inspectorMaxWidth)
+			*width = min(sidePaneDraggedWidth(*width, dx), maxWidth)
 		}
 	case released:
 		// 松手：压得过窄就收起面板并把宽度复位到默认值，否则夹取到面板自己的范围。
-		next, collapsed := sidePaneReleasedWidth(*width, inspectorMinWidth, inspectorDefaultWidth, inspectorMaxWidth)
+		next, collapsed := sidePaneReleasedWidth(*width, inspectorMinWidth, inspectorDefaultWidth, maxWidth)
 		*width = next
 		sidePaneHandles.setDragging(c, p.splitKey, false)
 		if collapsed {
@@ -350,7 +349,7 @@ func renderSidePaneHandle(c *ui.Context, s *chatState, p *sidePane, width *float
 	// 键盘可达：焦点在手柄上时左右各调 sidePaneHandleStep；面板在右侧，所以左箭头加宽。
 	// 不做焦点陷阱，不做惯性，与 ui.Split 的方向键行为保持同一套语义（步长不同）。
 	handle.OnShortcut(0, ui.KeyLeft, func() {
-		*width = min(*width+sidePaneHandleStep, inspectorMaxWidth)
+		*width = min(*width+sidePaneHandleStep, maxWidth)
 		persistUIState(s)
 		inspectorRemember(s)
 	})
@@ -436,7 +435,7 @@ func renderSidePaneSplit(c *ui.Context, s *chatState, renderChat func()) {
 		if overlay {
 			return
 		}
-		renderSidePaneHandle(c, s, p, width)
+		renderSidePaneHandle(c, s, p, width, max(0, available-inspectorChatMinWidth-sidePaneHandleWidth))
 		_, actual = inspectorLayout(available, *width)
 		if sidePaneHandles.dragging(c, p.splitKey) {
 			actual = min(*width, available-inspectorChatMinWidth-sidePaneHandleWidth)
@@ -444,12 +443,12 @@ func renderSidePaneSplit(c *ui.Context, s *chatState, renderChat func()) {
 		ui.Column(c.Key("inspector-shell")).Width(actual).Shrink(0).Clip().
 			Margin(inspectorTopInset(c), 0, 0, 0).
 			Transition(motionSidePanel(c, false)).Children(func() {
-				renderInspectorBody(c, s, actual, inspectorTopInset(c) == 0)
-				if inspectorTopInset(c) > 0 {
-					ui.Box(c.Key("inspector-top-border")).Absolute().Left(0).Right(0).Top(0).Height(Hairline).
-						Background(ThemeBorder(c)).Label(sidePaneTopDividerLabel)
-				}
-			})
+			renderInspectorBody(c, s, actual, inspectorTopInset(c) == 0)
+			if inspectorTopInset(c) > 0 {
+				ui.Box(c.Key("inspector-top-border")).Absolute().Left(0).Right(0).Top(0).Height(Hairline).
+					Background(ThemeBorder(c)).Label(sidePaneTopDividerLabel)
+			}
+		})
 	})
 	if overlay {
 		open := true

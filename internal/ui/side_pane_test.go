@@ -132,7 +132,7 @@ func TestActiveSidePanePriority(t *testing.T) {
 	}
 }
 
-// 宽度夹取：小于最小值回落到默认宽度，大于最大值取上限，范围内保持原值。
+// 宽度夹取：小于最小值回落到默认宽度，较大宽度保持原值。
 func TestSidePaneWidthClamp(t *testing.T) {
 	s := sidePaneTestState(t)
 	defer s.close()
@@ -146,7 +146,7 @@ func TestSidePaneWidthClamp(t *testing.T) {
 		want float32
 	}{
 		{"低于最小", inspectorMinWidth - 20, inspectorDefaultWidth},
-		{"高于最大", inspectorMaxWidth + 200, inspectorMaxWidth},
+		{"宽于旧上限", 1200, 1200},
 		{"区间内", inspectorMinWidth + 40, inspectorMinWidth + 40},
 	}
 	p := sidePaneByID(sidePaneFileID)
@@ -233,7 +233,7 @@ func TestSidePaneWidthPreferenceRoundTrip(t *testing.T) {
 		t.Fatalf("side_pane_widths 往返丢失: %s", string(data))
 	}
 
-	// 恢复：新窗口拿到偏好后，首次创建状态就用偏好宽度（越界时夹到该面板上限）。
+	// 恢复：新窗口拿到偏好后，首次创建状态就用偏好宽度。
 	restored := loadUIState()
 	other := newChatState(NewFakeClient())
 	defer other.close()
@@ -245,13 +245,13 @@ func TestSidePaneWidthPreferenceRoundTrip(t *testing.T) {
 		t.Fatalf("恢复后的共享宽度应为 620, got %v", width)
 	}
 
-	// 偏好越界时按优先级夹到最大宽度。
+	// 较宽的偏好在恢复时保持原值。
 	outOfRange := newChatState(NewFakeClient())
 	defer outOfRange.close()
-	setSidePaneWidthPreferences(outOfRange, map[string]float32{sidePanePreviewID: PreviewPanelMaxWidth + 300})
+	setSidePaneWidthPreferences(outOfRange, map[string]float32{sidePanePreviewID: 1100})
 	previewWidth := inspectorSession(outOfRange).Width
-	if previewWidth != inspectorMaxWidth {
-		t.Fatalf("越界偏好应夹到 %v, got %v", inspectorMaxWidth, previewWidth)
+	if previewWidth != 1100 {
+		t.Fatalf("较宽偏好应原样保留为 1100, got %v", previewWidth)
 	}
 }
 
@@ -736,5 +736,33 @@ func TestSidePaneSplit_DragPersistsWidth(t *testing.T) {
 	}
 	if got := file.InspectorSessions[s.selectedThreadID].Width; got != start+40 {
 		t.Fatalf("落盘的面板宽度 = %v, want %v", got, start+40)
+	}
+}
+
+func TestSidePaneSplit_DragKeepsChatMinimum(t *testing.T) {
+	resetSidePaneHandlesForTest()
+	s := sidePaneTestState(t)
+	defer s.close()
+	stubSidePanePanelRender(t, sidePaneFileID)
+	openFilePaneForTest(t, s)
+
+	var chatWidth float32
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderSidePaneSplit(c, s, func() {
+			chatWidth = ui.Box(c).Fill().Label("主对话区").Bounds().W
+		})
+	}, int(sidePaneSplitTestWidth), int(sidePaneSplitTestHeight))
+	tt.Frame()
+	hx, hy := sidePaneHandlePoint(t, tt)
+	tt.Press(hx, hy)
+	tt.Move(hx-500, hy)
+	tt.Release(hx-500, hy)
+
+	if chatWidth < inspectorChatMinWidth {
+		t.Fatalf("拖动后主对话区宽度=%v, 小于最小值 %v", chatWidth, inspectorChatMinWidth)
+	}
+	wantMax := sidePaneSplitTestWidth - inspectorChatMinWidth - sidePaneHandleWidth
+	if got := inspectorSession(s).Width; got > wantMax {
+		t.Fatalf("拖动后右栏宽度=%v, 超过可用上限 %v", got, wantMax)
 	}
 }
