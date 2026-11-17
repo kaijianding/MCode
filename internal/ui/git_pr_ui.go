@@ -24,6 +24,8 @@ const (
 	gitPRDialogWidth float32 = 860
 	// gitPRListPaneWidth 是左侧列表列宽度。
 	gitPRListPaneWidth float32 = 250
+	// gitPRConflictFilesShown 是详情里最多展开的冲突文件数，其余折叠成一行。
+	gitPRConflictFilesShown = 8
 )
 
 // gitPRClient 是 PR 只读弹窗需要的后端能力，由 app.Client 实现。
@@ -38,6 +40,12 @@ type gitPRClient interface {
 type gitPRActionClient interface {
 	GitPRMerge(ctx context.Context, threadID string, number int, method string) error
 	GitPRReview(ctx context.Context, threadID string, number int, event, body string) error
+}
+
+// gitPRConflictClient 是预演冲突文件与创建冲突解决 worktree 需要的后端能力。
+type gitPRConflictClient interface {
+	GitPRConflicts(ctx context.Context, threadID string, number int, base string) ([]string, error)
+	GitPRResolveWorktree(ctx context.Context, threadID string, number int, head, base string) (string, error)
 }
 
 // gitPRDialogState 是 PR 弹窗的状态，按 chatState 附加（与 chatFindStates 的做法一致）。
@@ -61,13 +69,28 @@ type gitPRDialogState struct {
 	mergeConfirm  string
 	mergeMenuOpen bool
 
-	listSeq   uint64 // 递增序号，丢弃过期的异步结果
-	detailSeq uint64
+	conflictNumber  int // 冲突结果对应的 PR 编号，0 表示没有结果
+	conflictFiles   []string
+	conflictLoading bool
+	conflictErr     string
+
+	listSeq     uint64 // 递增序号，丢弃过期的异步结果
+	detailSeq   uint64
+	conflictSeq uint64
 }
 
 func (st *gitPRDialogState) resetActions() {
 	st.reviewBody, st.actionBusy, st.actionErr, st.mergeConfirm = "", "", "", ""
 	st.mergeMenuOpen = false
+}
+
+// resetConflictsLocked 作废旧冲突结果；调用方需持有 st.mu。
+func (st *gitPRDialogState) resetConflictsLocked() {
+	st.conflictNumber = 0
+	st.conflictFiles = nil
+	st.conflictLoading = false
+	st.conflictErr = ""
+	st.conflictSeq++
 }
 
 var (
@@ -122,6 +145,7 @@ func (s *chatState) openGitPRDialog() {
 	st.detailErr = ""
 	st.detailLoading = false
 	st.resetActions()
+	st.resetConflictsLocked()
 	st.listErr = ""
 	st.listSeq++
 	st.detailSeq++
@@ -145,6 +169,7 @@ func (s *chatState) closeGitPRDialog() {
 	st.selected = 0
 	st.detail = nil
 	st.resetActions()
+	st.resetConflictsLocked()
 	st.listSeq++
 	st.detailSeq++
 	st.mu.Unlock()
@@ -215,6 +240,7 @@ func (s *chatState) fetchGitPRList() {
 				st.detailLoading = false
 				st.detailSeq++
 				st.resetActions()
+				st.resetConflictsLocked()
 			}
 			// 列表加载完成时没有选中项就自动选中第一条，只在这里做一次。
 			if st.selected == 0 && len(prs) > 0 {
@@ -246,6 +272,7 @@ func (s *chatState) selectGitPR(number int) {
 	st.detailErr = ""
 	st.detailLoading = true
 	st.resetActions()
+	st.resetConflictsLocked()
 	st.detailSeq++
 	seq := st.detailSeq
 	st.mu.Unlock()
@@ -307,6 +334,72 @@ func (s *chatState) runGitPRAction(kind, method string) {
 	}()
 }
 
+// runGitPRResolve 在独立 worktree 里解决冲突，并切到新建的会话。
+func (s *chatState) runGitPRResolve() {
+	client, ok := s.client.(gitPRConflictClient)
+	if !ok {
+		return
+	}
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || !gitPRMergeBlocked(*st.detail) || st.detail.CrossRepo {
+		st.mu.Unlock()
+		return
+	}
+	detail := *st.detail
+	number, threadID, seq := st.selected, st.threadID, st.detailSeq
+	st.actionBusy, st.actionErr = "resolve", ""
+	st.mu.Unlock()
+	s.invalidate()
+	go func() {
+		path, err := client.GitPRResolveWorktree(context.Background(), threadID, number, detail.HeadBranch, detail.BaseBranch)
+		newID := ""
+		if err == nil {
+			newID, err = s.createGitPRResolveThread(threadID, number, path)
+		}
+		st.mu.Lock()
+		if !st.open || st.detailSeq != seq || st.selected != number {
+			st.mu.Unlock()
+			return
+		}
+		st.actionBusy = ""
+		if err != nil {
+			st.actionErr = err.Error()
+			st.mu.Unlock()
+			s.invalidate()
+			return
+		}
+		st.mu.Unlock()
+		s.closeGitPRDialog()
+		s.selectThread(newID)
+	}()
+}
+
+// createGitPRResolveThread 在 PR 所属项目新建普通会话，命名后切到冲突 worktree。
+func (s *chatState) createGitPRResolveThread(threadID string, number int, path string) (string, error) {
+	s.mu.Lock()
+	th, ok := s.threadSnapshotLocked(threadID)
+	s.mu.Unlock()
+	if !ok || th.ProjectID == "" {
+		return "", fmt.Errorf("找不到 PR 所属项目")
+	}
+	opts := s.newThreadOptions(th.ProjectID)
+	opts.Provisional = false
+	id, err := s.client.CreateThreadWithOptions(context.Background(), th.ProjectID, opts)
+	if err != nil {
+		return "", err
+	}
+	if err := s.client.RenameThread(id, fmt.Sprintf("解决 PR #%d 冲突", number)); err != nil {
+		return "", err
+	}
+	if err := s.client.GitSwitchWorktree(context.Background(), id, path); err != nil {
+		return "", err
+	}
+	// 让新会话出现在侧栏；列表刷新失败不影响已经切过去的会话。
+	_ = s.refreshProjectThreads(context.Background(), th.ProjectID)
+	return id, nil
+}
+
 // fetchGitPRDetail 在后台读取详情；序号变化后旧结果直接丢弃。
 func (s *chatState) fetchGitPRDetail(number int, seq uint64) {
 	st := getGitPRDialogState(s)
@@ -331,12 +424,72 @@ func (s *chatState) fetchGitPRDetail(number int, seq uint64) {
 			return
 		}
 		st.detailLoading = false
+		needConflicts := false
+		conflictBase := ""
 		if err != nil {
 			st.detailErr = "读取 PR 详情失败: " + err.Error()
+			st.resetConflictsLocked()
 		} else {
 			loaded := detail
 			st.detail = &loaded
 			st.detailErr = ""
+			st.resetConflictsLocked()
+			if gitPRMergeBlocked(loaded) {
+				needConflicts = true
+				conflictBase = loaded.BaseBranch
+			}
+		}
+		st.mu.Unlock()
+		s.invalidate()
+		if needConflicts {
+			s.fetchGitPRConflicts(number, conflictBase, seq)
+		}
+	}()
+}
+
+// fetchGitPRConflicts 在后台预演合并冲突；编号或序号变化后旧结果直接丢弃。
+func (s *chatState) fetchGitPRConflicts(number int, base string, detailSeq uint64) {
+	st := getGitPRDialogState(s)
+	client, ok := s.client.(gitPRConflictClient)
+	if !ok {
+		st.mu.Lock()
+		if st.detailSeq == detailSeq && st.selected == number {
+			st.conflictNumber = number
+			st.conflictLoading = false
+			st.conflictErr = "当前客户端不支持读取冲突文件"
+		}
+		st.mu.Unlock()
+		s.invalidate()
+		return
+	}
+
+	threadID := s.gitPRThreadID()
+	st.mu.Lock()
+	if st.detailSeq != detailSeq || st.selected != number {
+		st.mu.Unlock()
+		return
+	}
+	st.conflictNumber = number
+	st.conflictLoading = true
+	st.conflictErr = ""
+	st.conflictFiles = nil
+	st.conflictSeq++
+	seq := st.conflictSeq
+	st.mu.Unlock()
+	s.invalidate()
+
+	go func() {
+		files, err := client.GitPRConflicts(context.Background(), threadID, number, base)
+		st.mu.Lock()
+		if st.conflictSeq != seq || st.detailSeq != detailSeq || st.selected != number || st.conflictNumber != number {
+			st.mu.Unlock()
+			return
+		}
+		st.conflictLoading = false
+		if err != nil {
+			st.conflictErr = err.Error()
+		} else {
+			st.conflictFiles = files
 		}
 		st.mu.Unlock()
 		s.invalidate()
@@ -740,6 +893,10 @@ func renderGitPRDetail(c *ui.Context, s *chatState, detail git.PRDetail, content
 							}
 						})
 
+					if gitPRMergeBlocked(detail) {
+						renderGitPRConflicts(c, s, detail)
+					}
+
 					if len(detail.Checks) > 0 {
 						renderGitPRSectionTitle(c, "CI 检查")
 						ui.Column(c.Key("modal-git-pr-detail-checks")).
@@ -822,24 +979,84 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", OnClick: func() { s.runGitPRAction("approve", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("request-changes", "") }})
 		ui.Spacer(c)
-		trigger := Button(c, ButtonOpts{Key: "modal-git-pr-merge", Text: "合并 ▾", Variant: ButtonPrimary, Disabled: busy != "" || gitPRMergeBlocked(detail), OnClick: func() { st.mu.Lock(); st.mergeMenuOpen = true; st.mu.Unlock(); s.invalidate() }})
-		appPopover(c.Key("modal-git-pr-merge-popover"), trigger, &menuOpen, func() { st.mu.Lock(); st.mergeMenuOpen = false; st.mu.Unlock(); s.invalidate() }, func() {
-			popoverCard(c, ui.Column(c.Key("modal-git-pr-merge-menu"))).Padding(Space1).Gap(Space0).Children(func() {
-				for _, item := range []struct{ label, method string }{{"Squash 合并", "squash"}, {"合并提交", "merge"}, {"变基合并", "rebase"}} {
-					Button(c, ButtonOpts{Key: "modal-git-pr-merge-" + item.method, Text: item.label, Variant: ButtonGhost, OnClick: func() {
-						st.mu.Lock()
-						st.mergeMenuOpen = false
-						st.mergeConfirm = item.method
-						st.mu.Unlock()
-						s.invalidate()
-					}})
-				}
+		if gitPRMergeBlocked(detail) {
+			resolveTip := ""
+			if detail.CrossRepo {
+				resolveTip = "来自 fork 的 PR 无法推回，请在网页上解决"
+			}
+			Button(c, ButtonOpts{Key: "modal-git-pr-resolve", Text: "解决冲突", Variant: ButtonPrimary, Loading: busy == "resolve", Disabled: (busy != "" && busy != "resolve") || detail.CrossRepo, Tooltip: resolveTip, OnClick: func() { s.runGitPRResolve() }})
+		} else {
+			trigger := Button(c, ButtonOpts{Key: "modal-git-pr-merge", Text: "合并 ▾", Variant: ButtonPrimary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeMenuOpen = true; st.mu.Unlock(); s.invalidate() }})
+			appPopover(c.Key("modal-git-pr-merge-popover"), trigger, &menuOpen, func() { st.mu.Lock(); st.mergeMenuOpen = false; st.mu.Unlock(); s.invalidate() }, func() {
+				popoverCard(c, ui.Column(c.Key("modal-git-pr-merge-menu"))).Padding(Space1).Gap(Space0).Children(func() {
+					for _, item := range []struct{ label, method string }{{"Squash 合并", "squash"}, {"合并提交", "merge"}, {"变基合并", "rebase"}} {
+						Button(c, ButtonOpts{Key: "modal-git-pr-merge-" + item.method, Text: item.label, Variant: ButtonGhost, OnClick: func() {
+							st.mu.Lock()
+							st.mergeMenuOpen = false
+							st.mergeConfirm = item.method
+							st.mu.Unlock()
+							s.invalidate()
+						}})
+					}
+				})
 			})
-		})
+		}
 	})
 	if errText != "" {
 		ui.Text(c, errText).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c)).MaxLines(3)
 	}
+}
+
+// renderGitPRConflicts 渲染冲突文件数量与路径列表。
+func renderGitPRConflicts(c *ui.Context, s *chatState, detail git.PRDetail) {
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	number := st.conflictNumber
+	loading := st.conflictLoading
+	errText := st.conflictErr
+	files := append([]string(nil), st.conflictFiles...)
+	st.mu.Unlock()
+	if number != detail.Number {
+		loading = true
+	}
+	ui.Column(c.Key("modal-git-pr-detail-conflicts")).
+		FillWidth().
+		Gap(Space1).
+		Children(func() {
+			switch {
+			case loading:
+				LoadingIndicator(c, nil, "", IconSM)
+			case errText != "":
+				ui.Text(c, errText).
+					FontSize(uiFont(TypeCaption)).
+					TextColor(ThemeDanger(c)).
+					MaxLines(3)
+			default:
+				ui.Text(c, fmt.Sprintf("%d 个文件冲突", len(files))).
+					FontSize(uiFont(TypeCaption)).
+					FontWeight(600).
+					TextColor(ThemeSecondaryText(c)).
+					SingleLine()
+				shown := files
+				if len(shown) > gitPRConflictFilesShown {
+					shown = shown[:gitPRConflictFilesShown]
+				}
+				for _, path := range shown {
+					ui.Text(c, path).
+						Font("monospace").
+						FontSize(uiFont(TypeCaption)).
+						TextColor(ThemePrimaryText(c)).
+						SingleLine().
+						Tooltip(path)
+				}
+				if rest := len(files) - len(shown); rest > 0 {
+					ui.Text(c, fmt.Sprintf("还有 %d 个", rest)).
+						FontSize(uiFont(TypeCaption)).
+						TextColor(ThemeSecondaryText(c)).
+						SingleLine()
+				}
+			}
+		})
 }
 
 // renderGitPRSectionTitle 渲染小节标题。

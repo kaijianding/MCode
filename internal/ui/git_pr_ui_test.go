@@ -214,13 +214,37 @@ func TestGitPRUpdatedLabel(t *testing.T) {
 	}
 }
 
-// gitPRDialogFake 提供可控的 PR 列表与详情，并记录详情请求。
+// gitPRDialogFake 提供可控的 PR 列表、详情与冲突解决调用记录。
 type gitPRDialogFake struct {
 	*FakeClient
 	prs     []git.PRSummary
 	listErr error
 	mu      sync.Mutex
 	details []int
+
+	detail      git.PRDetail
+	conflicts   []string
+	conflictErr error
+
+	conflictCalls []gitPRConflictCall
+	resolvePath   string
+	resolveErr    error
+	resolveCalls  []gitPRResolveCall
+	switchCalls   []gitPRSwitchCall
+}
+
+type gitPRConflictCall struct {
+	number int
+	base   string
+}
+
+type gitPRResolveCall struct {
+	number     int
+	head, base string
+}
+
+type gitPRSwitchCall struct {
+	threadID, path string
 }
 
 func (f *gitPRDialogFake) GitPRList(context.Context, string, int) ([]git.PRSummary, error) {
@@ -230,14 +254,69 @@ func (f *gitPRDialogFake) GitPRList(context.Context, string, int) ([]git.PRSumma
 func (f *gitPRDialogFake) GitPRDetail(_ context.Context, _ string, number int) (git.PRDetail, error) {
 	f.mu.Lock()
 	f.details = append(f.details, number)
+	detail := f.detail
 	f.mu.Unlock()
-	return git.PRDetail{PRSummary: git.PRSummary{Number: number, Title: "详情标题", State: "open"}}, nil
+	if detail.Number == 0 {
+		detail = git.PRDetail{PRSummary: git.PRSummary{Number: number, Title: "详情标题", State: "open"}}
+	}
+	return detail, nil
 }
+
+func (f *gitPRDialogFake) GitPRConflicts(_ context.Context, _ string, number int, base string) ([]string, error) {
+	f.mu.Lock()
+	f.conflictCalls = append(f.conflictCalls, gitPRConflictCall{number: number, base: base})
+	files, err := append([]string(nil), f.conflicts...), f.conflictErr
+	f.mu.Unlock()
+	return files, err
+}
+
+func (f *gitPRDialogFake) GitPRResolveWorktree(_ context.Context, _ string, number int, head, base string) (string, error) {
+	f.mu.Lock()
+	f.resolveCalls = append(f.resolveCalls, gitPRResolveCall{number: number, head: head, base: base})
+	path, err := f.resolvePath, f.resolveErr
+	f.mu.Unlock()
+	return path, err
+}
+
+func (f *gitPRDialogFake) GitSwitchWorktree(ctx context.Context, threadID, path string) error {
+	f.mu.Lock()
+	f.switchCalls = append(f.switchCalls, gitPRSwitchCall{threadID: threadID, path: path})
+	f.mu.Unlock()
+	return f.FakeClient.GitSwitchWorktree(ctx, threadID, path)
+}
+
+func (f *gitPRDialogFake) GitPRMerge(context.Context, string, int, string) error { return nil }
+
+func (f *gitPRDialogFake) GitPRReview(context.Context, string, int, string, string) error { return nil }
 
 func (f *gitPRDialogFake) detailCalls() []int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]int(nil), f.details...)
+}
+
+func (f *gitPRDialogFake) conflictCallsSnapshot() []gitPRConflictCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gitPRConflictCall(nil), f.conflictCalls...)
+}
+
+func (f *gitPRDialogFake) resolveCallsSnapshot() []gitPRResolveCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gitPRResolveCall(nil), f.resolveCalls...)
+}
+
+func (f *gitPRDialogFake) switchCallsSnapshot() []gitPRSwitchCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gitPRSwitchCall(nil), f.switchCalls...)
+}
+
+func (f *gitPRDialogFake) renameCallsSnapshot() []renameCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]renameCall(nil), f.renameCalls...)
 }
 
 func newGitPRDialogTestState(t *testing.T, client *gitPRDialogFake) *chatState {
@@ -246,7 +325,7 @@ func newGitPRDialogTestState(t *testing.T, client *gitPRDialogFake) *chatState {
 	s := newChatState(client)
 	s.mu.Lock()
 	s.selectedThreadID = "thread-1"
-	s.threads = []Thread{{ID: "thread-1"}}
+	s.threads = []Thread{{ID: "thread-1", ProjectID: "p1"}}
 	s.mu.Unlock()
 	t.Cleanup(func() {
 		s.close()
@@ -312,5 +391,138 @@ func TestGitPRDialogAutoSelectsFirst(t *testing.T) {
 	tt.Advance(DurSheet)
 	if !tt.HasText("第一条") {
 		t.Error("左列没有显示第一条 PR")
+	}
+}
+
+// TestGitPRDialogConflictList 覆盖冲突时读取并展示冲突文件路径。
+func TestGitPRDialogConflictList(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "冲突", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "冲突", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			Mergeable: "CONFLICTING",
+		},
+		conflicts: []string{"src/a.go", "src/b.go"},
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading && !st.conflictLoading && st.conflictNumber == 42
+	})
+	calls := f.conflictCallsSnapshot()
+	if len(calls) != 1 || calls[0].number != 42 || calls[0].base != "main" {
+		t.Fatalf("冲突预演调用 = %+v，期望 #42 base main", calls)
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	for _, text := range []string{"2 个文件冲突", "src/a.go", "src/b.go"} {
+		if !tt.HasText(text) {
+			t.Errorf("详情缺少 %q", text)
+		}
+	}
+	tt.Advance(time.Second)
+	if tt.FramePending() {
+		t.Error("冲突列表加载完成后仍在请求下一帧")
+	}
+}
+
+// TestGitPRDialogConflictResolve 覆盖「解决冲突」的完整调用顺序。
+func TestGitPRDialogConflictResolve(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "冲突", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "冲突", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			Mergeable: "CONFLICTING",
+		},
+		conflicts:   []string{"src/a.go"},
+		resolvePath: "/tmp/mcode-pr-42",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading && !st.conflictLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if err := tt.Click("解决冲突"); err != nil {
+		t.Fatalf("点击解决冲突: %v", err)
+	}
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+	if calls := f.resolveCallsSnapshot(); len(calls) != 1 || calls[0] != (gitPRResolveCall{number: 42, head: "feat/x", base: "main"}) {
+		t.Fatalf("冲突解决调用 = %+v", calls)
+	}
+	if got := f.LastCreatedProjectID(); got != "p1" {
+		t.Errorf("新建会话项目 = %q，期望 p1", got)
+	}
+	f.mu.Lock()
+	opts := f.lastNewThreadOpts
+	f.mu.Unlock()
+	if opts.Provisional {
+		t.Error("冲突解决会话不应是临时会话")
+	}
+	renames := f.renameCallsSnapshot()
+	if len(renames) != 1 || renames[0].Title != "解决 PR #42 冲突" {
+		t.Fatalf("重命名调用 = %+v", renames)
+	}
+	newID := renames[0].ThreadID
+	switches := f.switchCallsSnapshot()
+	if len(switches) != 1 || switches[0] != (gitPRSwitchCall{threadID: newID, path: "/tmp/mcode-pr-42"}) {
+		t.Fatalf("切换 worktree 调用 = %+v，期望会话 %q", switches, newID)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		s.mu.Unlock()
+		if selected == newID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("选中会话 = %q，期望 %q", selected, newID)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestGitPRDialogCrossRepoBlocksResolve 覆盖 fork 来的 PR 禁止解决冲突。
+func TestGitPRDialogCrossRepoBlocksResolve(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "冲突", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "冲突", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			Mergeable: "CONFLICTING",
+			CrossRepo: true,
+		},
+		resolvePath: "/tmp/mcode-pr-42",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if !tt.HasText("解决冲突") {
+		t.Fatal("缺少解决冲突按钮")
+	}
+	_ = tt.Click("解决冲突")
+	time.Sleep(50 * time.Millisecond)
+	if calls := f.resolveCallsSnapshot(); len(calls) != 0 {
+		t.Fatalf("fork PR 不应创建冲突 worktree，调用 = %+v", calls)
+	}
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	open, busy := st.open, st.actionBusy
+	st.mu.Unlock()
+	if !open || busy != "" {
+		t.Errorf("弹窗状态 open=%v busy=%q", open, busy)
 	}
 }
