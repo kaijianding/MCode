@@ -428,6 +428,7 @@ func (b *MemoryBackend) AttachStore(ctx context.Context, s *store.Store) error {
 		// 启动时仅恢复元数据，消息不预先全量加载进内存，首次访问时惰性加载
 		loadedThreads[t.ID] = &memoryThread{
 			summary:        summary,
+			createdAt:      t.CreatedAt,
 			sortOrder:      t.SortOrder,
 			queueRevision:  rev,
 			followUps:      wireFollowUps,

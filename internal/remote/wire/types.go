@@ -238,6 +238,7 @@ type ProjectSummary struct {
 	Path        string `json:"path"`
 	IsExpanded  bool   `json:"isExpanded"`
 	ThreadCount int    `json:"threadCount"`
+	Kind        string `json:"kind,omitempty"`
 }
 
 // ProjectList 对应 projects.list 成功结果

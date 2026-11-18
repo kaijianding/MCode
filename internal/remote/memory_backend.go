@@ -120,6 +120,7 @@ const (
 
 type memoryThread struct {
 	summary       wire.ThreadSummary
+	createdAt     time.Time
 	aiDuration    time.Duration
 	activity      []store.Interval
 	totalDuration time.Duration
@@ -232,6 +233,7 @@ type MemoryBackend struct {
 	stewardFeedID          string
 	stewardFeedLoaded      bool
 	stewardDesk            StewardDesk
+	chatsProjectID         string
 	queuePersistMu         sync.Mutex
 	branchActionMu         sync.Mutex
 	turnPersistMu          sync.Mutex
@@ -639,6 +641,29 @@ func isGuidanceTriggerText(text string) bool {
 	return !strings.HasPrefix(trimmed, "/") && !swarm.IsNotice(trimmed)
 }
 
+// SetChatsProjectID 记录内置「对话」项目 ID，供项目列表标记 kind 与按日期分目录。
+func (b *MemoryBackend) SetChatsProjectID(id string) {
+	b.mu.Lock()
+	b.chatsProjectID = id
+	b.mu.Unlock()
+}
+
+// projectWorkDirLocked 返回会话按所属项目推导的工作目录；调用方必须持有 b.mu。
+// 内置「对话」项目的会话按创建日期（本地时区 2006-01-02）分目录，普通项目直接返回项目 Path。
+func (b *MemoryBackend) projectWorkDirLocked(td *memoryThread) string {
+	if td == nil {
+		return ""
+	}
+	proj, ok := b.projects[td.summary.ProjectID]
+	if !ok || proj.Path == "" {
+		return ""
+	}
+	if b.chatsProjectID != "" && td.summary.ProjectID == b.chatsProjectID && !td.createdAt.IsZero() {
+		return filepath.Join(proj.Path, td.createdAt.Local().Format("2006-01-02"))
+	}
+	return proj.Path
+}
+
 // threadWorkDirLocked 返回该会话实际运行的工作目录，调用方必须持有 b.mu。
 func (b *MemoryBackend) threadWorkDirLocked(threadID string) (string, bool) {
 	td, ok := b.threads[threadID]
@@ -648,8 +673,8 @@ func (b *MemoryBackend) threadWorkDirLocked(threadID string) (string, bool) {
 	if td.workDir != "" {
 		return td.workDir, true
 	}
-	if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-		return proj.Path, true
+	if dir := b.projectWorkDirLocked(td); dir != "" {
+		return dir, true
 	}
 	return "", false
 }
@@ -1092,8 +1117,8 @@ func (b *MemoryBackend) turnWorkDirLocked(td *memoryThread) string {
 	workDir := b.harnessWorkDir
 	if td.workDir != "" {
 		workDir = td.workDir
-	} else if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-		workDir = proj.Path
+	} else if dir := b.projectWorkDirLocked(td); dir != "" {
+		workDir = dir
 	}
 	return workDir
 }

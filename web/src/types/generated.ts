@@ -531,6 +531,7 @@ export type RemoteProjectSummary = {
   path: string;
   isExpanded: boolean;
   threadCount: number;
+  kind?: "chats" | "steward";
 };
 
 export type RemoteThreadSummary = {

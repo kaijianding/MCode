@@ -94,6 +94,7 @@ func (b *MemoryBackend) AddThread(t wire.ThreadSummary, messages []wire.ThreadMe
 	t.ParentThreadID = optionalString(parentID)
 	td := &memoryThread{
 		summary:        t,
+		createdAt:      time.Now(),
 		sortOrder:      0,
 		queueRevision:  1,
 		messages:       msgs,
@@ -143,6 +144,12 @@ func (b *MemoryBackend) ListProjects(ctx context.Context) (wire.ProjectList, err
 	for _, t := range b.threads {
 		counts[t.summary.ProjectID]++
 	}
+	stewardProjectID := ""
+	if b.stewardFeedID != "" {
+		if td, ok := b.threads[b.stewardFeedID]; ok && td != nil {
+			stewardProjectID = td.summary.ProjectID
+		}
+	}
 
 	list := make([]wire.ProjectSummary, 0, len(b.projects))
 	for _, p := range b.projects {
@@ -150,6 +157,12 @@ func (b *MemoryBackend) ListProjects(ctx context.Context) (wire.ProjectList, err
 			p.ThreadCount = c
 		} else {
 			p.ThreadCount = 0
+		}
+		switch {
+		case b.chatsProjectID != "" && p.ID == b.chatsProjectID:
+			p.Kind = "chats"
+		case stewardProjectID != "" && p.ID == stewardProjectID:
+			p.Kind = "steward"
 		}
 		list = append(list, p)
 	}

@@ -2788,6 +2788,13 @@
         },
         "threadCount": {
           "type": "integer"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "chats",
+            "steward"
+          ]
         }
       },
       "required": [

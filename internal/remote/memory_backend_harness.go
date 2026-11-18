@@ -158,10 +158,11 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 		b.finishTurnEarly(td, threadID, turnID, turnIndex, false, false)
 		return
 	}
+	isChatsThread := b.chatsProjectID != "" && td.summary.ProjectID == b.chatsProjectID
 	if td.workDir != "" {
 		workDir = td.workDir
-	} else if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-		workDir = proj.Path
+	} else if dir := b.projectWorkDirLocked(td); dir != "" {
+		workDir = dir
 	}
 	sessionID := td.sessionID
 	needsHandoff := td.needsHandoff
@@ -248,6 +249,17 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 		rotationInfo.Manual = splitPending
 	}
 	b.mu.Unlock()
+
+	if isChatsThread && workDir != "" {
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			errMsg := fmt.Sprintf("创建工作目录失败: %v", err)
+			log.Printf("mkdir chats workdir %q for thread %s failed: %v", workDir, threadID, err)
+			b.markDeliveryFailed(threadID, turnID, deliveryMessageID, deliveryFollowUpID, errMsg)
+			_ = b.AppendNotice(threadID, errMsg)
+			b.finishTurnEarly(td, threadID, turnID, turnIndex, false, false)
+			return
+		}
+	}
 
 	// pi 直连后线程里残留的注入模型已失效：回写为默认，界面标签与实际使用的模型一致。
 	if personaProvider == "pi" && model != "" && model != "default" && isPiStaleModel(model) {

@@ -1186,8 +1186,8 @@ func (b *MemoryBackend) updateTurnFinish(threadID, turnID string, turnIndex int,
 	if ok {
 		if td.workDir != "" {
 			workDir = td.workDir
-		} else if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-			workDir = proj.Path
+		} else if dir := b.projectWorkDirLocked(td); dir != "" {
+			workDir = dir
 		}
 		touchedPaths = append([]string(nil), td.touchedPaths...)
 	}

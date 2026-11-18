@@ -79,7 +79,8 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 	}
 
 	threadID := newUUID()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	nowTime := time.Now()
+	now := nowTime.UTC().Format(time.RFC3339Nano)
 
 	// 用户主动新建时才用宿主记忆补齐没传的选择；只读记忆，不写记忆。
 	if userInitiated {
@@ -250,6 +251,7 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 
 	b.threads[threadID] = &memoryThread{
 		summary:        summary,
+		createdAt:      nowTime,
 		sortOrder:      sortOrder,
 		queueRevision:  1,
 		messages:       []wire.ThreadMessage{},
@@ -874,8 +876,8 @@ func (b *MemoryBackend) DeleteThread(ctx context.Context, threadID string) error
 		workDir := b.harnessWorkDir
 		if td.workDir != "" {
 			workDir = td.workDir
-		} else if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-			workDir = proj.Path
+		} else if dir := b.projectWorkDirLocked(td); dir != "" {
+			workDir = dir
 		}
 		gitRunner := b.git
 		b.mu.Unlock()

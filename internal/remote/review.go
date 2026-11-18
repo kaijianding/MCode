@@ -39,8 +39,8 @@ func (b *MemoryBackend) diffThreadState(threadID string) (diffThreadSnapshot, er
 	s := diffThreadSnapshot{workDir: b.harnessWorkDir, git: b.git, messages: make([]wire.ThreadMessage, len(td.messages)), running: td.summary.IsRunning, runningTurnID: td.runTurnID, takenBack: make(map[string]bool, len(td.takenBack)), store: b.store}
 	if td.workDir != "" {
 		s.workDir = td.workDir
-	} else if proj, ok := b.projects[td.summary.ProjectID]; ok && proj.Path != "" {
-		s.workDir = proj.Path
+	} else if dir := b.projectWorkDirLocked(td); dir != "" {
+		s.workDir = dir
 	}
 	copy(s.messages, td.messages)
 	for id := range td.takenBack {

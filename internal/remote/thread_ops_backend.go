@@ -427,7 +427,8 @@ func (b *MemoryBackend) BranchThread(ctx context.Context, p wire.ThreadsBranchPa
 
 	projectID := orig.summary.ProjectID
 	newThreadID := newUUID()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	branchNow := time.Now()
+	now := branchNow.UTC().Format(time.RFC3339Nano)
 	newTitle := stripLegacyOriginPrefixes(orig.summary.Title)
 	newSummary := wire.ThreadSummary{
 		ID:                newThreadID,
@@ -520,6 +521,7 @@ func (b *MemoryBackend) BranchThread(ctx context.Context, p wire.ThreadsBranchPa
 
 	b.threads[newThreadID] = &memoryThread{
 		summary:       newSummary,
+		createdAt:     branchNow,
 		sortOrder:     sortOrder,
 		queueRevision: 1,
 		messages:      copiedMsgs,
@@ -676,7 +678,8 @@ func (b *MemoryBackend) ForwardThread(ctx context.Context, p wire.ThreadsContinu
 	}
 
 	newThreadID := newUUID()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	forwardNow := time.Now()
+	now := forwardNow.UTC().Format(time.RFC3339Nano)
 	newTitle := stripLegacyOriginPrefixes(orig.summary.Title)
 	newSummary := wire.ThreadSummary{
 		ID:                newThreadID,
@@ -720,6 +723,7 @@ func (b *MemoryBackend) ForwardThread(ctx context.Context, p wire.ThreadsContinu
 
 	b.threads[newThreadID] = &memoryThread{
 		summary:       newSummary,
+		createdAt:     forwardNow,
 		sortOrder:     sortOrder,
 		queueRevision: 1,
 		messages:      []wire.ThreadMessage{},

@@ -63,6 +63,7 @@ func ensureChatsProject(ctx context.Context, backend *remote.MemoryBackend, clie
 		log.Printf("内置对话项目初始化失败: %v", err)
 		return ""
 	}
+	backend.SetChatsProjectID(id)
 	if client != nil {
 		client.setChatsProjectID(id)
 	}

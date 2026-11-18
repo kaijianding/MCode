@@ -73,7 +73,7 @@ func (b *MemoryBackend) EnsureStewardFeedThread(ctx context.Context, projectID s
 		return "", err
 	}
 	b.mu.Lock()
-	b.threads[summary.ID] = &memoryThread{summary: summary, queueRevision: 1, messagesLoaded: true, persisted: make(map[string]bool), pending: make(map[string]*pendingRequest), alwaysAllow: make(map[string]bool)}
+	b.threads[summary.ID] = &memoryThread{summary: summary, createdAt: now, queueRevision: 1, messagesLoaded: true, persisted: make(map[string]bool), pending: make(map[string]*pendingRequest), alwaysAllow: make(map[string]bool)}
 	b.mu.Unlock()
 	if err := b.store.SetSetting(ctx, "steward.feed_thread_id", summary.ID); err != nil {
 		return "", err
