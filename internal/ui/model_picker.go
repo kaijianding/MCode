@@ -144,6 +144,8 @@ type ModelPickerProps struct {
 	OnResetTierOverrides func()
 	// OnRefreshCatalog 请求重新拉取供应商目录；只有传了它，目录为空的供应商才画出“重新探测”按钮。
 	OnRefreshCatalog  func()
+	// OnOpenList 用户进入模型列表页时调用，用于按需加载限额等数据。
+	OnOpenList        func()
 	CatalogRefreshing bool
 	Invalidate        func()
 }
@@ -1422,6 +1424,9 @@ func renderModelPickerCard(c *ui.Context, p ModelPickerProps, state *ModelPicker
 	if !p.Inline {
 		onOpenModelList = func() {
 			state.setListOpen(p.ScopeKey, side, true)
+			if p.OnOpenList != nil {
+				p.OnOpenList()
+			}
 			modelPickerInvalidate(p)
 		}
 	}
@@ -1693,7 +1698,6 @@ func renderTierEditingBanner(c *ui.Context, p ModelPickerProps, state *ModelPick
 
 func renderModelPickerTiersSection(c *ui.Context, p ModelPickerProps, state *ModelPickerState) {
 	open := state != nil && (state.tiersOpen || state.TierEditing != "")
-	ui.Box(c.Key(p.KeyPrefix + "tier-group-gap")).Height(Space2)
 	renderProviderGroupHeaderToggle(c, p.KeyPrefix+"tier-group-header", "档位", !open, func() {
 		if state != nil {
 			state.tiersOpen = !open
@@ -2052,7 +2056,7 @@ func renderModelListPairRow(c *ui.Context, p ModelPickerProps, key string, pair 
 		Radius(RadiusMD).
 		Grow(1)
 	if row.Hovered() {
-		row.Background(ColorHoverDark)
+		row.Background(ColorHoverSubtleDark)
 	} else {
 		row.Background(ui.Transparent)
 	}
@@ -2106,7 +2110,9 @@ func swarmPairListDetail(pair SwarmPair, providers []ProviderInfo) string {
 	if pair.Name != "" && !swarmPairIsAutoName(pair, providers) {
 		unnamed := pair
 		unnamed.Name = ""
-		parts = append(parts, swarmPairTitle(unnamed, providers))
+		if modelPart := swarmPairTitle(unnamed, providers); modelPart != pair.Name {
+			parts = append(parts, modelPart)
+		}
 	}
 	leadProv := modelProviderDisplayName(providers, pair.LeadProvider)
 	if worker := swarmWorkerProvider(pair); worker != pair.LeadProvider {

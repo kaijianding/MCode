@@ -159,6 +159,26 @@ func TestSwarmPairTitleCustomName(t *testing.T) {
 	}
 }
 
+func TestSwarmPairListDetailSkipsNameEqualToModels(t *testing.T) {
+	providers := swarmPairShortNameProviders()
+	unnamed := config.SwarmPair{
+		LeadProvider:   config.ProviderClaude,
+		LeadModel:      "claude-opus-5-5",
+		WorkerProvider: config.ProviderCodex,
+		WorkerModel:    "gpt-5",
+	}
+	shortTitle := swarmPairTitle(unnamed, providers)
+	p := unnamed
+	p.Name = shortTitle
+	detail := swarmPairListDetail(p, providers)
+	if strings.HasPrefix(detail, shortTitle) || strings.Contains(detail, shortTitle) {
+		t.Fatalf("配对名与模型短名拼接相同时副标题不应重复：%q", detail)
+	}
+	if !strings.Contains(detail, "Claude 主导，Codex 执行") {
+		t.Fatalf("副标题应保留供应商说明：%q", detail)
+	}
+}
+
 func TestSwarmPairTooltipKeepsFullNames(t *testing.T) {
 	providers := swarmPairShortNameProviders()
 	p := config.SwarmPair{

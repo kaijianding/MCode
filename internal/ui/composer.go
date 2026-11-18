@@ -2402,8 +2402,11 @@ func renderSwarmSideTabs(c *ui.Context, s *chatState, th *Thread, swarmOn bool) 
 	}, composerModelPickerState)
 }
 
-// getProviderQuotaUsed 从设置状态中获取指定 provider 的用量百分比缓存。
+// getProviderQuotaUsed 优先读取 Composer 额度缓存，为空时回退到设置状态中的用量百分比缓存。
 func getProviderQuotaUsed(s *chatState, providerID string) (float64, bool) {
+	if windows := getChatQuotaWindowsForProvider(s, providerID); len(windows) > 0 {
+		return windows[0].UsedPercent, true
+	}
 	st := getChatSettings(s)
 	if st == nil {
 		return 0, false
@@ -2418,6 +2421,20 @@ func getProviderQuotaUsed(s *chatState, providerID string) (float64, bool) {
 		return 0, false
 	}
 	return windows[0].UsedPercent, true
+}
+
+// ensureProviderQuotaLoaded 在用户进入模型列表等事件中按需触发供应商配额与状态加载。
+func ensureProviderQuotaLoaded(s *chatState) {
+	st := getChatSettings(s)
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	needLoad := !st.providerRows.loaded && !st.providerRows.loading
+	st.mu.Unlock()
+	if needLoad {
+		st.loadProviderRows()
+	}
 }
 
 // swarmPairsFromSettings 返回当前目录就绪的原始配对。

@@ -42,6 +42,8 @@ var (
 	// 交互叠加态 (8% hover, 12% selected)
 	ColorHoverLight    = ui.RGBA(0, 0, 0, 0.08)
 	ColorHoverDark     = ui.RGBA(255, 255, 255, 0.08)
+	// 深色面板里与选中态并存的列表行悬停底色
+	ColorHoverSubtleDark = ui.RGBA(255, 255, 255, 0.04)
 	ColorSelectedLight = ui.RGBA(0, 0, 0, 0.12)
 	ColorSelectedDark  = ui.RGBA(255, 255, 255, 0.12)
 

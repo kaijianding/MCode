@@ -359,7 +359,7 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 		Radius(RadiusMD).
 		FillWidth()
 	if btn.Hovered() {
-		btn.Background(ColorHoverDark)
+		btn.Background(ColorHoverSubtleDark)
 	} else {
 		btn.Background(ui.Transparent)
 	}
@@ -392,13 +392,18 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 				if trailing != nil {
 					trailing()
 				}
-				arrow := IconChevronDown()
+				angle := float32(90)
 				if collapsed {
-					arrow = IconChevronRight()
+					angle = 0
 				}
-				ui.Icon(c, arrow).
+				icon := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
 					Size(10, 10).
 					TextColor(modelPickerTextSecondary)
+				if reduceMotion(c) {
+					icon.Rotate(angle)
+				} else {
+					icon.Rotate(icon.AnimateTo(key+"-arrow", angle, ui.Animation{Duration: animateDuration(c, DurFast), Ease: ui.EaseOut}))
+				}
 			})
 	})
 }
@@ -424,7 +429,7 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 		case selected:
 			btn.Background(ColorSelectedDark)
 		case btn.Hovered():
-			btn.Background(ColorHoverDark)
+			btn.Background(ColorHoverSubtleDark)
 		default:
 			btn.Background(ui.Transparent)
 		}
@@ -572,7 +577,7 @@ func modelPickerRowName(prov ProviderInfo, name string) string {
 	return base
 }
 
-// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽与模型名，右侧按需展示收藏星标与当前选中标记。
+// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽（供应商图标或已收藏星标）与模型名，右侧按需展示当前选中标记。
 // 星标只反映模型是否在配置的精选列表里（见 ModelPickerProps.Pins），不可点击。
 func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 	prov := opt.Provider
@@ -608,7 +613,7 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 		case opt.IsChecked:
 			btn.Background(ColorSelectedDark)
 		case btn.Hovered():
-			btn.Background(ColorHoverDark)
+			btn.Background(ColorHoverSubtleDark)
 		default:
 			btn.Background(ui.Transparent)
 		}
@@ -624,34 +629,30 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 			Gap(Space2).
 			FillWidth().
 			Children(func() {
-				ui.Box(c.Key(rowKey+"-icon-slot")).
+				pinnedStar := !opt.ShowGroup && providerHasPinnedModel(prov.ID, modelItem.ID, p.Pins)
+				iconSlot := ui.Box(c.Key(rowKey+"-icon-slot")).
 					Size(IconSM, IconSM).
 					Center().
-					Shrink(0).
-					Children(func() {
-						if opt.ShowGroup {
-							renderProviderIcon(c, prov.ID, IconSM)
-						}
-					})
+					Shrink(0)
+				if pinnedStar {
+					iconSlot.Label("已收藏").Tooltip("已收藏")
+				}
+				iconSlot.Children(func() {
+					// 收藏分组行已有供应商图标；普通分组内已收藏的模型在左侧图标槽显示星标。
+					if opt.ShowGroup {
+						renderProviderIcon(c, prov.ID, IconSM)
+					} else if pinnedStar {
+						ui.Icon(c, IconByName("star-filled")).
+							Size(10, 10).
+							TextColor(modelPickerTextSecondary)
+					}
+				})
 				ui.Text(c, modelPickerRowName(prov, name)).
 					FontSize(uiFont(TypeBody)).
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Shrink(0)
 				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
-				// 收藏行已有供应商图标，仅在分组内的行右端展示实心星，未收藏的模型不显示星。
-				if !opt.ShowGroup && providerHasPinnedModel(prov.ID, modelItem.ID, p.Pins) {
-					ui.Box(c).
-						Label("已收藏").
-						Tooltip("已收藏").
-						Size(IconSM, IconSM).
-						Shrink(0).
-						Children(func() {
-							ui.Icon(c, IconByName("star-filled")).
-								Size(IconSM, IconSM).
-								TextColor(modelPickerTextPrimary)
-						})
-				}
 				if opt.IsChecked {
 					ui.Icon(c, IconCheck()).
 						Size(IconSM, IconSM).

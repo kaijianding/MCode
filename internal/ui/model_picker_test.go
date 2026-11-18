@@ -1079,7 +1079,7 @@ func TestModelPickerLeadListRestoresPairs(t *testing.T) {
 	}
 }
 
-// 收藏行只显示模型名，不显示分组名和右端星标；分组内的行对收藏模型显示右端星标。
+// 收藏行只显示模型名，不显示分组名和星标；分组内的行对收藏模型在模型名左侧显示星标。
 func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 	providers := modelPickerTestProviders()
 	prov := providers[0]
@@ -1123,8 +1123,12 @@ func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 	if !noGroupTT.HasText("Claude 3.7 Sonnet") || noGroupTT.HasText("claude") {
 		t.Fatalf("ShowGroup=false 时应只显示模型名不显示分组名: %v", noGroupTT.Texts())
 	}
-	if _, ok := noGroupTT.Find("已收藏"); !ok {
+	starRect, ok := noGroupTT.Find("已收藏")
+	if !ok {
 		t.Fatalf("分组内收藏模型应显示星标: %v", noGroupTT.AccessAll())
+	}
+	if rowRect, ok := findTextRect(t, noGroupTT, "Claude 3.7 Sonnet"); !ok || starRect.X+starRect.W >= rowRect.X+rowRect.W/2 {
+		t.Fatalf("已收藏星标应位于模型名左侧，star=%+v row=%+v ok=%v", starRect, rowRect, ok)
 	}
 
 	plainNoGroupTT := render(plain, false)
@@ -1911,5 +1915,169 @@ func TestModelPickerQuotaOnAgentHeader(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("展开后 35%% 应仅在标题行出现一次，实际 %d 次: %v", count, tt.Texts())
+	}
+}
+
+func settleFrames(t *testing.T, tt *ui.Tester) {
+	t.Helper()
+	for range 300 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if !tt.FramePending() {
+			return
+		}
+	}
+	t.Fatal("卡片切换动效结束后不应继续请求下一帧")
+}
+
+func TestModelPickerCardToggleAnimationSettles(t *testing.T) {
+	t.Run("正常动效点开另一张卡片后推进时钟到结束不再请求帧", func(t *testing.T) {
+		setAppReduceMotion(t, false)
+		providers := modelPickerTestProviders()
+		state := &ModelPickerState{}
+		scope := "card-toggle-settle"
+		state.setListOpen(scope, ModelPickerSideLead, true)
+		props := ModelPickerProps{
+			Mode:      ModelPickerSimple,
+			KeyPrefix: "toggle-settle-",
+			ScopeKey:  scope,
+			State:     state,
+			Providers: providers,
+			Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		}
+		tt := ui.NewTester(func(c *ui.Context) {
+			renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+		}, 330, 640)
+		settleModelPickerPage(tt)
+		if tt.FramePending() {
+			t.Fatal("初始入场落位后不应继续请求帧")
+		}
+
+		if err := tt.Click("Codex"); err != nil {
+			t.Fatalf("点击 Codex 标题失败：%v", err)
+		}
+		if !tt.FramePending() {
+			t.Fatal("切换展开卡片后应启动折叠与旋转动效")
+		}
+
+		// 逐帧推进时钟，等待弹簧与退出过渡完全落位。
+		settleFrames(t, tt)
+		if tt.HasText("Claude 3.7 Sonnet") || !tt.HasText("o3-mini") {
+			t.Fatalf("切换后应仅展开 Codex 模型: %v", tt.Texts())
+		}
+
+		// 静止时再推进时钟也不应重启动画。
+		tt.Advance(DurBase)
+		if tt.FramePending() {
+			t.Fatal("静止状态下不应请求下一帧")
+		}
+	})
+
+	t.Run("单张卡片收起时保留父节点并播放Exit动画", func(t *testing.T) {
+		setAppReduceMotion(t, false)
+		open := true
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Column(c.Key("single-card-host")).Width(300).Background(modelPickerPanelBg).Children(func() {
+				renderModelPickerCollapsibleCard(c, "single-", "-claude", "Claude", open, nil, nil,
+					func() { open = !open },
+					func() {
+						ui.Text(c, "Claude 3.7 Sonnet").FontSize(uiFont(TypeBody)).TextColor(modelPickerTextPrimary)
+					},
+				)
+			})
+		}, 320, 200)
+		tt.Frame()
+		if tt.FramePending() {
+			t.Fatal("初始展开静止时不应请求帧")
+		}
+		open = false
+		tt.Frame()
+		if !tt.FramePending() {
+			t.Fatal("收起卡片后应播放 Exit 收起与箭头旋转动效")
+		}
+		tt.Advance(DurSnap / 2)
+		midImg := tt.Image()
+		tt.Advance(DurSlow + 200*time.Millisecond)
+		tt.Frame()
+		if tt.FramePending() {
+			t.Fatal("收起动画结束后不应继续请求下一帧")
+		}
+		endImg := tt.Image()
+		if midImg.Bounds() == endImg.Bounds() && slices.Equal(midImg.Pix, endImg.Pix) {
+			t.Fatal("收起过渡途中帧与结束后帧像素完全一致，说明未播放过渡动画")
+		}
+	})
+
+	t.Run("减少动效下切换卡片立即落位", func(t *testing.T) {
+		setAppReduceMotion(t, true)
+		providers := modelPickerTestProviders()
+		state := &ModelPickerState{}
+		scope := "card-toggle-reduced"
+		state.setListOpen(scope, ModelPickerSideLead, true)
+		props := ModelPickerProps{
+			Mode:      ModelPickerSimple,
+			KeyPrefix: "toggle-reduced-",
+			ScopeKey:  scope,
+			State:     state,
+			Providers: providers,
+			Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		}
+		tt := ui.NewTesterWith(func(c *ui.Context) {
+			renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+		}, 330, 640, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+		tt.Frame()
+		if tt.FramePending() {
+			t.Fatal("减少动效下初始静止时不应请求帧")
+		}
+		if err := tt.Click("Codex"); err != nil {
+			t.Fatalf("点击 Codex 标题失败：%v", err)
+		}
+		if tt.FramePending() {
+			t.Fatal("减少动效下切换卡片不应请求动画帧")
+		}
+		if tt.HasText("Claude 3.7 Sonnet") || !tt.HasText("o3-mini") {
+			t.Fatalf("减少动效下切换后应立即展开 Codex: %v", tt.Texts())
+		}
+	})
+}
+
+func TestGetProviderQuotaUsedPrefersComposerCache(t *testing.T) {
+	testenv.TempHome(t)
+	s := newChatState(NewFakeClient())
+	SetChatQuotaWindowsForProvider(s, "codex", []ProviderQuotaWindow{
+		{Label: "5h", UsedPercent: 35, Active: true},
+	})
+	t.Cleanup(func() { SetChatQuotaWindowsForProvider(s, "codex", nil) })
+
+	got, ok := getProviderQuotaUsed(s, "codex")
+	if !ok || got != 35 {
+		t.Fatalf("getProviderQuotaUsed(codex) = (%v, %v), want (35, true)", got, ok)
+	}
+}
+
+func TestModelPickerOpenListCallsOnOpenList(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{MenuOpen: true}
+	calls := 0
+	props := ModelPickerProps{
+		Mode:       ModelPickerSimple,
+		KeyPrefix:  "open-list-cb-",
+		ScopeKey:   "open-list-cb",
+		State:      state,
+		Providers:  providers,
+		Selection:  ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		OnOpenList: func() { calls++ },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerMenuBody(c, props, state)
+	}, 330, 600)
+	if err := tt.Click("选择其他模型"); err != nil {
+		t.Fatalf("点击选择其他模型失败: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("OnOpenList 调用次数 = %d, want 1", calls)
+	}
+	if !state.listOpen(props.ScopeKey, ModelPickerSideLead) {
+		t.Fatal("点击选择其他模型后应进入列表页")
 	}
 }

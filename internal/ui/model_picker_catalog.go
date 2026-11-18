@@ -12,6 +12,7 @@ type modelPickerCatalog struct {
 	MagpieFilter      modelPickerMagpieFilter
 	QuotaUsed         func(string) (float64, bool)
 	OnRefreshCatalog  func()
+	OnOpenList        func()
 	CatalogRefreshing bool
 }
 
@@ -39,6 +40,7 @@ func (cat modelPickerCatalog) apply(p ModelPickerProps) ModelPickerProps {
 	p.MagpieFilter = cat.MagpieFilter
 	p.QuotaUsed = cat.QuotaUsed
 	p.OnRefreshCatalog = cat.OnRefreshCatalog
+	p.OnOpenList = cat.OnOpenList
 	p.CatalogRefreshing = cat.CatalogRefreshing
 	return p
 }
@@ -61,6 +63,7 @@ func modelPickerCatalogFor(s *chatState) modelPickerCatalog {
 	}
 	cat.QuotaUsed = func(id string) (float64, bool) { return getProviderQuotaUsed(s, id) }
 	cat.OnRefreshCatalog = s.refreshProviders
+	cat.OnOpenList = func() { ensureProviderQuotaLoaded(s) }
 	return cat
 }
 

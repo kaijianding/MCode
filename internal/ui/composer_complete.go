@@ -929,6 +929,7 @@ func (s *chatState) runLocalSlashCommand(threadID, draft string) bool {
 		composerModelPickerState.Tab = "lead"
 		if tid != "" {
 			composerModelPickerState.setListOpen(tid, ModelPickerSideLead, true)
+			ensureProviderQuotaLoaded(s)
 		}
 		composerModelPickerState.MenuOpen = true
 		s.clearDraftAndCompletion()
