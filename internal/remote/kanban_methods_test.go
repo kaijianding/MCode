@@ -775,3 +775,101 @@ func TestSessionStateDropsStaleRunningFlag(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionStatusRunningWhileBackgroundTasks 验证回合结束后仍有运行中后台任务时：
+// SessionState/SessionStatus 的 Running 仍为 true，后台任务结束后回到 false；
+// 同时 summary.IsRunning 的粘滞纠正仍只看真实运行轮次（runTurnID/runCancel），不被后台任务保留。
+func TestSessionStatusRunningWhileBackgroundTasks(t *testing.T) {
+	threadID := "00000000-0000-0000-0000-0000000000fa"
+	backend, ctx := newBackgroundTestBackend(t, threadID)
+
+	turns := 0
+	mock := &mockHarness{
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			turns++
+			if turns == 1 {
+				emit(harness.Event{Type: harness.EventToolStart, ToolID: "toolu_bg_state", ToolName: "Bash", Input: []byte(`{"cmd":"go test ./...","run_in_background":true}`)})
+				emit(harness.Event{Type: harness.EventToolEnd, ToolID: "toolu_bg_state", Output: "Command running in background"})
+				emit(harness.Event{Type: harness.EventBackgroundTaskStart, ToolID: "toolu_bg_state", TaskID: "task-bg-state"})
+			} else {
+				emit(harness.Event{Type: harness.EventBackgroundTaskEnd, ToolID: "toolu_bg_state", TaskID: "task-bg-state", TaskStatus: "completed"})
+			}
+			emit(harness.Event{Type: harness.EventDone})
+			return nil
+		},
+	}
+	backend.SetHarness(mock, t.TempDir(), harness.ModeAgent)
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "后台跑测试",
+		ActionID: "00000000-0000-0000-0000-0000000000f1",
+	}); err != nil {
+		t.Fatalf("SendMessage turn 1 failed: %v", err)
+	}
+
+	waitThreadIdle(t, backend, ctx, threadID)
+	waitToolStatus(t, backend, ctx, threadID, "Bash", "background")
+	waitBackgroundTasks(t, backend, ctx, threadID, 1)
+
+	// 确认当前回合已结束（runTurnID 为空且 runCancel 为 nil），并注入粘滞的 summary.IsRunning=true。
+	backend.mu.Lock()
+	td := backend.threads[threadID]
+	if td.runTurnID != "" || td.runCancel != nil {
+		backend.mu.Unlock()
+		t.Fatalf("expected idle turn, got runTurnID=%q runCancel=%v", td.runTurnID, td.runCancel != nil)
+	}
+	td.summary.IsRunning = true
+	backend.mu.Unlock()
+
+	st, err := backend.SessionState(ctx, threadID)
+	if err != nil {
+		t.Fatalf("SessionState failed: %v", err)
+	}
+	if !st.Running {
+		t.Fatalf("expected SessionState.Running to be true while background task is running")
+	}
+	status, err := backend.SessionStatus(ctx, threadID)
+	if err != nil {
+		t.Fatalf("SessionStatus failed: %v", err)
+	}
+	if !status.Running {
+		t.Fatalf("expected SessionStatus.Running to be true while background task is running")
+	}
+
+	// 验证粘滞的 summary.IsRunning 依然按真实运行轮次纠正为 false，不因后台任务而保留。
+	backend.mu.Lock()
+	staleSummaryRunning := backend.threads[threadID].summary.IsRunning
+	backend.mu.Unlock()
+	if staleSummaryRunning {
+		t.Fatalf("expected stale summary.IsRunning to be corrected to false even with background tasks")
+	}
+
+	// 结束后台任务，确认 SessionState.Running 回到 false。
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "收尾后台任务",
+		ActionID: "00000000-0000-0000-0000-0000000000f2",
+	}); err != nil {
+		t.Fatalf("SendMessage turn 2 failed: %v", err)
+	}
+
+	waitThreadIdle(t, backend, ctx, threadID)
+	waitToolStatus(t, backend, ctx, threadID, "Bash", "completed")
+	waitBackgroundTasks(t, backend, ctx, threadID, 0)
+
+	stAfter, err := backend.SessionState(ctx, threadID)
+	if err != nil {
+		t.Fatalf("SessionState after background task ended failed: %v", err)
+	}
+	if stAfter.Running {
+		t.Fatalf("expected SessionState.Running to be false after background task ended")
+	}
+	statusAfter, err := backend.SessionStatus(ctx, threadID)
+	if err != nil {
+		t.Fatalf("SessionStatus after background task ended failed: %v", err)
+	}
+	if statusAfter.Running {
+		t.Fatalf("expected SessionStatus.Running to be false after background task ended")
+	}
+}

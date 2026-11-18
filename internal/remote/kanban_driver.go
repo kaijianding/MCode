@@ -255,13 +255,14 @@ func (b *MemoryBackend) SessionStatus(ctx context.Context, threadID string) (kan
 
 // sessionStatusLocked 的调用方需持有 b.mu。
 func (b *MemoryBackend) sessionStatusLocked(ctx context.Context, threadID string, td *memoryThread) kanban.SessionState {
-	// 没有真实运行实例时（runTurnID 为空且未在取消收尾）不能判定为运行中：
-	// 异常收尾遗留的 summary.IsRunning 粘滞标记以实际运行实例为准纠正，
-	// 避免 Swarm 调度看门狗将已结束的子代理永久视作 running。
-	running := td.runTurnID != "" || td.runCancel != nil
-	if !running && td.summary.IsRunning {
+	// 没有真实运行实例时（runTurnID 为空且未在取消收尾）以实际运行实例为准纠正异常收尾遗留的
+	// summary.IsRunning 粘滞标记，避免将已结束的会话永久视作 running；不要因为后台任务去保留 IsRunning。
+	turnRunning := td.runTurnID != "" || td.runCancel != nil
+	if !turnRunning && td.summary.IsRunning {
 		td.summary.IsRunning = false
 	}
+	// 后台命令未结束时不能判子代理完成，因此将未结束的后台任务计入 SessionState.Running。
+	running := turnRunning || b.backgroundTaskCountLocked(td) > 0
 	awaitingApproval := len(td.pending) > 0
 	// 待答复里有提问类请求时单独标出等待输入：Hyrda 看门狗对这两种等待都要豁免，
 	// 但看板关注标志要把「等用户回答问题」和「等审批」区分开。
