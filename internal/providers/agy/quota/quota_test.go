@@ -299,3 +299,16 @@ func TestQuota_RefreshAccessToken(t *testing.T) {
 		t.Errorf("expected 2 attempts with retry, got %d", attempts)
 	}
 }
+
+func TestDefaultHostsPreferDaily(t *testing.T) {
+	if len(DefaultHosts) == 0 {
+		t.Fatal("DefaultHosts must not be empty")
+	}
+	if DefaultHosts[0] != "https://daily-cloudcode-pa.sandbox.googleapis.com" {
+		t.Errorf("expected DefaultHosts[0] to be https://daily-cloudcode-pa.sandbox.googleapis.com, got %s", DefaultHosts[0])
+	}
+	last := DefaultHosts[len(DefaultHosts)-1]
+	if last != "https://cloudcode-pa.googleapis.com" {
+		t.Errorf("expected last element of DefaultHosts to be https://cloudcode-pa.googleapis.com, got %s", last)
+	}
+}

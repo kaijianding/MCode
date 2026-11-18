@@ -51,11 +51,11 @@ type Result struct {
 	Candidates []ModelCandidate
 }
 
-// DefaultHosts 是官方接口端点主机顺序（主用 + 备用测试主机）。
+// 生产主机 cloudcode-pa 的额度接口返回未使用的假数据，daily 主机返回真实用量，所以 daily 主机排在前面（与 antigravity_switch 一致）。
 var DefaultHosts = []string{
-	"https://cloudcode-pa.googleapis.com",
-	"https://daily-cloudcode-pa.googleapis.com",
 	"https://daily-cloudcode-pa.sandbox.googleapis.com",
+	"https://daily-cloudcode-pa.googleapis.com",
+	"https://cloudcode-pa.googleapis.com",
 }
 
 // 可在单元测试中调小的重试间隔变量
