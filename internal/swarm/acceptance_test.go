@@ -1399,6 +1399,96 @@ func TestAcceptanceRerunRejected(t *testing.T) {
 	}
 }
 
+func TestAcceptanceRerunWithoutChangesRejected(t *testing.T) {
+	for _, mode := range []string{"off", "ai"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			defer m.Stop()
+			settings := m.Settings()
+			settings.ReviewMode = mode
+			m.SetSettingsFunc(func() Settings { return settings })
+
+			m.opts.OnReport = func(_ string, _ string) error {
+				return nil
+			}
+
+			leadID := "lead-acc-rerun-empty-" + mode
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{"printf 'wrong check' >&2; exit 1"}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			m.mu.Lock()
+			m.leads[leadID].bees[0].AcceptanceReturns = acceptanceReturnLimit
+			m.mu.Unlock()
+
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "已完成改动")
+
+			before := waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				if mode == "off" {
+					return b.Status == StatusFailed && b.Reported
+				}
+				return isRejected(b) && b.Reported
+			})
+
+			// 还原副本里的改动，使副本相对基线没有可合并改动。
+			if err := os.Remove(filepath.Join(before.WorktreePath, "internal/feature.go")); err != nil {
+				t.Fatal(err)
+			}
+
+			if mode == "off" {
+				_, _, err = m.DispatchSingleEntry(context.Background(), SingleEntryRequest{
+					LeadThreadID: leadID, LeadWorkDir: dir,
+					Entry: Delegation{
+						Prompt:     "重跑验收",
+						ReworkOf:   bee.Name,
+						Rerun:      true,
+						Acceptance: []string{"true"},
+					},
+				})
+			} else {
+				_, _, err = m.DispatchFromReply(context.Background(), ReplyDispatchRequest{
+					LeadThreadID: leadID, LeadWorkDir: dir,
+					ReplyText: "```swarm\n" + `[{"prompt":"重跑验收","reworkOf":"Aspen","rerun":true,"acceptance":["true"]}]` + "\n```",
+				})
+			}
+			if err == nil || !strings.Contains(err.Error(), "没有可合并的改动") {
+				t.Fatalf("期望返回含 %q 的错误，实际: %v", "没有可合并的改动", err)
+			}
+
+			var after Bee
+			found := false
+			for _, b := range m.State(leadID).Bees {
+				if b.ThreadID == bee.ThreadID {
+					after = b
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("未找到目标 bee %s", bee.ThreadID)
+			}
+			if after.Status != before.Status {
+				t.Fatalf("Status 应保持不变: got=%v want=%v", after.Status, before.Status)
+			}
+			if after.MergeError != before.MergeError {
+				t.Fatalf("MergeError 应保持不变: got=%q want=%q", after.MergeError, before.MergeError)
+			}
+			if after.ReviewReason != before.ReviewReason {
+				t.Fatalf("ReviewReason 应保持不变: got=%q want=%q", after.ReviewReason, before.ReviewReason)
+			}
+			if !reflect.DeepEqual(after.Acceptance, before.Acceptance) {
+				t.Fatalf("Acceptance 应保持不变: got=%v want=%v", after.Acceptance, before.Acceptance)
+			}
+		})
+	}
+}
+
 func TestAcceptanceRejectedCopyKeptForRerun(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	finished := now.Add(-beeCopyReclaimIdle - time.Minute)

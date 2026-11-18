@@ -152,11 +152,11 @@ type Bee struct {
 	AcceptanceStep      int        `json:"-"`
 	AcceptanceStartedAt *time.Time `json:"-"`
 	// AcceptanceReturns 记录因验收失败发回原 bee 续修的次数。
-	AcceptanceReturns   int        `json:"acceptanceReturns,omitempty"`
-	ReviewFingerprint   string     `json:"reviewFingerprint,omitempty"`
-	ReviewProvider      string     `json:"reviewProvider,omitempty"`
-	ReviewModel         string     `json:"reviewModel,omitempty"`
-	ReviewEffort        string     `json:"reviewEffort,omitempty"`
+	AcceptanceReturns int    `json:"acceptanceReturns,omitempty"`
+	ReviewFingerprint string `json:"reviewFingerprint,omitempty"`
+	ReviewProvider    string `json:"reviewProvider,omitempty"`
+	ReviewModel       string `json:"reviewModel,omitempty"`
+	ReviewEffort      string `json:"reviewEffort,omitempty"`
 	// 审查漏斗的调度状态与结论：ReviewStage 只在内部使用，不进入远程协议。
 	ReviewStage           ReviewStage `json:"reviewStage,omitempty"`
 	ReviewLayer           string      `json:"reviewLayer,omitempty"` // l0 | l1 | l2 | l3 | human

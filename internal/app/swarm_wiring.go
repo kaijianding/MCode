@@ -322,18 +322,18 @@ type swarmStreamJob struct {
 
 // swarmStreamState 维护单个主会话当前轮次的流式解析状态。
 type swarmStreamState struct {
-	parser          *swarm.StreamParser
-	streamed        int             // 本轮已派发的条目数
-	suppressed      bool            // 本轮已达委派轮次上限，后续条目全部丢弃
-	limitHit        int             // 触发抑制的轮次上限，供回合末回送主代理时说明原因
-	counted         bool            // 本轮是否已计入委派轮次
+	parser                 *swarm.StreamParser
+	streamed               int             // 本轮已派发的条目数
+	suppressed             bool            // 本轮已达委派轮次上限，后续条目全部丢弃
+	limitHit               int             // 触发抑制的轮次上限，供回合末回送主代理时说明原因
+	counted                bool            // 本轮是否已计入委派轮次
 	overCap                int             // 本回合因超过单块条目上限而未派发的条目数
 	planRefused            int             // 本回合因 Plan 模式限制而未派发的条目数
 	planRefusedKeys        map[string]bool // 本回合因 Plan 模式被拒的 prompt（TrimSpace 后），仅用于避免重复计数
 	acceptanceRejected     []string        // 本回合因验收命令不合规而未启动的条目提示
 	acceptanceRejectedKeys map[string]bool // 本回合因验收命令被拒的去重键，避免流式与回合末重复汇报
 	settled                int             // 本回合由 settleRemaining 补派的条目数（不计入 streamed，只用于回送时统计已启动数）
-	dispatched      map[string]bool // 本轮已派发条目的 prompt（TrimSpace 后），用于回合末按整段回复补派
+	dispatched             map[string]bool // 本轮已派发条目的 prompt（TrimSpace 后），用于回合末按整段回复补派
 
 	// 跨回合去重与本回合回送所需的记录：本回合启动过哪些条目、因去重跳过了哪些。
 	started     []*swarmStartedEntry

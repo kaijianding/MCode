@@ -2190,15 +2190,17 @@ func (m *Manager) rerunAcceptance(ctx context.Context, leadThreadID string, d De
 	h.AcceptanceReturns = 0
 
 	patch, ok := m.prepareMerge(ctx, &h)
-	if ok && len(bytes.TrimSpace(patch)) > 0 {
-		h.PendingMerge = true
-		h.MergePatch = patch
-		h.ReviewConcerns = nil
-		h.ReviewState = ReviewRunning
-		h.ReviewStage = ReviewStageL0
-		queuedAt := m.now()
-		h.ReviewQueuedAt = &queuedAt
+	if !ok || len(bytes.TrimSpace(patch)) == 0 {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：%s 的副本里没有可合并的改动，只能派新 bee 按补丁重做", targetName)
 	}
+	h.PendingMerge = true
+	h.MergePatch = patch
+	h.ReviewConcerns = nil
+	h.ReviewState = ReviewRunning
+	h.ReviewStage = ReviewStageL0
+	queuedAt := m.now()
+	h.ReviewQueuedAt = &queuedAt
 
 	m.mu.Lock()
 	updated := false
