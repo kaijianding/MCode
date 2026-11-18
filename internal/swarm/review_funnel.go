@@ -275,7 +275,7 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 	}
 	if m.reviewMode() == reviewModeOff {
 		passed, detail := m.runAcceptance(ctx, leadThreadID, h)
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
 			return
 		}
 		if !passed {
@@ -330,7 +330,7 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 	}
 
 	passed, detail := m.runAcceptance(ctx, leadThreadID, h)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
 		return
 	}
 	if !passed {
@@ -949,11 +949,54 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
+// beeAcceptanceStopped 判断 bee 是否在验收期间被停止或丢弃合入。
+func (m *Manager) beeAcceptanceStopped(leadThreadID, beeThreadID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lead, ok := m.leads[leadThreadID]
+	if !ok {
+		return true
+	}
+	for i := range lead.bees {
+		if lead.bees[i].ThreadID == beeThreadID {
+			return lead.bees[i].Status == StatusStopped || lead.bees[i].MergeDiscarded || !lead.bees[i].PendingMerge
+		}
+	}
+	return true
+}
+
 // runAcceptance 在 bee 副本中顺序验收；reviewcheck 负责进程组取消及输出限额。
 func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee) (bool, string) {
 	if h.ReadOnly || len(h.ChangedFiles) == 0 || len(h.Acceptance) == 0 {
 		return true, ""
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	if h.ThreadID != "" {
+		m.mu.Lock()
+		if lead := m.leads[leadThreadID]; lead != nil {
+			for i := range lead.bees {
+				if lead.bees[i].ThreadID == h.ThreadID && (lead.bees[i].MergeDiscarded || lead.bees[i].Status == StatusStopped) {
+					cancel()
+					break
+				}
+			}
+		}
+		if ctx.Err() == nil {
+			if m.acceptanceCancels == nil {
+				m.acceptanceCancels = make(map[string]context.CancelFunc)
+			}
+			m.acceptanceCancels[h.ThreadID] = cancel
+		}
+		m.mu.Unlock()
+	}
+	defer func() {
+		cancel()
+		if h.ThreadID != "" {
+			m.mu.Lock()
+			delete(m.acceptanceCancels, h.ThreadID)
+			m.mu.Unlock()
+		}
+	}()
 	setProgress := func(step int, startedAt *time.Time) {
 		m.mu.Lock()
 		found := false
@@ -982,6 +1025,9 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 	}
 	const marker = "\nmcode-acceptance-exit:"
 	for i, command := range h.Acceptance {
+		if ctx.Err() != nil {
+			return false, fmt.Sprintf("%s（已取消）", command)
+		}
 		now := time.Now()
 		setProgress(i+1, &now)
 		executed := command
@@ -1003,6 +1049,9 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 		result := reviewcheck.Run(ctx, h.WorktreePath, reviewcheck.Command{
 			Shell: shell, Args: [][]string{args}, Display: command, Timeout: timeout, Env: loginenv.Environ(),
 		}, l0MaxOutput)
+		if ctx.Err() != nil {
+			return false, fmt.Sprintf("%s（已取消）", command)
+		}
 		if result.OK {
 			continue
 		}

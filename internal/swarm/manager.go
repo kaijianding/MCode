@@ -182,6 +182,8 @@ type Manager struct {
 	// retryingBees 记录用户手动「沿用改动续做」正在派发中的 bee 线程，
 	// 防止连点在同一份半成品上派出两个子会话；派发结束即清除。
 	retryingBees map[string]bool
+	// acceptanceCancels 记录各 bee 正在运行的验收命令取消函数，键为 bee ThreadID；由 m.mu 保护。
+	acceptanceCancels map[string]context.CancelFunc
 	// continueNudgedBees 记录失败后已经发过「中断续接」催促的 bee，避免同一条 bee 反复催。
 	continueNudgedBees map[string]bool
 	// reactivateSeen 记录每个 bee 连续多少个 tick 被看到「已在终态、但会话又在运行」，
@@ -676,6 +678,7 @@ func NewManager(opts Options) *Manager {
 		beeProgress:        make(map[string]progressSnapshot),
 		retriedBees:        make(map[string]int),
 		emptyNudgedBees:    make(map[string]bool),
+		acceptanceCancels:  make(map[string]context.CancelFunc),
 		continueNudgedBees: make(map[string]bool),
 		reactivateSeen:     make(map[string]int),
 		reactivateProbedAt: make(map[string]time.Time),
@@ -2784,7 +2787,7 @@ func (m *Manager) Tick(ctx context.Context) {
 			m.updateBeeLocked(tgt.leadThreadID, tgt.bee)
 		} else {
 			// 主工作区尚未落定：保持 running 并记录等待起点，由下个 tick 重新尝试落地。
-			m.markMergeWaitLocked(tgt.leadThreadID, tgt.bee.ThreadID, tgt.bee.MergeWaitSince, tgt.bee.FinishedAt, tgt.bee.ChangedFiles, tgt.bee.LinesAdded, tgt.bee.LinesDeleted, tgt.bee.MergeError)
+			m.markMergeWaitLocked(tgt.leadThreadID, tgt.bee.ThreadID, tgt.bee.MergeWaitSince, tgt.bee.FinishedAt, tgt.bee.ChangedFiles, tgt.bee.LinesAdded, tgt.bee.LinesDeleted, tgt.bee.MergeError, tgt.bee.LandMessage)
 		}
 		m.mu.Unlock()
 		changedLeads[tgt.leadThreadID] = struct{}{}
@@ -4739,7 +4742,7 @@ func (m *Manager) replaceBeeLocked(leadThreadID string, h Bee) bool {
 
 // markMergeWaitLocked 在保持 bee 处于 running 的前提下记录落地等待起点、改动文件与未落地的原因，
 // 让它在下个 tick 重新走落地检查，而不是被标记为完成。
-func (m *Manager) markMergeWaitLocked(leadThreadID, beeThreadID string, since, finishedAt *time.Time, changedFiles []string, linesAdded, linesDeleted int, mergeError string) {
+func (m *Manager) markMergeWaitLocked(leadThreadID, beeThreadID string, since, finishedAt *time.Time, changedFiles []string, linesAdded, linesDeleted int, mergeError, landMessage string) {
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
 		return
@@ -4760,15 +4763,27 @@ func (m *Manager) markMergeWaitLocked(leadThreadID, beeThreadID string, since, f
 		lead.bees[i].LinesAdded = linesAdded
 		lead.bees[i].LinesDeleted = linesDeleted
 		lead.bees[i].MergeError = mergeError
+		if landMessage != "" {
+			lead.bees[i].LandMessage = landMessage
+		}
 		// 会话已结束、只是等待落地，不应继续显示为思考中。
 		lead.bees[i].ThinkingMinutes = 0
 		return
 	}
 }
 
+// cancelAcceptanceLocked 取消指定 bee 正在运行的验收命令；调用方需持有 m.mu。
+func (m *Manager) cancelAcceptanceLocked(beeThreadID string) {
+	if cancel, ok := m.acceptanceCancels[beeThreadID]; ok {
+		delete(m.acceptanceCancels, beeThreadID)
+		if cancel != nil {
+			cancel()
+		}
+	}
+}
+
 // StopBee 停止指定的子会话，并将其置为 stopped 状态，不执行自动合并。
 func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string) error {
-	off := m.reviewMode() == reviewModeOff
 	m.mu.Lock()
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
@@ -4786,7 +4801,8 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 		m.mu.Unlock()
 		return ErrBeeNotFound
 	}
-	accepting := off && target.PendingMerge && target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0
+	_, runningAcceptance := m.acceptanceCancels[beeThreadID]
+	accepting := runningAcceptance || (target.PendingMerge && target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0)
 	if target.Status != StatusRunning && !accepting {
 		m.mu.Unlock()
 		return nil
@@ -4808,6 +4824,7 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 		target.ReviewQueuedAt = nil
 		target.ReviewApplyPending = false
 	}
+	m.cancelAcceptanceLocked(beeThreadID)
 	delete(m.beeProgress, beeThreadID)
 	m.mu.Unlock()
 
@@ -4822,7 +4839,6 @@ func (m *Manager) StopBee(ctx context.Context, leadThreadID, beeThreadID string)
 
 // StopAll 停止指定主会话下的所有处于 running 状态的子会话。
 func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
-	off := m.reviewMode() == reviewModeOff
 	// 先拿 deliverMu 再拿 m.mu：与 checkReports 的投递顺序一致，停止要么等正在进行的
 	// 投递返回，要么先于投递检查生效。持 m.mu 时不得再获取 deliverMu。
 	m.deliverMu.Lock()
@@ -4841,7 +4857,8 @@ func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
 		if !bee.Reported && (bee.Status == StatusCompleted || bee.Status == StatusFailed || bee.Status == StatusStopped) {
 			hasUnreported = true
 		}
-		accepting := off && bee.PendingMerge && bee.ReviewStage == ReviewStageL0 && len(bee.Acceptance) > 0
+		_, runningAcceptance := m.acceptanceCancels[bee.ThreadID]
+		accepting := runningAcceptance || (bee.PendingMerge && bee.ReviewStage == ReviewStageL0 && len(bee.Acceptance) > 0)
 		if bee.Status == StatusRunning || accepting {
 			lead.bees[i].Status = StatusStopped
 			lead.bees[i].Reported = true
@@ -4858,6 +4875,7 @@ func (m *Manager) StopAll(ctx context.Context, leadThreadID string) error {
 				bee.ReviewQueuedAt = nil
 				bee.ReviewApplyPending = false
 			}
+			m.cancelAcceptanceLocked(bee.ThreadID)
 			runningIDs = append(runningIDs, lead.bees[i].ThreadID)
 			delete(m.beeProgress, lead.bees[i].ThreadID)
 		}
@@ -4930,7 +4948,8 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 				break
 			}
 		}
-		if target == nil || (target.Status != StatusRunning && !target.PendingMerge) {
+		_, runningAcceptance := m.acceptanceCancels[threadID]
+		if target == nil || (target.Status != StatusRunning && !target.PendingMerge && !runningAcceptance) {
 			m.mu.Unlock()
 			return
 		}
@@ -4940,10 +4959,10 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 			target.FinishedAt = &now
 			target.Summary = ""
 		}
-		if target.PendingMerge {
+		if target.PendingMerge || runningAcceptance {
 			target.PendingMerge = false
 			target.MergeDiscarded = true
-			if target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0 && m.reviewMode() == reviewModeOff {
+			if runningAcceptance || (target.ReviewStage == ReviewStageL0 && len(target.Acceptance) > 0) {
 				target.ReviewState = ReviewNone
 				target.ReviewStage = ""
 				target.ReviewStartedAt = nil
@@ -4953,6 +4972,7 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 		}
 		target.AcceptanceStep = 0
 		target.AcceptanceStartedAt = nil
+		m.cancelAcceptanceLocked(threadID)
 		delete(m.beeProgress, threadID)
 		m.mu.Unlock()
 
@@ -4976,6 +4996,7 @@ func (m *Manager) BeeThreadDeleted(ctx context.Context, threadID string) {
 	var copies []leadBeeCopy
 	protected := m.reclaimProtectedPathsLocked()
 	for i := range lead.bees {
+		m.cancelAcceptanceLocked(lead.bees[i].ThreadID)
 		if lead.bees[i].Status == StatusRunning {
 			lead.bees[i].Status = StatusStopped
 			lead.bees[i].FinishedAt = &now
@@ -5462,10 +5483,13 @@ func (m *Manager) markReviewNeedsHuman(leadThreadID, beeThreadID, reason string)
 
 // ClearFinished 清理已结束的子会话；待审查或尚待汇报的审查结果必须保留。
 func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error {
+	mergeMu := m.getLeadMergeMutex(leadThreadID)
+	mergeMu.Lock()
 	m.mu.Lock()
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
 		m.mu.Unlock()
+		mergeMu.Unlock()
 		return ErrLeadNotFound
 	}
 	leadWorkDir := lead.leadWorkDir
@@ -5475,8 +5499,9 @@ func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error 
 		h := &lead.bees[i]
 		// 多 bee 分批审查时，不能在最终汇报前清掉已批准或已放弃的结果。
 		awaitingReport := m.reviewEnabled() && m.opts.OnReport != nil && !h.Reported
-		// 因 MCode 重启被打断的 bee 保留到用户续跑或放弃，不能当成已结束的 bee 清掉。
-		if h.Interrupted {
+		// 因 MCode 重启被打断的 bee 保留到用户续跑或放弃，不能当成已结束的 bee 清掉；
+		// 正在沿用改动续做交接中的 bee 也必须跳过，避免删掉将被新会话复用的副本与记录。
+		if h.Interrupted || m.retryingBees[h.ThreadID] {
 			continue
 		}
 		if h.Status != StatusRunning && h.ReviewState != ReviewRunning && !h.PendingMerge && !awaitingReport {
@@ -5489,6 +5514,7 @@ func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error 
 	m.mu.Unlock()
 
 	if len(finished) == 0 {
+		mergeMu.Unlock()
 		return nil
 	}
 
@@ -5513,7 +5539,7 @@ func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error 
 	if lead, ok := m.leads[leadThreadID]; ok {
 		remaining := make([]Bee, 0, len(lead.bees))
 		for _, h := range lead.bees {
-			if _, drop := finishedIDs[h.ThreadID]; !drop {
+			if _, drop := finishedIDs[h.ThreadID]; !drop || m.retryingBees[h.ThreadID] {
 				remaining = append(remaining, h)
 			}
 		}
@@ -5523,6 +5549,7 @@ func (m *Manager) ClearFinished(ctx context.Context, leadThreadID string) error 
 		delete(m.beeProgress, id)
 	}
 	m.mu.Unlock()
+	mergeMu.Unlock()
 
 	m.notifyChange(leadThreadID)
 	m.processQueue(ctx)
@@ -6426,9 +6453,29 @@ func (m *Manager) RetryBee(ctx context.Context, leadThreadID, beeThreadID string
 	}
 
 	m.mu.Lock()
+	if m.retryingBees[beeThreadID] {
+		var name string
+		if lead := m.leads[leadThreadID]; lead != nil {
+			for i := range lead.bees {
+				if lead.bees[i].ThreadID == beeThreadID {
+					name = lead.bees[i].Name
+					break
+				}
+			}
+		}
+		m.mu.Unlock()
+		return Bee{}, fmt.Errorf("子代理 %s 正在重新派发，请稍候", name)
+	}
+	m.mu.Unlock()
+
+	mergeMu := m.getLeadMergeMutex(leadThreadID)
+	mergeMu.Lock()
+
+	m.mu.Lock()
 	lead, ok := m.leads[leadThreadID]
 	if !ok {
 		m.mu.Unlock()
+		mergeMu.Unlock()
 		return Bee{}, ErrLeadNotFound
 	}
 	var old Bee
@@ -6450,17 +6497,25 @@ func (m *Manager) RetryBee(ctx context.Context, leadThreadID, beeThreadID string
 	m.mu.Unlock()
 
 	if !found {
+		mergeMu.Unlock()
 		// 只有属于该主会话的 bee 才能重试，避免跨会话误操作别人的 worktree。
 		return Bee{}, fmt.Errorf("%w: %s", ErrBeeNotFound, beeThreadID)
 	}
 	if busy {
+		mergeMu.Unlock()
 		return Bee{}, fmt.Errorf("子代理 %s 正在重新派发，请稍候", old.Name)
 	}
-	defer func() {
-		m.mu.Lock()
-		delete(m.retryingBees, beeThreadID)
-		m.mu.Unlock()
-	}()
+	unlocked := false
+	unlock := func() {
+		if !unlocked {
+			unlocked = true
+			m.mu.Lock()
+			delete(m.retryingBees, beeThreadID)
+			m.mu.Unlock()
+			mergeMu.Unlock()
+		}
+	}
+	defer unlock()
 
 	switch old.Status {
 	case StatusFailed, StatusStopped:
@@ -6499,6 +6554,7 @@ func (m *Manager) RetryBee(ctx context.Context, leadThreadID, beeThreadID string
 		}
 	}
 	m.mu.Unlock()
+	unlock()
 	m.notifyChange(leadThreadID)
 	return newBee, nil
 }

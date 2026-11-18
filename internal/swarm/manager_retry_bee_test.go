@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mcode/internal/git"
+	"mcode/internal/kanban"
 )
 
 // newRetryBeeManager 造一个已启用、含指定 bee 记录的管理器，供「沿用改动续做」的用例共用。
@@ -253,5 +255,214 @@ func TestManager_RetryBee_FallsBackWhenWorktreeGone(t *testing.T) {
 	}
 	if st := mgr.State(leadID); len(st.Bees) != 1 || st.Bees[0].ThreadID != newBee.ThreadID {
 		t.Fatalf("lead 里应只剩替换后的新 bee，实际 %+v", st.Bees)
+	}
+}
+
+// 验证 retryingBees 中的 failed bee 在 ClearFinished 时不会被删掉副本和记录。
+func TestClearFinishedSkipsRetryingBee(t *testing.T) {
+	t.Parallel()
+	const leadID = "lead-clear-skips-retrying"
+	ctx := context.Background()
+
+	mgr, _, _, runner, dir := newRetryBeeManager(t, leadID)
+	base, err := runner.RevParse(ctx, dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse failed: %v", err)
+	}
+	retryingWT := filepath.Join(t.TempDir(), "wt-retrying")
+	retryingBranch := "mcode/swarm/lead-csr/0"
+	if err := runner.WorktreeAdd(ctx, dir, retryingWT, retryingBranch, base); err != nil {
+		t.Fatalf("WorktreeAdd retrying failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(retryingWT, "partial.txt"), []byte("keep me\n"), 0644); err != nil {
+		t.Fatalf("write partial.txt: %v", err)
+	}
+
+	finishedWT := filepath.Join(t.TempDir(), "wt-finished")
+	finishedBranch := "mcode/swarm/lead-csr/1"
+	if err := runner.WorktreeAdd(ctx, dir, finishedWT, finishedBranch, base); err != nil {
+		t.Fatalf("WorktreeAdd finished failed: %v", err)
+	}
+
+	mgr.mu.Lock()
+	mgr.leads[leadID].bees = append(mgr.leads[leadID].bees,
+		Bee{
+			ThreadID:      "bee-retrying",
+			Index:         0,
+			Name:          "Aspen",
+			Task:          "续做中",
+			Status:        StatusFailed,
+			WorktreePath:  retryingWT,
+			Branch:        retryingBranch,
+			BaseCommit:    base,
+			TargetWorkDir: dir,
+			Reported:      true,
+		},
+		Bee{
+			ThreadID:      "bee-done",
+			Index:         1,
+			Name:          "Birch",
+			Task:          "已结束",
+			Status:        StatusFailed,
+			WorktreePath:  finishedWT,
+			Branch:        finishedBranch,
+			BaseCommit:    base,
+			TargetWorkDir: dir,
+			Reported:      true,
+		},
+	)
+	if mgr.retryingBees == nil {
+		mgr.retryingBees = make(map[string]bool)
+	}
+	mgr.retryingBees["bee-retrying"] = true
+	mgr.mu.Unlock()
+
+	if err := mgr.ClearFinished(ctx, leadID); err != nil {
+		t.Fatalf("ClearFinished failed: %v", err)
+	}
+
+	// retryingBees 中的 failed bee 必须保留记录与副本，非 retrying 的已结束 bee 被清理。
+	st := mgr.State(leadID)
+	if len(st.Bees) != 1 || st.Bees[0].ThreadID != "bee-retrying" {
+		t.Fatalf("应只保留 bee-retrying，实际 %+v", st.Bees)
+	}
+	if _, err := os.Stat(filepath.Join(retryingWT, "partial.txt")); err != nil {
+		t.Fatalf("retrying bee 的副本不应被删: %v", err)
+	}
+	if _, err := os.Stat(finishedWT); !os.IsNotExist(err) {
+		t.Fatalf("普通已结束 bee 的副本应被删除，stat err=%v", err)
+	}
+
+	// 再验证 RetryBee 与 ClearFinished 并发：RetryBee 从读取旧记录到替换完成全程持 mergeMu，
+	// ClearFinished 不会在交接中途删掉复用的副本。
+	mgr.mu.Lock()
+	delete(mgr.retryingBees, "bee-retrying")
+	mgr.mu.Unlock()
+
+	driver := mgr.opts.Driver.(*fakeDriver)
+	startEntered := make(chan struct{}, 1)
+	allowStart := make(chan struct{})
+	driver.onStart = func(_ kanban.SessionRequest) {
+		select {
+		case startEntered <- struct{}{}:
+		default:
+		}
+		<-allowStart
+	}
+
+	retryDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.RetryBee(ctx, leadID, "bee-retrying")
+		retryDone <- err
+	}()
+
+	select {
+	case <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RetryBee 未进入 StartSession")
+	}
+
+	clearDone := make(chan error, 1)
+	go func() {
+		clearDone <- mgr.ClearFinished(ctx, leadID)
+	}()
+
+	select {
+	case err := <-clearDone:
+		t.Fatalf("RetryBee 持 mergeMu 期间 ClearFinished 不应提前完成: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(allowStart)
+	if err := <-retryDone; err != nil {
+		t.Fatalf("RetryBee 失败: %v", err)
+	}
+	if err := <-clearDone; err != nil {
+		t.Fatalf("ClearFinished 失败: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(retryingWT, "partial.txt")); err != nil {
+		t.Fatalf("并发 ClearFinished 后复用的副本不应被删: %v", err)
+	}
+	if got := mgr.State(leadID).Bees; len(got) != 1 || got[0].Status != StatusRunning {
+		t.Fatalf("并发后应保留新派发的 running bee，实际 %+v", got)
+	}
+}
+
+// 验证另一 goroutine 持该 lead 的 mergeMu 时 ClearFinished 等待，不提前删副本，释放后才删。
+func TestClearFinishedWaitsLeadMergeMutex(t *testing.T) {
+	t.Parallel()
+	const leadID = "lead-clear-waits-mergemu"
+	ctx := context.Background()
+
+	mgr, _, _, runner, dir := newRetryBeeManager(t, leadID)
+	base, err := runner.RevParse(ctx, dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse failed: %v", err)
+	}
+	wtPath := filepath.Join(t.TempDir(), "wt-wait-lock")
+	branch := "mcode/swarm/lead-cwm/0"
+	if err := runner.WorktreeAdd(ctx, dir, wtPath, branch, base); err != nil {
+		t.Fatalf("WorktreeAdd failed: %v", err)
+	}
+
+	mgr.mu.Lock()
+	mgr.leads[leadID].bees = append(mgr.leads[leadID].bees, Bee{
+		ThreadID:      "bee-finished-1",
+		Index:         0,
+		Name:          "Cedar",
+		Task:          "待清理",
+		Status:        StatusFailed,
+		WorktreePath:  wtPath,
+		Branch:        branch,
+		BaseCommit:    base,
+		TargetWorkDir: dir,
+		Reported:      true,
+	})
+	mgr.mu.Unlock()
+
+	mergeMu := mgr.getLeadMergeMutex(leadID)
+	mergeMu.Lock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			mergeMu.Unlock()
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.ClearFinished(ctx, leadID)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("持有 mergeMu 期间 ClearFinished 不应返回: %v", err)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Fatalf("持有 mergeMu 期间不应删除副本: %v", err)
+	}
+	if got := mgr.State(leadID).Bees; len(got) != 1 {
+		t.Fatalf("持有 mergeMu 期间不应删除记录: %+v", got)
+	}
+
+	unlocked = true
+	mergeMu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ClearFinished 返回错误: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("释放 mergeMu 后 ClearFinished 未在 5 秒内完成")
+	}
+
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Fatalf("释放 mergeMu 后副本应已删除，stat err=%v", err)
+	}
+	if got := mgr.State(leadID).Bees; len(got) != 0 {
+		t.Fatalf("释放 mergeMu 后记录应已删除: %+v", got)
 	}
 }

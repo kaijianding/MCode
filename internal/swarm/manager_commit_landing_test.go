@@ -609,3 +609,47 @@ func TestManager_CommitLanding_ConflictMarkersAndTimeout(t *testing.T) {
 	}
 	assertLandingFile(t, root, markers)
 }
+
+func TestMergeWaitKeepsLandMessage(t *testing.T) {
+	t.Parallel()
+	m, _, root := newCommitLandingManager(t)
+	const lead = "lead-merge-wait-land-message"
+	const message = "fix: 保留等待期间的落地说明"
+	bee := startCommitLandingBee(t, m, root, lead, 0)
+	writePipelineFile(t, root, "lines.txt", strings.Replace(landingBase, "nine\n", "user nine\n", 1))
+	writePipelineFile(t, bee.WorktreePath, "lines.txt", strings.Replace(landingBase, "nine\n", "bee nine\n", 1))
+	completeBee(t, m, bee, "已完成修改")
+
+	calls := 0
+	m.opts.Describe = func(context.Context, string) (string, error) {
+		calls++
+		return message, nil
+	}
+
+	ctx := context.Background()
+	m.Tick(ctx)
+	m.Tick(ctx)
+
+	if calls != 1 {
+		t.Fatalf("主工作区未落定连续两次 tick，Describe 应只调用 1 次，实际 %d", calls)
+	}
+	st := m.State(lead)
+	if len(st.Bees) != 1 || st.Bees[0].LandMessage != message {
+		t.Fatalf("markMergeWaitLocked 后 LandMessage 应保留为 %q，实际 %+v", message, st.Bees)
+	}
+	if st.Bees[0].Status != StatusRunning || st.Bees[0].MergeWaitSince == nil {
+		t.Fatalf("未落定时 bee 应保持 running 并记录等待起点，实际 %+v", st.Bees[0])
+	}
+
+	// 主工作区解除冲突后再次 tick，复用已保留的 LandMessage 完成落地。
+	writePipelineFile(t, root, "lines.txt", landingBase)
+	m.Tick(ctx)
+	if calls != 1 {
+		t.Fatalf("冲突解除落地时不应重调 Describe，实际调用 %d 次", calls)
+	}
+	landed := m.State(lead).Bees[0]
+	assertLandingCommit(t, m, root, landed)
+	if got := gitTestRun(t, root, "show", "-s", "--format=%B", landed.LandedCommit); got != message {
+		t.Fatalf("提交说明=%q want=%q", got, message)
+	}
+}

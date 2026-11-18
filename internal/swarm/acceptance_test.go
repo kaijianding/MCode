@@ -628,3 +628,81 @@ func TestRewriteWorkDirBackslashBoundary(t *testing.T) {
 		t.Fatalf("rewrite = %q", got)
 	}
 }
+
+func TestStopBeeCancelsAcceptance(t *testing.T) {
+	for _, action := range []string{"stop", "stop-all", "delete"} {
+		m := NewManager(Options{})
+		dir := t.TempDir()
+		secondFile := filepath.Join(dir, "second-ran")
+		h := Bee{
+			ThreadID:      "bee-stop-cancel-" + action,
+			WorktreePath:  dir,
+			ChangedFiles:  []string{"a.go"},
+			Acceptance:    []string{"sleep 30", "touch '" + filepath.ToSlash(secondFile) + "'"},
+			Status:        StatusCompleted,
+			PendingMerge:  true,
+			ReviewState:   ReviewRunning,
+			ReviewStage:   ReviewStageL0,
+			TargetWorkDir: dir,
+		}
+		leadID := "lead-stop-cancel-" + action
+		m.leads[leadID] = &leadState{leadThreadID: leadID, leadWorkDir: dir, bees: []Bee{h}}
+
+		started := make(chan struct{}, 1)
+		m.SetOnChange(func(id string) {
+			st := m.State(id)
+			if len(st.Bees) > 0 && st.Bees[0].AcceptanceStep == 1 {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+			}
+		})
+
+		type accResult struct {
+			passed bool
+			detail string
+		}
+		done := make(chan accResult, 1)
+		go func() {
+			passed, detail := m.runAcceptance(context.Background(), leadID, h)
+			done <- accResult{passed: passed, detail: detail}
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: 验收命令未在 5 秒内启动", action)
+		}
+
+		switch action {
+		case "stop":
+			if err := m.StopBee(context.Background(), leadID, h.ThreadID); err != nil {
+				t.Fatalf("StopBee 失败: %v", err)
+			}
+		case "stop-all":
+			if err := m.StopAll(context.Background(), leadID); err != nil {
+				t.Fatalf("StopAll 失败: %v", err)
+			}
+		case "delete":
+			m.BeeThreadDeleted(context.Background(), h.ThreadID)
+		}
+
+		select {
+		case got := <-done:
+			if got.passed {
+				t.Fatalf("%s: 被取消的验收不应通过: %+v", action, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: 取消后 runAcceptance 未在 5 秒内返回", action)
+		}
+
+		if _, err := os.Stat(secondFile); !os.IsNotExist(err) {
+			t.Fatalf("%s: 被取消后不应执行第二条验收命令: %v", action, err)
+		}
+		after := m.State(leadID).Bees[0]
+		if after.ReviewState != ReviewNone || after.PendingMerge || !after.MergeDiscarded || (action != "delete" && after.Status != StatusStopped) {
+			t.Fatalf("%s: 停止后状态未按停止路径落定: %+v", action, after)
+		}
+	}
+}
