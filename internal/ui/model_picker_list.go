@@ -188,6 +188,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				renderModelPickerTiersSection(c, p, state)
 			}
 			if len(pinned) > 0 {
+				ui.Box(c.Key(p.KeyPrefix + "pinned-group-gap")).Height(Space2)
 				renderProviderGroupHeader(c, p.KeyPrefix+"pinned-group-header", "收藏")
 				for _, entry := range pinned {
 					mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
@@ -224,31 +225,37 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				if !hasOpen {
 					open = defaultOpenAgent != "" && prov.ID == defaultOpenAgent
 				}
-				renderProviderGroupHeaderToggle(c, p.KeyPrefix+"agent-group-"+prov.ID, modelPickerAgentName(prov), !open, func() {
-					if state.agentOpen == nil {
-						state.agentOpen = make(map[string]bool)
-					}
-					state.agentOpen[prov.ID] = !open
-					modelPickerInvalidate(p)
-				})
-				if !open {
-					continue
-				}
-				ui.Column(c.Key(p.KeyPrefix + "agent-group-body-" + prov.ID)).
+				ui.Column(c.Key(p.KeyPrefix + "agent-group-wrap-" + prov.ID)).
 					Gap(Space0).
+					Padding(Space2, 0, 0, 0).
 					FillWidth().
-					Transition(motionCollapse(c)).
 					Children(func() {
-						for mIdx, m := range prov.Models {
-							renderModelPickerListRow(c, p, modelRowOptions{
-								KeyPrefix: "model-",
-								Provider:  prov,
-								Model:     m,
-								IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
-								ShowQuota: mIdx == 0,
-								OnPick:    onPick,
-							})
+						renderModelPickerAgentHeader(c, p.KeyPrefix+"agent-group-"+prov.ID, prov, modelPickerAgentName(prov), !open, func() {
+							if state.agentOpen == nil {
+								state.agentOpen = make(map[string]bool)
+							}
+							state.agentOpen[prov.ID] = !open
+							modelPickerInvalidate(p)
+						})
+						if !open {
+							return
 						}
+						ui.Column(c.Key(p.KeyPrefix + "agent-group-body-" + prov.ID)).
+							Gap(Space0).
+							FillWidth().
+							Transition(motionCollapse(c)).
+							Children(func() {
+								for mIdx, m := range prov.Models {
+									renderModelPickerListRow(c, p, modelRowOptions{
+										KeyPrefix: "model-",
+										Provider:  prov,
+										Model:     m,
+										IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
+										ShowQuota: mIdx == 0,
+										OnPick:    onPick,
+									})
+								}
+							})
 					})
 			}
 			if !renderedAny {
@@ -258,6 +265,59 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 					Padding(Space2, Space3)
 			}
 		})
+}
+
+// renderModelPickerAgentHeader 渲染列表页可点击折叠的 Agent 分组标题：带供应商图标、加粗正文与右侧折叠箭头。
+func renderModelPickerAgentHeader(c *ui.Context, key string, prov ProviderInfo, title string, collapsed bool, onToggle func()) {
+	label := "折叠 " + title
+	if collapsed {
+		label = "展开 " + title
+	}
+	btn := ui.ButtonBase(c.Key(key)).
+		Label(label).
+		Tooltip(label).
+		Height(ControlMD).
+		Padding(Space0, Space3).
+		Radius(RadiusMD).
+		FillWidth()
+	if btn.Hovered() {
+		btn.Background(ColorHoverDark)
+	} else {
+		btn.Background(ui.Transparent)
+	}
+	btn.OnClick(func() {
+		if onToggle != nil {
+			onToggle()
+		}
+	})
+	btn.Children(func() {
+		ui.Row(c.Key(key + "-content")).
+			AlignItems(ui.Center).
+			Gap(Space2).
+			FillWidth().
+			Children(func() {
+				ui.Box(c.Key(key + "-icon-slot")).
+					Size(IconSM, IconSM).
+					Center().
+					Shrink(0).
+					Children(func() {
+						renderProviderIcon(c, prov.ID, IconSM)
+					})
+				ui.Text(c, title).
+					FontSize(uiFont(TypeBody)).
+					FontWeight(600).
+					TextColor(modelPickerTextPrimary).
+					SingleLine().
+					Grow(1)
+				arrow := IconChevronDown()
+				if collapsed {
+					arrow = IconChevronRight()
+				}
+				ui.Icon(c, arrow).
+					Size(10, 10).
+					TextColor(modelPickerTextSecondary)
+			})
+	})
 }
 
 // renderModelPickerFollowLeadRow 渲染执行侧列表顶部的「跟随主导模型」行。
@@ -295,11 +355,14 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 	btn.Children(func() {
 		ui.Row(c.Key(p.KeyPrefix+"follow-lead-row-content")).
 			AlignItems(ui.Center).
-			Gap(Space3).
+			Gap(Space2).
 			FillWidth().
 			Children(func() {
+				ui.Box(c.Key(p.KeyPrefix+"follow-lead-row-icon-slot")).
+					Size(IconSM, IconSM).
+					Shrink(0)
 				title := ui.Text(c, "跟随主导模型").
-					FontSize(uiFont(TypeProse)).
+					FontSize(uiFont(TypeBody)).
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Shrink(0)
@@ -397,7 +460,7 @@ func modelPickerAgentName(prov ProviderInfo) string {
 	return prov.ID
 }
 
-// renderModelPickerListRow 渲染模型列表页的一行：左侧模型名，右侧按需展示归属分组名、收藏星标与当前选中标记。
+// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽与模型名，右侧按需展示配额、收藏星标与当前选中标记。
 // 星标只反映模型是否在配置的精选列表里（见 ModelPickerProps.Pins），不可点击。
 func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 	prov := opt.Provider
@@ -414,19 +477,9 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 	if modelItem.IsDefault {
 		name = defaultModelRowDisplayName(prov, modelItem)
 	}
-	groupName := ""
-	tooltip := name
-	if opt.ShowGroup {
-		// 行左侧是模型名，右侧是分组名（模型 ID 里 `/` 之前的部分）；模型 ID 不带网关前缀时，分组就是它所属的 Agent。
-		groupName = prov.ID
-		if i := strings.IndexByte(modelItem.ID, '/'); i > 0 {
-			groupName = modelItem.ID[:i]
-		}
-		tooltip = name + "  " + groupName
-	}
 	btn := ui.ButtonBase(c.Key(rowKey)).
 		Label(name).
-		Tooltip(tooltip).
+		Tooltip(name).
 		Checked(opt.IsChecked).
 		Height(modelPickerRowHeight).
 		Padding(Space2, Space3).
@@ -453,11 +506,20 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 	btn.Children(func() {
 		ui.Row(c.Key(rowKey + "-content")).
 			AlignItems(ui.Center).
-			Gap(Space3).
+			Gap(Space2).
 			FillWidth().
 			Children(func() {
+				ui.Box(c.Key(rowKey + "-icon-slot")).
+					Size(IconSM, IconSM).
+					Center().
+					Shrink(0).
+					Children(func() {
+						if opt.ShowGroup {
+							renderProviderIcon(c, prov.ID, IconSM)
+						}
+					})
 				title := ui.Text(c, name).
-					FontSize(uiFont(TypeProse)).
+					FontSize(uiFont(TypeBody)).
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Shrink(0)
@@ -465,14 +527,6 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 					title.FontWeight(600)
 				}
 				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
-				if opt.ShowGroup {
-					ui.Text(c, groupName).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(modelPickerTextSecondary).
-						SingleLine().
-						Ellipsis("…").
-						Shrink(1)
-				}
 				if opt.ShowQuota && p.QuotaUsed != nil {
 					if usedPercent, ok := p.QuotaUsed(prov.ID); ok {
 						clamped := math.Max(0, math.Min(100, usedPercent))
@@ -481,8 +535,8 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 							TextColor(quotaPercentColor(c, clamped))
 					}
 				}
-				// 收藏（设置页固定的模型）在行右端给一枚实心星，未收藏的模型不显示星。
-				if providerHasPinnedModel(prov.ID, modelItem.ID, p.Pins) {
+				// 收藏行已有供应商图标，仅在分组内的行右端展示实心星，未收藏的模型不显示星。
+				if !opt.ShowGroup && providerHasPinnedModel(prov.ID, modelItem.ID, p.Pins) {
 					ui.Box(c).
 						Label("已收藏").
 						Tooltip("已收藏").

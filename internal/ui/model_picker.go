@@ -59,6 +59,7 @@ type ModelPickerState struct {
 	ListOpen    map[string]bool // 二级模型列表页展开状态，key 为 ScopeKey+"/"+side
 	MaxBeesOpen bool            // 并发 Bee 上限下拉菜单展开状态
 	TierEditing string          // 正在为其选择模型的档位 ID，空表示未编辑档位
+	tiersOpen   bool            // 列表页档位区是否展开；默认折叠
 	agentOpen   map[string]bool // 模型列表页各 Agent 分组展开状态；键为 provider ID，未记录时仅当前 Agent 展开
 	searchQuery string          // 列表页搜索框内容，按名称筛选模型
 
@@ -83,6 +84,7 @@ func (st *ModelPickerState) Reset() {
 	st.ListOpen = nil
 	st.MaxBeesOpen = false
 	st.TierEditing = ""
+	st.tiersOpen = false
 	st.agentOpen = nil
 	st.searchQuery = ""
 	st.pageDepth = 0
@@ -1222,8 +1224,8 @@ const modelPickerPanelRadius = float32(22)
 // 不再把弹层拉回来，避免用户已经去做别的事时面板突然弹出。
 const modelPickerSwarmReopenWindow = 5 * time.Second
 
-// modelPickerRowHeight 是模型列表单行（只有模型名）的行高，与列表常规行高一致。
-const modelPickerRowHeight = float32(34)
+// modelPickerRowHeight 是模型列表单行（只有模型名）的行高。
+const modelPickerRowHeight = float32(30)
 
 // modelPickerRowHeightTwoLine 是模型列表两行内容（名称 + 说明）的行高。
 const modelPickerRowHeightTwoLine = float32(46)
@@ -1683,132 +1685,145 @@ func renderTierEditingBanner(c *ui.Context, p ModelPickerProps, state *ModelPick
 }
 
 func renderModelPickerTiersSection(c *ui.Context, p ModelPickerProps, state *ModelPickerState) {
-	renderProviderGroupHeader(c, p.KeyPrefix+"tier-group-header", "档位")
-
-	for _, t := range p.Tiers {
-		tier := t
-		prov, mdl, eff, fast := effectiveTierModel(tier, p.PairTierOverrides, p.TierOverrides)
-		effectiveText := swarmModelCapsuleText(p.Providers, prov, mdl, eff, fast)
-
-		_, hasSessionOverride := p.TierOverrides[tier.ID]
-		isEditing := (state != nil && state.TierEditing == tier.ID)
-
-		ui.Row(c.Key(p.KeyPrefix + "tier-row-container-" + tier.ID)).
-			AlignItems(ui.Center).
-			FillWidth().
-			Children(func() {
-				rowBtn := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-row-"+tier.ID)).
-					Label(tier.Name).
-					Tooltip(tier.Name).
-					Height(ControlLG).
-					Padding(0, Space3).
-					Radius(RadiusMD).
-					Grow(1)
-				if rowBtn.Hovered() || isEditing {
-					rowBtn.Background(ColorHoverDark)
-				} else {
-					rowBtn.Background(ui.Transparent)
-				}
-				rowBtn.OnClick(func() {
-					if state != nil {
-						state.TierEditing = tier.ID
-						modelPickerInvalidate(p)
-					}
-				})
-				rowBtn.Children(func() {
-					ui.Row(c.Key(p.KeyPrefix + "tier-row-content-" + tier.ID)).
-						AlignItems(ui.Center).
-						Justify(ui.SpaceBetween).
-						Grow(1).
-						Children(func() {
-							renderSwarmTierChip(c, p.KeyPrefix+"tier-chip-"+tier.ID, tier.Name, tier.ID, tier.ReadOnly)
-							ui.Row(c.Key(p.KeyPrefix + "tier-row-right-" + tier.ID)).
-								AlignItems(ui.Center).
-								Gap(Space2).
-								Children(func() {
-									ui.Text(c, effectiveText).
-										FontSize(uiFont(TypeFootnote)).
-										TextColor(modelPickerTextSecondary).
-										SingleLine()
-									if hasSessionOverride {
-										ui.Box(c.Key(p.KeyPrefix+"tier-dot-"+tier.ID)).
-											Size(6, 6).
-											Radius(RadiusPill).
-											Background(ThemeAccent(c)).
-											Tooltip("会话覆盖")
-									}
-								})
-						})
-				})
-
-				if hasSessionOverride {
-					btnReset := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-reset-"+tier.ID)).
-						Label("恢复").
-						Tooltip("恢复").
-						Size(26, 26).
-						Radius(RadiusPill).
-						Center()
-					if btnReset.Hovered() {
-						btnReset.Background(ColorHoverDark)
-					} else {
-						btnReset.Background(ui.Transparent)
-					}
-					btnReset.OnClick(func() {
-						if state != nil && state.TierEditing == tier.ID {
-							state.TierEditing = ""
-						}
-						if p.OnSetTierOverride != nil {
-							p.OnSetTierOverride(tier.ID, nil)
-						}
-						modelPickerInvalidate(p)
-					})
-					btnReset.Children(func() {
-						textColor := ColorTextSecondaryDark
-						if btnReset.Hovered() {
-							textColor = ColorTextPrimaryDark
-						}
-						ui.Icon(c, iconRotateCcw).
-							Size(13, 13).
-							TextColor(textColor)
-					})
-				}
-			})
+	open := state != nil && (state.tiersOpen || state.TierEditing != "")
+	ui.Box(c.Key(p.KeyPrefix + "tier-group-gap")).Height(Space2)
+	renderProviderGroupHeaderToggle(c, p.KeyPrefix+"tier-group-header", "档位", !open, func() {
+		if state != nil {
+			state.tiersOpen = !open
+		}
+		modelPickerInvalidate(p)
+	})
+	if !open {
+		return
 	}
 
-	ui.Row(c.Key(p.KeyPrefix+"tier-footer-row")).
-		AlignItems(ui.Center).
-		Justify(ui.SpaceBetween).
-		Padding(Space1, Space3).
+	ui.Column(c.Key(p.KeyPrefix + "tier-rows")).
+		Gap(Space0).
 		FillWidth().
+		Transition(motionCollapse(c)).
 		Children(func() {
-			ui.Text(c, "修改在下一轮派发生效").
-				FontSize(uiFont(TypeCaption)).
-				TextColor(modelPickerTextSecondary)
+			for _, t := range p.Tiers {
+				tier := t
+				prov, mdl, eff, fast := effectiveTierModel(tier, p.PairTierOverrides, p.TierOverrides)
+				effectiveText := swarmModelCapsuleText(p.Providers, prov, mdl, eff, fast)
+
+				_, hasSessionOverride := p.TierOverrides[tier.ID]
+				isEditing := (state != nil && state.TierEditing == tier.ID)
+
+				ui.Row(c.Key(p.KeyPrefix + "tier-row-container-" + tier.ID)).
+					AlignItems(ui.Center).
+					FillWidth().
+					Children(func() {
+						rowBtn := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-row-"+tier.ID)).
+							Label(tier.Name).
+							Tooltip(tier.Name).
+							Height(ControlLG).
+							Padding(0, Space3).
+							Radius(RadiusMD).
+							Grow(1)
+						if rowBtn.Hovered() || isEditing {
+							rowBtn.Background(ColorHoverDark)
+						} else {
+							rowBtn.Background(ui.Transparent)
+						}
+						rowBtn.OnClick(func() {
+							if state != nil {
+								state.TierEditing = tier.ID
+								modelPickerInvalidate(p)
+							}
+						})
+						rowBtn.Children(func() {
+							ui.Row(c.Key(p.KeyPrefix + "tier-row-content-" + tier.ID)).
+								AlignItems(ui.Center).
+								Justify(ui.SpaceBetween).
+								Grow(1).
+								Children(func() {
+									renderSwarmTierChip(c, p.KeyPrefix+"tier-chip-"+tier.ID, tier.Name, tier.ID, tier.ReadOnly)
+									ui.Row(c.Key(p.KeyPrefix + "tier-row-right-" + tier.ID)).
+										AlignItems(ui.Center).
+										Gap(Space2).
+										Children(func() {
+											ui.Text(c, effectiveText).
+												FontSize(uiFont(TypeFootnote)).
+												TextColor(modelPickerTextSecondary).
+												SingleLine()
+											if hasSessionOverride {
+												ui.Box(c.Key(p.KeyPrefix+"tier-dot-"+tier.ID)).
+													Size(6, 6).
+													Radius(RadiusPill).
+													Background(ThemeAccent(c)).
+													Tooltip("会话覆盖")
+											}
+										})
+								})
+						})
+
+						if hasSessionOverride {
+							btnReset := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-reset-"+tier.ID)).
+								Label("恢复").
+								Tooltip("恢复").
+								Size(26, 26).
+								Radius(RadiusPill).
+								Center()
+							if btnReset.Hovered() {
+								btnReset.Background(ColorHoverDark)
+							} else {
+								btnReset.Background(ui.Transparent)
+							}
+							btnReset.OnClick(func() {
+								if state != nil && state.TierEditing == tier.ID {
+									state.TierEditing = ""
+								}
+								if p.OnSetTierOverride != nil {
+									p.OnSetTierOverride(tier.ID, nil)
+								}
+								modelPickerInvalidate(p)
+							})
+							btnReset.Children(func() {
+								textColor := ColorTextSecondaryDark
+								if btnReset.Hovered() {
+									textColor = ColorTextPrimaryDark
+								}
+								ui.Icon(c, iconRotateCcw).
+									Size(13, 13).
+									TextColor(textColor)
+							})
+						}
+					})
+			}
+
 			if len(p.TierOverrides) > 0 {
-				btnResetAll := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-reset-all")).
-					Label("全部恢复").
-					Tooltip("全部恢复").
-					Padding(Space0, Space2).
-					Radius(RadiusXS).
-					Center().
-					Background(ui.Transparent)
-				if btnResetAll.Hovered() {
-					btnResetAll.Background(ColorHoverDark)
-				}
-				btnResetAll.OnClick(func() {
-					if state != nil {
-						state.TierEditing = ""
-					}
-					if p.OnResetTierOverrides != nil {
-						p.OnResetTierOverrides()
-					}
-					modelPickerInvalidate(p)
-				})
-				btnResetAll.Children(func() {
-					ui.Text(c, "全部恢复").
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeAccent(c))
-				})
+				ui.Row(c.Key(p.KeyPrefix+"tier-footer-row")).
+					AlignItems(ui.Center).
+					Justify(ui.End).
+					Padding(Space1, Space3).
+					FillWidth().
+					Children(func() {
+						btnResetAll := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-reset-all")).
+							Label("全部恢复").
+							Tooltip("全部恢复").
+							Padding(Space0, Space2).
+							Radius(RadiusXS).
+							Center().
+							Background(ui.Transparent)
+						if btnResetAll.Hovered() {
+							btnResetAll.Background(ColorHoverDark)
+						}
+						btnResetAll.OnClick(func() {
+							if state != nil {
+								state.TierEditing = ""
+							}
+							if p.OnResetTierOverrides != nil {
+								p.OnResetTierOverrides()
+							}
+							modelPickerInvalidate(p)
+						})
+						btnResetAll.Children(func() {
+							ui.Text(c, "全部恢复").
+								FontSize(uiFont(TypeCaption)).
+								TextColor(ThemeAccent(c))
+						})
+					})
 			}
 		})
 }

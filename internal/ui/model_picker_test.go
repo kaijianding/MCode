@@ -621,8 +621,8 @@ func TestModelPickerListPageSkipsMissingPinnedModel(t *testing.T) {
 				})
 			}, 320, 640)
 			tt.Frame()
-			// 目录缺失时列表里不应出现该收藏行（含它右侧的分组名标签）。
-			if !tt.HasText("Claude 3.7 Sonnet") || tt.HasText("Magpie Old") != present || tt.HasText("magpie") != present {
+			// 目录缺失时列表里不应出现该收藏行。
+			if !tt.HasText("Claude 3.7 Sonnet") || tt.HasText("Magpie Old") != present {
 				t.Fatalf("一级页收藏显示不符合目录状态：%v", tt.Texts())
 			}
 		})
@@ -1078,8 +1078,8 @@ func TestModelPickerLeadListRestoresPairs(t *testing.T) {
 	}
 }
 
-// 列表行的模型名右侧带分组名；收藏（固定的）模型额外带一枚实心星。
-func TestModelPickerListRowShowsGroupNameAndPinStar(t *testing.T) {
+// 收藏行只显示模型名，不显示分组名和右端星标；分组内的行对收藏模型显示右端星标。
+func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 	providers := modelPickerTestProviders()
 	prov := providers[0]
 	pinned := ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}
@@ -1097,25 +1097,38 @@ func TestModelPickerListRowShowsGroupNameAndPinStar(t *testing.T) {
 	}
 
 	pinnedTT := render(pinned, true)
-	if !pinnedTT.HasText("Claude 3.7 Sonnet") || !pinnedTT.HasText("claude") {
-		t.Fatalf("ShowGroup=true 时行内应同时显示模型名与分组名: %v", pinnedTT.Texts())
+	if !pinnedTT.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("ShowGroup=true 时应显示模型名: %v", pinnedTT.Texts())
 	}
-	if _, ok := pinnedTT.Find("已收藏"); !ok {
-		t.Fatalf("收藏模型应显示星标: %v", pinnedTT.AccessAll())
+	if pinnedTT.HasText("claude") {
+		t.Fatalf("ShowGroup=true 时不应再显示右侧分组名: %v", pinnedTT.Texts())
+	}
+	if _, ok := pinnedTT.Find("已收藏"); ok {
+		t.Fatalf("ShowGroup=true 时不应再显示右端星标: %v", pinnedTT.AccessAll())
 	}
 
 	plainTT := render(plain, true)
-	// 模型 ID 自带网关前缀时，右侧只显示斜杠前的分组名。
-	if plainTT.HasText("dewuopenai/deepseek-v4.1-flash") || !plainTT.HasText("dewuopenai") {
-		t.Fatalf("分组名应只取斜杠前的部分: %v", plainTT.Texts())
+	if !plainTT.HasText("DeepSeek V4.1 Flash") {
+		t.Fatalf("ShowGroup=true 时应显示模型名: %v", plainTT.Texts())
+	}
+	if plainTT.HasText("dewuopenai/deepseek-v4.1-flash") || plainTT.HasText("dewuopenai") {
+		t.Fatalf("ShowGroup=true 时不应再显示右侧分组名: %v", plainTT.Texts())
 	}
 	if _, ok := plainTT.Find("已收藏"); ok {
-		t.Fatalf("未收藏模型不应显示星标")
+		t.Fatalf("ShowGroup=true 时不应再显示右端星标")
 	}
 
 	noGroupTT := render(pinned, false)
 	if !noGroupTT.HasText("Claude 3.7 Sonnet") || noGroupTT.HasText("claude") {
-		t.Fatalf("ShowGroup=false 时不应显示右侧分组名: %v", noGroupTT.Texts())
+		t.Fatalf("ShowGroup=false 时应只显示模型名不显示分组名: %v", noGroupTT.Texts())
+	}
+	if _, ok := noGroupTT.Find("已收藏"); !ok {
+		t.Fatalf("分组内收藏模型应显示星标: %v", noGroupTT.AccessAll())
+	}
+
+	plainNoGroupTT := render(plain, false)
+	if _, ok := plainNoGroupTT.Find("已收藏"); ok {
+		t.Fatalf("分组内未收藏模型不应显示星标")
 	}
 }
 
@@ -1460,6 +1473,68 @@ func TestModelPickerGrouped_BeesSwarmFollowLeadRow(t *testing.T) {
 	}
 	if !followed {
 		t.Fatal("点击「跟随主导模型」应调用 OnFollowLead")
+	}
+}
+
+func TestModelPickerGrouped_TiersCollapsedByDefault(t *testing.T) {
+	providers := modelPickerTestProviders()
+	tiers := []config.SwarmTier{
+		{ID: "read", Name: "只读", ReadOnly: true},
+	}
+
+	state := &ModelPickerState{}
+	scope := "grouped-tiers-collapsed"
+	state.setListOpen(scope, ModelPickerSideBees, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSwarm,
+		KeyPrefix: "grouped-tiers-",
+		ScopeKey:  scope,
+		State:     state,
+		SwarmOn:   true,
+		Providers: providers,
+		Tiers:     tiers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		Bees:      ModelSelection{Provider: "codex", Model: "o3-mini"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideBees)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if tt.HasText("只读") {
+		t.Fatalf("档位区默认应折叠，不应直接显示「只读」: %v", tt.Texts())
+	}
+	if _, ok := tt.Find("展开 档位"); !ok {
+		t.Fatalf("档位区默认折叠时应能找到「展开 档位」: %v", tt.AccessAll())
+	}
+	if err := tt.Click("展开 档位"); err != nil {
+		t.Fatalf("点击「展开 档位」失败: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+	}
+	if tt.FramePending() {
+		t.Fatal("展开档位区动画结束后不应继续请求下一帧")
+	}
+	if !tt.HasText("只读") {
+		t.Fatalf("展开档位区后应显示「只读」: %v", tt.Texts())
+	}
+
+	editState := &ModelPickerState{TierEditing: "read"}
+	editScope := "grouped-tiers-editing"
+	editState.setListOpen(editScope, ModelPickerSideBees, true)
+	editProps := props
+	editProps.KeyPrefix = "grouped-tiers-edit-"
+	editProps.ScopeKey = editScope
+	editProps.State = editState
+	editTT := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, editProps, editState, ModelPickerSideBees)
+	}, 330, 640)
+	settleModelPickerPage(editTT)
+
+	if !editTT.HasText("只读") {
+		t.Fatalf("预设 TierEditing 时应默认展开档位区并可见「只读」: %v", editTT.Texts())
 	}
 }
 

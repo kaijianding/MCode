@@ -181,7 +181,14 @@ func TestComposerBeeTiers_RenderAndPick(t *testing.T) {
 	}
 	settleModelPickerPage(tt)
 
-	// 1. 验证档位与徽章正常渲染
+	// 1. 档位区默认折叠，点击展开后验证档位与徽章正常渲染
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("展开 档位")
+		return ok
+	})
+	if err := tt.Click("展开 档位"); err != nil {
+		t.Fatalf("click 展开 档位 failed: %v", err)
+	}
 	waitFor(t, tt, func() bool {
 		return tt.HasText("档位") && tt.HasText("只读") && tt.HasText("执行")
 	})
@@ -301,7 +308,14 @@ func TestComposerBeeTiers_SingleTierReset(t *testing.T) {
 	}
 	settleModelPickerPage(tt)
 	waitFor(t, tt, func() bool {
-		return tt.HasText("恢复")
+		_, ok := tt.Find("展开 档位")
+		return ok
+	})
+	if err := tt.Click("展开 档位"); err != nil {
+		t.Fatalf("click 展开 档位 failed: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		return tt.HasText("只读") && tt.HasText("恢复")
 	})
 	if err := tt.Click("恢复"); err != nil {
 		t.Fatalf("click 恢复 failed: %v", err)
