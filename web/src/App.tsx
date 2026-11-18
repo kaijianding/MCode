@@ -23,6 +23,7 @@ import { loadThreadDraftView, loadThreadView, prefetchThreadViews } from './util
 import { clearHomeQuery } from './utils/homeSearch';
 import { useIsWideSheet } from './components/thread/menu/useIsWideSheet';
 import { usesSplitLayout, threadOpenMode } from './utils/splitLayout';
+import { chatsProject, pickableProjects } from './utils/builtinProjects';
 
 // 会话页会把时间线、输入框、markdown 与 highlight.js 一起带进来，首屏只加载会话列表，
 // 所以 ThreadView / ThreadDraftView 改为按需加载；连接可用后在空闲时预取，打开基本不用等。
@@ -137,7 +138,7 @@ const AppContent: React.FC = () => {
   }, [connectionState]);
 
   useEffect(() => {
-    setCreateProjectID(selectedProjectID ?? projects[0]?.id ?? '');
+    setCreateProjectID(selectedProjectID ?? chatsProject(projects)?.id ?? projects[0]?.id ?? '');
   }, [projects, selectedProjectID]);
 
   useEffect(() => {
@@ -168,12 +169,15 @@ const AppContent: React.FC = () => {
 
   const handleNewThread = () => {
     prefetchThreadViews();
+    const chats = chatsProject(projects);
     if (selectedProjectID) {
       navigate(`#/new/${encodeURIComponent(selectedProjectID)}`, threadNavigationOptions);
+    } else if (chats) {
+      navigate(`#/new/${encodeURIComponent(chats.id)}`, threadNavigationOptions);
     } else if (projects.length === 1) {
       navigate(`#/new/${encodeURIComponent(projects[0].id)}`, threadNavigationOptions);
     } else {
-      setCreateProjectID(projects[0]?.id ?? '');
+      setCreateProjectID(chatsProject(projects)?.id ?? projects[0]?.id ?? '');
       setCreateKind('thread');
     }
   };
@@ -492,7 +496,7 @@ const AppContent: React.FC = () => {
             <label className="settings-label mt-4" htmlFor="app-new-thread-project">项目</label>
             <select id="app-new-thread-project" value={createProjectID} onChange={(event) => setCreateProjectID(event.target.value)} className="sheet-select">
               <option value="">选择一个项目</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              {pickableProjects(projects).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
             {canAddProject && (
               <button

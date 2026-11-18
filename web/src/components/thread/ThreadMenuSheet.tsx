@@ -43,6 +43,7 @@ import { routeAfterPop, shouldIgnoreMenuEscape } from './menu/menuStackActions';
 import { ThreadMenuSwarmPanel } from './menu/ThreadMenuSwarmPanel';
 import { ThreadMenuWorkspacePanel } from './menu/ThreadMenuWorkspacePanel';
 import { ThreadMenuExportPanel } from './menu/ThreadMenuExportPanel';
+import { chatsProject } from '../../utils/builtinProjects';
 import {
   ArchiveBoxIcon, ArrowDownIcon, ArrowPathIcon, ArrowUturnRightIcon, CodeBracketIcon,
   DocumentTextIcon, EyeIcon, FolderIcon, GitBranchIcon, LayoutIcon, ListBulletIcon,
@@ -169,7 +170,7 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
   menuButtonRef,
   renderExternalPage
 }: ThreadMenuSheetProps) {
-  const { setThreadSwarmMode: setSwarmModeRpc } = useRemoteStatic();
+  const { projects, setThreadSwarmMode: setSwarmModeRpc } = useRemoteStatic();
   const supportsMethod = useRemoteMethodSupport();
   const threadID = latestSummary.id;
   // 排队中的子代理也算未结束，与头部 ⋯ 上的角标口径一致
@@ -422,8 +423,12 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
     (composerOptions.workspaceMode ?? (latestSummary.worktreeRequested ? 'worktree' : 'local')) === 'worktree'
       ? 'Worktree'
       : '本地';
+  const chatsProjectID = chatsProject(projects)?.id;
+  const isChatsThread = Boolean(chatsProjectID && latestSummary.projectID === chatsProjectID);
+  const showGitRow = gitSupported && !isChatsThread;
+  const showWorkspaceRow = !isChatsThread;
   const showOpenGroup =
-    swarmSupported || reviewSupported || gitSupported || scriptsSupported || filesSupported;
+    swarmSupported || reviewSupported || showGitRow || scriptsSupported || filesSupported;
   const showSwarmRow = swarmSupported && !swarmState?.isBee;
   const showMcpRow = mcpServersSupported && !latestSummary.isArchived;
   const showSaveTaskRow =
@@ -549,7 +554,7 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
                     {reviewSupported && (
                       <MenuRow icon={<EyeIcon className="h-4 w-4" />} label="审阅" chevron onClick={() => pushPage({ kind: 'review' })} />
                     )}
-                    {gitSupported && (
+                    {showGitRow && (
                       <MenuRow icon={<GitBranchIcon className="h-4 w-4" />} label="Git" chevron onClick={() => pushPage({ kind: 'git' })} />
                     )}
                     {scriptsSupported && (
@@ -562,6 +567,7 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
                 )}
 
                 {/* 本会话设置：编排与工作区各占一个子页，MCP 服务器也是栈内一页 */}
+                {(showSwarmRow || showWorkspaceRow || showMcpRow) && (
                 <MenuGroup
                   title="本会话设置"
                   footer={
@@ -575,11 +581,14 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
                   {showSwarmRow && (
                     <MenuRow icon={<SparklesIcon className="h-4 w-4" />} label="编排" value={swarmModeLabel} chevron onClick={() => pushPage({ kind: 'swarm' })} />
                   )}
-                  <MenuRow icon={<CodeBracketIcon className="h-4 w-4" />} label="工作区" value={workspaceLabel} chevron onClick={() => pushPage({ kind: 'workspace' })} />
+                  {showWorkspaceRow && (
+                    <MenuRow icon={<CodeBracketIcon className="h-4 w-4" />} label="工作区" value={workspaceLabel} chevron onClick={() => pushPage({ kind: 'workspace' })} />
+                  )}
                   {showMcpRow && (
                     <MenuRow icon={<ServerIcon className="h-4 w-4" />} label="MCP 服务器" chevron disabled={isUpdatingThread} onClick={() => pushPage({ kind: 'mcp' })} />
                   )}
                 </MenuGroup>
+                )}
 
                 {/* 分享：把会话内容搬成看板任务、转发到新会话，或导出/复制 */}
                 <MenuGroup

@@ -43,6 +43,7 @@ import {
 import type { ComposerHistoryState } from '../utils/composerHistory';
 import { overrideCount, parseBeeTiers, serializeBeeTiers } from '../utils/beeTiers';
 import type { TierOverrideDraft } from '../utils/beeTiers';
+import { pickableProjects } from '../utils/builtinProjects';
 import {
   expandPastedText,
   insertPlaceholderAt,
@@ -1058,6 +1059,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
     providers
   ]);
 
+  const pickableProjectList = useMemo(() => (projects ? pickableProjects(projects) : []), [projects]);
   const currentProject = projects?.find((p) => p.id === selectedProjectID);
 
   // 编排模板区块：摘要页里模型入口行上方
@@ -1359,7 +1361,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
             )}
 
             {/* Project Picker Pill (when projects available in DraftView) */}
-            {projects && projects.length > 0 && onSelectProject && (
+            {pickableProjectList.length > 0 && onSelectProject && (
               <button
                 type="button"
                 onClick={() => setActiveSheet('project')}
@@ -1979,7 +1981,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
               )}
 
               {activeSheet === 'project' &&
-                projects?.map((p) => (
+                pickableProjectList.map((p) => (
                   <button
                     key={p.id}
                     type="button"

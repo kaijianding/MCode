@@ -43,6 +43,7 @@ import {
   type ThreadRowStatus
 } from '../utils/threadRowStatus';
 import { stewardAvatarText, stewardLabel } from '../utils/stewardIdentity';
+import { chatsProject, pickableProjects } from '../utils/builtinProjects';
 import { useRemoteSettingsApi } from '../context/remoteSettingsApi';
 import { LazyBoundary } from './LazyFallback';
 import { visibleFilterChips, type ThreadFilter } from '../utils/homeFilterChips';
@@ -1169,7 +1170,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
   const [archivedLoaded, setArchivedLoaded] = useState(false);
   const archivedRequestRef = useRef(0);
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
-  const [createProjectID, setCreateProjectID] = useState(projectID ?? '');
+  const [createProjectID, setCreateProjectID] = useState(projectID ?? chatsProject(projects)?.id ?? '');
   const [bulkOpen, setBulkOpen] = useState(false);
   const [automationOpen, setAutomationOpen] = useState(false);
   const [bulkNotice, setBulkNotice] = useState<{
@@ -1246,8 +1247,10 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     projectID && capabilities?.methods.includes('threads.bulk.preview')
   );
 
+  const defaultCreateProjectID = projectID ?? chatsProject(projects)?.id ?? '';
+
   useEffect(() => {
-    setCreateProjectID(projectID ?? '');
+    setCreateProjectID(defaultCreateProjectID);
     setDormantExpanded(recallThreadListWindow(windowKey).dormantExpanded);
     setDormantLimit(recallThreadListWindow(windowKey).dormantLimit);
     setOpenRowID(null);
@@ -1256,6 +1259,10 @@ export const ThreadList: React.FC<ThreadListProps> = ({
     setArchivedLoaded(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectID]);
+
+  useEffect(() => {
+    setCreateProjectID((current) => current || defaultCreateProjectID);
+  }, [defaultCreateProjectID]);
 
   // 批量整理结果提示条约 8 秒后自动消失，撤销后重新计时。
   useEffect(() => {
@@ -1908,7 +1915,7 @@ export const ThreadList: React.FC<ThreadListProps> = ({
             <label className="settings-label" htmlFor="new-thread-project">项目</label>
             <select id="new-thread-project" value={createProjectID} onChange={(event) => setCreateProjectID(event.target.value)} className="sheet-select">
               <option value="">选择一个项目</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              {pickableProjects(projects).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
             <button type="button" className="primary-button primary-button--wide" onClick={() => { setCreateSheetOpen(false); onCreateDraft(createProjectID); }} disabled={!createProjectID || !canCreate || !isConnected || isSyncing}>
               继续编辑

@@ -43,6 +43,7 @@ import { MemoryProposalSettingsRowView } from './settings/MemoryProposalSettings
 import { AttentionSettingsRowView } from './settings/AttentionSettingsRowView';
 import { SETTINGS_ITEMS } from './settings/settingsIndex';
 import { CONNECTION_NOTICE_DELAY_MS, connectionNoticeText } from './connectionNotice';
+import { pickableProjects } from '../utils/builtinProjects';
 
 // 子代理档位抽屉只在设置里手动打开，体积不小，改为按需加载。
 const SwarmTiersSheet = React.lazy(() =>
@@ -296,7 +297,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [scopeOpen]);
 
-  const filteredProjects = projects.filter((project) => {
+  const filteredProjects = pickableProjects(projects).filter((project) => {
     const query = scopeQuery.toLowerCase();
     return project.name.toLowerCase().includes(query) || project.path.toLowerCase().includes(query);
   });

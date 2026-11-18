@@ -18,6 +18,7 @@ import { isPreviewableImageFile } from '../context/remoteImages';
 import type { RemoteThreadAction } from '../context/RemoteContext';
 import { ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from './Icons';
 import { ThreadComposer, composerAttachmentLimit } from './ThreadComposer';
+import { chatsProject, pickableProjects } from '../utils/builtinProjects';
 
 interface ThreadDraftViewProps {
   project: RemoteProjectSummary;
@@ -109,6 +110,9 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
   } = useRemoteStatic();
   const isConnected = connectionState === 'connected';
   const [currentProject, setCurrentProject] = useState<RemoteProjectSummary>(project);
+  const chatsProjectID = chatsProject(projects)?.id;
+  const isChatsDraft = Boolean(chatsProjectID && currentProject.id === chatsProjectID);
+  const pickableProjectList = useMemo(() => pickableProjects(projects), [projects]);
   const composerOptionsSupported = Boolean(capabilities?.features?.includes('threads.composerOptions'));
   const attachmentsSupported = Boolean(
     capabilities?.features?.includes('threads.attachments') &&
@@ -440,14 +444,16 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
           <div className="truncate text-[16px] font-semibold text-[var(--foreground)]">新会话草稿</div>
           <div className="truncate text-xs text-[var(--foreground-muted)]">{currentProject.name}</div>
         </div>
-        <button
-          type="button"
-          onClick={() => setWorkspaceSheetOpen(true)}
-          className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium border border-[var(--border)] bg-[var(--user-bubble)] text-[var(--foreground)] hover:bg-[var(--card-alt,var(--card))] transition active:scale-95"
-          aria-label="选择工作区"
-        >
-          <span>工作区：{composerOptions.workspaceMode === 'worktree' ? 'Worktree' : composerOptions.workspaceMode === 'local' ? '本地' : '默认'}</span>
-        </button>
+        {!isChatsDraft && (
+          <button
+            type="button"
+            onClick={() => setWorkspaceSheetOpen(true)}
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium border border-[var(--border)] bg-[var(--user-bubble)] text-[var(--foreground)] hover:bg-[var(--card-alt,var(--card))] transition active:scale-95"
+            aria-label="选择工作区"
+          >
+            <span>工作区：{composerOptions.workspaceMode === 'worktree' ? 'Worktree' : composerOptions.workspaceMode === 'local' ? '本地' : '默认'}</span>
+          </button>
+        )}
       </header>
 
       <div className="flex flex-1 min-h-0 items-center justify-center overflow-y-auto p-4">
@@ -526,7 +532,7 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
         onAddAttachments={(files) => void handleAddAttachments(files)}
         onRemoveAttachment={removeAttachment}
         onSend={() => void handleSend()}
-        projects={projects}
+        projects={pickableProjectList}
         selectedProjectID={currentProject.id}
         onSelectProject={(id) => {
           const found = projects?.find((p) => p.id === id);
@@ -535,7 +541,7 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
       />
 
       {/* 工作区选择面板 */}
-      {workspaceSheetOpen && (
+      {!isChatsDraft && workspaceSheetOpen && (
         <SheetFrame onRequestClose={() => setWorkspaceSheetOpen(false)} size="bare" cardClassName="settings-sheet" labelledBy="draft-workspace-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="flex items-start justify-between gap-3 mb-4">
