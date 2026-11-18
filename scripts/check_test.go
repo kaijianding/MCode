@@ -14,7 +14,63 @@ import (
 const fakeGo = `#!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CHECK_LOG"
 if [[ "${1:-}" == "list" ]]; then
-    printf 'mcode/internal/a\nmcode/build.noindex/stage0/seed\nmcode/dist/darwin-arm64/mcode.app/Contents/Resources\n'
+    printf 'mcode/internal/a\nmcode/internal/ui\nmcode/build.noindex/stage0/seed\nmcode/dist/darwin-arm64/mcode.app/Contents/Resources\n'
+    exit 0
+fi
+if [[ "${1:-}" == "test" ]]; then
+    is_compile=0
+    out_path=""
+    prev=""
+    for arg in "$@"; do
+        if [[ "$prev" == "-o" ]]; then
+            out_path="$arg"
+            prev=""
+            continue
+        fi
+        case "$arg" in
+        -c) is_compile=1 ;;
+        -o) prev="-o" ;;
+        esac
+    done
+    if [[ $is_compile -eq 1 && -n "$out_path" ]]; then
+        cat <<'EOF' > "$out_path"
+#!/usr/bin/env bash
+list_mode=0
+run_pattern=""
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "-test.run" ]]; then
+        run_pattern="$arg"
+        prev=""
+        continue
+    fi
+    case "$arg" in
+    -test.list)
+        list_mode=1
+        ;;
+    -test.run)
+        prev="-test.run"
+        ;;
+    -test.run=*)
+        run_pattern="${arg#-test.run=}"
+        ;;
+    esac
+done
+if [[ $list_mode -eq 1 ]]; then
+    printf 'TestAlpha\nTestBeta\nTestGamma\nTestDelta\nTestEpsilon\nBenchmarkUI\n'
+    exit 0
+fi
+if [[ -n "$run_pattern" ]]; then
+    printf '%s %s\n' "$(basename "$0")" "$*" >> "$CHECK_LOG"
+    if [[ -n "${CHECK_UI_FAIL:-}" && "$run_pattern" == *"$CHECK_UI_FAIL"* ]]; then
+        echo "FAIL: $CHECK_UI_FAIL"
+        exit 1
+    fi
+fi
+exit 0
+EOF
+        chmod +x "$out_path"
+    fi
 fi
 exit 0
 `
@@ -61,6 +117,9 @@ func newCheckFixture(t *testing.T) *checkFixture {
 	}
 	// 依赖规则检查是独立脚本，这里用总返回成功的替身。
 	if err := os.WriteFile(filepath.Join(scriptsDir, "check-deps.sh"), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "ui"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +176,7 @@ func TestCheckScriptExcludesBuildOutput(t *testing.T) {
 	}
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "go vet") || strings.HasPrefix(line, "go test") {
+		if strings.HasPrefix(line, "go vet") || (strings.HasPrefix(line, "go test") && !strings.HasPrefix(line, "go test -c")) {
 			if !strings.Contains(line, "mcode/internal/a") {
 				t.Fatalf("检查命令缺少有效包: %s", line)
 			}
@@ -204,8 +263,73 @@ func TestCheckScriptGoTestTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `go test -timeout 300s "${pkgs[@]}"`
-	if !strings.Contains(string(data), want) {
-		t.Fatalf("check.sh 缺少预期超时配置 %q", want)
+	for _, want := range []string{`go test -timeout 300s "${test_pkgs[@]}"`, `-test.timeout 300s`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("check.sh 缺少预期超时配置 %q", want)
+		}
+	}
+}
+
+func TestCheckScriptShardsUITests(t *testing.T) {
+	f := newCheckFixture(t)
+	output, lines, err := f.run(t, nil)
+	if err != nil {
+		t.Fatalf("check.sh 应当成功退出: %v\n%s\n%s", err, output, strings.Join(lines, "\n"))
+	}
+
+	var goTestLines []string
+	var shardPatterns []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "go test ") && !strings.HasPrefix(line, "go test -c ") {
+			goTestLines = append(goTestLines, line)
+		}
+		if strings.HasPrefix(line, "ui.test ") {
+			idx := strings.Index(line, "-test.run ")
+			if idx == -1 {
+				t.Fatalf("ui.test 调用缺少 -test.run: %s", line)
+			}
+			shardPatterns = append(shardPatterns, strings.TrimSpace(line[idx+len("-test.run "):]))
+		}
+	}
+
+	if len(goTestLines) != 1 {
+		t.Fatalf("预期恰好 1 条其他包的 go test 调用，实际 %d: %v", len(goTestLines), goTestLines)
+	}
+	if !strings.Contains(goTestLines[0], "mcode/internal/a") || strings.Contains(goTestLines[0], "mcode/internal/ui") {
+		t.Fatalf("其他包的 go test 应包含 mcode/internal/a 且不包含 mcode/internal/ui: %s", goTestLines[0])
+	}
+
+	if len(shardPatterns) != 4 {
+		t.Fatalf("预期 4 个分片调用，实际 %d: %v", len(shardPatterns), shardPatterns)
+	}
+
+	counts := map[string]int{}
+	for _, pat := range shardPatterns {
+		if !strings.HasPrefix(pat, "^(") || !strings.HasSuffix(pat, ")$") {
+			t.Fatalf("分片 -test.run 格式异常: %s", pat)
+		}
+		inner := strings.TrimSuffix(strings.TrimPrefix(pat, "^("), ")$")
+		for _, name := range strings.Split(inner, "|") {
+			counts[name]++
+		}
+	}
+
+	wantTests := []string{"TestAlpha", "TestBeta", "TestGamma", "TestDelta", "TestEpsilon"}
+	for _, name := range wantTests {
+		if counts[name] != 1 {
+			t.Fatalf("测试 %s 应恰好出现在 1 个分片中，实际 %d 次 (patterns=%v)", name, counts[name], shardPatterns)
+		}
+	}
+	if counts["BenchmarkUI"] != 0 {
+		t.Fatalf("BenchmarkUI 不应出现在任何分片中 (patterns=%v)", shardPatterns)
+	}
+
+	fFail := newCheckFixture(t)
+	failOut, _, failErr := fFail.run(t, map[string]string{"CHECK_UI_FAIL": "TestBeta"})
+	if failErr == nil {
+		t.Fatalf("设置 CHECK_UI_FAIL 时 check.sh 应当非零退出:\n%s", failOut)
+	}
+	if !strings.Contains(failOut, "FAIL: TestBeta") {
+		t.Fatalf("失败时应打印失败分片日志:\n%s", failOut)
 	}
 }

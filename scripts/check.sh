@@ -67,8 +67,71 @@ echo "==> 依赖规则检查"
 bash scripts/check-deps.sh
 
 echo "==> go test"
-# internal/ui 单包已接近 2 分钟，留出余量。
-CGO_ENABLED=0 go test -timeout 300s "${pkgs[@]}"
+test_pkgs=()
+has_ui=0
+for pkg in "${pkgs[@]}"; do
+    if [[ "$pkg" == "mcode/internal/ui" ]]; then
+        has_ui=1
+    else
+        test_pkgs+=("$pkg")
+    fi
+done
+if [[ ${#test_pkgs[@]} -gt 0 ]]; then
+    CGO_ENABLED=0 go test -timeout 300s "${test_pkgs[@]}"
+fi
+if [[ $has_ui -eq 1 ]]; then
+    ui_tmp="$(mktemp -d)"
+    trap 'rm -rf "${ui_tmp:-}"' EXIT
+    CGO_ENABLED=0 go test -c -o "$ui_tmp/ui.test" ./internal/ui
+
+    # internal/ui 单包串行约 2 分钟，分片数写死为 4 进程并行跑。
+    ui_list="$("$ui_tmp/ui.test" -test.list '.')"
+    ui_shards=("" "" "" "")
+    ui_idx=0
+    while IFS= read -r name; do
+        if [[ -z "$name" ]]; then
+            continue
+        fi
+        shard=$((ui_idx % 4))
+        if [[ -z "${ui_shards[$shard]}" ]]; then
+            ui_shards[$shard]="$name"
+        else
+            ui_shards[$shard]="${ui_shards[$shard]}|$name"
+        fi
+        ui_idx=$((ui_idx + 1))
+    done < <(printf '%s\n' "$ui_list" | grep -E '^(Test|Example|Fuzz)' || true)
+
+    ui_pids=()
+    ui_logs=()
+    for i in 0 1 2 3; do
+        if [[ -z "${ui_shards[$i]}" ]]; then
+            continue
+        fi
+        log_file="$ui_tmp/shard-$i.log"
+        ui_logs[$i]="$log_file"
+        (
+            cd internal/ui
+            exec "$ui_tmp/ui.test" -test.timeout 300s -test.run "^(${ui_shards[$i]})$"
+        ) >"$log_file" 2>&1 &
+        ui_pids[$i]=$!
+    done
+
+    ui_failed=0
+    for i in 0 1 2 3; do
+        if [[ -z "${ui_pids[$i]:-}" ]]; then
+            continue
+        fi
+        if ! wait "${ui_pids[$i]}"; then
+            ui_failed=1
+            echo "==> internal/ui 分片 $((i + 1)) 失败:" >&2
+            cat "${ui_logs[$i]}" >&2
+        fi
+    done
+    if [[ $ui_failed -ne 0 ]]; then
+        exit 1
+    fi
+    echo "ok  	mcode/internal/ui (4 shards, $ui_idx tests)"
+fi
 
 if [[ $RACE -eq 1 ]]; then
     echo "==> go test -race"
