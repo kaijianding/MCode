@@ -985,8 +985,8 @@ func TestGitPRCheckout(t *testing.T) {
 	}
 }
 
-// TestCreateGitPRThreadRollsBackOnSendFailure 覆盖首条消息发送失败时回滚删掉已创建会话。
-func TestCreateGitPRThreadRollsBackOnSendFailure(t *testing.T) {
+// TestCreateGitPRThreadKeepsThreadOnSendFailure 覆盖首条消息发送失败时保留已切入 worktree 的会话，不调用 DeleteThread。
+func TestCreateGitPRThreadKeepsThreadOnSendFailure(t *testing.T) {
 	f := NewFakeClient()
 	f.mu.Lock()
 	f.sendErr = errors.New("send failed")
@@ -997,8 +997,47 @@ func TestCreateGitPRThreadRollsBackOnSendFailure(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Send 失败时应返回错误，got newID=%q", newID)
 	}
+	if !strings.Contains(err.Error(), "会话已创建，但首条消息发送失败：") {
+		t.Fatalf("错误信息 = %q，期望包含保留会话提示", err.Error())
+	}
+	if newID == "" {
+		t.Fatalf("Send 失败时应保留并返回新会话 ID")
+	}
+
+	f.mu.Lock()
+	deletes := append([]string(nil), f.deleteCalls...)
+	threads := append([]Thread(nil), f.threads["p1"]...)
+	f.mu.Unlock()
+
+	if len(deletes) != 0 {
+		t.Fatalf("Send 失败时不应调用 DeleteThread，实际 deleteCalls=%v", deletes)
+	}
+	found := false
+	for _, th := range threads {
+		if th.ID == newID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("保留的会话 %q 未出现在项目列表中: %+v", newID, threads)
+	}
+}
+
+// TestCreateGitPRThreadRollsBackOnRenameFailure 覆盖尚未切入 worktree 时 RenameThread 失败仍回滚删掉新建会话。
+func TestCreateGitPRThreadRollsBackOnRenameFailure(t *testing.T) {
+	f := NewFakeClient()
+	f.mu.Lock()
+	f.renameErr = errors.New("rename failed")
+	f.mu.Unlock()
+
+	s := newGitPRDialogTestState(t, &gitPRDialogFake{FakeClient: f})
+	newID, err := s.createGitPRThread("thread-1", 42, "/tmp/mcode-pr-42", "解决 PR #42 冲突", "请处理冲突")
+	if err == nil {
+		t.Fatalf("RenameThread 失败时应返回错误，got newID=%q", newID)
+	}
 	if newID != "" {
-		t.Fatalf("失败时不应返回新会话 ID: %q", newID)
+		t.Fatalf("RenameThread 失败时不应返回新会话 ID: %q", newID)
 	}
 
 	f.mu.Lock()
@@ -1013,6 +1052,64 @@ func TestCreateGitPRThreadRollsBackOnSendFailure(t *testing.T) {
 		if th.ID == deletes[0] {
 			t.Fatalf("回滚后项目仍残留孤儿会话 %q", th.ID)
 		}
+	}
+}
+
+// TestGitPRResolveSendFailureSelectsThreadAndToasts 覆盖调用方在首条消息发送失败时关闭弹窗、切入保留会话并以 Toast 报错。
+func TestGitPRResolveSendFailureSelectsThreadAndToasts(t *testing.T) {
+	base := NewFakeClient()
+	base.mu.Lock()
+	base.sendErr = errors.New("send failed")
+	base.mu.Unlock()
+	f := &gitPRDialogFake{
+		FakeClient: base,
+		prs:        []git.PRSummary{{Number: 42, Title: "冲突", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "冲突", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			Mergeable: "CONFLICTING",
+		},
+		conflicts:   []string{"src/a.go"},
+		resolvePath: "/tmp/mcode-pr-42",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if err := tt.Click("解决冲突"); err != nil {
+		t.Fatalf("点击解决冲突: %v", err)
+	}
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+	renames := f.renameCallsSnapshot()
+	if len(renames) != 1 {
+		t.Fatalf("重命名调用 = %+v", renames)
+	}
+	newID := renames[0].ThreadID
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		toast := s.toastMessage
+		s.mu.Unlock()
+		if selected == newID && strings.Contains(toast, "会话已创建，但首条消息发送失败：") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("selected=%q (want %q), toast=%q", selected, newID, toast)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	base.mu.Lock()
+	deletes := append([]string(nil), base.deleteCalls...)
+	base.mu.Unlock()
+	if len(deletes) != 0 {
+		t.Fatalf("Send 失败时不应调用 DeleteThread，实际 %v", deletes)
 	}
 }
 

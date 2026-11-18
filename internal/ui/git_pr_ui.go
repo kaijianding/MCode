@@ -374,25 +374,7 @@ func (s *chatState) runGitPRResolve() {
 			prompt := fmt.Sprintf("这个 worktree 正在把 origin/%s 合并进 PR #%d 的分支 %s，出现了冲突。请逐个解决冲突文件，保持双方意图，跑相关测试，然后完成合并提交。不要推送。", detail.BaseBranch, number, detail.HeadBranch)
 			newID, err = s.createGitPRThread(threadID, number, path, fmt.Sprintf("解决 PR #%d 冲突", number), prompt)
 		}
-		st.mu.Lock()
-		if !st.open || st.detailSeq != seq || st.selected != number {
-			open := st.open
-			st.mu.Unlock()
-			if err == nil {
-				s.notifyStaleGitPRThread(open, number, newID)
-			}
-			return
-		}
-		st.actionBusy = ""
-		if err != nil {
-			st.actionErr = err.Error()
-			st.mu.Unlock()
-			s.invalidate()
-			return
-		}
-		st.mu.Unlock()
-		s.closeGitPRDialog()
-		s.selectThread(newID)
+		s.finishGitPRThreadAction(st, seq, number, newID, err)
 	}()
 }
 
@@ -433,30 +415,46 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 			}
 			newID, err = s.createGitPRThread(threadID, number, path, title, prompt)
 		}
-		st.mu.Lock()
-		if !st.open || st.detailSeq != seq || st.selected != number {
-			open := st.open
-			st.mu.Unlock()
-			if err == nil {
-				s.notifyStaleGitPRThread(open, number, newID)
-			}
+		if !s.finishGitPRThreadAction(st, seq, number, newID, err) {
 			return
 		}
-		st.actionBusy = ""
-		if err != nil {
-			st.actionErr = err.Error()
-			st.mu.Unlock()
-			s.invalidate()
-			return
-		}
-		st.mu.Unlock()
-		s.closeGitPRDialog()
-		s.selectThread(newID)
 		// AI 审查会话建好后直接停在该 PR 的改动视图，用户不必再打开 PR 弹窗找「导入 AI 审查」。
 		if kind == "ai-review" && s.gitPRThreadID() == newID {
 			openReviewPR(s, number)
 		}
 	}()
+}
+
+// finishGitPRThreadAction 处理 PR 新建会话后的弹窗收尾；只要 newID 非空就会保留会话并切入，错误改以 Toast 提示。
+func (s *chatState) finishGitPRThreadAction(st *gitPRDialogState, seq uint64, number int, newID string, err error) bool {
+	st.mu.Lock()
+	if !st.open || st.detailSeq != seq || st.selected != number {
+		open := st.open
+		st.mu.Unlock()
+		if newID != "" {
+			s.notifyStaleGitPRThread(open, number, newID)
+			if err != nil {
+				s.setToast(err.Error())
+			}
+		}
+		return false
+	}
+	st.actionBusy = ""
+	if err != nil && newID == "" {
+		st.actionErr = err.Error()
+		st.mu.Unlock()
+		s.invalidate()
+		return false
+	}
+	st.mu.Unlock()
+	if newID != "" {
+		s.closeGitPRDialog()
+		s.selectThread(newID)
+	}
+	if err != nil {
+		s.setToast(err.Error())
+	}
+	return newID != ""
 }
 
 // notifyStaleGitPRThread 处理新建 PR 会话完成时弹窗已关闭或切到别的 PR 的情况。
@@ -495,8 +493,9 @@ func (s *chatState) createGitPRThread(threadID string, number int, path, title, 
 	}
 	if prompt != "" {
 		if _, err := s.client.Send(context.Background(), id, prompt); err != nil {
-			_ = s.client.DeleteThread(id)
-			return "", err
+			// 会话已切入 PR worktree，删除会连带清理可能复用的 PR worktree 及其本地改动。
+			_ = s.refreshProjectThreads(context.Background(), th.ProjectID)
+			return id, fmt.Errorf("会话已创建，但首条消息发送失败：%w", err)
 		}
 	}
 	// 让新会话出现在侧栏；列表刷新失败不影响已经切过去的会话。

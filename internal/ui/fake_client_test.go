@@ -378,6 +378,7 @@ type FakeClient struct {
 	agySetAutoWarmupErr error
 
 	renameCalls []renameCall
+	renameErr   error
 
 	// splitCalls 记录 SplitSession 请求的会话 ID；splitErr 非 nil 时该调用直接返回它。
 	splitCalls []string
@@ -1434,6 +1435,9 @@ func (f *FakeClient) RenameThread(threadID, title string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.renameCalls = append(f.renameCalls, renameCall{ThreadID: threadID, Title: title})
+	if f.renameErr != nil {
+		return f.renameErr
+	}
 	for _, list := range f.threads {
 		for i := range list {
 			if list[i].ID == threadID {
