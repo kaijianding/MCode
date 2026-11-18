@@ -374,8 +374,8 @@ func TestReviewPRAIAddsDrafts(t *testing.T) {
 	s, f, dp := reviewPRSetup(t)
 	tt := ui.NewTester(func(c *ui.Context) { renderReviewPRAction(c, s, dp, "t1") }, 800, 100)
 	tt.Frame()
-	if !tt.HasText("AI 审查") {
-		t.Fatal("没有草稿时缺少 AI 审查按钮")
+	if !tt.HasText("导入 AI 审查") {
+		t.Fatal("没有草稿时缺少导入 AI 审查按钮")
 	}
 	if tt.HasText("批准") || tt.HasText("要求修改") {
 		t.Fatal("没有草稿时显示了提交审阅按钮")

@@ -575,7 +575,7 @@ func renderReviewPRAction(c *ui.Context, s *chatState, dp *diffPanelState, tid s
 	}
 	ui.Row(c.Key("review-pr-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
 		if ai {
-			Button(c, ButtonOpts{Key: "review-pr-ai", Text: "AI 审查", Variant: ButtonSecondary, Size: ControlSM, Loading: aiBusy == number, Disabled: aiBusy != 0, OnClick: func() { startReviewPRAI(s, dp, tid) }})
+			Button(c, ButtonOpts{Key: "review-pr-ai", Text: "导入 AI 审查", Variant: ButtonSecondary, Size: ControlSM, Loading: aiBusy == number, Disabled: aiBusy != 0, OnClick: func() { startReviewPRAI(s, dp, tid) }})
 		}
 		if count > 0 {
 			for _, action := range []struct{ event, title string }{{"comment", "评论"}, {"approve", "批准"}, {"request-changes", "要求修改"}} {

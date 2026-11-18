@@ -623,6 +623,111 @@ func TestGitPRDialogConflictResolve(t *testing.T) {
 	}
 }
 
+// TestGitPRAIReviewThread 覆盖 AI 审查检出 PR、新建审查会话并发送审查指令。
+func TestGitPRAIReviewThread(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "审查", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "按钮归类", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+		},
+		checkoutPath: "/tmp/mcode-pr-42-review",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	// 拿不到改动文件数的客户端（如 GitLab）也要显示这个按钮。
+	if !tt.HasText("AI 审查") {
+		t.Fatal("缺少 AI 审查按钮")
+	}
+	if err := tt.Click("AI 审查"); err != nil {
+		t.Fatalf("点击 AI 审查: %v", err)
+	}
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+	calls := f.checkoutCallsSnapshot()
+	if len(calls) != 1 || calls[0] != (gitPRCheckoutCall{number: 42, head: "feat/x"}) {
+		t.Fatalf("检出调用 = %+v", calls)
+	}
+	renames := f.renameCallsSnapshot()
+	if len(renames) != 1 || renames[0].Title != "审查 PR #42" {
+		t.Fatalf("重命名调用 = %+v", renames)
+	}
+	newID := renames[0].ThreadID
+	switches := f.switchCallsSnapshot()
+	if len(switches) != 1 || switches[0] != (gitPRSwitchCall{threadID: newID, path: "/tmp/mcode-pr-42-review"}) {
+		t.Fatalf("切换 worktree 调用 = %+v", switches)
+	}
+	f.FakeClient.mu.Lock()
+	sends := append([]sentCall(nil), f.FakeClient.sendCalls...)
+	f.FakeClient.mu.Unlock()
+	if len(sends) != 1 || sends[0].ThreadID != newID {
+		t.Fatalf("发送调用 = %+v，期望会话 %q", sends, newID)
+	}
+	for _, want := range []string{"```pr-review", "origin/main", "按钮归类"} {
+		if !strings.Contains(sends[0].Text, want) {
+			t.Fatalf("审查提示缺少 %q: %q", want, sends[0].Text)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		s.mu.Unlock()
+		if selected == newID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("选中会话 = %q，期望 %q", selected, newID)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestGitPRAIReviewCrossRepoDisabled 覆盖 fork 来的 PR 不能发起 AI 审查。
+func TestGitPRAIReviewCrossRepoDisabled(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "审查", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "审查", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			CrossRepo: true,
+		},
+		checkoutPath: "/tmp/mcode-pr-42-review",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if !tt.HasText("AI 审查") {
+		t.Fatal("缺少 AI 审查按钮")
+	}
+	_ = tt.Click("AI 审查")
+	time.Sleep(50 * time.Millisecond)
+	if calls := f.checkoutCallsSnapshot(); len(calls) != 0 {
+		t.Fatalf("fork PR 不应检出，调用 = %+v", calls)
+	}
+	if renames := f.renameCallsSnapshot(); len(renames) != 0 {
+		t.Fatalf("fork PR 不应新建会话，调用 = %+v", renames)
+	}
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	open, busy := st.open, st.actionBusy
+	st.mu.Unlock()
+	if !open || busy != "" {
+		t.Errorf("弹窗状态 open=%v busy=%q", open, busy)
+	}
+}
+
 // TestGitPRDialogCrossRepoBlocksResolve 覆盖 fork 来的 PR 禁止解决冲突。
 func TestGitPRDialogCrossRepoBlocksResolve(t *testing.T) {
 	f := &gitPRDialogFake{

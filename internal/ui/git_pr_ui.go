@@ -393,7 +393,16 @@ func (s *chatState) runGitPRResolve() {
 }
 
 // runGitPRCheckout 把 PR 分支检出到独立 worktree，并切到新建的会话。
-func (s *chatState) runGitPRCheckout() {
+func (s *chatState) runGitPRCheckout() { s.runGitPRCheckoutThread("checkout") }
+
+// gitPRAIReviewPrompt 是审查会话的首条消息，参数依次为 PR 编号、标题与三处 base 分支。
+const gitPRAIReviewPrompt = `请审查 PR #%d「%s」。这个 worktree 已检出 PR 分支，base 是 origin/%s（需要时先 git fetch origin %s），用 git diff origin/%s...HEAD 查看改动，按需阅读相关代码。只报告真实的缺陷、安全问题、数据丢失风险和明显的逻辑错误，不报风格问题。不要修改文件、不要提交、不要推送，也不要用 gh 或 glab 发表评论。最后输出一个 ` + "```" + `pr-review 代码块，内容是 JSON 数组，每项 {"path":"仓库相对路径","line":新文件行号,"body":"问题和后果"}，line 必须落在 diff 的改动范围内，最多 10 条；没有问题时输出 []。`
+
+// runGitPRAIReview 检出 PR 分支，在新会话里让 agent 直接开始审查。
+func (s *chatState) runGitPRAIReview() { s.runGitPRCheckoutThread("ai-review") }
+
+// runGitPRCheckoutThread 检出 PR 分支到独立 worktree 并切到新会话；ai-review 额外发送审查指令。
+func (s *chatState) runGitPRCheckoutThread(kind string) {
 	client, ok := s.client.(gitPRCheckoutClient)
 	if !ok {
 		return
@@ -406,14 +415,19 @@ func (s *chatState) runGitPRCheckout() {
 	}
 	detail := *st.detail
 	number, threadID, seq := st.selected, st.threadID, st.detailSeq
-	st.actionBusy, st.actionErr = "checkout", ""
+	st.actionBusy, st.actionErr = kind, ""
 	st.mu.Unlock()
 	s.invalidate()
 	go func() {
 		path, err := client.GitPRCheckoutWorktree(context.Background(), threadID, number, detail.HeadBranch)
 		newID := ""
 		if err == nil {
-			newID, err = s.createGitPRThread(threadID, number, path, fmt.Sprintf("PR #%d", number), "")
+			title, prompt := fmt.Sprintf("PR #%d", number), ""
+			if kind == "ai-review" {
+				title = fmt.Sprintf("审查 PR #%d", number)
+				prompt = fmt.Sprintf(gitPRAIReviewPrompt, number, detail.Title, detail.BaseBranch, detail.BaseBranch, detail.BaseBranch)
+			}
+			newID, err = s.createGitPRThread(threadID, number, path, title, prompt)
 		}
 		st.mu.Lock()
 		if !st.open || st.detailSeq != seq || st.selected != number {
@@ -1031,9 +1045,11 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 	st.mu.Unlock()
 	area := ui.TextArea(c.Key("modal-git-pr-review-body"), &body).Placeholder("评论").Lines(4, 10).FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).Background(ThemeHover(c)).Border(Hairline, ThemeBorder(c)).Radius(RadiusSM).Padding(Space2, Space3).FillWidth()
 	area.OnChange(func() { st.mu.Lock(); st.reviewBody = body; st.mu.Unlock() })
-	_, canReview := s.client.(reviewPRClient)
-	_, canAI := s.client.(reviewPRAIClient)
 	_, canCheckout := s.client.(gitPRCheckoutClient)
+	checkoutTip := ""
+	if detail.CrossRepo {
+		checkoutTip = "来自 fork 的 PR 无法检出"
+	}
 	ui.Row(c.Key("modal-git-pr-review-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
 		if confirm != "" {
 			ui.Text(c, fmt.Sprintf("合并 #%d？", detail.Number)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
@@ -1042,23 +1058,13 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 			Button(c, ButtonOpts{Key: "modal-git-pr-merge-cancel", Text: "取消", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeConfirm = ""; st.mu.Unlock(); s.invalidate() }})
 			return
 		}
-		if canReview && canAI && detail.ChangedFiles > 0 {
-			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() {
-				tid := s.gitPRThreadID()
-				openReviewPR(s, detail.Number)
-				if dp := getDiffPanelState(s); dp != nil {
-					startReviewPRAI(s, dp, tid)
-				}
-			}})
+		if canCheckout {
+			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Loading: busy == "ai-review", Disabled: (busy != "" && busy != "ai-review") || detail.CrossRepo, Tooltip: checkoutTip, OnClick: func() { s.runGitPRAIReview() }})
 		}
 		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", OnClick: func() { s.runGitPRAction("approve", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-comment", Text: "评论", Variant: ButtonSecondary, Loading: busy == "comment", Disabled: (busy != "" && busy != "comment") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("comment", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("request-changes", "") }})
 		if canCheckout {
-			checkoutTip := ""
-			if detail.CrossRepo {
-				checkoutTip = "来自 fork 的 PR 无法检出"
-			}
 			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: (busy != "" && busy != "checkout") || detail.CrossRepo, Tooltip: checkoutTip, OnClick: func() { s.runGitPRCheckout() }})
 		}
 		ui.Spacer(c)
