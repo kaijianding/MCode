@@ -44,7 +44,6 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		state = modelPickerStateFor(p.KeyPrefix + p.ScopeKey)
 	}
 	query := state.searchQuery
-	searching := strings.TrimSpace(query) != ""
 	// 正在为某个档位选模型：编辑状态记在面板状态里，选中模型后落到该档位而不是会话子代理模型。
 	editingTier := ""
 	if side == ModelPickerSideBees {
@@ -121,15 +120,15 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 				renderModelPickerBackButton(c, p.KeyPrefix, onBack)
 				SearchField(c, TextFieldProps{Key: p.KeyPrefix + "model-list-search", Value: &state.searchQuery, Label: "model-list-search-input", Placeholder: "搜索模型", FillWidth: true, AutoFocus: true, OnChange: func(string) { modelPickerInvalidate(p) }})
 			})
-		renderModelPickerListRegion(c, p, state, side, selection, searching, query, providers, pinned, onPick)
+		renderModelPickerListRegion(c, p, state, side, selection, query, providers, pinned, onPick)
 	})
 	modelPickerPageTransition(c, body, state, modelPickerPageDepth(p, state, side))
 }
 
-// renderModelPickerListRegion 渲染搜索框下方的列表：搜索态跨 Agent 列出命中项，
-// 非搜索态渲染配对/跟随/档位/收藏与按 Agent 折叠分组的模型列表。
+// renderModelPickerListRegion 渲染搜索框下方的列表：固定为按 Agent 折叠的分组列表，
+// 搜索词非空时同一套卡片只显示命中的模型并强制展开。
 func renderModelPickerListRegion(c *ui.Context, p ModelPickerProps, state *ModelPickerState, side ModelPickerSide,
-	selection ModelSelection, searching bool, query string,
+	selection ModelSelection, query string,
 	providers []ProviderInfo, pinned []modelPickerPinnedEntry, onPick func(ProviderInfo, ModelInfo)) {
 	var list ui.Element
 	if isAppFlyoutServices(c.Services()) && p.NativeMenu == nil {
@@ -138,14 +137,8 @@ func renderModelPickerListRegion(c *ui.Context, p ModelPickerProps, state *Model
 		list = ui.Scroll(c.Key(p.KeyPrefix+"model-list-rows")).MaxHeight(400).ScrollbarInsets(4, 0, 4, 0)
 	}
 	list.MinWidth(0).FillWidth().Children(func() {
-		if searching {
-			if side == ModelPickerSideBees && state != nil && state.TierEditing != "" {
-				renderTierEditingBanner(c, p, state)
-			}
-			renderModelPickerSearchResults(c, p, side, providers, query, onPick)
-			return
-		}
-		renderModelPickerGroupedList(c, p, state, side, selection, providers, pinned, onPick)
+		// 搜索态复用同一套分组卡片：保留 Agent 标题行，只显示命中的模型。
+		renderModelPickerGroupedList(c, p, state, side, selection, providers, pinned, query, onPick)
 	})
 }
 
@@ -213,11 +206,13 @@ func renderModelPickerCollapsibleCard(c *ui.Context, keyPrefix, keySuffix, title
 	})
 }
 
-// renderModelPickerGroupedList 渲染非搜索态纵向列表：依次包含档位编辑提示、主导侧配对、
-// 执行侧跟随主导、执行侧档位、收藏以及按 Agent 折叠的模型分组。
+// renderModelPickerGroupedList 渲染列表页纵向分组：非搜索态依次包含档位编辑提示、主导侧配对、
+// 执行侧跟随主导、执行侧档位、收藏以及按 Agent 折叠的模型分组；搜索态复用同一套分组卡片，
+// 只保留命中模型的 Agent 组（标题行照常显示，卡片强制展开），便于分辨模型属于哪个 Agent。
 func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *ModelPickerState, side ModelPickerSide,
 	selection ModelSelection, providers []ProviderInfo, pinned []modelPickerPinnedEntry,
-	onPick func(ProviderInfo, ModelInfo)) {
+	query string, onPick func(ProviderInfo, ModelInfo)) {
+	searching := strings.TrimSpace(query) != ""
 	ui.Column(c.Key(p.KeyPrefix+"model-list-items")).
 		Gap(Space3).
 		MinWidth(0).
@@ -227,14 +222,16 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 			if side == ModelPickerSideBees && state != nil && state.TierEditing != "" {
 				renderTierEditingBanner(c, p, state)
 			}
-			if side == ModelPickerSideLead {
-				renderModelPickerPairsSection(c, p, state)
-			}
-			if p.Mode == ModelPickerSwarm && side == ModelPickerSideBees {
-				renderModelPickerFollowLeadRow(c, p, state)
-			}
-			if side == ModelPickerSideBees && len(p.Tiers) > 0 {
-				renderModelPickerTiersSection(c, p, state)
+			if !searching {
+				if side == ModelPickerSideLead {
+					renderModelPickerPairsSection(c, p, state)
+				}
+				if p.Mode == ModelPickerSwarm && side == ModelPickerSideBees {
+					renderModelPickerFollowLeadRow(c, p, state)
+				}
+				if side == ModelPickerSideBees && len(p.Tiers) > 0 {
+					renderModelPickerTiersSection(c, p, state)
+				}
 			}
 
 			openCard := ""
@@ -256,8 +253,24 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				modelPickerInvalidate(p)
 			}
 
-			if len(pinned) > 0 {
+			// 搜索命中收藏里的模型时也保留收藏分组；只列命中的收藏行，并强制展开。
+			pinnedShown := pinned
+			if searching && len(pinned) > 0 {
+				pinnedShown = make([]modelPickerPinnedEntry, 0, len(pinned))
+				for _, entry := range pinned {
+					if modelPickerQueryMatch(entry.Provider, entry.Model, query) {
+						pinnedShown = append(pinnedShown, entry)
+					}
+				}
+			}
+			if len(pinnedShown) > 0 {
 				open := openCard == modelPickerPinnedCardID
+				var onToggle func()
+				if searching {
+					open = true
+				} else {
+					onToggle = func() { toggleCard(modelPickerPinnedCardID, open) }
+				}
 				renderModelPickerCollapsibleCard(c, p.KeyPrefix+"pinned-group", "", "收藏", open,
 					func() {
 						ui.Icon(c, IconByName("star-filled")).
@@ -265,9 +278,9 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 							TextColor(modelPickerTextSecondary)
 					},
 					nil,
-					func() { toggleCard(modelPickerPinnedCardID, open) },
+					onToggle,
 					func() {
-						for _, entry := range pinned {
+						for _, entry := range pinnedShown {
 							mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
 							renderModelPickerListRow(c, p, modelRowOptions{
 								KeyPrefix: "pinned-",
@@ -276,7 +289,9 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 								IsChecked: selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model),
 								IsLocked:  side == ModelPickerSideLead && p.HasMessages && entry.Provider.ID != selection.Provider,
 								ShowGroup: true,
-								OnPick:    onPick,
+								// 收藏卡片跨 Agent，行内要标出模型归属。
+								ShowGroupName: true,
+								OnPick:        onPick,
 							})
 						}
 					},
@@ -291,7 +306,14 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				if lockAgents && prov.ID != currentAgent {
 					continue
 				}
-				if len(prov.Models) == 0 {
+				// 搜索态只保留命中模型的 Agent 组；标题行照常画出来，用来说明模型属于哪个 Agent。
+				matches := make([]int, 0, len(prov.Models))
+				for mIdx, m := range prov.Models {
+					if !searching || modelPickerQueryMatch(prov, m, query) {
+						matches = append(matches, mIdx)
+					}
+				}
+				if len(prov.Models) == 0 && !searching {
 					if prov.Available && prov.UnavailableReason != "" {
 						renderModelPickerListCard(c, p.KeyPrefix+"agent-notice-card-"+prov.ID, func() {
 							renderProviderCatalogNotice(c, p, "", prov)
@@ -300,27 +322,44 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 					}
 					continue
 				}
+				if len(matches) == 0 {
+					continue
+				}
 				renderedAny = true
 				open := openCard == prov.ID
+				var onToggle func()
+				if searching {
+					// 搜索命中直接铺开，标题行不提供折叠，避免多一步点击。
+					open = true
+				} else {
+					onToggle = func() { toggleCard(prov.ID, open) }
+				}
 				renderModelPickerCollapsibleCard(c, p.KeyPrefix+"agent-group", "-"+prov.ID, modelPickerAgentName(prov), open,
 					func() { renderProviderIcon(c, prov.ID, IconSM) },
 					func() { renderModelPickerQuotaPercent(c, p.QuotaUsed, prov.ID) },
-					func() { toggleCard(prov.ID, open) },
+					onToggle,
 					func() {
-						for mIdx, m := range prov.Models {
+						for _, mIdx := range matches {
+							m := prov.Models[mIdx]
 							renderModelPickerListRow(c, p, modelRowOptions{
 								KeyPrefix: "model-",
 								Provider:  prov,
 								Model:     m,
 								IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
-								OnPick:    onPick,
+								// 列表页的行也标出分组名（例如网关前缀），与收藏、搜索保持一致。
+								ShowGroupName: true,
+								OnPick:        onPick,
 							})
 						}
 					},
 				)
 			}
 			if !renderedAny {
-				ui.Text(c, "没有可用的模型").
+				emptyText := "没有可用的模型"
+				if searching {
+					emptyText = "没有匹配的模型"
+				}
+				ui.Text(c, emptyText).
 					FontSize(uiFont(TypeFootnote)).
 					TextColor(modelPickerTextSecondary).
 					Padding(Space2, Space3)
@@ -347,9 +386,12 @@ func renderModelPickerQuotaPercent(c *ui.Context, quotaUsed func(string) (float6
 
 // renderModelPickerAgentHeader 渲染列表页可点击折叠的分组标题：带图标、加粗正文、可选右侧附加内容与折叠箭头。
 func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title string, collapsed bool, trailing func(), onToggle func()) {
-	label := "折叠 " + title
-	if collapsed {
-		label = "展开 " + title
+	label := title
+	if onToggle != nil {
+		label = "折叠 " + title
+		if collapsed {
+			label = "展开 " + title
+		}
 	}
 	btn := ui.ButtonBase(c.Key(key)).
 		Label(label).
@@ -392,17 +434,19 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 				if trailing != nil {
 					trailing()
 				}
-				angle := float32(90)
-				if collapsed {
-					angle = 0
-				}
-				icon := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
-					Size(10, 10).
-					TextColor(modelPickerTextSecondary)
-				if reduceMotion(c) {
-					icon.Rotate(angle)
-				} else {
-					icon.Rotate(icon.AnimateTo(key+"-arrow", angle, ui.Animation{Duration: animateDuration(c, DurFast), Ease: ui.EaseOut}))
+				if onToggle != nil {
+					angle := float32(90)
+					if collapsed {
+						angle = 0
+					}
+					icon := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
+						Size(10, 10).
+						TextColor(modelPickerTextSecondary)
+					if reduceMotion(c) {
+						icon.Rotate(angle)
+					} else {
+						icon.Rotate(icon.AnimateTo(key+"-arrow", angle, ui.Animation{Duration: animateDuration(c, DurFast), Ease: ui.EaseOut}))
+					}
 				}
 			})
 	})
@@ -521,28 +565,6 @@ func renderModelPickerBackButton(c *ui.Context, keyPrefix string, onBack func())
 	})
 }
 
-// renderModelPickerSearchResults 渲染搜索态：跨 Agent 列出命中模型，每个 Agent 一组。
-func renderModelPickerSearchResults(c *ui.Context, p ModelPickerProps, side ModelPickerSide,
-	providers []ProviderInfo, query string, onPick func(ProviderInfo, ModelInfo)) {
-	isChecked := func(prov ProviderInfo, mIdx int, m ModelInfo) bool {
-		return prov.ID == p.Selection.Provider && modelMatches(prov.Models, p.Selection.Model, mIdx, m)
-	}
-	isDisabled := func(prov ProviderInfo) bool { return p.HasMessages && prov.ID != p.Selection.Provider }
-	if side == ModelPickerSideBees {
-		isChecked = func(prov ProviderInfo, mIdx int, m ModelInfo) bool {
-			return prov.ID == p.Bees.Provider && modelMatches(prov.Models, p.Bees.Model, mIdx, m)
-		}
-		isDisabled = func(ProviderInfo) bool { return false }
-	}
-	rendered := renderModelList(c, p, "search-", modelPickerSideKey(side), providers, query, isChecked, isDisabled, onPick)
-	if !rendered {
-		ui.Text(c, "没有匹配的模型").
-			FontSize(uiFont(TypeFootnote)).
-			TextColor(modelPickerTextSecondary).
-			Padding(Space2, Space3, Space1, Space3)
-	}
-}
-
 // modelPickerAgentName 返回 Agent 的显示名，供分组标题与 Tooltip 使用。
 func modelPickerAgentName(prov ProviderInfo) string {
 	if name := strings.TrimSpace(prov.Name); name != "" {
@@ -594,9 +616,22 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 	if modelItem.IsDefault {
 		name = defaultModelRowDisplayName(prov, modelItem)
 	}
+	// 跨 Agent 平铺时在行右侧标出分组名：模型 ID 自带网关前缀（`bulita_claude/xxx`）就取斜杠前那段，
+	// 否则这个模型本来就属于该 Provider。
+	groupName := ""
+	if opt.ShowGroupName {
+		groupName = prov.ID
+		if i := strings.IndexByte(modelItem.ID, '/'); i > 0 {
+			groupName = modelItem.ID[:i]
+		}
+	}
+	tip := name
+	if groupName != "" {
+		tip = name + "  " + groupName
+	}
 	btn := ui.ButtonBase(c.Key(rowKey)).
 		Label(name).
-		Tooltip(name).
+		Tooltip(tip).
 		Checked(opt.IsChecked).
 		Height(modelPickerRowHeight).
 		Padding(Space2, Space3).
@@ -653,6 +688,14 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 					SingleLine().
 					Shrink(0)
 				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
+				if groupName != "" {
+					ui.Text(c, groupName).
+						FontSize(uiFont(TypeCaption)).
+						TextColor(modelPickerTextSecondary).
+						SingleLine().
+						Ellipsis("…").
+						Shrink(1)
+				}
 				if opt.IsChecked {
 					ui.Icon(c, IconCheck()).
 						Size(IconSM, IconSM).
@@ -676,6 +719,9 @@ type modelRowOptions struct {
 	ShowSubtitle bool
 	SubtitleText string
 	ShowGroup    bool
-	ShowQuota    bool
-	OnPick       func(prov ProviderInfo, m ModelInfo)
+	// ShowGroupName 让行右侧显示分组名（模型 ID 里 `/` 之前的部分，缺省用 Provider ID）；
+	// 收藏与搜索这类跨 Agent 平铺的列表用它替代分组标题，Agent 分组卡片内的行不需要。
+	ShowGroupName bool
+	ShowQuota     bool
+	OnPick        func(prov ProviderInfo, m ModelInfo)
 }
