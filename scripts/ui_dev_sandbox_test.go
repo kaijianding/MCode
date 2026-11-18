@@ -295,8 +295,26 @@ func TestUISandboxAllowsSystemTemp(t *testing.T) {
 
 func TestUISandboxRejectsUnknownArgument(t *testing.T) {
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--unknown")
-	if out, err := cmd.CombinedOutput(); err == nil {
+	out, err := cmd.CombinedOutput()
+	if err == nil {
 		t.Fatalf("未知参数应失败: %s", out)
+	}
+	if !strings.Contains(string(out), "--background") {
+		t.Fatalf("usage 缺少 --background: %s", out)
+	}
+}
+
+func TestUISandboxBackgroundFlag(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--background", "--seed-only")
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("--background 参数解析失败: %v\n%s", err, out)
+	}
+	cmd = exec.Command("bash", "ui_dev_sandbox.sh", "--background", "--background", "--seed-only")
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+t.TempDir())
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("重复 --background 应失败: %s", out)
 	}
 }
 

@@ -382,6 +382,11 @@ func nativeTheme(base ui.Theme, colors ui.Theme, highContrast bool) ui.Theme {
 	base.Selection, base.Focus = colors.Selection, colors.Focus
 	base.Inverse, base.InverseText = colors.Inverse, colors.InverseText
 	base.Scrollbar, base.ScrollbarWidth = colors.Scrollbar, 8
+	base.ScrollbarStyle = ui.ScrollbarStyle{
+		Thumb:  colors.Scrollbar,
+		Hover:  colors.Scrollbar.Alpha(1.5),
+		Active: colors.Scrollbar.Alpha(2),
+	}
 	base.Radius, base.Spacing = RadiusSM, Space1
 	if highContrast {
 		base.Focus.A = 255

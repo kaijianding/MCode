@@ -3,8 +3,9 @@ set -euo pipefail
 
 seed_only=false
 showcase=false
+background=false
 theme=""
-usage() { printf '用法：%s [--showcase] [--theme light|dark] [--seed-only]\n' "$0" >&2; }
+usage() { printf '用法：%s [--showcase] [--theme light|dark] [--seed-only] [--background]\n' "$0" >&2; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,6 +17,11 @@ while [[ $# -gt 0 ]]; do
     --showcase)
       if $showcase; then usage; exit 1; fi
       showcase=true
+      shift
+      ;;
+    --background)
+      if $background; then usage; exit 1; fi
+      background=true
       shift
       ;;
     --theme)
@@ -94,11 +100,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+dev_cmd=(go tool mygo dev)
+if $background; then dev_cmd+=(-background); fi
+
 # 后台运行并进入独立进程组，退出时由 cleanup 整组结束。
 set -m
 env -i PATH="$PATH" HOME="$data/home" TMPDIR="${TMPDIR:-/tmp}" \
   GOMODCACHE="$module_cache" GOCACHE="$build_cache" MCODE_DATA="$data" \
-  MCODE_WORKDIR="$data/work" go tool mygo dev &
+  MCODE_WORKDIR="$data/work" "${dev_cmd[@]}" &
 dev_pid=$!
 set +m
 wait "$dev_pid"

@@ -421,3 +421,34 @@ func TestThemeRuntimeDerivedColors(t *testing.T) {
 	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
 	tt.Frame()
 }
+
+func TestThemeScrollbarStyleHoverActive(t *testing.T) {
+	resetRuntimeTheme(t)
+	setAppReduceMotion(t, true)
+	for _, base := range []*ui.Theme{ui.LightTheme(), ui.DarkTheme()} {
+		var colors ui.Theme
+		tester := ui.NewTester(func(c *ui.Context) {
+			colors = nativeThemeColors(c)
+		}, 100, 100)
+		tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+		tester.SetDark(base.Dark)
+		tester.Frame()
+		s := nativeTheme(*base, colors, false).ScrollbarStyle
+		if s.Thumb != colors.Scrollbar {
+			t.Errorf("dark=%v: Thumb=%v, want %v", base.Dark, s.Thumb, colors.Scrollbar)
+		}
+		if s.Hover.A <= s.Thumb.A || s.Active.A <= s.Thumb.A {
+			t.Errorf("dark=%v: Hover(%d) 和 Active(%d) 的 alpha 应大于 Thumb(%d)", base.Dark, s.Hover.A, s.Active.A, s.Thumb.A)
+		}
+		if s.Active.A < s.Hover.A {
+			t.Errorf("dark=%v: Active(%d) 的 alpha 不应小于 Hover(%d)", base.Dark, s.Active.A, s.Hover.A)
+		}
+		if s.Hover.R != s.Thumb.R || s.Hover.G != s.Thumb.G || s.Hover.B != s.Thumb.B ||
+			s.Active.R != s.Thumb.R || s.Active.G != s.Thumb.G || s.Active.B != s.Thumb.B {
+			t.Errorf("dark=%v: Hover(%v) 或 Active(%v) 的 RGB 与 Thumb(%v) 不一致", base.Dark, s.Hover, s.Active, s.Thumb)
+		}
+		if s.TrackWidth != 0 || s.ThumbWidth != 0 || s.Radius != 0 || s.MinLength != 0 || s.Square || s.Flush || s.Track != ui.Transparent {
+			t.Errorf("dark=%v: ScrollbarStyle 其余字段应保持零值: %+v", base.Dark, s)
+		}
+	}
+}
