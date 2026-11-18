@@ -18,8 +18,7 @@ function assertNotIncludes(haystack: string, needle: string): void {
 
 // 搜索索引里必须存在这一行，id 也要和行上的 data-settings-item 对得上。
 const entry = SETTINGS_ITEMS.find((item) => item.id === 'web-memory-proposals');
-const entryDesc = entry?.desc;
-if (!entry || !entryDesc) throw new Error('设置搜索索引缺少 web-memory-proposals 条目或说明');
+if (!entry) throw new Error('设置搜索索引缺少 web-memory-proposals 条目');
 
 const noop = () => {};
 const pendingHtml = renderToStaticMarkup(
@@ -46,11 +45,11 @@ assertNotIncludes(pendingHtml, 'settings-label');
 assertNotIncludes(pendingHtml, 'settings-note');
 
 // 文案：小节标题、行标题、说明与搜索索引一致。
-assertIncludes(pendingHtml, '记忆');
-assertIncludes(pendingHtml, '记忆提议');
+assertIncludes(pendingHtml, entry.section);
+assertIncludes(pendingHtml, entry.title);
 assertIncludes(pendingHtml, '打开');
 assertIncludes(pendingHtml, 'secondary-button settings-inline-button');
-assertIncludes(pendingHtml, entryDesc);
+assertIncludes(pendingHtml, '待审的会话记忆先落本地收件箱，接受后写入 Nowledge Mem，驳回只改本地状态；也可搜索记忆或手动新建一条待审记忆。');
 
 // 角标：0 不显示，超过 99 显示 99+，其余显示原始数量。
 assertNotIncludes(emptyHtml, 'rounded-full');

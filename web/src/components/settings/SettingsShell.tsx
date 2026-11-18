@@ -5,15 +5,12 @@ import { SheetFrame } from '../sheet/SheetFrame';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSheetDrag } from '../../hooks/useSheetDrag';
 import {
-  ArchiveBoxIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
   DocumentTextIcon,
   LayoutIcon,
   MessageIcon,
   SearchIcon,
-  SettingsIcon,
-  SparklesIcon,
   StarIcon,
   SunIcon,
   XMarkIcon
@@ -50,12 +47,9 @@ const LAST_PAGE_KEY = 'mcode.settings.lastPage';
 // 页面图标只引用 Icons.tsx 里已有的图标，按语义挑；settingsIndex 里只存名字。
 const PAGE_ICONS: Record<SettingsPageIcon, React.FC<{ className?: string }>> = {
   message: MessageIcon,
-  sparkles: SparklesIcon,
   layout: LayoutIcon,
   document: DocumentTextIcon,
-  settings: SettingsIcon,
   sun: SunIcon,
-  archive: ArchiveBoxIcon,
   desktop: ComputerDesktopIcon,
   star: StarIcon
 };

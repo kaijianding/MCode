@@ -18,8 +18,7 @@ function assertNotIncludes(haystack: string, needle: string): void {
 
 // 搜索索引里必须存在这一行，id 也要和行上的 data-settings-item 对得上。
 const entry = SETTINGS_ITEMS.find((item) => item.id === 'web-attention-inbox');
-const entryDesc = entry?.desc;
-if (!entry || !entryDesc) throw new Error('设置搜索索引缺少 web-attention-inbox 条目或说明');
+if (!entry) throw new Error('设置搜索索引缺少 web-attention-inbox 条目');
 
 const noop = () => {};
 const pendingHtml = renderToStaticMarkup(
@@ -46,11 +45,11 @@ assertNotIncludes(pendingHtml, 'settings-label');
 assertNotIncludes(pendingHtml, 'settings-note');
 
 // 文案：小节标题、行标题、说明与搜索索引一致。
-assertIncludes(pendingHtml, '待处理');
-assertIncludes(pendingHtml, '待处理事项');
+assertIncludes(pendingHtml, entry.section);
+assertIncludes(pendingHtml, entry.title);
 assertIncludes(pendingHtml, '打开');
 assertIncludes(pendingHtml, 'secondary-button settings-inline-button');
-assertIncludes(pendingHtml, entryDesc);
+assertIncludes(pendingHtml, '会话卡住、出错、额度用尽、等待审批，以及看板与自动化失败的汇总在这里逐条处理。');
 
 // 角标：0 不显示，超过 99 显示 99+，其余显示原始数量。
 assertNotIncludes(emptyHtml, 'rounded-full');

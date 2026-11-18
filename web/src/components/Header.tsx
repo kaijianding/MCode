@@ -33,7 +33,6 @@ import {
   SunIcon
 } from './Icons';
 import { LazyBoundary } from './LazyFallback';
-import type { SettingsFormPage } from './SettingsForm';
 import { SettingsRow, SettingsSection, SettingsStackedRow, SettingsSwitch } from './settings/SettingsLayout';
 import { SettingsShell } from './settings/SettingsShell';
 import { DevicesSection } from './settings/DevicesSection';
@@ -449,10 +448,7 @@ export const Header: React.FC<HeaderProps> = ({
         'swarm',
         'steward',
         ...(isMemorySupported ? ['nowledge'] : []),
-        'general',
-        'notifications',
         'appearance',
-        'archive',
         'device',
         'about'
       ]
@@ -461,6 +457,7 @@ export const Header: React.FC<HeaderProps> = ({
   const visibleSettingsItemIDs = SETTINGS_ITEMS.filter((item) => {
     if (!visibleSettingsPageIDs.includes(item.page)) return false;
     if (item.id === 'block-swarm-tiers') return canManageSwarmTiers;
+    if (item.id === 'block-always-allowed') return settingsApi.supportsSettings;
     if (item.id === 'web-attention-inbox') return isAttentionSupported;
     if (item.id === 'web-memory-proposals') return isMemorySupported;
     if (item.settingsKey) {
@@ -625,8 +622,7 @@ export const Header: React.FC<HeaderProps> = ({
           onPageChange={onSettingsPageChange}
           visiblePageIDs={visibleSettingsPageIDs}
           visibleItemIDs={visibleSettingsItemIDs}
-          renderPage={(pageID, advanced) => {
-            const toggleAdvanced = () => advanced.setOpen(!advanced.open);
+          renderPage={(pageID) => {
             switch (pageID) {
               case 'conversation':
                 // 宿主不支持远程设置时，「会话」页只放本地的自动折叠开关。
@@ -635,16 +631,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <SettingsForm
                       api={settingsApi}
                       page="conversation"
-                      advancedOpen={advanced.open}
-                      onAdvancedToggle={toggleAdvanced}
                     />
+                    <AlwaysAllowedSection projectID={selectedProjectID} projectName={projectName} />
                   </LazyBoundary>
                 ) : (
-                  <SettingsSection title="回复与思考">
+                  <SettingsSection title="回复">
                     <SettingsRow
                       itemID="row-auto-collapse-reasoning"
                       title="自动折叠思考过程"
-                      desc="思考结束后自动收起，关闭则保持展开"
                       control={
                         <SettingsSwitch
                           checked={autoCollapse}
@@ -658,52 +652,31 @@ export const Header: React.FC<HeaderProps> = ({
                     />
                   </SettingsSection>
                 );
-              case 'archive':
-              case 'general':
-              case 'notifications':
+              case 'swarm':
                 return (
                   <LazyBoundary label="正在加载设置…">
                     <SettingsForm
                       api={settingsApi}
-                      page={pageID as SettingsFormPage}
-                      advancedOpen={advanced.open}
-                      onAdvancedToggle={toggleAdvanced}
+                      page="swarm"
+                      swarmTiersRow={
+                        canManageSwarmTiers ? (
+                          <SettingsRow
+                            itemID="block-swarm-tiers"
+                            title="子代理档位"
+                            control={
+                              <button
+                                type="button"
+                                className="secondary-button settings-inline-button"
+                                onClick={openSwarmTiers}
+                              >
+                                管理
+                              </button>
+                            }
+                          />
+                        ) : undefined
+                      }
                     />
-                    {pageID === 'general' && (
-                      <AlwaysAllowedSection projectID={selectedProjectID} projectName={projectName} />
-                    )}
                   </LazyBoundary>
-                );
-              case 'swarm':
-                return (
-                  <>
-                    <LazyBoundary label="正在加载设置…">
-                      <SettingsForm
-                        api={settingsApi}
-                        page="swarm"
-                        advancedOpen={advanced.open}
-                        onAdvancedToggle={toggleAdvanced}
-                        swarmTiersRow={
-                          canManageSwarmTiers ? (
-                            <SettingsRow
-                              itemID="block-swarm-tiers"
-                              title="子代理档位"
-                              desc="按档位配置子代理的模型与写入白名单"
-                              control={
-                                <button
-                                  type="button"
-                                  className="secondary-button settings-inline-button"
-                                  onClick={openSwarmTiers}
-                                >
-                                  管理
-                                </button>
-                              }
-                            />
-                          ) : undefined
-                        }
-                      />
-                    </LazyBoundary>
-                  </>
                 );
               case 'steward':
                 return (
@@ -712,8 +685,6 @@ export const Header: React.FC<HeaderProps> = ({
                       <SettingsForm
                         api={settingsApi}
                         page="steward"
-                        advancedOpen={advanced.open}
-                        onAdvancedToggle={toggleAdvanced}
                       />
                     </LazyBoundary>
                     {isAttentionSupported && (
@@ -728,7 +699,7 @@ export const Header: React.FC<HeaderProps> = ({
               case 'appearance':
                 return (
                   <SettingsSection title="主题与字体">
-                    <SettingsStackedRow itemID="row-theme" title="主题" desc="跟随系统、浅色或深色">
+                    <SettingsStackedRow itemID="row-theme" title="主题">
                       <div className="theme-switch" role="radiogroup" aria-label="主题">
                         {([
                           ['system', '跟随系统', <ComputerDesktopIcon className="h-4 w-4" />],
@@ -760,7 +731,6 @@ export const Header: React.FC<HeaderProps> = ({
                       <SettingsRow
                         itemID="web-connection-refresh"
                         title="刷新会话与看板"
-                        desc="重新拉取 Mac 上的会话、看板与项目列表"
                         error={refreshError}
                         control={
                           <button
@@ -789,7 +759,6 @@ export const Header: React.FC<HeaderProps> = ({
                         <SettingsRow
                           itemID="web-home-pairing"
                           title="主屏幕配对码"
-                          desc="为主屏幕应用生成一次 64 位配对码"
                           error={homePairingError}
                           control={
                             <button
@@ -831,7 +800,6 @@ export const Header: React.FC<HeaderProps> = ({
                         <SettingsStackedRow
                           itemID="web-device-name"
                           title="设备名称"
-                          desc="修改这台设备在 Mac 上显示的名字"
                           error={deviceRenameError}
                         >
                           <form
@@ -910,7 +878,6 @@ export const Header: React.FC<HeaderProps> = ({
                       <SettingsRow
                         itemID="web-device-forget"
                         title="忘记此设备"
-                        desc="撤销 Mac 上的此设备并清除本地配对信息"
                         control={
                           <button
                             type="button"
