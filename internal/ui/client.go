@@ -1219,8 +1219,8 @@ type Client interface {
 	AgyAccounts() ([]accounts.Account, error)
 	// AgyDefaultAccountID 获取当前默认的 agy 账号 ID。
 	AgyDefaultAccountID() string
-	// AgyLoginStart 发起浏览器 OAuth 登录流程，返回授权跳转 URL。
-	AgyLoginStart(ctx context.Context) (string, error)
+	// AgyLoginStart 发起浏览器 OAuth 登录流程，返回授权跳转 URL；targetID 非空时绑定回指定账号。
+	AgyLoginStart(ctx context.Context, targetID string) (string, error)
 	// AgyLoginSubmit 提交手动输入的回调 URL 或授权码完成登录。
 	AgyLoginSubmit(input string) error
 	// AgyLoginWait 等待后台浏览器 OAuth 流程完成，返回新登录的账号元数据。

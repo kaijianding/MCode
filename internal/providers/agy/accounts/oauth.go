@@ -62,9 +62,13 @@ type accountResult struct {
 	err     error
 }
 
+// ErrReloginEmailMismatch 重新登录时授权的 Google 账号邮箱与目标账号已有邮箱不一致。
+var ErrReloginEmailMismatch = errors.New("登录的 Google 账号与该账号不一致")
+
 // LoginSession 封装单次登录授权的生命周期与交互通道。
 type LoginSession struct {
 	manager     *Manager
+	targetID    string
 	authURL     string
 	state       string
 	verifier    string
@@ -139,7 +143,7 @@ func (s *LoginSession) Submit(input string) error {
 // exchangeAndFinish 兑换 token 并完成合并，仅执行一次。
 func (s *LoginSession) exchangeAndFinish(code string) {
 	s.once.Do(func() {
-		acc, err := s.manager.exchangeTokenAndSave(s.sessionCtx, code, s.verifier, s.redirectURI)
+		acc, err := s.manager.exchangeTokenAndSave(s.sessionCtx, code, s.verifier, s.redirectURI, s.targetID)
 		s.resChan <- accountResult{account: acc, err: err}
 		if s.server != nil {
 			go func() {
@@ -152,6 +156,11 @@ func (s *LoginSession) exchangeAndFinish(code string) {
 
 // LoginStart 启动本地 OAuth 回调监听并拉起浏览器，整体超时 180 秒。
 func (m *Manager) LoginStart(ctx context.Context) (*LoginSession, error) {
+	return m.LoginStartFor(ctx, "")
+}
+
+// LoginStartFor 启动本地 OAuth 回调监听并拉起浏览器，targetID 非空时将结果写回指定账号，整体超时 180 秒。
+func (m *Manager) LoginStartFor(ctx context.Context, targetID string) (*LoginSession, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("listen local port: %w", err)
@@ -195,6 +204,7 @@ func (m *Manager) LoginStart(ctx context.Context) (*LoginSession, error) {
 	sessionCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	session := &LoginSession{
 		manager:     m,
+		targetID:    targetID,
 		authURL:     authURL,
 		state:       state,
 		verifier:    verifier,
@@ -283,7 +293,7 @@ type userInfoResponse struct {
 }
 
 // exchangeTokenAndSave 调用官方 token 端点兑换凭据，通过 userinfo 校验，并在锁保护下合并落盘。
-func (m *Manager) exchangeTokenAndSave(ctx context.Context, code, verifier, redirectURI string) (Account, error) {
+func (m *Manager) exchangeTokenAndSave(ctx context.Context, code, verifier, redirectURI, targetID string) (Account, error) {
 	endpoints := m.opts.Endpoints.withDefaults()
 	client := m.opts.HTTPClient
 	if client == nil {
@@ -344,7 +354,10 @@ func (m *Manager) exchangeTokenAndSave(ctx context.Context, code, verifier, redi
 		},
 	}
 
-	return m.mergeAndSaveAccount(tokenFile, userInfo.Email, userInfo.Name)
+	if targetID == "" {
+		return m.mergeAndSaveAccount(tokenFile, userInfo.Email, userInfo.Name)
+	}
+	return m.reloginSaveAccount(targetID, tokenFile, userInfo.Email, userInfo.Name)
 }
 
 func (m *Manager) fetchUserInfo(ctx context.Context, userInfoURL, accessToken string) (userInfoResponse, error) {
@@ -396,23 +409,7 @@ func (m *Manager) mergeAndSaveAccountLocked(tokenFile OAuthTokenFile, email, nam
 	for i, acc := range m.index.Accounts {
 		if acc.ID != SystemAccountID && acc.Email != "" && strings.EqualFold(acc.Email, email) {
 			// 防幽灵写入校验：账号存在于当前索引中，仅更新 token 文件并激活状态
-			accID := acc.ID
-			writeErr := m.withTokenLock(accID, func(tokenPath string) error {
-				return atomicWriteJSON(tokenPath, tokenFile)
-			})
-			if writeErr != nil {
-				return Account{}, fmt.Errorf("write updated token: %w", writeErr)
-			}
-
-			m.index.Accounts[i].Status = StatusActive
-			m.index.Accounts[i].StatusReason = ""
-			if name != "" && m.index.Accounts[i].Name == "" {
-				m.index.Accounts[i].Name = name
-			}
-			if err := m.saveIndexLocked(); err != nil {
-				return Account{}, err
-			}
-			return m.index.Accounts[i], nil
+			return m.updateAccountTokenLocked(i, tokenFile, "", name)
 		}
 	}
 
@@ -456,6 +453,65 @@ func (m *Manager) mergeAndSaveAccountLocked(tokenFile OAuthTokenFile, email, nam
 	}
 
 	return newAcc, nil
+}
+
+// reloginSaveAccount 将重新登录拿到的凭证写回 targetID 对应的已有账号，不新建账号。
+func (m *Manager) reloginSaveAccount(targetID string, tokenFile OAuthTokenFile, email, name string) (Account, error) {
+	acc, err := m.reloginSaveAccountLocked(targetID, tokenFile, email, name)
+	if err != nil {
+		return Account{}, err
+	}
+	m.refreshQuotaAfterLogin(acc.ID)
+	return acc, nil
+}
+
+func (m *Manager) reloginSaveAccountLocked(targetID string, tokenFile OAuthTokenFile, email, name string) (Account, error) {
+	m.mu.Lock()
+	idx := -1
+	for i := range m.index.Accounts {
+		if m.index.Accounts[i].ID == targetID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		m.mu.Unlock()
+		return Account{}, ErrAccountGone
+	}
+	if targetID == SystemAccountID {
+		m.mu.Unlock()
+		return m.mergeAndSaveAccountLocked(tokenFile, email, name)
+	}
+	defer m.mu.Unlock()
+
+	if m.index.Accounts[idx].Email != "" && !strings.EqualFold(m.index.Accounts[idx].Email, email) {
+		return Account{}, ErrReloginEmailMismatch
+	}
+	return m.updateAccountTokenLocked(idx, tokenFile, email, name)
+}
+
+// updateAccountTokenLocked 在已持有 m.mu 的前提下把新 token 写回指定索引账号并激活状态。
+func (m *Manager) updateAccountTokenLocked(idx int, tokenFile OAuthTokenFile, email, name string) (Account, error) {
+	accID := m.index.Accounts[idx].ID
+	writeErr := m.withTokenLock(accID, func(tokenPath string) error {
+		return atomicWriteJSON(tokenPath, tokenFile)
+	})
+	if writeErr != nil {
+		return Account{}, fmt.Errorf("write updated token: %w", writeErr)
+	}
+
+	m.index.Accounts[idx].Status = StatusActive
+	m.index.Accounts[idx].StatusReason = ""
+	if email != "" && m.index.Accounts[idx].Email == "" {
+		m.index.Accounts[idx].Email = email
+	}
+	if name != "" && m.index.Accounts[idx].Name == "" {
+		m.index.Accounts[idx].Name = name
+	}
+	if err := m.saveIndexLocked(); err != nil {
+		return Account{}, err
+	}
+	return cloneAccount(m.index.Accounts[idx]), nil
 }
 
 // TerminalLogin 为备用终端登录预建一个待定账号的目录布局，返回隔离环境参数。

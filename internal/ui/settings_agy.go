@@ -565,7 +565,7 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 						loginShortcutBtn.Background(ThemeAccent(c).Alpha(0.20))
 					}
 					if loginShortcutBtn.Clicked() && client != nil {
-						st.startBrowserLogin()
+						st.startBrowserLogin("")
 					}
 					loginShortcutBtn.Children(func() {
 						ui.Text(c, "登录 agy 账号").
@@ -924,7 +924,7 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 									st.mu.Lock()
 									st.jumpToItemID = "row-agy-browser-login"
 									st.mu.Unlock()
-									st.startBrowserLogin()
+									st.startBrowserLogin(accVal.ID)
 								}
 								reloginBtn.Children(func() {
 									ui.Text(c, "重新登录").
@@ -1119,7 +1119,7 @@ func renderAgyBrowserLoginBody(c *ui.Context, st *SettingsState) {
 						startBtn.Background(ThemeAccent(c).Alpha(0.20))
 					}
 					if startBtn.Clicked() && !busy && client != nil {
-						st.startBrowserLogin()
+						st.startBrowserLogin("")
 					}
 					startBtn.Children(func() {
 						btnText := "浏览器登录"
@@ -1486,8 +1486,8 @@ func (st *SettingsState) noteAgyQuotaRefresh(accID string, err error) {
 	st.mu.Unlock()
 }
 
-// startBrowserLogin 封装发起浏览器 OAuth 流程及后台等待。
-func (st *SettingsState) startBrowserLogin() {
+// startBrowserLogin 封装发起浏览器 OAuth 流程及后台等待；targetID 非空时表示重新登录已有账号。
+func (st *SettingsState) startBrowserLogin(targetID string) {
 	client := st.agyClient()
 	if client == nil {
 		return
@@ -1509,7 +1509,7 @@ func (st *SettingsState) startBrowserLogin() {
 
 	go func() {
 		defer cancel()
-		url, err := client.AgyLoginStart(ctx)
+		url, err := client.AgyLoginStart(ctx, targetID)
 		if err != nil {
 			st.mu.Lock()
 			st.agy.loginBrowserBusy = false

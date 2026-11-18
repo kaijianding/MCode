@@ -2796,7 +2796,7 @@ func (f *FakeClient) AgyDefaultAccountID() string {
 }
 
 // AgyLoginStart 模拟发起浏览器 OAuth 流程。
-func (f *FakeClient) AgyLoginStart(ctx context.Context) (string, error) {
+func (f *FakeClient) AgyLoginStart(ctx context.Context, targetID string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.agyLoginStartCalls++

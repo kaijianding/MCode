@@ -402,8 +402,8 @@ func (c *Client) AgyAccounts() ([]accounts.Account, error) {
 	return c.agy.List(), nil
 }
 
-// AgyLoginStart 开启新的 OAuth 登录会话，如有旧会话先取消，并返回授权 URL。
-func (c *Client) AgyLoginStart(ctx context.Context) (string, error) {
+// AgyLoginStart 开启新的 OAuth 登录会话，如有旧会话先取消，并返回授权 URL；targetID 非空时将结果绑定回指定账号。
+func (c *Client) AgyLoginStart(ctx context.Context, targetID string) (string, error) {
 	if c.agy == nil {
 		return "", errors.New("agy accounts are not configured")
 	}
@@ -415,7 +415,7 @@ func (c *Client) AgyLoginStart(ctx context.Context) (string, error) {
 		c.agyLogin = nil
 	}
 
-	sess, err := c.agy.LoginStart(ctx)
+	sess, err := c.agy.LoginStartFor(ctx, targetID)
 	if err != nil {
 		return "", err
 	}
