@@ -892,12 +892,16 @@ func composerQuotaGroupModels(provider, title string, windows []ProviderQuotaWin
 		}
 	}
 	models := buildTrayQuotaModel(groups, time.Time{}, now, false).Groups
+	windowsByProvider := make(map[string][]ProviderQuotaWindow, len(groups))
+	for _, group := range groups {
+		windowsByProvider[group.Provider] = group.Windows
+	}
 	for i := range models {
 		for j := range models[i].Accounts {
 			account := &models[i].Accounts[j]
 			account.DisplayName = strings.TrimSuffix(account.DisplayName, " · 最近使用")
 			account.DisplayName = quotaAccountDisplayName(account.DisplayName, strings.TrimPrefix(models[i].Provider, "magpie:"))
-			for _, window := range groups[i].Windows {
+			for _, window := range windowsByProvider[models[i].Provider] {
 				if window.Account == account.Account && window.Provider != "" {
 					account.DisplayName = quotaAccountDisplayName(account.DisplayName, window.Provider)
 				}

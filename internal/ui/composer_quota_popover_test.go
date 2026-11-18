@@ -191,6 +191,36 @@ func TestComposerQuotaGroupModels(t *testing.T) {
 	}
 }
 
+func TestComposerQuotaGroupModels_SkipsAllDisabledProviderGroup(t *testing.T) {
+	now := time.Now()
+	windows := []ProviderQuotaWindow{
+		{Label: "5 hours", Account: "claude · disabled@example.com", Source: "magpie", Provider: "claude", Disabled: true},
+		{Label: "5 hours", Account: "codex · a@example.com", Source: "magpie", Provider: "codex"},
+	}
+	groups := composerQuotaGroupModels("pi:magpie", "Magpie", windows, "", "", now)
+	if len(groups) != 1 {
+		t.Fatalf("应只返回一个未停用分组，实际=%d: %+v", len(groups), groups)
+	}
+	if groups[0].Provider != "magpie:codex" {
+		t.Fatalf("返回的 Provider = %q，想要 %q", groups[0].Provider, "magpie:codex")
+	}
+	if len(groups[0].Accounts) != 1 || groups[0].Accounts[0].DisplayName != "a@example.com" {
+		t.Fatalf("账号 DisplayName 应去掉前缀，实际=%+v", groups[0].Accounts)
+	}
+
+	// 验证不会因下标错位拿到已丢弃分组的 Windows（两个分组同账号名时，不应按前一组 Provider 去前缀）。
+	mismatched := composerQuotaGroupModels("pi:magpie", "Magpie", []ProviderQuotaWindow{
+		{Label: "5 hours", Account: "claude · shared@example.com", Source: "magpie", Provider: "claude", Disabled: true},
+		{Label: "5 hours", Account: "claude · shared@example.com", Source: "magpie", Provider: "codex"},
+	}, "", "", now)
+	if len(mismatched) != 1 || mismatched[0].Provider != "magpie:codex" {
+		t.Fatalf("错位验证分组结果错误: %+v", mismatched)
+	}
+	if len(mismatched[0].Accounts) != 1 || mismatched[0].Accounts[0].DisplayName != "claude · shared@example.com" {
+		t.Fatalf("不应拿已丢弃分组的 Provider 去掉当前分组账号前缀，实际=%+v", mismatched[0].Accounts)
+	}
+}
+
 func TestQuotaGroupTitleVisible(t *testing.T) {
 	if quotaGroupTitleVisible(1, quotaGroupListOptions{HideSingleGroupTitle: true}) ||
 		!quotaGroupTitleVisible(2, quotaGroupListOptions{HideSingleGroupTitle: true}) ||
