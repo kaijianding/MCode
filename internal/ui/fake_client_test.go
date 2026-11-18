@@ -188,6 +188,7 @@ type FakeClient struct {
 	mu sync.Mutex
 
 	projects           []Project
+	chatsProjectID     string
 	providers          []ProviderInfo
 	threads            map[string][]Thread
 	threadsCalls       map[string]int // 按项目统计 Threads 调用次数，用于断言列表重拉的次数
@@ -5143,4 +5144,18 @@ func (f *FakeClient) SetMemoryDistillResult(count int, err error) {
 	defer f.mu.Unlock()
 	f.memoryDistillCount = count
 	f.memoryDistillErr = err
+}
+
+// SetChatsProjectID 设置内置对话项目的 ID（用于模拟后端 ChatsProjectID 能力）。
+func (f *FakeClient) SetChatsProjectID(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.chatsProjectID = id
+}
+
+// ChatsProjectID 返回内置对话项目的 ID。
+func (f *FakeClient) ChatsProjectID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.chatsProjectID
 }

@@ -1964,11 +1964,16 @@ func (s *chatState) createThread(projectID string) {
 	s.createProvisionalThread(projectID, false)
 }
 
-// createNewThread 在当前选中会话所属的项目里新建（没有选中会话时用第一个项目）。
+// createNewThread 在当前选中会话所属的项目里新建（选中总管会话或未选中会话时用第一个普通项目，最后兜底对话项目）。
 func (s *chatState) createNewThread() {
+	// stewardProjectID 会加 s.mu，因此在持锁前先取好两个内置项目 ID 与总管会话 ID。
+	stewardProjID := s.stewardProjectID()
+	stewardThreadID := s.stewardThreadID()
+	chatsProjID := s.chatsProjectID()
+
 	s.mu.Lock()
 	var targetProjectID string
-	if s.selectedThreadID != "" {
+	if s.selectedThreadID != "" && s.selectedThreadID != stewardThreadID {
 		for _, th := range s.threads {
 			if th.ID == s.selectedThreadID && th.ProjectID != "" {
 				targetProjectID = th.ProjectID
@@ -1976,8 +1981,17 @@ func (s *chatState) createNewThread() {
 			}
 		}
 	}
-	if targetProjectID == "" && len(s.projects) > 0 {
-		targetProjectID = s.projects[0].ID
+	if targetProjectID == "" {
+		for _, p := range s.projects {
+			if p.ID == "" || p.ID == stewardProjID || p.ID == chatsProjID {
+				continue
+			}
+			targetProjectID = p.ID
+			break
+		}
+	}
+	if targetProjectID == "" {
+		targetProjectID = chatsProjID
 	}
 	s.mu.Unlock()
 

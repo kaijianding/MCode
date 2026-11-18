@@ -232,6 +232,41 @@ func sidebarTopBarHeight(topOffset float32) float32 {
 	return 0
 }
 
+type sidebarMetrics struct {
+	compact      bool
+	rowHeight    float32
+	padY         float32
+	padX         float32
+	folderIndent float32
+	projectGap   float32
+}
+
+// currentSidebarMetrics 返回侧栏行高与边距指标：行高跟界面密度与文字大小缩放，紧凑模式下再压低行高与缩进。
+func currentSidebarMetrics(c *ui.Context, s *chatState) sidebarMetrics {
+	isCompact := false
+	if st := getChatSettings(s); st != nil {
+		isCompact = st.cfg.Appearance.SidebarCompact
+	}
+	dens := currentDensity(c, s)
+	rowScale := sidebarScaleFactor()
+	m := sidebarMetrics{
+		compact:      isCompact,
+		rowHeight:    dens.RowH * rowScale,
+		padY:         4,
+		padX:         dens.PadX,
+		folderIndent: FolderIndent,
+		projectGap:   GroupGap,
+	}
+	if isCompact {
+		m.rowHeight = DensityCompact.RowH * rowScale
+		m.padY = Space1 / 2
+		m.padX = DensityCompact.PadX
+		m.folderIndent = 10
+		m.projectGap = Space2
+	}
+	return m
+}
+
 func renderSidebar(c *ui.Context, s *chatState) {
 	sidebarMu.Lock()
 	if state := sidebarSearch[s]; state != nil {
@@ -305,10 +340,14 @@ func renderSidebar(c *ui.Context, s *chatState) {
 	s.mu.Unlock()
 
 	// 总管 feed 已经在侧栏顶部单独成段：它的会话与所在项目不再在项目树、动态视图里重复出现。
+	// 内置对话项目也已在侧栏顶部单独成段，不出现在项目树里。
 	// 这里只过滤本地副本，不改 s.projects / s.threads 本身。
 	stewardThread := s.stewardThreadID()
 	if stewardThread != "" {
 		projects, threads, threadsByProj = withoutStewardThread(stewardThread, projects, threads, threadsByProj)
+	}
+	if chatsProjID := s.chatsProjectID(); chatsProjID != "" {
+		projects = withoutProjects(projects, chatsProjID)
 	}
 
 	// 按保存的项目顺序渲染，未在顺序中的项目按原顺序追加到末尾。
@@ -463,32 +502,17 @@ func renderSidebar(c *ui.Context, s *chatState) {
 		// 总管段：头像、「昵称 · 总管」与待处理数徽标合成一行；
 		// 客户端不支持总管或会话还没建好时退回只渲染待处理行。
 		renderSidebarStewardSection(c, s)
+		renderSidebarChatsSection(c, s)
 
 		// 3. 项目与会话列表
 		ui.Scroll(c.Key("sidebar-projects-list")).Grow(1).Children(func() {
-			isCompact := false
-			if st := getChatSettings(s); st != nil {
-				isCompact = st.cfg.Appearance.SidebarCompact
-			}
-
-			// 行高与左右内边距跟「界面密度」走；行高再按「文字大小」缩放：
-			// 行内标题按比例变大，行高不跟上就会把文字截断；内边距与间距是间距，不缩放。
-			dens := currentDensity(c, s)
-			rowScale := sidebarScaleFactor()
-			var threadRowHeight float32 = dens.RowH * rowScale
-			var threadPadY float32 = 4
-			var threadPadX float32 = dens.PadX
-			var folderIndent float32 = FolderIndent
-			var projectGap float32 = GroupGap
-
-			// 「紧凑侧边栏」是侧栏自己的开关，再压到紧凑档：更矮的行、更小的缩进与间距。
-			if isCompact {
-				threadRowHeight = DensityCompact.RowH * rowScale
-				threadPadY = Space1 / 2
-				threadPadX = DensityCompact.PadX
-				folderIndent = 10
-				projectGap = Space2
-			}
+			m := currentSidebarMetrics(c, s)
+			isCompact := m.compact
+			threadRowHeight := m.rowHeight
+			threadPadY := m.padY
+			threadPadX := m.padX
+			folderIndent := m.folderIndent
+			projectGap := m.projectGap
 
 			// 搜索词非空且项目与会话全部未命中时，列表区居中显示「无结果」卡片。
 			if lowerQuery != "" && len(matchesByProject) == 0 {

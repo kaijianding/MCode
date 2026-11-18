@@ -208,7 +208,7 @@ func withoutStewardThread(stewardThread string, projects []Project, threads []Th
 	}
 
 	if projectID := stewardProjectIDForThread(stewardThread, threads, threadsByProj); projectID != "" {
-		projects = withoutStewardProject(projectID, projects)
+		projects = withoutProjects(projects, projectID)
 		delete(threadsByProj, projectID)
 	}
 
@@ -269,11 +269,20 @@ func (s *chatState) stewardProjectID() string {
 	return stewardProjectIDForThread(threadID, s.threads, s.threadsByProj)
 }
 
-// withoutStewardProject 返回剔除总管项目后的新切片，不修改入参；projectID 为空时原样复制一份。
-func withoutStewardProject(projectID string, projects []Project) []Project {
+// withoutProjects 返回剔除指定项目 ID 后的新切片，不修改入参；空 ID 会被忽略。
+func withoutProjects(projects []Project, ids ...string) []Project {
+	var excluded map[string]bool
+	for _, id := range ids {
+		if id != "" {
+			if excluded == nil {
+				excluded = make(map[string]bool, len(ids))
+			}
+			excluded[id] = true
+		}
+	}
 	kept := make([]Project, 0, len(projects))
 	for _, p := range projects {
-		if projectID != "" && p.ID == projectID {
+		if excluded[p.ID] {
 			continue
 		}
 		kept = append(kept, p)

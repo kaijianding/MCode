@@ -839,8 +839,8 @@ func renderProjectChoicesPopover(c *ui.Context, s *chatState, currentProjectID s
 	projects := make([]Project, len(s.projects))
 	copy(projects, s.projects)
 	s.mu.Unlock()
-	// 总管主目录对应的项目只属于总管自己，不在切换项目浮层里露出；只过滤局部副本。
-	projects = withoutStewardProject(s.stewardProjectID(), projects)
+	// 总管主目录与内置对话项目不在切换项目浮层里露出；只过滤局部副本。
+	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 
 	card := ui.Column(c.Key("chat-new-thread-project-menu"))
 	if !native {

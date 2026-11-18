@@ -28,8 +28,8 @@ var chatScaleFiles = map[string]bool{
 }
 var sidebarScaleFiles = map[string]bool{
 	"sidebar.go": true, "sidebar_activity.go": true, "sidebar_bees.go": true,
-	"sidebar_footer.go": true, "sidebar_hover_card.go": true, "sidebar_state_groups.go": true,
-	"sidebar_steward.go": true, "sidebar_bulk.go": true,
+	"sidebar_chats.go": true, "sidebar_footer.go": true, "sidebar_hover_card.go": true,
+	"sidebar_state_groups.go": true, "sidebar_steward.go": true, "sidebar_bulk.go": true,
 }
 
 // TestTextScaleOnlyChatAndSidebar 限制文字缩放的适用范围。

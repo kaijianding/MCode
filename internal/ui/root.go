@@ -219,13 +219,18 @@ func buildRoot(client Client, opts ...Option) (*chatState, func(c *ui.Context)) 
 					view = "chat"
 					state.createNewThread()
 				case "new-worktree-thread":
-					// 取当前选中会话所属项目（退化为第一个项目），没有项目时提示。
+					// 取当前选中会话所属项目（退化为第一个项目），没有项目时提示；
+					// 若目标是内置对话项目则建普通会话，不建 worktree。
 					if projectID := worktreeTargetProjectID(state); projectID == "" {
 						state.setToast("请先添加项目")
 					} else {
 						state.closeWorkspace()
 						view = "chat"
-						state.createThreadInWorktree(projectID)
+						if chatsProjID := state.chatsProjectID(); chatsProjID != "" && projectID == chatsProjID {
+							state.createThread(projectID)
+						} else {
+							state.createThreadInWorktree(projectID)
+						}
 					}
 				case "toggle-terminal":
 					toggleTerminal(state)

@@ -152,7 +152,7 @@ func kanbanSheetProjectPicker(c *ui.Context, s *chatState, projectID string, onS
 	s.mu.Lock()
 	projects := append([]Project(nil), s.projects...)
 	s.mu.Unlock()
-	projects = withoutStewardProject(s.stewardProjectID(), projects)
+	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 	opts := kanbanProjectListOptions(projects)
 
 	kst := getKanbanModalState(s)

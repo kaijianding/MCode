@@ -426,6 +426,7 @@ func buildPaletteItems(s *chatState) []paletteItem {
 		})
 	}
 
+	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 	for _, p := range projects {
 		pID := p.ID
 		items = append(items, paletteItem{

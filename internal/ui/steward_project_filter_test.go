@@ -2,14 +2,14 @@ package mcodeui
 
 import "testing"
 
-// withoutStewardProject 剔除指定项目、projectID 为空时原样返回、且不修改入参。
+// withoutProjects 剔除指定项目、ID 为空时原样返回、且不修改入参。
 func TestWithoutStewardProject(t *testing.T) {
 	input := []Project{
 		{ID: "p1", Name: "普通项目", Path: "/path/to/p1"},
 		{ID: "p2", Name: "总管的家", Path: "/path/to/p2"},
 	}
 
-	got := withoutStewardProject("p2", input)
+	got := withoutProjects(input, "p2")
 	if len(got) != 1 || got[0].ID != "p1" {
 		t.Fatalf("应只保留普通项目，实际: %+v", got)
 	}
@@ -17,10 +17,10 @@ func TestWithoutStewardProject(t *testing.T) {
 		t.Fatalf("不应修改入参切片，实际: %+v", input)
 	}
 
-	// projectID 为空时原样返回全部项目，但仍然是一份可安全修改的副本。
-	all := withoutStewardProject("", input)
+	// ID 为空时原样返回全部项目，但仍然是一份可安全修改的副本。
+	all := withoutProjects(input, "")
 	if len(all) != 2 || all[0].ID != "p1" || all[1].ID != "p2" {
-		t.Fatalf("projectID 为空时应原样返回全部项目，实际: %+v", all)
+		t.Fatalf("ID 为空时应原样返回全部项目，实际: %+v", all)
 	}
 	all[0].Name = "改副本"
 	if input[0].Name != "普通项目" {
@@ -28,7 +28,7 @@ func TestWithoutStewardProject(t *testing.T) {
 	}
 
 	// 列表里没有该项目时同样原样保留。
-	missing := withoutStewardProject("p9", input)
+	missing := withoutProjects(input, "p9")
 	if len(missing) != 2 {
 		t.Fatalf("项目不在列表里时应全部保留，实际: %+v", missing)
 	}
