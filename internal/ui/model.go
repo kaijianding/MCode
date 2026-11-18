@@ -530,6 +530,7 @@ type chatState struct {
 
 	threadListState ui.ListState
 	chatListState   ui.ListState
+	chatScroll      ui.ScrollState // 只用于「跳到最新」的平滑滚动
 	mdOpts          markdown.Options
 	mdStaticOpts    markdown.Options
 	imagePreview    *imagePreviewState // 正在放大的本地图片，nil 表示没有大图浮层

@@ -226,9 +226,7 @@ func TestChatJumpToLatestButton(t *testing.T) {
 	if err := tt.Click(jumpLabel); err != nil {
 		t.Fatalf("点击回到底部按钮失败: %v", err)
 	}
-	for i := 0; i < 5; i++ {
-		tt.Frame()
-	}
+	waitFor(t, tt, func() bool { return tt.HasText("消息-79") })
 	if !tt.HasText("消息-79") {
 		t.Fatalf("点击回到底部后应显示最新消息")
 	}

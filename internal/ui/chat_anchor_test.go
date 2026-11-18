@@ -469,3 +469,79 @@ func TestChatAnchorReleaseClearsPad(t *testing.T) {
 		t.Fatalf("解除锚定后垫高目标与条目数应清零: target=%v items=%d", got.padTarget, got.padItems)
 	}
 }
+
+// TestJumpToLatestScrollsSmoothly 验证「跳到最新」在开启/关闭动效时的滚动行为及空闲停帧。
+func TestJumpToLatestScrollsSmoothly(t *testing.T) {
+	setup := func(t *testing.T, reduced bool) (*ui.Tester, *chatState) {
+		t.Helper()
+		setAppReduceMotion(t, reduced)
+		fake := NewFakeClient()
+		var msgs []Message
+		for i := 0; i < 80; i++ {
+			msgs = append(msgs, Message{
+				ID:        fmt.Sprintf("u%02d", i),
+				Role:      "user",
+				Text:      fmt.Sprintf("消息-%02d", i),
+				TurnIndex: i + 1,
+				IsFinal:   true,
+			})
+		}
+		fake.SetMessages("t1", msgs)
+
+		var s *chatState
+		tt := ui.NewTester(Root(fake, func(cs *chatState) { s = cs }), 1000, 700)
+		waitFor(t, tt, func() bool { return s != nil && tt.HasText("消息-79") })
+
+		// 滚到顶部并等入场过渡停稳，确认未到底。
+		tt.Scroll(600, 300, 0, -100000)
+		tt.Frame()
+		tt.Advance(DurSlow * 3)
+		if s.chatListState.AtEnd() {
+			t.Fatalf("滚到顶部后 chatListState.AtEnd() 应为 false")
+		}
+		return tt, s
+	}
+
+	t.Run("动效开启时平滑滚动并空闲停帧", func(t *testing.T) {
+		tt, s := setup(t, false)
+		startY := s.chatScroll.Y
+
+		s.jumpChatToLatest("t1")
+		tt.Frame()
+		tt.Advance(20 * time.Millisecond)
+
+		if s.chatListState.AtEnd() {
+			t.Fatalf("推进一小段时间后列表不应一帧到底")
+		}
+		if s.chatScroll.Y <= startY {
+			t.Fatalf("推进一小段时间后滚动位置应已向下移动: startY=%v curY=%v", startY, s.chatScroll.Y)
+		}
+
+		// 推进超过 DurSlow 后应到底且恢复跟随，之后再推进不再请求下一帧。
+		tt.Advance(DurSlow * 4)
+		if !s.chatListState.AtEnd() {
+			t.Fatalf("推进超过 DurSlow 后 chatListState.AtEnd() 应为 true")
+		}
+		if !s.chatListState.FollowEnd {
+			t.Fatalf("推进超过 DurSlow 后 chatListState.FollowEnd 应为 true")
+		}
+		tt.Advance(DurSlow * 2)
+		if tt.FramePending() {
+			t.Fatalf("滚到底部停稳后不应再请求下一帧")
+		}
+	})
+
+	t.Run("减少动效时一帧直达底部", func(t *testing.T) {
+		tt, s := setup(t, true)
+
+		s.jumpChatToLatest("t1")
+		tt.Frame()
+
+		if !s.chatListState.AtEnd() {
+			t.Fatalf("减少动效时调用 jumpChatToLatest 后一帧即应到底")
+		}
+		if !s.chatListState.FollowEnd {
+			t.Fatalf("减少动效时调用 jumpChatToLatest 后 FollowEnd 应为 true")
+		}
+	})
+}

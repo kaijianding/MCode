@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"math"
 	"sync"
 
 	"github.com/egoist/mygo/ui"
@@ -519,17 +520,22 @@ func (s *chatState) chatSelectedThreadID() string {
 	return s.selectedThreadID
 }
 
-// jumpChatToLatest 回到时间线最新处：滚到底的同时清空未读基线，不必等下一帧 AtEnd 变为 true。
-// 「跳到最新」按钮与同名快捷键共用这一条路径。
+// jumpChatToLatest 回到时间线最新处：清空未读并解除锚定后，减少动效时直接到底，
+// 否则平滑滚到底；「跳到最新」按钮与同名快捷键共用这一条路径。
 func (s *chatState) jumpChatToLatest(selectedThreadID string) {
 	if s == nil || selectedThreadID == "" {
 		return
 	}
 	s.clearTimelineUnread(selectedThreadID)
-	s.releaseChatAnchor(selectedThreadID, true)
+	s.releaseChatAnchor(selectedThreadID, false)
+	if reduceMotion(nil) {
+		s.chatListState.ScrollToEnd()
+		return
+	}
+	s.chatScroll.ScrollTo(0, math.MaxFloat32, springGentle)
 }
 
-// releaseChatAnchor 解除锚定并恢复跟随；toEnd 为真时顺手滚到底（点「跳到最新」走这条）。
+// releaseChatAnchor 解除锚定并恢复跟随；toEnd 为真时顺手直接滚到底。
 func (s *chatState) releaseChatAnchor(selectedThreadID string, toEnd bool) {
 	if s == nil {
 		return

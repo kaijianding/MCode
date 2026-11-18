@@ -104,6 +104,7 @@ func renderChat(c *ui.Context, s *chatState) {
 	// 切换会话或发送消息后滚到底并恢复跟随；等消息到达后再消费，其余时候不干预用户的滚动。
 	if s.scrollToEnd && len(s.messages) > 0 {
 		s.scrollToEnd = false
+		s.chatScroll = ui.ScrollState{}
 		s.chatListState.FollowEnd = true
 		s.chatListState.ScrollToEnd()
 	}
@@ -351,6 +352,16 @@ func renderChat(c *ui.Context, s *chatState) {
 						// 锚定期间在列表底部垫出一屏空白，刚发出的消息才能停在视口顶部：
 						// 动画推进时这块空白逐帧增长，follow-end 排版就把锚点行一路顶上来。
 						listPadBottom := listPadY + s.chatAnchorPadExtra(c, chatBody)
+						// 虚拟列表按行按需测量：滑到底的过程中未渲染过的行会撑大 MaxY，
+						// 每帧把目标续到最新 MaxY，避免停在首帧估算的底部位置。
+						if s.chatScroll.Scrolling() {
+							if reduceMotion(c) {
+								s.chatScroll = ui.ScrollState{}
+								s.chatListState.ScrollToEnd()
+							} else {
+								s.chatScroll.ScrollTo(0, math.MaxFloat32, springGentle)
+							}
+						}
 						listEl = ui.List(c.Key("message-list"), &s.chatListState, len(timelineItems), func(i int) {
 							item := timelineItems[i]
 							isLastAssistant := itemHoldsTurnEnd(item, lastAssistantPerTurn) &&
@@ -365,7 +376,7 @@ func renderChat(c *ui.Context, s *chatState) {
 									anchorRowTop = b.Y
 								}
 							}
-						}).Grow(1).MinHeight(0).Padding(listPadY, 0, listPadBottom, 0)
+						}).TrackScroll(&s.chatScroll).Grow(1).MinHeight(0).Padding(listPadY, 0, listPadBottom, 0)
 						// 列表构建完再处理锚定：推进垫高动画、下发收口滚动、判断是否该解除。
 						s.applyChatAnchor(selectedID, timelineItems, anchorGeometry{
 							rowTop:       anchorRowTop,
