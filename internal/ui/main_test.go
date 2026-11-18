@@ -15,8 +15,6 @@ func TestMain(m *testing.M) {
 	// 休眠提示音在测试里静音，避免测试进程打开音频设备。
 	playDormantChimeFn = func() {}
 
-	// 限频 Stat ui-state.json 会推迟发现外部改动；测试需要写文件后立刻生效，故把间隔置 0。
-	lastSelectionStatInterval = 0
 	// 自建 worktree 重新识别也有限频；测试需要每次 messagesRev 变化都立即重新识别，故置 0。
 	aiWorktreeRedetectInterval = 0
 

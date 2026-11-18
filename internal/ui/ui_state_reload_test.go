@@ -62,6 +62,7 @@ func waitLastSelectionWritesDone(t *testing.T) {
 func TestLastModelSelectionReloadsAfterExternalChange(t *testing.T) {
 	dataDir := settingsTestDir(t)
 	path := resetLastSelectionCacheForReload(t, dataDir)
+	setLastSelectionStatInterval(t, 0)
 
 	firstModTime := time.Now().Add(-time.Hour)
 	writeLastSelectionFile(t, path, ModelSelection{Provider: "claude", Model: "sonnet"}, firstModTime)
@@ -113,15 +114,16 @@ func TestSaveLastModelSelectionSurvivesReload(t *testing.T) {
 }
 
 // setLastSelectionStatInterval 在测试期间把 Stat ui-state.json 的最小间隔设为 interval，
-// 并在用例结束后恢复为 0（TestMain 里设定的默认值），避免影响其它用例。
+// 并在用例结束后恢复为原值，避免影响其它用例。
 func setLastSelectionStatInterval(t *testing.T, interval time.Duration) {
 	t.Helper()
 	lastModelSelectionMu.Lock()
+	old := lastSelectionStatInterval
 	lastSelectionStatInterval = interval
 	lastModelSelectionMu.Unlock()
 	t.Cleanup(func() {
 		lastModelSelectionMu.Lock()
-		lastSelectionStatInterval = 0
+		lastSelectionStatInterval = old
 		lastModelSelectionMu.Unlock()
 	})
 }

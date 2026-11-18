@@ -153,13 +153,14 @@ type timelineFrameBenchState struct {
 // newTimelineFrameBenchState 构造基准场景并跑几帧热起来（字体度量、时间线缓存、滚动到底）。
 func newTimelineFrameBenchState(b *testing.B) *timelineFrameBenchState {
 	b.Helper()
-	// TestMain 把 Stat 限频置 0 方便用例改写文件即生效；基准要反映线上行为，故恢复成线上默认的 1s。
+	// 基准要反映线上行为，Stat 限频固定用线上默认的 1s。
 	lastModelSelectionMu.Lock()
+	old := lastSelectionStatInterval
 	lastSelectionStatInterval = time.Second
 	lastModelSelectionMu.Unlock()
 	b.Cleanup(func() {
 		lastModelSelectionMu.Lock()
-		lastSelectionStatInterval = 0
+		lastSelectionStatInterval = old
 		lastModelSelectionMu.Unlock()
 	})
 	// TestMain 把自建 worktree 重新识别限频也置 0 了；基准要反映线上行为，同样恢复成线上默认的 5s。
