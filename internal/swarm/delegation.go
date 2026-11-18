@@ -901,7 +901,7 @@ func (p *StreamParser) Closed() bool {
 
 // beeWorkRulesFor 返回随委派提示词下发的工作方式：先是该档位类型专属的几条，再是三类共通的几条。
 // 类型判断：ReadOnly 为只读类；否则有 WritePaths 为方案类；其余为改代码类。
-func beeWorkRulesFor(cfg BeeConfig) string {
+func beeWorkRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 	var rules []string
 	switch {
 	case cfg.ReadOnly:
@@ -916,11 +916,15 @@ func beeWorkRulesFor(cfg BeeConfig) string {
 			"- 需要复现时可以跑有范围的测试：只针对相关包或模块，每条命令都要设超时，不依赖网络，不跑全量测试套件，不启动 mcode 本体。",
 		}
 	default:
+		selfCheckRule := "- 可以做有范围的自测：构建、vet 或 lint，以及只针对改动所在包或模块的测试（Go 项目用 go build ./...、go vet、go test ./<包>/ -run <测试名> -timeout 120s），每条命令都要设超时。自测不依赖网络，不跑全量测试套件，不启动 mcode 本体；不为了让测试通过去改任务范围外的测试。全量检查由主代理在自己的检出中执行。"
+		if hasAcceptance {
+			selfCheckRule = "- 汇报前不跑测试，测试由验收命令负责。可以跑构建和 vet（Go 项目用 go build ./...、go vet ./<包>/，vet 会编译测试文件），每条命令都要设超时，不跑全量测试套件，不启动 mcode 本体。验收失败、输出发回给你之后，再跑相关测试定位。"
+		}
 		rules = []string{
 			"- 立即开始，只读完成任务所需的内容，然后动手修改。",
 			"- brief 已经点明文件、位置和改法的，直接照做，不再反复读。",
 			"- 不碰 brief 没提到的文件（确实无法避免的除外），不回退、不重排、不清理别人的改动。",
-			"- 可以做有范围的自测：构建、vet 或 lint，以及只针对改动所在包或模块的测试（Go 项目用 go build ./...、go vet、go test ./<包>/ -run <测试名> -timeout 120s），每条命令都要设超时。自测不依赖网络，不跑全量测试套件，不启动 mcode 本体；不为了让测试通过去改任务范围外的测试。全量检查由主代理在自己的检出中执行。",
+			selfCheckRule,
 		}
 	}
 	rules = append(rules,
@@ -939,7 +943,7 @@ func beeWorkRulesFor(cfg BeeConfig) string {
 
 // beeReportRulesFor 返回随委派提示词下发的汇报规范：第一条按档位类型，其余共通。
 // 子代理的最后一条回复会原样展示给用户。
-func beeReportRulesFor(cfg BeeConfig) string {
+func beeReportRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 	var first string
 	switch {
 	case cfg.ReadOnly:
@@ -950,6 +954,9 @@ func beeReportRulesFor(cfg BeeConfig) string {
 		first = "- 汇报只写一次：先写根因，再写编号步骤，每步给出位置、改法和验收标准。汇报正文超过约 1000 字时，把完整方案写进允许写入的路径，汇报里只留根因、各步标题和该文件路径。"
 	default:
 		first = "- 汇报只写一次，几行即可，写成主代理能直接照着处理的内容：改了什么、在哪个文件、跑了哪些自测命令及结果（没跑就写未跑），以及仍未解决或不确定的地方。"
+		if hasAcceptance {
+			first = "- 汇报只写一次，几行即可，写成主代理能直接照着处理的内容：改了什么、在哪个文件、跑了哪些构建或 vet 命令及结果，以及仍未解决或不确定的地方；测试结果由 mcode 验收给出，不用写。"
+		}
 	}
 	return strings.Join([]string{
 		first,
@@ -969,14 +976,15 @@ func beePrompt(name string, d Delegation, cfg BeeConfig) string {
 	if sys := strings.TrimSpace(cfg.SystemPrompt); sys != "" {
 		b.WriteString("\n\n## 档位要求\n" + sys)
 	}
-	if len(d.Acceptance) > 0 {
-		b.WriteString("\n\n## 验收\nmcode 在你汇报后于工作副本根目录逐条运行以下命令，全部退出码为 0 才合并；不必在汇报前自己重复跑这些命令，失败时 mcode 会把输出发回给你修。命令由 sh 执行（Windows 上为 Git Bash）：")
+	hasAcceptance := len(d.Acceptance) > 0
+	if hasAcceptance {
+		b.WriteString("\n\n## 验收\nmcode 在你汇报后于工作副本根目录逐条运行以下命令，全部退出码为 0 才合并；汇报前不要自己跑这些命令或同一批测试，失败时 mcode 会把输出发回给你修。命令由 sh 执行（Windows 上为 Git Bash）：")
 		for _, command := range d.Acceptance {
 			fmt.Fprintf(&b, "\n- `%s`", command)
 		}
 	}
-	b.WriteString("\n\n## 工作方式\n" + beeWorkRulesFor(cfg))
-	b.WriteString("\n\n## 汇报\n" + beeReportRulesFor(cfg))
+	b.WriteString("\n\n## 工作方式\n" + beeWorkRulesFor(cfg, hasAcceptance))
+	b.WriteString("\n\n## 汇报\n" + beeReportRulesFor(cfg, hasAcceptance))
 	return b.String()
 }
 

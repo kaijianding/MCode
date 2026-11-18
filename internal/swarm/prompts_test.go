@@ -177,6 +177,7 @@ func TestLeadPolicyScopedBees(t *testing.T) {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(plansOnly, mode, false)
 			if !strings.Contains(got, "Bees may run scoped checks") ||
+				!strings.Contains(got, "leaves tests to the acceptance commands") ||
 				!strings.Contains(got, "run the full checks yourself once, after the last bee has merged") {
 				t.Fatalf("plansOnly=%v mode=%s 的策略应说明 bee 只跑有范围的自测且主代理在最后一只 bee 合并后跑一次完整检查:\n%s", plansOnly, mode, got)
 			}

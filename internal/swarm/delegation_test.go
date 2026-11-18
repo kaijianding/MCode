@@ -361,7 +361,7 @@ func TestParseDelegations_Rerun(t *testing.T) {
 func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 	d := Delegation{Task: "T", Prompt: "P"}
 	cfg := BeeConfig{}
-	want := BeePromptPrefix + "Aspen" + "，由主代理派发，完成以下任务。\n\n## 任务：T\n\nP\n\n## 工作方式\n" + beeWorkRulesFor(cfg) + "\n\n## 汇报\n" + beeReportRulesFor(cfg)
+	want := BeePromptPrefix + "Aspen" + "，由主代理派发，完成以下任务。\n\n## 任务：T\n\nP\n\n## 工作方式\n" + beeWorkRulesFor(cfg, false) + "\n\n## 汇报\n" + beeReportRulesFor(cfg, false)
 	if got := beePrompt("Aspen", d, cfg); got != want {
 		t.Errorf("beePrompt 输出变化：\ngot  %q\nwant %q", got, want)
 	}
@@ -376,7 +376,7 @@ func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 func TestBeePromptListsAcceptance(t *testing.T) {
 	d := Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test ./...", "go vet ./..."}}
 	got := beePrompt("Aspen", d, BeeConfig{})
-	for _, want := range []string{"## 验收", "不必在汇报前自己重复跑这些命令，失败时 mcode 会把输出发回给你修。", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
+	for _, want := range []string{"## 验收", "汇报前不要自己跑这些命令或同一批测试，失败时 mcode 会把输出发回给你修。", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("提示词缺少 %q: %s", want, got)
 		}
@@ -387,6 +387,27 @@ func TestBeePromptListsAcceptance(t *testing.T) {
 	d.Acceptance = nil
 	if strings.Contains(beePrompt("Aspen", d, BeeConfig{}), "## 验收") {
 		t.Fatal("没有验收命令时不应显示验收段落")
+	}
+}
+
+func TestBeePromptAcceptanceSkipsSelfTests(t *testing.T) {
+	withAcc := beePrompt("Aspen", Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test -run Foo ./..."}}, BeeConfig{})
+	for _, want := range []string{"汇报前不跑测试", "测试结果由 mcode 验收给出"} {
+		if !strings.Contains(withAcc, want) {
+			t.Fatalf("带验收命令的提示词应包含 %q:\n%s", want, withAcc)
+		}
+	}
+	for _, unwanted := range []string{"可以做有范围的自测", "跑了哪些自测命令"} {
+		if strings.Contains(withAcc, unwanted) {
+			t.Fatalf("带验收命令的提示词不应包含 %q:\n%s", unwanted, withAcc)
+		}
+	}
+
+	withoutAcc := beePrompt("Aspen", Delegation{Task: "T", Prompt: "P"}, BeeConfig{})
+	for _, want := range []string{"可以做有范围的自测", "跑了哪些自测命令及结果"} {
+		if !strings.Contains(withoutAcc, want) {
+			t.Fatalf("不带验收命令的提示词仍应包含 %q:\n%s", want, withoutAcc)
+		}
 	}
 }
 
@@ -468,7 +489,7 @@ func TestBeePrompt_RulesByTier(t *testing.T) {
 
 func TestBeeWorkRules_NetworkResearch(t *testing.T) {
 	for name, cfg := range map[string]BeeConfig{"只读": {ReadOnly: true}, "方案": {WritePaths: []string{"docs/**"}}, "改代码": {}} {
-		rules := beeWorkRulesFor(cfg)
+		rules := beeWorkRulesFor(cfg, false)
 		for _, want := range []string{"web_fetch、web_search", "curl（必须带 -m 超时）", "只读不写", "不向外部服务提交、发布或上传内容", "不发送密钥或用户信息"} {
 			if !strings.Contains(rules, want) {
 				t.Errorf("%s类工作规则应包含 %q", name, want)
@@ -478,7 +499,7 @@ func TestBeeWorkRules_NetworkResearch(t *testing.T) {
 			t.Errorf("%s类工作规则不应禁止访问网络", name)
 		}
 	}
-	if !strings.Contains(beeWorkRulesFor(BeeConfig{}), "自测不依赖网络") {
+	if !strings.Contains(beeWorkRulesFor(BeeConfig{}, false), "自测不依赖网络") {
 		t.Error("改代码类工作规则应包含自测不依赖网络")
 	}
 }
