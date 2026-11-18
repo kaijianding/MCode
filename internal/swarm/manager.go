@@ -525,7 +525,7 @@ type beeWriteScope struct {
 
 // writeScopePaths 只使用原始 brief，避免组装提示里的示例路径占用文件。
 func writeScopePaths(brief string, changed []string) []string {
-	paths := reviewcheck.ExtractPaths(brief)
+	paths := reviewcheck.ExtractPaths(dropReferenceClauses(brief))
 	if len(paths) == 0 {
 		return nil
 	}
@@ -549,6 +549,38 @@ func writeScopePaths(brief string, changed []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// 参考路径不会被写，不应让并行 bee 排队。
+var referenceClauseCues = []string{
+	"参考",
+	"对照",
+	"仿照",
+	"类似",
+	"不要改",
+	"不要修改",
+	"不得修改",
+	"不要动",
+}
+
+func dropReferenceClauses(brief string) string {
+	clauses := strings.FieldsFunc(brief, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == '。' || r == '；' || r == ';' || r == '，' || r == ','
+	})
+	kept := make([]string, 0, len(clauses))
+	for _, clause := range clauses {
+		isRef := false
+		for _, cue := range referenceClauseCues {
+			if strings.Contains(clause, cue) {
+				isRef = true
+				break
+			}
+		}
+		if !isRef {
+			kept = append(kept, clause)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 func overlappingScope(a, b []string) []string {

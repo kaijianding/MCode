@@ -2859,6 +2859,9 @@ func TestDispatchScopeBoundaries(t *testing.T) {
 		{name: "旧条目范围未知", active: Bee{Status: StatusRunning, Prompt: "a.go", ChangedFiles: []string{"a.go"}}, spec: BeeSpec{Brief: "a.go"}},
 		{name: "brief没有路径", active: Bee{Status: StatusRunning, Brief: "完成工作", ChangedFiles: []string{"a.go"}}, spec: BeeSpec{Brief: "a.go"}},
 		{name: "不同lead", active: Bee{Status: StatusRunning, Brief: "a.go"}, spec: BeeSpec{Brief: "a.go"}, otherLead: true},
+		{name: "参考路径不占范围", active: Bee{Status: StatusRunning, Brief: "修改 a.go。参考 b.go 的写法。"}, spec: BeeSpec{Brief: "修改 b.go"}, want: false},
+		{name: "新条目参考路径不占范围", active: Bee{Status: StatusRunning, Brief: "修改 b.go"}, spec: BeeSpec{Brief: "修改 a.go，对照 b.go"}, want: false},
+		{name: "同句修改路径仍占范围", active: Bee{Status: StatusRunning, Brief: "修改 a.go。参考 b.go 的写法。"}, spec: BeeSpec{Brief: "修改 a.go"}, want: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := NewManager(Options{})
