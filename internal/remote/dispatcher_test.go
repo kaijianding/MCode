@@ -88,9 +88,10 @@ type fakeBackend struct {
 	unsubscribeFunc    func(ctx context.Context, c Conn, threadID string) error
 	sendMessageFunc    func(ctx context.Context, params wire.SendMessageParams) (wire.SendMessageResult, error)
 	interruptFunc      func(ctx context.Context, params wire.InterruptParams) (wire.InterruptResult, error)
-	createThreadFunc   func(ctx context.Context, params wire.ThreadCreateParams) (wire.ThreadCreateResult, error)
-	updateThreadFunc   func(ctx context.Context, params wire.ThreadUpdateParams) (wire.ThreadUpdateResult, error)
-	actionStatusFunc   func(ctx context.Context, actionID string) (wire.ActionStatusResult, error)
+	createThreadFunc        func(ctx context.Context, params wire.ThreadCreateParams) (wire.ThreadCreateResult, error)
+	updateThreadFunc        func(ctx context.Context, params wire.ThreadUpdateParams) (wire.ThreadUpdateResult, error)
+	moveThreadToProjectFunc func(ctx context.Context, params wire.ThreadsMoveToProjectParams) (wire.ThreadSummary, error)
+	actionStatusFunc        func(ctx context.Context, actionID string) (wire.ActionStatusResult, error)
 	listRequestsFunc   func(ctx context.Context, threadID string) (wire.RequestsListResult, error)
 	respondRequestFunc func(ctx context.Context, params wire.RequestsRespondParams) (wire.RequestsRespondResult, error)
 	listProvidersFunc  func(ctx context.Context) (wire.ProvidersListResult, error)
@@ -183,6 +184,13 @@ func (b *fakeBackend) UpdateThread(ctx context.Context, params wire.ThreadUpdate
 		return b.updateThreadFunc(ctx, params)
 	}
 	return wire.ThreadUpdateResult{}, nil
+}
+
+func (b *fakeBackend) MoveThreadToProject(ctx context.Context, params wire.ThreadsMoveToProjectParams) (wire.ThreadSummary, error) {
+	if b.moveThreadToProjectFunc != nil {
+		return b.moveThreadToProjectFunc(ctx, params)
+	}
+	return wire.ThreadSummary{}, nil
 }
 
 func (b *fakeBackend) ActionStatus(ctx context.Context, actionID string) (wire.ActionStatusResult, error) {

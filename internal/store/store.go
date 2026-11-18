@@ -1505,6 +1505,25 @@ func (s *Store) UpdateThreadWorkDir(ctx context.Context, id, workDir string, wor
 	return nil
 }
 
+// UpdateThreadProject 将线程移入指定项目，并清空 worktree_path、worktree_requested 与 session_id。
+// 若线程不存在返回 ErrNotFound。
+func (s *Store) UpdateThreadProject(ctx context.Context, id, projectID string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE threads SET project_id = ?, worktree_path = NULL, worktree_requested = 0, session_id = '' WHERE id = ?",
+		projectID, id)
+	if err != nil {
+		return fmt.Errorf("update thread project %s: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdateThreadContinuation 更新线程的 continuation。若线程不存在返回 ErrNotFound。
 func (s *Store) UpdateThreadContinuation(ctx context.Context, id, text string) error {
 	res, err := s.db.ExecContext(ctx, "UPDATE threads SET continuation = ? WHERE id = ?", text, id)

@@ -167,6 +167,27 @@ func (d *Dispatcher) handleThreadsMove(ctx context.Context, params json.RawMessa
 	return replySuccess(res)
 }
 
+func (d *Dispatcher) handleThreadsMoveToProject(ctx context.Context, params json.RawMessage, replySuccess func(any) *wire.Response, replyErr func(int, string) *wire.Response, replyWithBackendErr func(error) *wire.Response) *wire.Response {
+	var p wire.ThreadsMoveToProjectParams
+	if err := decodeStrict(params, &p); err != nil {
+		return replyErr(wire.InvalidParams, "Invalid params: "+err.Error())
+	}
+	if !isValidUUID(p.ThreadID) {
+		return replyErr(wire.InvalidParams, "Invalid params: 'threadID' must be a valid UUID")
+	}
+	if !isValidUUID(p.ProjectID) {
+		return replyErr(wire.InvalidParams, "Invalid params: 'projectID' must be a valid UUID")
+	}
+	if d.backend == nil {
+		return replyErr(wire.ErrCodeOperationRejected, "thread operations unavailable")
+	}
+	summary, err := d.backend.MoveThreadToProject(ctx, p)
+	if err != nil {
+		return replyWithBackendErr(err)
+	}
+	return replySuccess(summary)
+}
+
 func (d *Dispatcher) handleThreadsBranch(ctx context.Context, params json.RawMessage, replySuccess func(any) *wire.Response, replyErr func(int, string) *wire.Response, replyWithBackendErr func(error) *wire.Response) *wire.Response {
 	var p wire.ThreadsBranchParams
 	if err := decodeStrict(params, &p); err != nil {

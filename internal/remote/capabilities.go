@@ -65,6 +65,7 @@ var implementedMethods = []string{
 	"swarm.tiers.get",
 	"swarm.tiers.set",
 	"threads.move",
+	"threads.moveToProject",
 	"threads.branch",
 	"threads.continue",
 	"threads.commands",

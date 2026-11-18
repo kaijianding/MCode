@@ -1478,8 +1478,14 @@ func threadContextMenu(c *ui.Context, s *chatState, projectID string, thVal Thre
 				s.markDormantWithUndo(projectID, thVal.ID)
 			}
 		}
-		if m.Item("迁入 Worktree…").Chosen() {
-			s.openWorktreeMove(thVal.ID)
+		if chatsID := s.chatsProjectID(); chatsID != "" && projectID == chatsID {
+			if m.Item("移到项目…").Chosen() {
+				s.openMoveToProjectModal(thVal.ID)
+			}
+		} else {
+			if m.Item("迁入 Worktree…").Chosen() {
+				s.openWorktreeMove(thVal.ID)
+			}
 		}
 		m.Separator()
 		// 第三组：导出与复制类（不改动会话本身）。
@@ -1559,6 +1565,7 @@ func renderSidebarModals(c *ui.Context, s *chatState) {
 	renderRemoveProjectModal(c, s)
 	renderWorktreeManageModal(c, s)
 	renderWorktreeMoveModal(c, s)
+	renderMoveToProjectModal(c, s)
 }
 
 func renderRenameThreadModal(c *ui.Context, s *chatState) {
@@ -1868,6 +1875,10 @@ type worktreeUIState struct {
 	moveBranch   string
 	moveTransfer bool
 	moving       bool
+
+	moveToProjectOpen     bool
+	moveToProjectThreadID string
+	movingToProject       bool
 }
 
 var (
@@ -2316,6 +2327,136 @@ func renderWorktreeMoveModal(c *ui.Context, s *chatState) {
 						})
 					})
 				modalResizeGripsMin(c, modalDragWorktreeMove, width, height, 360, 160)
+			})
+	})
+}
+
+func (s *chatState) openMoveToProjectModal(threadID string) {
+	ws := getWorktreeUIState(s)
+	ws.mu.Lock()
+	ws.moveToProjectOpen = true
+	ws.moveToProjectThreadID = threadID
+	ws.movingToProject = false
+	ws.mu.Unlock()
+	s.invalidate()
+}
+
+func (s *chatState) closeMoveToProjectModal() {
+	ws := getWorktreeUIState(s)
+	ws.mu.Lock()
+	ws.moveToProjectOpen = false
+	ws.moveToProjectThreadID = ""
+	ws.mu.Unlock()
+	s.invalidate()
+}
+
+func (s *chatState) submitMoveToProject(projectID string) {
+	ws := getWorktreeUIState(s)
+	ws.mu.Lock()
+	if ws.movingToProject || ws.moveToProjectThreadID == "" {
+		ws.mu.Unlock()
+		return
+	}
+	ws.movingToProject = true
+	threadID := ws.moveToProjectThreadID
+	ws.mu.Unlock()
+	s.invalidate()
+
+	oldProjectID := s.chatsProjectID()
+	go func() {
+		err := s.client.MoveThreadToProject(threadID, projectID)
+		ws.mu.Lock()
+		ws.movingToProject = false
+		ws.mu.Unlock()
+		if err != nil {
+			s.setToast(err.Error())
+			s.invalidate()
+			return
+		}
+		s.closeMoveToProjectModal()
+		s.mu.Lock()
+		for i := range s.threads {
+			if s.threads[i].ID == threadID {
+				s.threads[i].ProjectID = projectID
+			}
+		}
+		if oldProjectID != "" {
+			oldList := s.threadsByProj[oldProjectID]
+			for i := range oldList {
+				if oldList[i].ID == threadID {
+					moved := oldList[i]
+					moved.ProjectID = projectID
+					s.threadsByProj[oldProjectID] = append(oldList[:i], oldList[i+1:]...)
+					s.threadsByProj[projectID] = append([]Thread{moved}, s.threadsByProj[projectID]...)
+					break
+				}
+			}
+		}
+		if s.collapsedProj == nil {
+			s.collapsedProj = make(map[string]bool)
+		}
+		s.collapsedProj[projectID] = false
+		s.mu.Unlock()
+		s.selectThread(threadID)
+		if oldProjectID != "" {
+			s.loadThreads(oldProjectID, false)
+		}
+		s.loadThreads(projectID, false)
+	}()
+}
+
+func renderMoveToProjectModal(c *ui.Context, s *chatState) {
+	ws := getWorktreeUIState(s)
+	ws.mu.Lock()
+	open := ws.moveToProjectOpen
+	ws.mu.Unlock()
+	if !open {
+		modalDragReset(modalDragMoveToProject)
+		return
+	}
+
+	s.mu.Lock()
+	projects := make([]Project, len(s.projects))
+	copy(projects, s.projects)
+	s.mu.Unlock()
+	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
+
+	modalDragModal(c, modalDragMoveToProject, &ws.moveToProjectOpen, func() {
+		if c.Shortcut(0, ui.KeyEscape) {
+			s.closeMoveToProjectModal()
+			return
+		}
+
+		ui.Column(c.Key("modal-move-to-project-card")).
+			Label("modal-move-to-project-card").
+			Width(280).
+			Background(ThemeSurface(c)).
+			BorderColor(ThemeBorder(c)).
+			BorderWidth(1).
+			Radius(RadiusLG).
+			Padding(Space2).
+			Gap(Space0).
+			Children(func() {
+				for _, p := range projects {
+					project := p
+					item := ui.ButtonBase(c.Key("modal-move-to-project-item-" + project.ID)).
+						Label(project.Name).
+						Padding(Space2, Space3).
+						Radius(RadiusSM).
+						FillWidth()
+					if item.Hovered() {
+						item.Background(ThemeHover(c))
+					}
+					if item.Clicked() {
+						s.submitMoveToProject(project.ID)
+					}
+					item.Children(func() {
+						ui.Text(c, project.Name).
+							FontSize(sidebarFont(TypeBody)).
+							TextColor(ThemePrimaryText(c)).
+							SingleLine()
+					})
+				}
 			})
 	})
 }

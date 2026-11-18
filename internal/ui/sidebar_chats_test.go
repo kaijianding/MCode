@@ -499,3 +499,102 @@ func TestChatsSidebarSearchOnlyChatsNoEmptyCard(t *testing.T) {
 		t.Fatalf("动态视图下仅对话命中时不应显示无结果卡片: %q", tt.Texts())
 	}
 }
+
+func TestChatsMoveToProjectMenu(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "对话"},
+			{ID: "p1", Name: "普通项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {{ID: "c1", ProjectID: "chats-builtin", Title: "对话会话", UpdatedAt: now}},
+			"p1":            {{ID: "t1", ProjectID: "p1", Title: "普通会话", UpdatedAt: now}},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("对话会话") && tt.HasText("普通会话")
+	})
+
+	// 1. 普通会话右键菜单：有「迁入 Worktree…」，没有「移到项目…」。
+	if err := tt.RightClick("普通会话"); err != nil {
+		t.Fatalf("RightClick 普通会话失败: %v", err)
+	}
+	tt.Frame()
+	normalMenu := tt.Menu()
+	var hasWorktree, hasMoveToProject bool
+	for _, item := range normalMenu {
+		if item == "迁入 Worktree…" {
+			hasWorktree = true
+		}
+		if item == "移到项目…" {
+			hasMoveToProject = true
+		}
+	}
+	if !hasWorktree || hasMoveToProject {
+		t.Fatalf("普通会话菜单应含「迁入 Worktree…」且不含「移到项目…」，实际: %v", normalMenu)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
+	// 2. 对话会话右键菜单：有「移到项目…」，没有「迁入 Worktree…」。
+	if err := tt.RightClick("对话会话"); err != nil {
+		t.Fatalf("RightClick 对话会话失败: %v", err)
+	}
+	tt.Frame()
+	chatsMenu := tt.Menu()
+	hasWorktree, hasMoveToProject = false, false
+	for _, item := range chatsMenu {
+		if item == "迁入 Worktree…" {
+			hasWorktree = true
+		}
+		if item == "移到项目…" {
+			hasMoveToProject = true
+		}
+	}
+	if !hasMoveToProject || hasWorktree {
+		t.Fatalf("对话会话菜单应含「移到项目…」且不含「迁入 Worktree…」，实际: %v", chatsMenu)
+	}
+
+	// 3. 点击「移到项目…」打开弹窗，选择「普通项目」后移动并保持选中。
+	if err := tt.ChooseMenuItem("移到项目…"); err != nil {
+		t.Fatalf("ChooseMenuItem 移到项目… 失败: %v", err)
+	}
+	tt.Frame()
+	if _, ok := tt.Find("modal-move-to-project-card"); !ok {
+		t.Fatal("点击「移到项目…」后应打开项目选择弹窗")
+	}
+	if err := tt.Click("普通项目"); err != nil {
+		t.Fatalf("点击目标项目失败: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		fake.mu.Lock()
+		calls := len(fake.moveThreadToProjectCalls)
+		fake.mu.Unlock()
+		state.mu.Lock()
+		inTarget := false
+		for _, th := range state.threadsByProj["p1"] {
+			if th.ID == "c1" {
+				inTarget = true
+				break
+			}
+		}
+		inChats := len(state.threadsByProj["chats-builtin"])
+		state.mu.Unlock()
+		return calls == 1 && inTarget && inChats == 0
+	})
+	state.mu.Lock()
+	selected := state.selectedThreadID
+	state.mu.Unlock()
+	if selected != "c1" {
+		t.Fatalf("移动后应保持选中该会话 c1, got %q", selected)
+	}
+}

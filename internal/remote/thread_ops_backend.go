@@ -303,6 +303,143 @@ func (b *MemoryBackend) MoveThread(ctx context.Context, threadID, direction stri
 	}, nil
 }
 
+// MoveThreadToProject 将内置「对话」项目中的会话移入指定的普通项目。
+func (b *MemoryBackend) MoveThreadToProject(ctx context.Context, p wire.ThreadsMoveToProjectParams) (wire.ThreadSummary, error) {
+	b.mu.Lock()
+	td, ok := b.threads[p.ThreadID]
+	if !ok || td == nil {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeResourceNotFound,
+			Message: fmt.Sprintf("thread %s not found", p.ThreadID),
+		}
+	}
+	if b.chatsProjectID == "" || td.summary.ProjectID != b.chatsProjectID {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "仅「对话」项目中的会话可移动到其他项目",
+		}
+	}
+	if _, ok := b.projects[p.ProjectID]; !ok {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeResourceNotFound,
+			Message: fmt.Sprintf("project %s not found", p.ProjectID),
+		}
+	}
+	if p.ProjectID == b.chatsProjectID {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "不能移动到「对话」项目",
+		}
+	}
+	stewardProjectID := ""
+	if b.stewardFeedID != "" {
+		if std, ok := b.threads[b.stewardFeedID]; ok && std != nil {
+			stewardProjectID = std.summary.ProjectID
+		}
+	}
+	if stewardProjectID != "" && p.ProjectID == stewardProjectID {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "不能移动到「总管」项目",
+		}
+	}
+	if td.summary.IsRunning || td.runTurnID != "" || td.runCancel != nil || td.stewardBusy {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "会话运行中，无法移动到其他项目",
+		}
+	}
+	if td.workDir != "" {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "会话已绑定独立工作目录，无法移动到其他项目",
+		}
+	}
+	if td.isHelper || td.summary.IsHelper || td.parentThreadID != "" || (td.summary.ParentThreadID != nil && *td.summary.ParentThreadID != "") {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeOperationRejected,
+			Message: "子会话无法移动到其他项目",
+		}
+	}
+	for _, other := range b.threads {
+		if other.parentThreadID == p.ThreadID || (other.summary.ParentThreadID != nil && *other.summary.ParentThreadID == p.ThreadID) {
+			b.mu.Unlock()
+			return wire.ThreadSummary{}, &wire.RPCError{
+				Code:    wire.ErrCodeOperationRejected,
+				Message: "包含子会话的会话无法移动到其他项目",
+			}
+		}
+	}
+
+	if err := b.ensureMessagesLocked(td, p.ThreadID); err != nil {
+		log.Printf("ensure messages for thread %s error: %v", p.ThreadID, err)
+	}
+	b.ensureMessagesLoadedLocked(td)
+
+	var (
+		hasExisting bool
+		minSort     int64
+	)
+	for _, t := range b.threads {
+		if t.summary.ProjectID == p.ProjectID {
+			if !hasExisting || t.sortOrder < minSort {
+				minSort = t.sortOrder
+				hasExisting = true
+			}
+		}
+	}
+	var sortOrder int64
+	if hasExisting {
+		sortOrder = minSort - 1
+	}
+
+	if b.store != nil {
+		if err := b.store.UpdateThreadProject(ctx, p.ThreadID, p.ProjectID); err != nil {
+			b.mu.Unlock()
+			if errors.Is(err, store.ErrNotFound) {
+				return wire.ThreadSummary{}, &wire.RPCError{
+					Code:    wire.ErrCodeResourceNotFound,
+					Message: fmt.Sprintf("thread %s not found", p.ThreadID),
+				}
+			}
+			return wire.ThreadSummary{}, err
+		}
+		if err := b.store.UpdateThreadSortOrder(ctx, p.ThreadID, sortOrder); err != nil {
+			log.Printf("store update thread sort order error (thread %s): %v", p.ThreadID, err)
+		}
+	}
+
+	td.summary.ProjectID = p.ProjectID
+	td.summary.WorktreeRequested = false
+	td.workDir = ""
+	td.sessionID = ""
+	td.sessionEpoch++
+	td.continuationSent = false
+	td.needsHandoff = len(td.messages) > 0
+	td.reinjectGuidance = true
+	delete(b.guidanceDelivered, p.ThreadID)
+	td.sortOrder = sortOrder
+	td.summary.OrderKey = formatOrderKey(sortOrder)
+	td.summary.UpdatedAt = b.nowLocked().Format(time.RFC3339Nano)
+	summary := b.summaryForPublishLocked(td)
+	hook := b.threadsChangedHook
+	b.mu.Unlock()
+
+	b.hub.Publish(p.ThreadID, nil, nil, summary)
+	if hook != nil {
+		hook(wire.ThreadsChanged{Threads: []wire.ThreadSummary{summary}})
+	}
+	return summary, nil
+}
+
 // stripLegacyOriginPrefixes 清理旧版本在会话标题中留下的 'Continued: ' 和 'Branch: ' 前缀。
 func stripLegacyOriginPrefixes(title string) string {
 	trimmed := strings.TrimSpace(title)

@@ -21,6 +21,7 @@ type Backend interface {
 	Interrupt(ctx context.Context, params wire.InterruptParams) (wire.InterruptResult, error)
 	CreateThread(ctx context.Context, params wire.ThreadCreateParams) (wire.ThreadCreateResult, error)
 	UpdateThread(ctx context.Context, params wire.ThreadUpdateParams) (wire.ThreadUpdateResult, error)
+	MoveThreadToProject(ctx context.Context, params wire.ThreadsMoveToProjectParams) (wire.ThreadSummary, error)
 	ActionStatus(ctx context.Context, actionID string) (wire.ActionStatusResult, error)
 	ListRequests(ctx context.Context, threadID string) (wire.RequestsListResult, error)
 	RespondRequest(ctx context.Context, params wire.RequestsRespondParams) (wire.RequestsRespondResult, error)

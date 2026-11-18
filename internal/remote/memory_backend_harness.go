@@ -166,6 +166,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 	}
 	sessionID := td.sessionID
 	needsHandoff := td.needsHandoff
+	reinjectGuidance := td.reinjectGuidance
 	// 会话文件已丢失时（例如本地会话被清理），把可见历史交接进本轮提示词，避免模型失去上下文。
 	// 只影响本轮，不写回线程状态；实现者本轮重建会话后，下一轮就不会再交接。
 	if !needsHandoff && sessionID != "" {
@@ -355,7 +356,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 	guidanceInjected := false
 	// 换新后的 provider 会话里没有首轮指导词，不论历史与交付状态都重新注入。
 	if !compactOnly && workDir != "" && guidanceBuilder != nil &&
-		(rotated || (isGuidanceTriggerText(userText) && b.guidancePending(threadID, priorHistory))) {
+		(rotated || reinjectGuidance || (isGuidanceTriggerText(userText) && b.guidancePending(threadID, priorHistory))) {
 		guidance := guidanceBuilder(workDir)
 		// 额外的首轮段落（普通会话的「可以交给总管」提示）同样只在首轮出现：
 		// 与指导词拼成一段前置，后续轮次不再带，也不会随历史累积。
@@ -1333,6 +1334,11 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 		}
 		b.mu.Unlock()
 		if guidanceInjected {
+			b.mu.Lock()
+			if td.runTurnID == turnID && td.sessionEpoch == recordedEpoch {
+				td.reinjectGuidance = false
+			}
+			b.mu.Unlock()
 			b.markGuidanceDelivered(threadID)
 		}
 		break

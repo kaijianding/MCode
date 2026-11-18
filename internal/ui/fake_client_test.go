@@ -514,7 +514,9 @@ type FakeClient struct {
 		Branch        string
 		TransferFiles bool
 	}
-	moveToWorktreeErr error
+	moveToWorktreeErr        error
+	moveThreadToProjectCalls [][2]string
+	moveThreadToProjectErr   error
 
 	bulkMarkReadCalls []BulkMarkReadCall
 	bulkMarkReadErr   error
@@ -4209,6 +4211,35 @@ func (f *FakeClient) MoveToWorktree(ctx context.Context, threadID, branch string
 		TransferFiles bool
 	}{ThreadID: threadID, Branch: branch, TransferFiles: transferFiles})
 	return f.moveToWorktreeErr
+}
+
+func (f *FakeClient) MoveThreadToProject(threadID, projectID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.moveThreadToProjectCalls = append(f.moveThreadToProjectCalls, [2]string{threadID, projectID})
+	if f.moveThreadToProjectErr != nil {
+		return f.moveThreadToProjectErr
+	}
+	var moved Thread
+	var found bool
+	for pid, list := range f.threads {
+		for i, th := range list {
+			if th.ID == threadID {
+				moved = th
+				f.threads[pid] = append(list[:i], list[i+1:]...)
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if found {
+		moved.ProjectID = projectID
+		f.threads[projectID] = append([]Thread{moved}, f.threads[projectID]...)
+	}
+	return nil
 }
 
 func (f *FakeClient) BulkMarkRead(ctx context.Context, projectID string, threadIDs []string) error {

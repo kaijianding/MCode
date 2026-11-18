@@ -1689,3 +1689,47 @@ func TestMessageErrKindRoundTrip(t *testing.T) {
 		t.Fatalf("普通消息的 ErrKind 期望 nil，实际为 %q", *list[1].ErrKind)
 	}
 }
+
+func TestUpdateThreadProject(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "update_thread_project_test.db")
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open 失败: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().UTC()
+	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
+	_ = s.UpsertProject(ctx, Project{ID: "p2", Name: "P2", Path: "/p2", CreatedAt: now, UpdatedAt: now})
+	if err := s.CreateThread(ctx, Thread{
+		ID:                "t1",
+		ProjectID:         "p1",
+		Title:             "T1",
+		Provider:          "claude",
+		SessionID:         "sess-old",
+		WorktreePath:      "/p1/wt",
+		WorktreeRequested: true,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}); err != nil {
+		t.Fatalf("CreateThread 失败: %v", err)
+	}
+
+	if err := s.UpdateThreadProject(ctx, "t1", "p2"); err != nil {
+		t.Fatalf("UpdateThreadProject 失败: %v", err)
+	}
+
+	got, err := s.GetThread(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetThread 失败: %v", err)
+	}
+	if got.ProjectID != "p2" || got.WorktreePath != "" || got.WorktreeRequested || got.SessionID != "" {
+		t.Fatalf("更新后字段不符: %+v", got)
+	}
+
+	if err := s.UpdateThreadProject(ctx, "missing", "p2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("不存在的线程应返回 ErrNotFound, got %v", err)
+	}
+}

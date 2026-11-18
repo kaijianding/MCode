@@ -1419,6 +1419,8 @@ type Client interface {
 	SaveProviderSetting(ctx context.Context, s ProviderSetting, apiKey string) (ProviderSetting, error)
 	// MoveToWorktree 将指定会话迁移至独立的 Git worktree 分支，支持是否迁移未提交文件。
 	MoveToWorktree(ctx context.Context, threadID, branch string, transferFiles bool) error
+	// MoveThreadToProject 将内置「对话」项目中的会话移入指定的普通项目。
+	MoveThreadToProject(threadID, projectID string) error
 	// BulkMarkRead 批量将指定会话标记为已读。
 	BulkMarkRead(ctx context.Context, projectID string, threadIDs []string) error
 	// ArchiveThreadWithUndo 归档指定会话，返回 10 秒内可通过 UndoBulkOperation 撤销的令牌。

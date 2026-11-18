@@ -905,6 +905,18 @@ func (c *Client) ForwardThread(ctx context.Context, threadID string) (string, er
 	return res.ThreadID, nil
 }
 
+// MoveThreadToProject 调用 backend.MoveThreadToProject 将内置「对话」项目中的会话移入指定的普通项目。
+func (c *Client) MoveThreadToProject(threadID, projectID string) error {
+	if c == nil || c.backend == nil {
+		return errors.New("backend 不可用")
+	}
+	_, err := c.backend.MoveThreadToProject(context.Background(), wire.ThreadsMoveToProjectParams{
+		ThreadID:  threadID,
+		ProjectID: projectID,
+	})
+	return err
+}
+
 // ThreadForwardedContext 调用 backend.ThreadForwardedContext 读取转发会话带入的历史上下文。
 func (c *Client) ThreadForwardedContext(ctx context.Context, threadID string) (mcodeui.ForwardedContext, bool, error) {
 	if c.backend == nil {

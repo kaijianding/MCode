@@ -238,3 +238,224 @@ func TestListProjectsKind(t *testing.T) {
 		t.Fatalf("普通项目 Kind = %q, want empty", kinds[normalProjID])
 	}
 }
+
+func TestMoveThreadToProject(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "move_to_project.db")
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer s.Close()
+
+	hub := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	mockH := &mockHarness{
+		kind: "mock",
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			emit(harness.Event{Type: harness.EventSession, SessionID: "sess-" + turn.ID})
+			emit(harness.Event{Type: harness.EventText, Text: "reply"})
+			return nil
+		},
+	}
+	backend.RegisterHarness(mockH)
+	var guidanceDirs []string
+	backend.SetGuidanceBuilder(func(workDir string) string {
+		guidanceDirs = append(guidanceDirs, workDir)
+		return "[GUIDANCE:" + filepath.Base(workDir) + "]"
+	})
+	if err := backend.AttachStore(ctx, s); err != nil {
+		t.Fatalf("AttachStore: %v", err)
+	}
+
+	chatsPath := t.TempDir()
+	targetPath := t.TempDir()
+	chatsProjID := newUUID()
+	targetProjID := newUUID()
+	backend.AddProject(wire.ProjectSummary{ID: chatsProjID, Name: "对话", Path: chatsPath})
+	backend.AddProject(wire.ProjectSummary{ID: targetProjID, Name: "目标项目", Path: targetPath})
+	backend.SetChatsProjectID(chatsProjID)
+
+	existingRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: targetProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(existing) failed: %v", err)
+	}
+	chatsRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: chatsProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(chats) failed: %v", err)
+	}
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: chatsRes.ThreadID,
+		Text:     "首轮消息",
+		ActionID: newUUID(),
+	}); err != nil {
+		t.Fatalf("SendMessage(1) failed: %v", err)
+	}
+	waitThreadIdle(t, backend, ctx, chatsRes.ThreadID)
+
+	summary, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{
+		ThreadID:  chatsRes.ThreadID,
+		ProjectID: targetProjID,
+	})
+	if err != nil {
+		t.Fatalf("MoveThreadToProject failed: %v", err)
+	}
+	if summary.ProjectID != targetProjID {
+		t.Fatalf("summary.ProjectID = %q, want %q", summary.ProjectID, targetProjID)
+	}
+	if gotDir, ok := backend.ThreadWorkDir(chatsRes.ThreadID); !ok || gotDir != targetPath {
+		t.Fatalf("移动后 ThreadWorkDir = (%q, %v), want (%q, true)", gotDir, ok, targetPath)
+	}
+	backend.mu.Lock()
+	sessID := backend.threads[chatsRes.ThreadID].sessionID
+	needsHandoff := backend.threads[chatsRes.ThreadID].needsHandoff
+	backend.mu.Unlock()
+	if sessID != "" || !needsHandoff {
+		t.Fatalf("移动后 sessionID = %q, needsHandoff = %v; want empty and true", sessID, needsHandoff)
+	}
+
+	// 移动后排在目标项目最前。
+	targetThreads, err := backend.ListThreads(ctx, wire.ThreadListParams{ProjectID: &targetProjID})
+	if err != nil {
+		t.Fatalf("ListThreads(target) failed: %v", err)
+	}
+	if len(targetThreads.Threads) != 2 || targetThreads.Threads[0].ID != chatsRes.ThreadID || targetThreads.Threads[1].ID != existingRes.ThreadID {
+		t.Fatalf("目标项目会话顺序不符: %+v", targetThreads.Threads)
+	}
+
+	// 移动后的下一轮应重新注入目标项目的指导词，并带本地历史交接。
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: chatsRes.ThreadID,
+		Text:     "第二轮消息",
+		ActionID: newUUID(),
+	}); err != nil {
+		t.Fatalf("SendMessage(2) failed: %v", err)
+	}
+	waitThreadIdle(t, backend, ctx, chatsRes.ThreadID)
+	calls := mockH.getTurnCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 turn calls, got %d", len(calls))
+	}
+	if calls[1].WorkDir != targetPath || calls[1].SessionID != "" {
+		t.Fatalf("第二轮 Turn 参数不符: WorkDir=%q SessionID=%q", calls[1].WorkDir, calls[1].SessionID)
+	}
+	if len(guidanceDirs) != 2 || guidanceDirs[1] != targetPath {
+		t.Fatalf("移动后应重新为目标项目构建指导词: %v", guidanceDirs)
+	}
+
+	// 重新 AttachStore 后仍属于目标项目且排在最前。
+	hub2 := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub2.Close()
+	backend2 := NewMemoryBackend(hub2)
+	defer backend2.Close()
+	if err := backend2.AttachStore(ctx, s); err != nil {
+		t.Fatalf("AttachStore(2): %v", err)
+	}
+	backend2.SetChatsProjectID(chatsProjID)
+	reloaded, err := backend2.GetThread(ctx, chatsRes.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThread after reload: %v", err)
+	}
+	if reloaded.ProjectID != targetProjID {
+		t.Fatalf("重载后 ProjectID = %q, want %q", reloaded.ProjectID, targetProjID)
+	}
+	if gotDir, ok := backend2.ThreadWorkDir(chatsRes.ThreadID); !ok || gotDir != targetPath {
+		t.Fatalf("重载后 ThreadWorkDir = (%q, %v), want (%q, true)", gotDir, ok, targetPath)
+	}
+}
+
+func TestMoveThreadToProjectRejects(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "move_rejects.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer s.Close()
+
+	hub := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.RegisterHarness(&mockHarness{kind: "mock"})
+	if err := backend.AttachStore(ctx, s); err != nil {
+		t.Fatalf("AttachStore: %v", err)
+	}
+
+	chatsProjID := newUUID()
+	stewardProjID := newUUID()
+	normalProjID := newUUID()
+	otherProjID := newUUID()
+	backend.AddProject(wire.ProjectSummary{ID: chatsProjID, Name: "对话", Path: t.TempDir()})
+	backend.AddProject(wire.ProjectSummary{ID: stewardProjID, Name: "总管", Path: t.TempDir()})
+	backend.AddProject(wire.ProjectSummary{ID: normalProjID, Name: "普通项目1", Path: t.TempDir()})
+	backend.AddProject(wire.ProjectSummary{ID: otherProjID, Name: "普通项目2", Path: t.TempDir()})
+	backend.SetChatsProjectID(chatsProjID)
+	if _, err := backend.EnsureStewardFeedThread(ctx, stewardProjID); err != nil {
+		t.Fatalf("EnsureStewardFeedThread: %v", err)
+	}
+
+	chatsRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: chatsProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(chats): %v", err)
+	}
+	normalRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: normalProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(normal): %v", err)
+	}
+
+	// 1. 会话不存在
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: newUUID(), ProjectID: normalProjID}); err == nil {
+		t.Fatal("不存在的会话应被拒绝")
+	}
+	// 2. 非对话会话
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: normalRes.ThreadID, ProjectID: otherProjID}); err == nil {
+		t.Fatal("普通项目会话应被拒绝")
+	}
+	// 3. 目标项目不存在
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: newUUID()}); err == nil {
+		t.Fatal("不存在的目标项目应被拒绝")
+	}
+	// 4. 目标是对话项目
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: chatsProjID}); err == nil {
+		t.Fatal("目标是对话项目应被拒绝")
+	}
+	// 5. 目标是总管项目
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: stewardProjID}); err == nil {
+		t.Fatal("目标是总管项目应被拒绝")
+	}
+	// 6. 会话运行中
+	backend.mu.Lock()
+	backend.threads[chatsRes.ThreadID].runTurnID = "turn-running"
+	backend.mu.Unlock()
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: normalProjID}); err == nil {
+		t.Fatal("运行中的会话应被拒绝")
+	}
+	backend.mu.Lock()
+	backend.threads[chatsRes.ThreadID].runTurnID = ""
+	backend.mu.Unlock()
+
+	// 7. 已绑定 workDir
+	backend.mu.Lock()
+	backend.threads[chatsRes.ThreadID].workDir = "/some/wt"
+	backend.mu.Unlock()
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: normalProjID}); err == nil {
+		t.Fatal("绑定 workDir 的会话应被拒绝")
+	}
+	backend.mu.Lock()
+	backend.threads[chatsRes.ThreadID].workDir = ""
+	backend.mu.Unlock()
+
+	// 8. 有子会话或自身是子会话
+	childID := newUUID()
+	backend.AddThread(wire.ThreadSummary{ID: childID, ProjectID: chatsProjID, ParentThreadID: &chatsRes.ThreadID, IsHelper: true}, nil)
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: childID, ProjectID: normalProjID}); err == nil {
+		t.Fatal("helper 子会话应被拒绝")
+	}
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: normalProjID}); err == nil {
+		t.Fatal("有子会话的父会话应被拒绝")
+	}
+}

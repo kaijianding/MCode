@@ -683,6 +683,17 @@ func (d *Dispatcher) handleSingle(ctx context.Context, c Conn, raw []byte) *wire
 			return replySuccess(result)
 		}, replyErr, replyWithBackendErr)
 
+	case "threads.moveToProject":
+		return d.handleThreadsMoveToProject(ctx, env.Params, func(result any) *wire.Response {
+			if th, ok := result.(wire.ThreadSummary); ok {
+				d.broadcastThreadsChanged(wire.ThreadsChanged{
+					Threads: []wire.ThreadSummary{th},
+				})
+				d.NotifyAuthed(projectExtChangedMethod, wire.ProjectExtChangedParams{ProjectID: th.ProjectID})
+			}
+			return replySuccess(result)
+		}, replyErr, replyWithBackendErr)
+
 	case "threads.branch":
 		return d.handleThreadsBranch(ctx, env.Params, func(result any) *wire.Response {
 			if br, ok := result.(wire.ThreadsBranchResult); ok && br.ThreadID != "" {

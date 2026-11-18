@@ -33,6 +33,7 @@ const (
 	modalDragRemoveProject     = "modal-drag-remove-project"
 	modalDragWorktreeManage    = "modal-drag-worktree-manage"
 	modalDragWorktreeMove      = "modal-drag-worktree-move"
+	modalDragMoveToProject     = "modal-drag-move-to-project"
 	modalDragGitHubClone       = "modal-drag-github-clone"
 	modalDragRemotePairing     = "modal-drag-remote-pairing"
 	modalDragContextCreate     = "modal-drag-context-create"

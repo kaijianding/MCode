@@ -1153,7 +1153,7 @@ type ThreadsGetDiffResult struct {
 	MetadataTruncated *bool        `json:"metadataTruncated,omitempty"`
 }
 
-// --- 会话移动 (threads.move) ---
+// --- 会话移动 (threads.move / threads.moveToProject) ---
 
 // ThreadsMoveParams 对应 threads.move 请求参数
 type ThreadsMoveParams struct {
@@ -1165,6 +1165,12 @@ type ThreadsMoveParams struct {
 type ThreadsMoveResult struct {
 	Thread ThreadSummary `json:"thread"`
 	Moved  bool          `json:"moved"`
+}
+
+// ThreadsMoveToProjectParams 对应 threads.moveToProject 请求参数
+type ThreadsMoveToProjectParams struct {
+	ThreadID  string `json:"threadID"`
+	ProjectID string `json:"projectID"`
 }
 
 // --- 会话队列与跟进项 (threads.queue.*) ---
