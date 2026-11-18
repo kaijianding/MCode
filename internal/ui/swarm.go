@@ -3093,6 +3093,7 @@ func renderSwarmReportMessageCapsules(c *ui.Context, s *chatState, hp *swarmPane
 			Name:         entry.Name,
 			Text:         swarmReportPillText(entry),
 			StatusColor:  swarmReportStatusColor(c, entry.Status),
+			Tint:         swarmCapsuleTint(c, entry.Status),
 			TierName:     chipName,
 			TierColor:    chipColor,
 			TierReadOnly: chipReadOnly,

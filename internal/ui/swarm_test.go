@@ -2004,3 +2004,20 @@ func TestSwarmHeaderBadgeColors(t *testing.T) {
 	}, 100, 100)
 	tt.Frame()
 }
+
+func TestSwarmCapsuleTint(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		if got, want := swarmCapsuleTint(c, "已完成"), ThemeSuccess(c).Alpha(0.12); got != want {
+			t.Errorf("已完成底色 = %+v, want %+v", got, want)
+		}
+		if got, want := swarmCapsuleTint(c, "失败"), ThemeDanger(c).Alpha(0.12); got != want {
+			t.Errorf("失败底色 = %+v, want %+v", got, want)
+		}
+		for _, status := range []string{"运行中", "已停止"} {
+			if got := swarmCapsuleTint(c, status); got != (ui.Color{}) {
+				t.Errorf("%s底色 = %+v, want zero", status, got)
+			}
+		}
+	}, 100, 100)
+	tt.Frame()
+}

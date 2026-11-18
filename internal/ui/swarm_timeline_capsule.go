@@ -406,10 +406,24 @@ type swarmCapsuleView struct {
 	Name         string   // 头像里的首字符来源
 	Text         string   // 主文案，如「Aspen 运行中」「Cove 已完成工作」
 	StatusColor  ui.Color // 状态点颜色
+	Tint         ui.Color // 结果底色：成功淡绿、失败淡红，零值表示用默认表面色
 	TierName     string   // 档位展示名，为空时不显示档位徽章
 	TierColor    ui.Color // 档位徽章的强调色
 	TierReadOnly bool     // 档位是否只读，只读时徽章带锁图标
 	Elapsed      string   // 耗时文案，为空时不显示
+}
+
+// swarmCapsuleTint 根据中文状态词返回胶囊的结果底色：已完成用淡绿色、失败用淡红色，
+// 其余状态返回零值表示沿用默认表面色。
+func swarmCapsuleTint(c *ui.Context, status string) ui.Color {
+	switch strings.TrimSpace(status) {
+	case "已完成":
+		return ThemeSuccess(c).Alpha(0.12)
+	case "失败":
+		return ThemeDanger(c).Alpha(0.12)
+	default:
+		return ui.Color{}
+	}
 }
 
 // renderSwarmCapsuleFlow 渲染横向流式的胶囊容器：胶囊从左到右排列，放不下时自动换行；
@@ -438,7 +452,15 @@ func renderSwarmCapsuleButton(c *ui.Context, key string, view swarmCapsuleView, 
 		Border(1, ThemeBorder(c)).
 		Background(ThemeSurface(c))
 
-	if opened {
+	if view.Tint.A > 0 {
+		if opened || btn.Hovered() {
+			hoverTint := view.Tint
+			hoverTint.A = 255
+			btn.Background(hoverTint.Alpha(0.2))
+		} else {
+			btn.Background(view.Tint)
+		}
+	} else if opened {
 		btn.Background(ThemeSelected(c))
 	} else if btn.Hovered() {
 		btn.Background(ThemeHover(c))
@@ -537,6 +559,7 @@ func renderSwarmCapsule(c *ui.Context, s *chatState, leadID string, h SwarmBee, 
 		Name:         swarmCapsuleName(h),
 		Text:         swarmCapsuleTitle(h),
 		StatusColor:  swarmStatusColor(c, h.Status),
+		Tint:         swarmCapsuleTint(c, swarmReportStatusText(h.Status)),
 		TierName:     tierName,
 		TierColor:    swarmTierColor(c, h.Tier),
 		TierReadOnly: h.ReadOnly,
