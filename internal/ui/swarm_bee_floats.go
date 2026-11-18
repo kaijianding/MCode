@@ -1252,6 +1252,7 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 				swarmFloatMu.Lock()
 				swarmSelectedBeeID[leadID] = bee.ThreadID
 				swarmFloatMu.Unlock()
+				markSwarmFailedBeeSeen(s, leadID, bee)
 				*open = false
 				s.invalidate()
 			}
@@ -1305,6 +1306,7 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 					}
 					if pop.Clicked() {
 						s.popOutSwarmBee(bee.ThreadID)
+						markSwarmFailedBeeSeen(s, leadID, bee)
 						*open = false
 						s.invalidate()
 					}

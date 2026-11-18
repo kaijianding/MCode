@@ -587,6 +587,7 @@ func renderBackgroundBeeRow(c *ui.Context, s *chatState, key string, index int, 
 	}
 	if btn.Clicked() {
 		openSwarmFloatForBee(leadID, h.ThreadID)
+		markSwarmFailedBeeSeen(s, leadID, h)
 		s.invalidate()
 		if onNavigate != nil {
 			onNavigate()

@@ -129,6 +129,7 @@ func renderSwarmQuestionBannerRow(c *ui.Context, s *chatState, leadID string, h 
 					}
 					renderApprovalButton(c, key+"-open", "去回答", "打开该子线程浮窗自己回答", true, false, func() {
 						openSwarmFloatForBee(leadID, h.ThreadID)
+						markSwarmFailedBeeSeen(s, leadID, h)
 						s.invalidate()
 					})
 				})

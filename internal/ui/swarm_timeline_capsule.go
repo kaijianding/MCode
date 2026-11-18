@@ -664,6 +664,7 @@ func renderSwarmCapsuleOpenFloatButton(c *ui.Context, s *chatState, leadID strin
 			onOpened()
 		}
 		openSwarmFloatForBee(leadID, h.ThreadID)
+		markSwarmFailedBeeSeen(s, leadID, h)
 		s.invalidate()
 	}
 	btn.Children(func() {

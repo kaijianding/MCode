@@ -948,6 +948,130 @@ func paintSwarmToggle(c *ui.Context, painter *ui.Painter, r ui.Rect, p swarmTogg
 	}
 }
 
+var (
+	swarmFailedSeenMu sync.Mutex
+	// swarmFailedSeen 记录当前进程内用户已查看的失败子代理（主会话 ID -> 子代理 ID -> 查看时的 FinishedAt）。
+	// 渲染每帧只读此内存表，不做任何磁盘 I/O；开启持久化时同步落盘并在启动时由 applyUIState 恢复。
+	swarmFailedSeen = make(map[string]map[string]string)
+)
+
+// swarmFailedBeeFinishedKey 返回失败子代理用于比对是否重跑的完成时间键；FinishedAt 为 nil 时记空串。
+func swarmFailedBeeFinishedKey(bee SwarmBee) string {
+	if bee.FinishedAt == nil {
+		return ""
+	}
+	return bee.FinishedAt.UTC().Format(time.RFC3339Nano)
+}
+
+// swarmUnseenFailedCount 统计当前会话里处于 failed 且尚未被查看（或 FinishedAt 已变化）的子代理数量。
+// 仅读取内存表，不在渲染路径做磁盘 I/O。
+func swarmUnseenFailedCount(leadID string, bees []SwarmBee) int {
+	if len(bees) == 0 {
+		return 0
+	}
+	swarmFailedSeenMu.Lock()
+	defer swarmFailedSeenMu.Unlock()
+	leadSeen := swarmFailedSeen[leadID]
+	count := 0
+	for _, bee := range bees {
+		if bee.Status != "failed" {
+			continue
+		}
+		id := strings.TrimSpace(bee.ThreadID)
+		if id != "" && len(leadSeen) > 0 {
+			if recorded, ok := leadSeen[id]; ok && recorded == swarmFailedBeeFinishedKey(bee) {
+				continue
+			}
+		}
+		count++
+	}
+	return count
+}
+
+// markSwarmFailedBeesSeen 把给定列表里所有 Status == "failed" 的子代理记为已查看，
+// 并在开启持久化时异步写回 ui-state.json。
+func markSwarmFailedBeesSeen(s *chatState, leadID string, bees []SwarmBee) {
+	if leadID == "" || len(bees) == 0 {
+		return
+	}
+	hasFailed := false
+	for _, bee := range bees {
+		if bee.Status == "failed" && strings.TrimSpace(bee.ThreadID) != "" {
+			hasFailed = true
+			break
+		}
+	}
+	if !hasFailed {
+		return
+	}
+
+	persist := uiStatePersistenceEnabled(s)
+	var records map[string]map[string]string
+
+	swarmFailedSeenMu.Lock()
+	leadSeen := swarmFailedSeen[leadID]
+	changed := false
+	for _, bee := range bees {
+		if bee.Status != "failed" {
+			continue
+		}
+		id := strings.TrimSpace(bee.ThreadID)
+		if id == "" {
+			continue
+		}
+		key := swarmFailedBeeFinishedKey(bee)
+		if leadSeen == nil {
+			leadSeen = make(map[string]string)
+			swarmFailedSeen[leadID] = leadSeen
+		}
+		if prev, ok := leadSeen[id]; !ok || prev != key {
+			leadSeen[id] = key
+			changed = true
+		}
+	}
+	if changed && persist {
+		records = copyNestedStringMap(swarmFailedSeen)
+	}
+	swarmFailedSeenMu.Unlock()
+
+	if changed && persist {
+		saveSwarmFailedSeen(records)
+	}
+}
+
+// markSwarmFailedBeeSeen 在用户点开某个具体子代理时，若它当前处于 failed 状态则记为已查看。
+func markSwarmFailedBeeSeen(s *chatState, leadID string, bee SwarmBee) {
+	if bee.Status != "failed" {
+		return
+	}
+	markSwarmFailedBeesSeen(s, leadID, []SwarmBee{bee})
+}
+
+// mergeSwarmFailedSeenMemory 把启动时从磁盘读到的已查看记录并入内存表（仅由 applyUIState 调用）。
+func mergeSwarmFailedSeenMemory(records map[string]map[string]string) {
+	if len(records) == 0 {
+		return
+	}
+	swarmFailedSeenMu.Lock()
+	defer swarmFailedSeenMu.Unlock()
+	for leadID, bees := range records {
+		if leadID == "" || len(bees) == 0 {
+			continue
+		}
+		dst := swarmFailedSeen[leadID]
+		if dst == nil {
+			dst = make(map[string]string, len(bees))
+			swarmFailedSeen[leadID] = dst
+		}
+		for beeID, finishedAt := range bees {
+			if beeID == "" {
+				continue
+			}
+			dst[beeID] = finishedAt
+		}
+	}
+}
+
 // renderSwarmHeaderButton 渲染会话头部的 Swarm 切换按钮：外观与模型选择面板里的编排开关一致
 // （开启时外圈为名册色渐变环），右键弹出会话专属开关菜单。
 func renderSwarmHeaderButton(c *ui.Context, s *chatState) {
@@ -985,12 +1109,7 @@ func renderSwarmHeaderButton(c *ui.Context, s *chatState) {
 		queuedCount = 0
 	}
 	pendingCount := runningCount + queuedCount
-	failedCount := 0
-	for _, bee := range activeBees {
-		if bee.Status == "failed" {
-			failedCount++
-		}
-	}
+	failedCount := swarmUnseenFailedCount(leadID, activeBees)
 	floatShown := swarmFloatVisible(leadID, activeBees)
 	// 等待用户回答的子线程：按钮右上角叠角标，tooltip 说明，点击直接打开对应子线程的浮窗。
 	waitingBees := swarmWaitingBeeIDs(s, activeBees)
@@ -1060,6 +1179,7 @@ func renderSwarmHeaderButton(c *ui.Context, s *chatState) {
 				} else {
 					undismissSwarmFloatPanel(leadID)
 				}
+				markSwarmFailedBeesSeen(s, leadID, activeBees)
 				s.invalidate()
 			}
 			// 右键菜单直接切换会话级工作模式；子线程（isBee）本身不承载主导角色，不挂菜单。
