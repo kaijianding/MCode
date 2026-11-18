@@ -892,8 +892,8 @@ func TestModelPickerListPageLockedAgents(t *testing.T) {
 				t.Fatalf("点击 Agent 分组失败：%v", err)
 			}
 			settleModelPickerPage(tt)
-			if !state.agentOpen["codex"] || !tt.HasText("o3-mini") {
-				t.Fatalf("应展开 Codex 的模型: open=%v texts=%v", state.agentOpen, tt.Texts())
+			if !state.openCardSet || state.openCard != "codex" || !tt.HasText("o3-mini") {
+				t.Fatalf("应展开 Codex 的模型: open=%q set=%v texts=%v", state.openCard, state.openCardSet, tt.Texts())
 			}
 		})
 	}
@@ -1065,8 +1065,8 @@ func TestModelPickerLeadListRestoresPairs(t *testing.T) {
 	state.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
 	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerListPage(c, props, state, ModelPickerSideLead) }, 330, 640)
 	settleModelPickerPage(tt)
-	if !tt.HasText("配对") || !tt.HasText("模型") {
-		t.Fatalf("主导侧列表应保留配对分组: %v", tt.Texts())
+	if !tt.HasText("配对") || magpieTestHasExactText(tt, "模型") {
+		t.Fatalf("主导侧列表应保留配对分组并去掉「模型」小节标题: %v", tt.Texts())
 	}
 	if err := tt.Click("深度思考"); err != nil {
 		t.Fatalf("点击配对失败：%v", err)
@@ -1166,7 +1166,7 @@ func TestModelPickerTabSwitchKeepsListOpen(t *testing.T) {
 
 func TestModelPickerBackButtonReturnsToEffortCard(t *testing.T) {
 	providers := modelPickerTestProviders()
-	state := &ModelPickerState{agentOpen: map[string]bool{"codex": true}}
+	state := &ModelPickerState{openCard: "codex", openCardSet: true}
 	props := ModelPickerProps{
 		Mode: ModelPickerSwarm, KeyPrefix: "back-", ScopeKey: "back-test", State: state,
 		Providers: providers,
@@ -1181,8 +1181,8 @@ func TestModelPickerBackButtonReturnsToEffortCard(t *testing.T) {
 	if state.listOpen(props.ScopeKey, ModelPickerSideLead) {
 		t.Fatal("返回后应关闭模型列表页")
 	}
-	if state.searchQuery != "" || state.agentOpen != nil {
-		t.Fatalf("返回后应清空查询与分组展开状态: %q %v", state.searchQuery, state.agentOpen)
+	if state.searchQuery != "" || state.openCard != "" || state.openCardSet {
+		t.Fatalf("返回后应清空查询与分组展开状态: %q %q %v", state.searchQuery, state.openCard, state.openCardSet)
 	}
 }
 
@@ -1752,5 +1752,164 @@ func TestModelPickerListRowShowsTrimmedName(t *testing.T) {
 	}
 	if _, ok := tt.Find("DeepSeek V4.1 Flash (auto)"); !ok {
 		t.Fatalf("按钮 Label 应保留完整原名以便查找/点击: %v", tt.AccessAll())
+	}
+}
+
+func TestModelPickerAccordionSingleOpen(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "accordion-single-open"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "accordion-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Pins:      []ModelPin{{Provider: "claude", ModelID: "claude-3-7-sonnet"}},
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-5-haiku"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("Claude"); err != nil {
+		t.Fatalf("点击 Claude 标题失败：%v", err)
+	}
+	settleModelPickerPage(tt)
+	if tt.HasText("Claude 3.5 Haiku") {
+		t.Fatalf("再次点击已展开的 Claude 后应全部收起: %v", tt.Texts())
+	}
+
+	if err := tt.Click("Claude"); err != nil {
+		t.Fatalf("展开 Claude 标题失败：%v", err)
+	}
+	settleModelPickerPage(tt)
+	if !tt.HasText("Claude 3.5 Haiku") || tt.HasText("o3-mini") {
+		t.Fatalf("展开 Claude 后应仅显示 Claude 模型: %v", tt.Texts())
+	}
+
+	if err := tt.Click("Codex"); err != nil {
+		t.Fatalf("点击 Codex 标题失败：%v", err)
+	}
+	settleModelPickerPage(tt)
+	if tt.HasText("Claude 3.5 Haiku") || tt.HasText("Claude 3.7 Sonnet") || !tt.HasText("o3-mini") {
+		t.Fatalf("点击 Codex 后应关闭 Claude 并展开 Codex: %v", tt.Texts())
+	}
+
+	if err := tt.Click("收藏"); err != nil {
+		t.Fatalf("点击收藏标题失败：%v", err)
+	}
+	settleModelPickerPage(tt)
+	if tt.HasText("Claude 3.5 Haiku") || tt.HasText("o3-mini") || !tt.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("点击收藏后应关闭 Agent 分组并显示收藏行: %v", tt.Texts())
+	}
+}
+
+func TestModelPickerDefaultOpenCardPrefersPinned(t *testing.T) {
+	providers := modelPickerTestProviders()
+	pins := []ModelPin{
+		{Provider: "claude", ModelID: "claude-3-7-sonnet"},
+		{Provider: "codex", ModelID: "o3-mini"},
+	}
+
+	t.Run("当前模型在收藏里默认仅展开收藏", func(t *testing.T) {
+		state := &ModelPickerState{}
+		scope := "default-open-pinned"
+		state.setListOpen(scope, ModelPickerSideLead, true)
+		props := ModelPickerProps{
+			Mode:      ModelPickerSimple,
+			KeyPrefix: "def-pinned-",
+			ScopeKey:  scope,
+			State:     state,
+			Providers: providers,
+			Pins:      pins,
+			Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		}
+		tt := ui.NewTester(func(c *ui.Context) {
+			renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+		}, 330, 640)
+		settleModelPickerPage(tt)
+		if !tt.HasText("Claude 3.7 Sonnet") || !tt.HasText("o3-mini") {
+			t.Fatalf("应默认展开收藏卡片: %v", tt.Texts())
+		}
+		if tt.HasText("Claude 3.5 Haiku") {
+			t.Fatalf("收藏默认展开时当前 Agent 卡片应保持收起: %v", tt.Texts())
+		}
+	})
+
+	t.Run("当前模型不在收藏里默认展开当前Agent", func(t *testing.T) {
+		state := &ModelPickerState{}
+		scope := "default-open-agent"
+		state.setListOpen(scope, ModelPickerSideLead, true)
+		props := ModelPickerProps{
+			Mode:      ModelPickerSimple,
+			KeyPrefix: "def-agent-",
+			ScopeKey:  scope,
+			State:     state,
+			Providers: providers,
+			Pins:      pins,
+			Selection: ModelSelection{Provider: "claude", Model: "claude-3-5-haiku"},
+		}
+		tt := ui.NewTester(func(c *ui.Context) {
+			renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+		}, 330, 640)
+		settleModelPickerPage(tt)
+		if !tt.HasText("Claude 3.5 Haiku") || !tt.HasText("Claude 3.7 Sonnet") {
+			t.Fatalf("应默认展开当前 Agent 卡片: %v", tt.Texts())
+		}
+		if tt.HasText("o3-mini") {
+			t.Fatalf("当前 Agent 默认展开时收藏卡片应保持收起: %v", tt.Texts())
+		}
+	})
+}
+
+func TestModelPickerQuotaOnAgentHeader(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "quota-header"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "quota-hdr-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		QuotaUsed: func(id string) (float64, bool) {
+			if id == "codex" {
+				return 35, true
+			}
+			return 0, false
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if tt.HasText("o3-mini") {
+		t.Fatalf("Codex 初始应处于收起状态: %v", tt.Texts())
+	}
+	if !magpieTestHasExactText(tt, "35%") {
+		t.Fatalf("Agent 收起时标题行也应显示配额 35%%: %v", tt.Texts())
+	}
+
+	if err := tt.Click("Codex"); err != nil {
+		t.Fatalf("点击 Codex 标题失败：%v", err)
+	}
+	settleModelPickerPage(tt)
+	if !tt.HasText("o3-mini") {
+		t.Fatalf("点击 Codex 后应展开模型行: %v", tt.Texts())
+	}
+	count := 0
+	for _, txt := range tt.Texts() {
+		if txt == "35%" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("展开后 35%% 应仅在标题行出现一次，实际 %d 次: %v", count, tt.Texts())
 	}
 }

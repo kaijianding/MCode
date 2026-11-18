@@ -60,7 +60,8 @@ type ModelPickerState struct {
 	MaxBeesOpen bool            // 并发 Bee 上限下拉菜单展开状态
 	TierEditing string          // 正在为其选择模型的档位 ID，空表示未编辑档位
 	tiersOpen   bool            // 列表页档位区是否展开；默认折叠
-	agentOpen   map[string]bool // 模型列表页各 Agent 分组展开状态；键为 provider ID，未记录时仅当前 Agent 展开
+	openCard    string          // 列表页当前展开的卡片；"" 表示全部收起；未设置时按默认
+	openCardSet bool
 	searchQuery string          // 列表页搜索框内容，按名称筛选模型
 
 	// pageDepth 是上一帧渲染的二级页深度（0 强度卡片、1 模型列表、2 更多模型），
@@ -85,7 +86,8 @@ func (st *ModelPickerState) Reset() {
 	st.MaxBeesOpen = false
 	st.TierEditing = ""
 	st.tiersOpen = false
-	st.agentOpen = nil
+	st.openCard = ""
+	st.openCardSet = false
 	st.searchQuery = ""
 	st.pageDepth = 0
 	st.pageDir = 0
@@ -1345,7 +1347,8 @@ func renderModelPickerSideTabs(c *ui.Context, p ModelPickerProps, state *ModelPi
 					if state.listOpen(p.ScopeKey, modelPickerSideFromTab(state.Tab)) {
 						state.setListOpen(p.ScopeKey, modelPickerSideFromTab(state.Tab), false)
 						state.setListOpen(p.ScopeKey, modelPickerSideFromTab(item.id), true)
-						state.agentOpen = nil
+						state.openCard = ""
+						state.openCardSet = false
 					}
 					state.Tab = item.id
 					state.TierEditing = ""

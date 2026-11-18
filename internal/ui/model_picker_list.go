@@ -55,7 +55,8 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		state.setListOpen(scopeKey, side, false)
 		// 返回后下次打开不残留旧查询与旧展开状态。
 		state.searchQuery = ""
-		state.agentOpen = nil
+		state.openCard = ""
+		state.openCardSet = false
 		modelPickerInvalidate(p)
 	}
 
@@ -67,7 +68,8 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		if side == ModelPickerSideBees && editingTier != "" {
 			tierID := editingTier
 			state.searchQuery = ""
-			state.agentOpen = nil
+			state.openCard = ""
+			state.openCardSet = false
 			if p.OnSetTierOverride != nil {
 				p.OnSetTierOverride(tierID, &config.SwarmTierOverride{
 					Provider: prov.ID,
@@ -81,7 +83,8 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 		state.setListOpen(scopeKey, side, false)
 		// 选中后清空查询与展开状态，下次打开列表不残留旧状态。
 		state.searchQuery = ""
-		state.agentOpen = nil
+		state.openCard = ""
+		state.openCardSet = false
 		if p.OnPickModel != nil {
 			p.OnPickModel(side, prov, m)
 		}
@@ -146,6 +149,8 @@ func renderModelPickerListRegion(c *ui.Context, p ModelPickerProps, state *Model
 	})
 }
 
+const modelPickerPinnedCardID = "@pinned"
+
 // modelPickerDefaultOpenAgent 返回列表页默认展开的 Agent ID：
 // 当前选中的供应商在本次可渲染列表里且有模型时优先展开它，否则回退到第一个有模型的供应商。
 func modelPickerDefaultOpenAgent(providers []ProviderInfo, current string) string {
@@ -164,6 +169,18 @@ func modelPickerDefaultOpenAgent(providers []ProviderInfo, current string) strin
 	return firstWithModels
 }
 
+// modelPickerDefaultOpenCard 返回列表页默认展开的卡片 ID：
+// 当前选中的模型在收藏里时默认展开收藏卡片，否则回退到默认展开的 Agent。
+func modelPickerDefaultOpenCard(providers []ProviderInfo, pinned []modelPickerPinnedEntry, selection ModelSelection) string {
+	for _, entry := range pinned {
+		mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
+		if selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model) {
+			return modelPickerPinnedCardID
+		}
+	}
+	return modelPickerDefaultOpenAgent(providers, selection.Provider)
+}
+
 // renderModelPickerListCard 渲染列表页的分组卡片容器，用于分隔收藏与各 Agent 分组。
 func renderModelPickerListCard(c *ui.Context, key string, body func()) {
 	ui.Column(c.Key(key)).
@@ -173,6 +190,27 @@ func renderModelPickerListCard(c *ui.Context, key string, body func()) {
 		Background(modelPickerCardBg).
 		FillWidth().
 		Children(body)
+}
+
+// renderModelPickerCollapsibleCard 渲染列表页可折叠分组卡片：标题行固定在顶部，展开时渲染分隔线与带折叠动效的行体。
+func renderModelPickerCollapsibleCard(c *ui.Context, keyPrefix, keySuffix, title string, open bool,
+	icon, trailing, onToggle, body func()) {
+	renderModelPickerListCard(c, keyPrefix+"-wrap"+keySuffix, func() {
+		renderModelPickerAgentHeader(c, keyPrefix+keySuffix, icon, title, !open, trailing, onToggle)
+		if !open {
+			return
+		}
+		ui.Box(c.Key(keyPrefix+"-divider"+keySuffix)).
+			Height(Hairline).
+			Margin(0, Space3).
+			Background(modelPickerDivider).
+			FillWidth()
+		ui.Column(c.Key(keyPrefix + "-body" + keySuffix)).
+			Gap(Space0).
+			FillWidth().
+			Transition(motionCollapse(c)).
+			Children(body)
+	})
 }
 
 // renderModelPickerGroupedList 渲染非搜索态纵向列表：依次包含档位编辑提示、主导侧配对、
@@ -198,32 +236,54 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 			if side == ModelPickerSideBees && len(p.Tiers) > 0 {
 				renderModelPickerTiersSection(c, p, state)
 			}
+
+			openCard := ""
+			if state != nil && state.openCardSet {
+				openCard = state.openCard
+			} else {
+				openCard = modelPickerDefaultOpenCard(providers, pinned, selection)
+			}
+			toggleCard := func(cardID string, isOpen bool) {
+				if state == nil {
+					return
+				}
+				if isOpen {
+					state.openCard = ""
+				} else {
+					state.openCard = cardID
+				}
+				state.openCardSet = true
+				modelPickerInvalidate(p)
+			}
+
 			if len(pinned) > 0 {
-				ui.Column(c.Key(p.KeyPrefix + "pinned-section")).
-					Gap(Space0).
-					MinWidth(0).
-					FillWidth().
-					Children(func() {
-						renderProviderGroupHeader(c, p.KeyPrefix+"pinned-group-header", "收藏")
-						renderModelPickerListCard(c, p.KeyPrefix+"pinned-card", func() {
-							for _, entry := range pinned {
-								mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
-								renderModelPickerListRow(c, p, modelRowOptions{
-									KeyPrefix: "pinned-",
-									Provider:  entry.Provider,
-									Model:     entry.Model,
-									IsChecked: selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model),
-									IsLocked:  side == ModelPickerSideLead && p.HasMessages && entry.Provider.ID != selection.Provider,
-									ShowGroup: true,
-									OnPick:    onPick,
-								})
-							}
-						})
-					})
+				open := openCard == modelPickerPinnedCardID
+				renderModelPickerCollapsibleCard(c, p.KeyPrefix+"pinned-group", "", "收藏", open,
+					func() {
+						ui.Icon(c, IconByName("star-filled")).
+							Size(IconSM, IconSM).
+							TextColor(modelPickerTextSecondary)
+					},
+					nil,
+					func() { toggleCard(modelPickerPinnedCardID, open) },
+					func() {
+						for _, entry := range pinned {
+							mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
+							renderModelPickerListRow(c, p, modelRowOptions{
+								KeyPrefix: "pinned-",
+								Provider:  entry.Provider,
+								Model:     entry.Model,
+								IsChecked: selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model),
+								IsLocked:  side == ModelPickerSideLead && p.HasMessages && entry.Provider.ID != selection.Provider,
+								ShowGroup: true,
+								OnPick:    onPick,
+							})
+						}
+					},
+				)
 			}
 
 			currentAgent := selection.Provider
-			defaultOpenAgent := modelPickerDefaultOpenAgent(providers, currentAgent)
 			lockAgents := side == ModelPickerSideLead && p.HasMessages
 			renderedAny := false
 			for _, pv := range providers {
@@ -241,43 +301,23 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 					continue
 				}
 				renderedAny = true
-				open, hasOpen := state.agentOpen[prov.ID]
-				if !hasOpen {
-					open = defaultOpenAgent != "" && prov.ID == defaultOpenAgent
-				}
-				renderModelPickerListCard(c, p.KeyPrefix+"agent-group-wrap-"+prov.ID, func() {
-					renderModelPickerAgentHeader(c, p.KeyPrefix+"agent-group-"+prov.ID, prov, modelPickerAgentName(prov), !open, func() {
-						if state.agentOpen == nil {
-							state.agentOpen = make(map[string]bool)
+				open := openCard == prov.ID
+				renderModelPickerCollapsibleCard(c, p.KeyPrefix+"agent-group", "-"+prov.ID, modelPickerAgentName(prov), open,
+					func() { renderProviderIcon(c, prov.ID, IconSM) },
+					func() { renderModelPickerQuotaPercent(c, p.QuotaUsed, prov.ID) },
+					func() { toggleCard(prov.ID, open) },
+					func() {
+						for mIdx, m := range prov.Models {
+							renderModelPickerListRow(c, p, modelRowOptions{
+								KeyPrefix: "model-",
+								Provider:  prov,
+								Model:     m,
+								IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
+								OnPick:    onPick,
+							})
 						}
-						state.agentOpen[prov.ID] = !open
-						modelPickerInvalidate(p)
-					})
-					if !open {
-						return
-					}
-					ui.Box(c.Key(p.KeyPrefix+"agent-group-divider-"+prov.ID)).
-						Height(Hairline).
-						Margin(0, Space3).
-						Background(modelPickerDivider).
-						FillWidth()
-					ui.Column(c.Key(p.KeyPrefix + "agent-group-body-" + prov.ID)).
-						Gap(Space0).
-						FillWidth().
-						Transition(motionCollapse(c)).
-						Children(func() {
-							for mIdx, m := range prov.Models {
-								renderModelPickerListRow(c, p, modelRowOptions{
-									KeyPrefix: "model-",
-									Provider:  prov,
-									Model:     m,
-									IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
-									ShowQuota: mIdx == 0,
-									OnPick:    onPick,
-								})
-							}
-						})
-				})
+					},
+				)
 			}
 			if !renderedAny {
 				ui.Text(c, "没有可用的模型").
@@ -288,8 +328,25 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 		})
 }
 
-// renderModelPickerAgentHeader 渲染列表页可点击折叠的 Agent 分组标题：带供应商图标、加粗正文与右侧折叠箭头。
-func renderModelPickerAgentHeader(c *ui.Context, key string, prov ProviderInfo, title string, collapsed bool, onToggle func()) {
+// renderModelPickerQuotaPercent 渲染供应商配额已用百分比；未提供回调或无数据时不渲染。
+func renderModelPickerQuotaPercent(c *ui.Context, quotaUsed func(string) (float64, bool), providerID string) {
+	if quotaUsed == nil {
+		return
+	}
+	usedPercent, ok := quotaUsed(providerID)
+	if !ok {
+		return
+	}
+	clamped := math.Max(0, math.Min(100, usedPercent))
+	ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(clamped)))).
+		FontSize(uiFont(TypeCaption)).
+		TextColor(quotaPercentColor(c, clamped)).
+		SingleLine().
+		Shrink(0)
+}
+
+// renderModelPickerAgentHeader 渲染列表页可点击折叠的分组标题：带图标、加粗正文、可选右侧附加内容与折叠箭头。
+func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title string, collapsed bool, trailing func(), onToggle func()) {
 	label := "折叠 " + title
 	if collapsed {
 		label = "展开 " + title
@@ -322,7 +379,9 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, prov ProviderInfo, 
 					Center().
 					Shrink(0).
 					Children(func() {
-						renderProviderIcon(c, prov.ID, IconSM)
+						if icon != nil {
+							icon()
+						}
 					})
 				ui.Text(c, title).
 					FontSize(uiFont(TypeBody)).
@@ -330,6 +389,9 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, prov ProviderInfo, 
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Grow(1)
+				if trailing != nil {
+					trailing()
+				}
 				arrow := IconChevronDown()
 				if collapsed {
 					arrow = IconChevronRight()
@@ -369,7 +431,8 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 		btn.OnClick(func() {
 			state.setListOpen(p.ScopeKey, ModelPickerSideBees, false)
 			state.searchQuery = ""
-			state.agentOpen = nil
+			state.openCard = ""
+			state.openCardSet = false
 			if p.OnFollowLead != nil {
 				p.OnFollowLead()
 			}
@@ -432,7 +495,6 @@ func renderModelPickerPairsSection(c *ui.Context, p ModelPickerProps, state *Mod
 		}
 		renderModelListPairRow(c, p, fmt.Sprintf("%spair-row-%d", p.KeyPrefix, idx), pair, selected, onEnter)
 	}
-	renderProviderGroupHeader(c, p.KeyPrefix+"pair-models-header", "模型")
 }
 
 // renderModelPickerBackButton 渲染搜索框左侧的返回按钮：回到该侧的推理强度卡片。
@@ -510,7 +572,7 @@ func modelPickerRowName(prov ProviderInfo, name string) string {
 	return base
 }
 
-// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽与模型名，右侧按需展示配额、收藏星标与当前选中标记。
+// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽与模型名，右侧按需展示收藏星标与当前选中标记。
 // 星标只反映模型是否在配置的精选列表里（见 ModelPickerProps.Pins），不可点击。
 func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 	prov := opt.Provider
@@ -577,14 +639,6 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 					SingleLine().
 					Shrink(0)
 				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
-				if opt.ShowQuota && p.QuotaUsed != nil {
-					if usedPercent, ok := p.QuotaUsed(prov.ID); ok {
-						clamped := math.Max(0, math.Min(100, usedPercent))
-						ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(clamped)))).
-							FontSize(uiFont(TypeCaption)).
-							TextColor(quotaPercentColor(c, clamped))
-					}
-				}
 				// 收藏行已有供应商图标，仅在分组内的行右端展示实心星，未收藏的模型不显示星。
 				if !opt.ShowGroup && providerHasPinnedModel(prov.ID, modelItem.ID, p.Pins) {
 					ui.Box(c).
