@@ -302,9 +302,8 @@ func TestEnableSwarmWithGlobal_LockedGlobalKeepsValue(t *testing.T) {
 // C-HY-19：applySwarmPair 切换 Lead provider/model、写入 Bees 偏好、联动开启 Swarm 并关闭弹层。
 func TestApplySwarmPair_SwitchesLeadAndWritesBeesPrefs(t *testing.T) {
 	testenv.TempHome(t)
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	t.Cleanup(func() {
-		composerModelPickerState.MenuOpen = false
 		clearModelCapsuleSnapshot("t1")
 	})
 

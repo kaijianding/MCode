@@ -10,6 +10,14 @@ import (
 	"mcode/internal/testenv"
 )
 
+func resetComposerModelPickerForTest(t *testing.T) {
+	t.Helper()
+	resetComposerModelPickerState("")
+	t.Cleanup(func() {
+		resetComposerModelPickerState("")
+	})
+}
+
 // findTextRect 返回首个包含 text 的文本所在矩形；找不到时返回 false。
 func findTextRect(t *testing.T, tt *ui.Tester, text string) (ui.Rect, bool) {
 	t.Helper()
@@ -79,7 +87,7 @@ func TestComposerModel_ShowCurrentModelName(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	providers := []ProviderInfo{
 		{
@@ -121,10 +129,7 @@ func TestComposerModel_SwitchToOtherAgent(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
-	t.Cleanup(func() {
-		composerModelPickerState.MenuOpen = false
-	})
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	providers := []ProviderInfo{
 		{
@@ -213,10 +218,7 @@ func TestComposerModel_HasMessagesCannotSwitchAgent(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
-	t.Cleanup(func() {
-		composerModelPickerState.MenuOpen = false
-	})
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	providers := []ProviderInfo{
 		{
@@ -295,7 +297,7 @@ func TestComposerModel_SwitchWithinSameAgent(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	providers := []ProviderInfo{
 		{
@@ -368,7 +370,7 @@ func TestComposerModel_HiddenWhenNoThread(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := &FakeClient{
 		projects:  []Project{{ID: "p1", Name: "mcode-test", Path: "/path/to/test"}},
 		threads:   make(map[string][]Thread),
@@ -391,8 +393,7 @@ func composerModelPrefsFixture(t *testing.T, withMessages bool) (*FakeClient, *u
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	t.Cleanup(func() { composerModelPickerState.MenuOpen = false })
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.SetSwarmState("t1", SwarmState{LeadThreadID: "t1", Enabled: true})
 	fake.SetProviders([]ProviderInfo{
@@ -623,7 +624,7 @@ func TestComposerModel_ResetToDefault(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.SetProviders([]ProviderInfo{
 		{
@@ -687,10 +688,7 @@ func TestComposerModel_SwarmSideTabs(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
-	t.Cleanup(func() {
-		composerModelPickerState.MenuOpen = false
-	})
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.SetSwarmState("t1", SwarmState{LeadThreadID: "t1", Available: true, Enabled: true})
 	fake.SetProviders([]ProviderInfo{
@@ -738,10 +736,7 @@ func TestComposerModel_EffortsEmpty(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
-	t.Cleanup(func() {
-		composerModelPickerState.MenuOpen = false
-	})
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.SetProviders([]ProviderInfo{
 		{
@@ -786,8 +781,7 @@ func TestComposerModel_FastModeClickPersistsDefaultModel(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
-	composerModelPickerState.MenuOpen = false
-	t.Cleanup(func() { composerModelPickerState.MenuOpen = false })
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.SetProviders([]ProviderInfo{{
 		ID: "claude", Name: "Claude", Available: true,
@@ -826,6 +820,7 @@ func TestComposerModel_BeesOffTabEnablesSwarm(t *testing.T) {
 	testenv.TempHome(t)
 	t.Setenv("MCODE_DATA", t.TempDir())
 	t.Cleanup(lastSelectionWriteWG.Wait)
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	s := newChatState(fake)
 	s.selectedThreadID = "t1"

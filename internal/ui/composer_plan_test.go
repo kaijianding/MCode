@@ -11,7 +11,7 @@ import (
 
 // 场景 1：点击 Build 胶囊切换为 Plan，假 Client 收到 InteractionMode="plan"，界面显示 Plan。
 func TestComposerPlan_ClickToggle(t *testing.T) {
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	tt := ui.NewTester(Root(fake), 1000, 700)
 
@@ -36,7 +36,7 @@ func TestComposerPlan_ClickToggle(t *testing.T) {
 }
 
 func TestComposerPlan_SaveFailureBlocksSendAndRollsBack(t *testing.T) {
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	release := make(chan struct{})
 	defer func() {
@@ -78,7 +78,7 @@ func TestComposerPlan_SaveFailureBlocksSendAndRollsBack(t *testing.T) {
 
 // 场景 2：⇧⌘P 在 build 与 plan 之间来回切换；toggleInteractionMode 再次切回 build。
 func TestComposerPlan_ShortcutAndToggleBack(t *testing.T) {
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	state, view := buildRoot(fake)
 	tt := ui.NewTester(view, 1000, 700)
@@ -113,7 +113,7 @@ func TestComposerPlan_ShortcutAndToggleBack(t *testing.T) {
 
 // 场景 3：切换模式时保留会话已有的 effort 与 Bees 配置。
 func TestComposerPlan_TogglePreservesOtherPrefs(t *testing.T) {
-	composerModelPickerState.MenuOpen = false
+	resetComposerModelPickerForTest(t)
 	fake := NewFakeClient()
 	fake.mu.Lock()
 	for _, list := range fake.threads {
