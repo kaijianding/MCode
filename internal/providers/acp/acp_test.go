@@ -748,9 +748,24 @@ func runFakeACPFeatures(mode string) {
 					notify := func(update map[string]any) {
 						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
 					}
+					if mode == "feature_hold_agy_records" {
+						toolID := "agy-record-tool"
+						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command"})
+						path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), "antigravity-cli", "brain", fakeHoldSession, ".system_generated", "logs", "transcript.jsonl")
+						if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+							panic(err)
+						}
+						line, _ := json.Marshal(map[string]any{"step_index": 1, "status": "RUNNING", "content": fmt.Sprintf("Tool is running as a background task with task id: %s/task-1", fakeHoldSession)})
+						if err := os.WriteFile(path, append(line, '\n'), 0600); err != nil {
+							panic(err)
+						}
+					}
 					tasks := 2
 					if mode == "feature_hold_inround" {
 						tasks = 1
+					}
+					if mode == "feature_hold_agy_records" {
+						tasks = 0
 					}
 					for i := 1; i <= tasks; i++ {
 						toolID := fmt.Sprintf("hold-tool-%d", i)
@@ -770,19 +785,12 @@ func runFakeACPFeatures(mode string) {
 						notify(update)
 					}
 					if mode == "feature_hold_inround" {
-						// 本轮应答前任务已经结束：完成行落在 transcript 里，watcher 还没来得及扫描。
-						path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), "antigravity-cli", "brain", fakeHoldSession, ".system_generated", "logs", "transcript.jsonl")
+						// 本轮应答前任务已经结束：完成消息落盘，watcher 还没来得及扫描。
+						path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), "antigravity-cli", "brain", fakeHoldSession, ".system_generated", "messages", "in-round.json")
 						if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 							panic(err)
 						}
-						line, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q finished with result:\noutput", fakeHoldSession+"/task-1")})
-						file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-						if err != nil {
-							panic(err)
-						}
-						_, err = file.Write(append(line, '\n'))
-						_ = file.Close()
-						if err != nil {
+						if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"content":%q,"timestamp":"2026-01-01T00:00:00Z"}`, fmt.Sprintf("Task id %q finished with result:\\noutput", fakeHoldSession+"/task-1"))), 0600); err != nil {
 							panic(err)
 						}
 					}
@@ -1661,7 +1669,7 @@ func TestResumeMissingSessionReportsLostSession(t *testing.T) {
 	}
 }
 
-// 测试通过控制文件追加完成行，假进程再把它们写入真实的 transcript 路径。
+// 测试通过控制文件追加完成通知，假进程再把它们写入 agy messages 目录。
 func runFakeACPBackground(mode string, write func(any)) {
 	control := os.Getenv("MCODE_TEST_ACP_COMPLETE")
 	if control == "" {
@@ -1671,7 +1679,7 @@ func runFakeACPBackground(mode string, write func(any)) {
 	if mode == "feature_hold_legacy" {
 		dir = "antigravity-acp"
 	}
-	path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), dir, "brain", fakeHoldSession, ".system_generated", "logs", "transcript.jsonl")
+	path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), dir, "brain", fakeHoldSession, ".system_generated", "messages")
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	var offset int
@@ -1683,14 +1691,19 @@ func runFakeACPBackground(mode string, write func(any)) {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			panic(err)
 		}
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-		if err != nil {
+		if err := os.MkdirAll(path, 0700); err != nil {
 			panic(err)
 		}
-		_, err = file.Write(data[offset:])
-		_ = file.Close()
-		if err != nil {
-			panic(err)
+		for _, line := range strings.Split(strings.TrimSpace(string(data[offset:])), "\n") {
+			var message map[string]any
+			if err := json.Unmarshal([]byte(line), &message); err != nil {
+				panic(err)
+			}
+			name := fmt.Sprintf("%d.json", offset)
+			if err := os.WriteFile(filepath.Join(path, name), []byte(line), 0600); err != nil {
+				panic(err)
+			}
+			offset += len(line) + 1
 		}
 		offset = len(data)
 		if mode == "feature_hold_idle" {
@@ -1751,7 +1764,7 @@ func (f acpHoldFixture) complete(t *testing.T, task int, status string) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	if err := json.NewEncoder(file).Encode(map[string]any{"content": fmt.Sprintf("Task id %q %s with result:\noutput", fmt.Sprintf("%s/task-%d", fakeHoldSession, task), status)}); err != nil {
+	if err := json.NewEncoder(file).Encode(map[string]any{"content": fmt.Sprintf("Task id %q %s with result:\noutput", fmt.Sprintf("%s/task-%d", fakeHoldSession, task), status), "timestamp": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2022,34 +2035,65 @@ func TestACPHoldIdleUpdates(t *testing.T) {
 	}
 }
 
+func TestACPHoldAgyRecords(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_agy_records")
+	calls := make(chan string, 2)
+	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
+	events := f.run(t, f.turn)
+	startAt, toolEndAt := -1, -1
+	for i, event := range events {
+		if event.Type == harness.EventBackgroundTaskStart {
+			if event.TaskID != fakeHoldSession+"/task-1" || event.ToolID != "agy-record-tool" {
+				t.Fatalf("后台任务开始事件 = %+v", event)
+			}
+			startAt = i
+		}
+		if event.Type == harness.EventToolEnd && event.ToolID == "agy-record-tool" {
+			toolEndAt = i
+		}
+	}
+	if startAt < 0 || toolEndAt < 0 || startAt > toolEndAt {
+		t.Fatalf("后台任务开始未先于工具结束: %v", events)
+	}
+	roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+	if len(roots) != 1 || syscall.Kill(roots[0], 0) != nil || len(featureParams(f.messages(t), "session/close")) != 0 {
+		t.Fatal("轮末未保留后台任务进程")
+	}
+	f.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return len(calls) > 0 })
+	if got := <-calls; got != f.turn.ThreadID {
+		t.Fatalf("unsolicited thread = %q", got)
+	}
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	attachEvents := f.run(t, attach)
+	if len(attachEvents) < 1 || attachEvents[0].Type != harness.EventBackgroundTaskEnd || attachEvents[0].TaskID != fakeHoldSession+"/task-1" || attachEvents[0].TaskStatus != "completed" {
+		t.Fatalf("Attach 结束事件 = %v", attachEvents)
+	}
+	if syscall.Kill(roots[0], 0) == nil {
+		t.Fatal("Attach 完成后常驻进程仍存活")
+	}
+}
+
 func TestACPHoldCompletionReader(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	first, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q finished with result:", fakeHoldSession+"/task-1")})
-	second, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q was canceled with result:", fakeHoldSession+"/task-2")})
-	data := append(append(append([]byte{}, first...), '\n'), second[:len(second)/2]...)
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	for i, item := range []struct{ task, status, time string }{
+		{"task-1", "finished", "2026-01-01T00:00:00Z"},
+		{"task-2", "was canceled", "2026-01-01T00:00:01Z"},
+	} {
+		content := fmt.Sprintf("Task id %q %s with result:", fakeHoldSession+"/"+item.task, item.status)
+		data := []byte(fmt.Sprintf(`{"content":%q,"timestamp":%q}`, content, item.time))
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%03d.json", i)), data, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	events, offset := readBackgroundCompletions(path, 0)
-	if len(events) != 1 || events[0].TaskStatus != "completed" || offset != int64(len(first)+1) {
-		t.Fatalf("首次增量读取 = %v, %d", events, offset)
+	seen := make(map[string]bool)
+	events := readBackgroundCompletions(dir, seen)
+	if len(events) != 2 || events[0].TaskStatus != "completed" || events[1].TaskStatus != "canceled" || len(seen) != 2 {
+		t.Fatalf("messages 首读 = %v, seen=%v", events, seen)
 	}
-	data = append(append(append([]byte{}, first...), '\n'), append(second, '\n')...)
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	events, offset = readBackgroundCompletions(path, offset)
-	if len(events) != 1 || events[0].TaskStatus != "canceled" || offset != int64(len(data)) {
-		t.Fatalf("续读半行 = %v, %d", events, offset)
-	}
-	if events, _ := readBackgroundCompletions(path, offset); len(events) != 0 {
-		t.Fatalf("重复读取了已消费行: %v", events)
-	}
-	if err := os.WriteFile(path, append(first, '\n'), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if events, _ := readBackgroundCompletions(path, offset); len(events) != 1 {
-		t.Fatalf("日志截断后未从头读取: %v", events)
+	if events := readBackgroundCompletions(dir, seen); len(events) != 0 {
+		t.Fatalf("重复读取已消费消息: %v", events)
 	}
 }
 

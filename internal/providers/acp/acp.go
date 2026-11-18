@@ -549,6 +549,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	pendingTools := make(map[string]pendingTool)
 	startedTools := make(map[string]bool)
 	pendingOrder := make([]string, 0)
+	var toolStartOrder []string
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
 	toolsFinished := false
@@ -968,6 +969,9 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			}
 			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath}
 			startedTools[u.ToolCallID] = true
+			if h.opts.HoldBackgroundTasks {
+				toolStartOrder = append(toolStartOrder, u.ToolCallID)
+			}
 			if readPath != "" {
 				pendingOrder = append(pendingOrder, u.ToolCallID)
 			}
@@ -1363,11 +1367,40 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			CachedReadTokens int64 `json:"cachedReadTokens"`
 		} `json:"usage"`
 	}
+	var transcriptPath string
+	var transcriptOffset int64
+	if h.opts.HoldBackgroundTasks {
+		transcriptPath = agyRecordPath(p, sid, "logs/transcript.jsonl")
+		if info, err := os.Stat(transcriptPath); err == nil {
+			transcriptOffset = info.Size()
+		}
+	}
 	promptErr := conn.Call(ctx, "session/prompt", map[string]any{
 		"sessionId": sid,
 		"prompt":    promptItems,
 	}, &promptResult)
 	detach()
+
+	var agyErr error
+	if h.opts.HoldBackgroundTasks && promptErr == nil {
+		if h.opts.Agent == AgentAgy {
+			agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
+		}
+		if agyErr == nil && ctx.Err() == nil {
+			for i := len(toolStartOrder) - 1; i >= 0; i-- {
+				toolID := toolStartOrder[i]
+				if _, pending := pendingTools[toolID]; toolID == "" || !pending {
+					continue
+				}
+				path := agyRecordPath(p, sid, "logs/transcript.jsonl")
+				if path != transcriptPath {
+					transcriptOffset = 0
+				}
+				h.backgroundTaskTranscriptStarts(p, path, transcriptOffset, toolID, emit)
+				break
+			}
+		}
+	}
 
 	toolsMu.Lock()
 	toolsFinished = true
@@ -1386,8 +1419,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 	toolsMu.Unlock()
 
-	var agyErr error
-	if promptErr == nil && h.opts.Agent == AgentAgy {
+	if !h.opts.HoldBackgroundTasks && promptErr == nil && h.opts.Agent == AgentAgy {
 		agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
 	}
 	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil {

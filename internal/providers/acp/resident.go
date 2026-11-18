@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -329,19 +329,45 @@ func (h *Harness) holdProcess(p *acpProcess, threadID string) bool {
 	return p.keep
 }
 
-// agyTranscriptPath 返回 agy 为 sid 写下的 transcript 路径；两个已知目录都不存在时为空。
-func agyTranscriptPath(p *acpProcess, sid string) string {
+func agyRecordPath(p *acpProcess, sid, record string) string {
 	if !agySessionIDPattern.MatchString(sid) {
 		return ""
 	}
 	geminiDir := agyGeminiDir(p.args, p.cmd.Env)
 	for _, dir := range []string{"antigravity-cli", "antigravity-acp"} {
-		candidate := filepath.Join(geminiDir, dir, "brain", sid, ".system_generated", "logs", "transcript.jsonl")
+		candidate := filepath.Join(geminiDir, dir, "brain", sid, ".system_generated", record)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
 	return ""
+}
+
+func (h *Harness) backgroundTaskTranscriptStarts(p *acpProcess, path string, offset int64, toolID string, emit func(harness.Event)) {
+	if path == "" {
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return
+	}
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadBytes('\n')
+		var step struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(line, &step) == nil {
+			h.backgroundTaskStarts(p, toolID, []string{step.Content}, emit)
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // reconcileRoundTasks 把本轮 prompt 返回前已经结束的后台任务直接记成完成：
@@ -350,15 +376,10 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 	h.residentMu.Lock()
 	sid := p.sessionID
 	h.residentMu.Unlock()
-	path := agyTranscriptPath(p, sid)
 	statuses := make(map[string]string)
-	if path != "" {
-		completions, _ := readBackgroundCompletions(path, 0)
-		statuses = make(map[string]string, len(completions))
-		for _, event := range completions {
-			if _, exists := statuses[event.TaskID]; !exists {
-				statuses[event.TaskID] = event.TaskStatus
-			}
+	for _, event := range readBackgroundCompletions(agyRecordPath(p, sid, "messages"), nil) {
+		if _, exists := statuses[event.TaskID]; !exists {
+			statuses[event.TaskID] = event.TaskStatus
 		}
 	}
 	var ended []harness.Event
@@ -396,8 +417,7 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	path := ""
-	var offset int64
+	seen := make(map[string]bool)
 	for {
 		select {
 		case <-p.done:
@@ -410,13 +430,7 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 		if stop {
 			return
 		}
-		if candidate := agyTranscriptPath(p, sid); candidate != "" && candidate != path {
-			path, offset = candidate, 0
-		}
-		var ended []harness.Event
-		if path != "" {
-			ended, offset = readBackgroundCompletions(path, offset)
-		}
+		ended := readBackgroundCompletions(agyRecordPath(p, sid, "messages"), seen)
 		h.residentMu.Lock()
 		if h.closed || p.dead || h.residents[threadID] != p {
 			h.residentMu.Unlock()
@@ -453,39 +467,61 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 	}
 }
 
-func readBackgroundCompletions(path string, offset int64) ([]harness.Event, int64) {
-	f, err := os.Open(path)
+func readBackgroundCompletions(dir string, seen map[string]bool) []harness.Event {
+	if dir == "" {
+		return nil
+	}
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, offset
+		return nil
 	}
-	defer f.Close()
-	if info, err := f.Stat(); err == nil && info.Size() < offset {
-		offset = 0
+	type completion struct {
+		event     harness.Event
+		timestamp time.Time
 	}
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, offset
-	}
-	reader := bufio.NewReader(f)
-	var events []harness.Event
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			// 未写完的一行留到下次，不能吞掉完成通知。
-			return events, offset
-		}
-		offset += int64(len(line))
-		var step struct {
-			Content string `json:"content"`
-		}
-		if json.Unmarshal(line, &step) != nil {
+	var completions []completion
+	for _, file := range files {
+		if !file.Type().IsRegular() || filepath.Ext(file.Name()) != ".json" {
 			continue
 		}
-		for _, match := range backgroundTaskEndPattern.FindAllStringSubmatch(step.Content, -1) {
-			status := "completed"
-			if strings.HasPrefix(match[2], "was") {
-				status = "canceled"
-			}
-			events = append(events, harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: match[1], TaskStatus: status})
+		path := filepath.Join(dir, file.Name())
+		if seen[path] {
+			continue
 		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var message struct {
+			Content   string `json:"content"`
+			Timestamp string `json:"timestamp"`
+		}
+		if json.Unmarshal(data, &message) != nil {
+			continue
+		}
+		if seen != nil {
+			seen[path] = true
+		}
+		match := backgroundTaskEndPattern.FindStringSubmatch(message.Content)
+		if match == nil {
+			continue
+		}
+		status := "completed"
+		if match[2] == "was canceled" {
+			status = "canceled"
+		}
+		timestamp, _ := time.Parse(time.RFC3339Nano, message.Timestamp)
+		completions = append(completions, completion{
+			event:     harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: match[1], TaskStatus: status},
+			timestamp: timestamp,
+		})
 	}
+	sort.SliceStable(completions, func(i, j int) bool {
+		return completions[i].timestamp.Before(completions[j].timestamp)
+	})
+	var events []harness.Event
+	for _, result := range completions {
+		events = append(events, result.event)
+	}
+	return events
 }
