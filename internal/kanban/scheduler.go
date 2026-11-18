@@ -424,11 +424,10 @@ func (g *GoalScheduler) tickGoal(ctx context.Context, goal store.Goal) error {
 					tasks[i] = up
 					goalChanged = true
 				}
-				goal.Status = string(GoalStatusPaused)
 				reason := fmt.Sprintf("task %s failed: %s", t.Title, st.FailureReason)
-				goal.StatusReason = &reason
-				if upGoal, err := g.svc.opts.Store.UpdateGoal(ctx, goal, goal.Revision); err == nil {
-					goal = upGoal
+				var paused bool
+				goal, paused = g.pauseGoalOnTaskFailure(ctx, goal, reason)
+				if paused {
 					goalChanged = true
 				}
 			}
@@ -645,6 +644,35 @@ func (g *GoalScheduler) tickGoal(ctx context.Context, goal store.Goal) error {
 	}
 
 	return nil
+}
+
+// pauseGoalOnTaskFailure 在任务失败耗尽重试后把目标置为 paused；若发生版本冲突则重读最新版本重试一次，已终止的目标不再改写。
+func (g *GoalScheduler) pauseGoalOnTaskFailure(ctx context.Context, goal store.Goal, reason string) (store.Goal, bool) {
+	goal.Status = string(GoalStatusPaused)
+	goal.StatusReason = &reason
+	if upGoal, err := g.svc.opts.Store.UpdateGoal(ctx, goal, goal.Revision); err == nil {
+		return upGoal, true
+	} else if !errors.Is(err, store.ErrRevisionConflict) {
+		log.Printf("kanban: 暂停目标 %s 失败: %v", goal.ID, err)
+		return goal, false
+	}
+
+	latest, err := g.svc.opts.Store.GetGoal(ctx, goal.ID)
+	if err != nil {
+		log.Printf("kanban: 重读目标 %s 失败: %v", goal.ID, err)
+		return goal, false
+	}
+	if latest.Status == string(GoalStatusCompleted) || latest.Status == string(GoalStatusCancelled) {
+		return latest, false
+	}
+	latest.Status = string(GoalStatusPaused)
+	latest.StatusReason = &reason
+	upGoal, err := g.svc.opts.Store.UpdateGoal(ctx, latest, latest.Revision)
+	if err != nil {
+		log.Printf("kanban: 暂停目标 %s 失败: %v", goal.ID, err)
+		return latest, false
+	}
+	return upGoal, true
 }
 
 // occupiedSlots 统计当前占用并发槽位的任务数。

@@ -131,7 +131,10 @@ func (s *Service) CheckWaits(ctx context.Context, now time.Time) error {
 		}
 		updated, err := s.opts.Store.UpdateTask(ctx, t, t.Revision)
 		if err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if res.Status != "" {
 			s.notifyResult(ctx, updated, res)

@@ -2,8 +2,10 @@ package kanban
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,5 +106,68 @@ func TestCheckWaitsHumanExpiryCreatesDecision(t *testing.T) {
 	decisions, err := db.ListStewardDecisions(ctx, "open", 0)
 	if err != nil || len(decisions) != 1 || decisions[0].Question != "等待的人工处理已到期，是否继续等" {
 		t.Fatalf("人工等待决策卡: %+v, %v", decisions, err)
+	}
+}
+
+type conflictProjects struct {
+	dir        string
+	db         *store.Store
+	once       sync.Once
+	conflicted string
+}
+
+func (p *conflictProjects) ProjectRoot(ctx context.Context, projectID string) (string, error) {
+	p.once.Do(func() {
+		taskID := "wait-1"
+		if projectID == "p2" {
+			taskID = "wait-2"
+		}
+		t, err := p.db.GetTask(ctx, taskID)
+		if err == nil {
+			t.Title = "concurrently updated"
+			if _, uerr := p.db.UpdateTask(ctx, t, t.Revision); uerr == nil {
+				p.conflicted = taskID
+			}
+		}
+	})
+	return p.dir, nil
+}
+
+func TestCheckWaitsContinuesAfterConflict(t *testing.T) {
+	ctx := context.Background()
+	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
+	projects := &conflictProjects{dir: t.TempDir(), db: db}
+	svc.opts.Projects = projects
+
+	now := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	meta := EncodeTaskMeta(TaskMeta{WaitKind: "machine", WaitCheck: "true", WakeAt: now.Format(time.RFC3339)})
+	p1, p2 := "p1", "p2"
+	if err := db.CreateTask(ctx, store.Task{ID: "wait-1", ProjectID: &p1, Status: string(TaskStatusWaiting), Meta: meta}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateTask(ctx, store.Task{ID: "wait-2", ProjectID: &p2, Status: string(TaskStatusWaiting), Meta: meta}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.CheckWaits(ctx, now)
+	if !errors.Is(err, store.ErrRevisionConflict) {
+		t.Fatalf("期望返回 store.ErrRevisionConflict，实际: %v", err)
+	}
+	if projects.conflicted == "" {
+		t.Fatal("未触发预期的并发版本冲突")
+	}
+
+	otherID := "wait-2"
+	if projects.conflicted == "wait-2" {
+		otherID = "wait-1"
+	}
+
+	conflictedTask, err := db.GetTask(ctx, projects.conflicted)
+	if err != nil || conflictedTask.Status != string(TaskStatusWaiting) {
+		t.Fatalf("冲突任务应保留 waiting 状态: %+v, %v", conflictedTask, err)
+	}
+	otherTask, err := db.GetTask(ctx, otherID)
+	if err != nil || otherTask.Status != string(TaskStatusTodo) {
+		t.Fatalf("冲突后的剩余 waiting 任务应继续处理并唤醒: %+v, %v", otherTask, err)
 	}
 }

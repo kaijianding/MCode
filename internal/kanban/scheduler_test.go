@@ -1078,3 +1078,127 @@ func TestGoalSchedulerClearsBackoffAfterSuccessfulStart(t *testing.T) {
 		t.Fatalf("启动成功后应清空重试时间: meta=%+v err=%v", meta, err)
 	}
 }
+
+type sessionStateHookDriver struct {
+	*mockDriver
+	onState func(context.Context, string) (SessionState, error)
+}
+
+func (d *sessionStateHookDriver) SessionState(ctx context.Context, threadID string) (SessionState, error) {
+	if d.onState != nil {
+		return d.onState(ctx, threadID)
+	}
+	return d.mockDriver.SessionState(ctx, threadID)
+}
+
+func TestTickGoalPauseRetriesOnRevisionConflict(t *testing.T) {
+	t.Run("并发更新后重读并暂停目标", func(t *testing.T) {
+		ctx := context.Background()
+		svc, s, mock, scheduler := setupSchedulerTestService(t, true)
+		threadID := "thread-fail-conflict"
+		projectID := "proj-1"
+		var once sync.Once
+		svc.opts.Driver = &sessionStateHookDriver{
+			mockDriver: mock,
+			onState: func(ctx context.Context, tid string) (SessionState, error) {
+				once.Do(func() {
+					g, err := s.GetGoal(ctx, "goal-conflict")
+					if err != nil {
+						t.Errorf("读取目标失败: %v", err)
+						return
+					}
+					g.Title = "并发修改后的标题"
+					if _, err := s.UpdateGoal(ctx, g, g.Revision); err != nil {
+						t.Errorf("并发更新目标失败: %v", err)
+					}
+				})
+				return SessionState{Failed: true, FailureReason: "boom"}, nil
+			},
+		}
+		seedSchedulerGoal(t, ctx, s,
+			store.Goal{ID: "goal-conflict", ProjectID: projectID, Title: "冲突重试目标"},
+			store.Task{
+				ID:           "task-fail",
+				ProjectID:    &projectID,
+				Title:        "失败任务",
+				Status:       string(TaskStatusInProgress),
+				ThreadID:     &threadID,
+				AttemptCount: 2,
+			},
+			store.Task{
+				ID:        "task-next",
+				ProjectID: &projectID,
+				Title:     "后续任务",
+			},
+		)
+
+		scheduler.Tick(ctx)
+
+		goal, err := s.GetGoal(ctx, "goal-conflict")
+		if err != nil {
+			t.Fatalf("获取目标失败: %v", err)
+		}
+		if goal.Status != string(GoalStatusPaused) {
+			t.Fatalf("版本冲突重试后目标应为 paused，实际: %s", goal.Status)
+		}
+		if goal.Title != "并发修改后的标题" {
+			t.Fatalf("重读重试应保留并发修改的字段，实际标题: %s", goal.Title)
+		}
+		if goal.StatusReason == nil || !strings.Contains(*goal.StatusReason, "失败任务") || !strings.Contains(*goal.StatusReason, "boom") {
+			t.Fatalf("期望 StatusReason 记录失败原因，实际: %v", goal.StatusReason)
+		}
+		nextTask, err := s.GetTask(ctx, "task-next")
+		if err != nil {
+			t.Fatalf("获取后续任务失败: %v", err)
+		}
+		if nextTask.Status != string(TaskStatusTodo) {
+			t.Fatalf("目标暂停后不应启动后续任务，实际: %s", nextTask.Status)
+		}
+	})
+
+	t.Run("并发取消后不覆盖终态", func(t *testing.T) {
+		ctx := context.Background()
+		svc, s, mock, scheduler := setupSchedulerTestService(t, true)
+		threadID := "thread-fail-cancelled"
+		projectID := "proj-1"
+		var once sync.Once
+		svc.opts.Driver = &sessionStateHookDriver{
+			mockDriver: mock,
+			onState: func(ctx context.Context, tid string) (SessionState, error) {
+				once.Do(func() {
+					g, err := s.GetGoal(ctx, "goal-cancelled")
+					if err != nil {
+						t.Errorf("读取目标失败: %v", err)
+						return
+					}
+					g.Status = string(GoalStatusCancelled)
+					if _, err := s.UpdateGoal(ctx, g, g.Revision); err != nil {
+						t.Errorf("并发取消目标失败: %v", err)
+					}
+				})
+				return SessionState{Failed: true, FailureReason: "boom"}, nil
+			},
+		}
+		seedSchedulerGoal(t, ctx, s,
+			store.Goal{ID: "goal-cancelled", ProjectID: projectID, Title: "并发取消目标"},
+			store.Task{
+				ID:           "task-fail-cancel",
+				ProjectID:    &projectID,
+				Title:        "失败任务",
+				Status:       string(TaskStatusInProgress),
+				ThreadID:     &threadID,
+				AttemptCount: 2,
+			},
+		)
+
+		scheduler.Tick(ctx)
+
+		goal, err := s.GetGoal(ctx, "goal-cancelled")
+		if err != nil {
+			t.Fatalf("获取目标失败: %v", err)
+		}
+		if goal.Status != string(GoalStatusCancelled) {
+			t.Fatalf("已取消目标不应被改写为 paused，实际: %s", goal.Status)
+		}
+	})
+}
