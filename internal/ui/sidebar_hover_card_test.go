@@ -660,3 +660,51 @@ func TestSidebarScrollingTitleUsesCallerStyle(t *testing.T) {
 		t.Fatal("跑马灯自绘像素中未找到调用方传入的红色")
 	}
 }
+
+// TestSidebarCompactMarqueeStartsOnFirstHover 验证紧凑模式下运行中会话首次悬停后，
+// 仅推进时钟并重画（不制造额外重建）即可在 sidebarMarqueeDelay 后启动跑马灯并持续请求下一帧。
+func TestSidebarCompactMarqueeStartsOnFirstHover(t *testing.T) {
+	resetSidebarHoverCardForTest()
+	setAppReduceMotion(t, false)
+	longTitle := strings.Repeat("紧凑模式运行中超长会话标题", 4)
+
+	fake := NewFakeClient()
+	fake.threads["p1"] = []Thread{{
+		ID:        "t1",
+		ProjectID: "p1",
+		Title:     longTitle,
+		IsRunning: true,
+		UpdatedAt: time.Now(),
+	}}
+	state, view := buildRoot(fake)
+	st := NewSettingsState(settingsTestDir(t), nil, state)
+	st.cfg.Appearance.SidebarCompact = true
+	setChatSettings(state, st)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText(longTitle) })
+
+	// 只做一次指针移动触发悬停，不额外调 tt.Frame() 制造重建。
+	rect, ok := tt.Find(longTitle)
+	if !ok {
+		t.Fatalf("expected to find thread title %q, texts: %q", longTitle, tt.Texts())
+	}
+	tt.Move(rect.X+8, rect.Y+rect.H/2)
+	titleRect := image.Rect(int(rect.X), int(rect.Y), int(rect.X+rect.W), int(rect.Y+rect.H))
+	before := cloneImage(tt.Image())
+
+	// 推进到 sidebarMarqueeDelay 之后（仍在 hoverCard 650ms 预热之前），只靠时钟驱动重画，不手动重建。
+	tt.Advance(sidebarMarqueeDelay + 40*time.Millisecond)
+
+	sidebarMarqueeMu.Lock()
+	marqueeCount := len(sidebarMarqueeStart)
+	sidebarMarqueeMu.Unlock()
+	if marqueeCount == 0 {
+		t.Fatalf("expected sidebarMarqueeStart to record start time on first hover")
+	}
+	if !tt.FramePending() {
+		t.Fatalf("expected marquee to keep requesting next frame after sidebarMarqueeDelay")
+	}
+	if !bandDiffers(before, tt.Image(), titleRect) {
+		t.Fatalf("expected title pixels to start scrolling after sidebarMarqueeDelay")
+	}
+}
