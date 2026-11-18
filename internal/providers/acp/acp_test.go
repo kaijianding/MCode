@@ -811,6 +811,21 @@ func runFakeACPFeatures(mode string) {
 					}
 				}
 			}
+			if mode == "feature_read_kind" {
+				calls := []map[string]any{
+					{"toolCallId": "kind-read", "name": "read_file", "kind": "read", "rawInput": map[string]any{"file_path": "/workspace/a.go"}},
+					{"toolCallId": "kind-edit", "name": "edit_file", "kind": "edit", "rawInput": map[string]any{"path": "a.txt"}},
+				}
+				for i, call := range calls {
+					write(map[string]any{"jsonrpc": "2.0", "id": 9120 + i, "method": "session/request_permission", "params": map[string]any{
+						"toolCall": call,
+						"options":  []any{map[string]any{"optionId": "allow", "kind": "allow_once"}, map[string]any{"optionId": "deny", "kind": "reject_once"}},
+					}})
+					if read() == nil {
+						return
+					}
+				}
+			}
 			if strings.HasPrefix(mode, "feature_tool_") {
 				notify := func(update map[string]any) {
 					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
@@ -1141,6 +1156,27 @@ func TestRequestPermissionMarksExecuteAsCommand(t *testing.T) {
 	}
 	if got := approver.reqs[2].Kind; got == harness.RequestKindCommand {
 		t.Errorf("编辑类调用不应标为命令类，得到 %q", got)
+	}
+}
+
+// TestACPRequestPermissionMarksReadKind 覆盖 session/request_permission 的只读标记：
+// read 类 kind 标为 ReadOnly=true，edit 类 kind 为 false。
+func TestACPRequestPermissionMarksReadKind(t *testing.T) {
+	approver := &recordingApprover{}
+	if _, _, err := runACPFeature(t, "feature_read_kind", AgentAgy, harness.Turn{Mode: harness.ModeSupervised, Approver: approver}); err != nil {
+		t.Fatal(err)
+	}
+
+	approver.mu.Lock()
+	defer approver.mu.Unlock()
+	if len(approver.reqs) != 2 {
+		t.Fatalf("got %d approval requests, want 2", len(approver.reqs))
+	}
+	if !approver.reqs[0].ReadOnly {
+		t.Errorf("read 类调用应标为 ReadOnly=true，得到 false")
+	}
+	if approver.reqs[1].ReadOnly {
+		t.Errorf("edit 类调用应为 ReadOnly=false，得到 true")
 	}
 }
 

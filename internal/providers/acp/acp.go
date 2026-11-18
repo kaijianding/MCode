@@ -673,6 +673,17 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 					approveReq.Summary = "执行计划"
 					approveReq.Plan = DroidPlanMarkdown(input)
 				}
+				if !isCommandCall && !planExit {
+					switch p.ToolCall.Kind {
+					case "read", "search":
+						approveReq.ReadOnly = true
+					default:
+						switch toolName {
+						case "read_file", "view_file", "list_dir", "grep_search", "find_by_name":
+							approveReq.ReadOnly = true
+						}
+					}
+				}
 				dec, err := turn.Approver.Approve(ctx, approveReq)
 				if err != nil {
 					approveErr = err

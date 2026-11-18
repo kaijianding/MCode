@@ -182,7 +182,7 @@ func (a *threadApprover) Interact(ctx context.Context, req harness.ApprovalReque
 	if kind == harness.RequestKindQuestion && a.b.threadIsSubagent(a.threadID) {
 		autoForwardQuestion = a.b.autoForwardQuestionEnabled()
 	}
-	if req.Sensitive == "" && sensitiveFallbackKind(kind) {
+	if req.Sensitive == "" && (sensitiveFallbackKind(kind) || (req.ReadOnly && !interactive)) {
 		req.Sensitive = gate.SensitiveFor(kind, req.ToolName, req.Input, approvalCommand(req), a.b.approvalWorkDir(a.threadID))
 	}
 
@@ -207,10 +207,10 @@ func (a *threadApprover) Interact(ctx context.Context, req harness.ApprovalReque
 	}
 
 	// 只读档 Swarm helper 会话自动拒绝除提问外的所有写操作/审批，不向前端分发；
-	// 只读 shell 命令（ls、grep、wc 等）不改动任何东西，直接放行。
+	// 只读类请求（ReadOnly）与只读 shell 命令（ls、grep、wc 等）不改动任何东西，非敏感时直接放行。
 	// 判定必须用输入里的真实命令：Summary 是 provider 拼接出的展示串（如 `Bash {"command":…}`），取首词必然判否。
 	if (td.isHelper || td.parentThreadID != "") && td.summary.RuntimeMode == string(harness.ModeReadOnly) {
-		if req.Sensitive == "" && kind == harness.RequestKindCommand && isSafeReadOnlyCommand(approvalCommand(req)) {
+		if req.Sensitive == "" && (req.ReadOnly || kind == harness.RequestKindCommand && isSafeReadOnlyCommand(approvalCommand(req))) {
 			a.b.mu.Unlock()
 			return harness.ApprovalResponse{Decision: harness.DecisionAllow}, nil
 		}

@@ -1720,6 +1720,113 @@ func TestReadOnlyHelperAllowsAgyRunCommand(t *testing.T) {
 	}
 }
 
+// TestThreadApproverReadOnlyHelperAllowsReadRequest 覆盖只读档 helper 对 ReadOnly 请求的处理：
+// 普通源码文件 ReadOnly=true 放行，ReadOnly=false 拒绝，凭证路径即使 ReadOnly=true 仍拒绝。
+func TestThreadApproverReadOnlyHelperAllowsReadRequest(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	ctx := context.Background()
+	threadID := "00000000-0000-0000-0000-0000000000a3"
+	backend.AddThread(wire.ThreadSummary{
+		ID:          threadID,
+		Title:       "Read-only Read Request Thread",
+		RuntimeMode: "readonly",
+	}, nil)
+	backend.SetThreadRelation(threadID, "00000000-0000-0000-0000-000000000001", true)
+
+	var (
+		allowResp harness.ApprovalResponse
+		allowErr  error
+		denyResp  harness.ApprovalResponse
+		denyErr   error
+		credResp  harness.ApprovalResponse
+		credErr   error
+	)
+
+	doneCh := make(chan struct{})
+	mock := &mockHarness{
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			defer close(doneCh)
+			ia, ok := turn.Approver.(harness.Interactor)
+			if !ok {
+				t.Error("turn approver should implement harness.Interactor")
+				return nil
+			}
+			allowResp, allowErr = ia.Interact(ctx, harness.ApprovalRequest{
+				ToolName: "read_file",
+				ReadOnly: true,
+				Input:    json.RawMessage(`{"file_path":"/workspace/internal/swarm/delegation.go"}`),
+			})
+			denyResp, denyErr = ia.Interact(ctx, harness.ApprovalRequest{
+				ToolName: "read_file",
+				ReadOnly: false,
+				Input:    json.RawMessage(`{"file_path":"/workspace/internal/swarm/delegation.go"}`),
+			})
+			credResp, credErr = ia.Interact(ctx, harness.ApprovalRequest{
+				ToolName: "read_file",
+				ReadOnly: true,
+				Input:    json.RawMessage(`{"file_path":"~/.ssh/id_rsa"}`),
+			})
+			return nil
+		},
+	}
+	backend.SetHarness(mock, "/workspace", harness.ModeAgent)
+
+	conn := newMockStreamConn()
+	var requestNotified bool
+	conn.notifyFn = func(method string, params any) error {
+		if method == "requests.changed" {
+			requestNotified = true
+		}
+		return nil
+	}
+	if _, err := backend.Subscribe(ctx, conn, threadID); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "执行任务",
+		ActionID: "00000000-0000-0000-0000-0000000000a4",
+	}); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn execution timed out")
+	}
+
+	if allowErr != nil {
+		t.Fatalf("ReadOnly 请求不应返回错误: %v", allowErr)
+	}
+	if allowResp.Decision != harness.DecisionAllow {
+		t.Errorf("ReadOnly=true 读取普通源码应放行，得到 %v", allowResp.Decision)
+	}
+
+	if denyErr != nil {
+		t.Fatalf("非 ReadOnly 请求不应返回错误: %v", denyErr)
+	}
+	if denyResp.Decision != harness.DecisionDeny {
+		t.Errorf("ReadOnly=false 应被拒绝，得到 %v", denyResp.Decision)
+	}
+
+	if credErr != nil {
+		t.Fatalf("凭证路径请求不应返回错误: %v", credErr)
+	}
+	if credResp.Decision != harness.DecisionDeny {
+		t.Errorf("读取凭证路径即使 ReadOnly=true 仍应被拒绝，得到 %v", credResp.Decision)
+	}
+
+	if requestNotified {
+		t.Error("只读档放行/拒绝都不应向前端推送 requests.changed")
+	}
+}
+
 // TestApprovals_HelperThreadAutoApprovesUnattended 覆盖无人值守的 Swarm bee：
 // 非敏感审批（命令、文件改动、计划）自动放行，敏感操作自动拒绝，提问得到固定答复，
 // 全程不产生前端待处理请求。

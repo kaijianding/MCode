@@ -162,6 +162,8 @@ type ApprovalRequest struct {
 	Summary  string
 	// Sensitive 非空表示凭证读取（credential）或控制面写入（controlPlane），只能逐次允许。
 	Sensitive string
+	// ReadOnly 表示 provider 声明该调用只读取、不改动任何东西（如 ACP 的 read/search 类调用）。
+	ReadOnly bool
 	// Kind 为空时由审批方按工具名推断。
 	Kind      RequestKind
 	Questions []Question
