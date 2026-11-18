@@ -19,6 +19,7 @@ var (
 	quotaBatchWaitMin     = 800 * time.Millisecond
 	quotaBatchWaitMax     = 2500 * time.Millisecond
 	quotaDebounceDuration = 15 * time.Second
+	errTokenFileMissing   = errors.New("登录凭证缺失，请重新登录")
 )
 
 // DefaultAccountID 返回当前索引中的默认账号 ID（线程安全）。
@@ -216,6 +217,9 @@ func (m *Manager) refreshQuota(ctx context.Context, acc Account) error {
 		m.mu.Unlock()
 	}
 	if readErr != nil {
+		if id != SystemAccountID && errors.Is(readErr, fs.ErrNotExist) {
+			return m.handleRefreshFailure(id, errTokenFileMissing, true)
+		}
 		return m.handleRefreshFailure(id, fmt.Errorf("read token file: %w", readErr), false)
 	}
 
