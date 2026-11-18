@@ -1,10 +1,16 @@
 package accounts
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	prepareKeychain = func(string) error { return nil }
+	os.Exit(m.Run())
+}
 
 func TestIsolateLibrary(t *testing.T) {
 	oldGoos := goos
@@ -121,4 +127,57 @@ func TestIsolateLibrary(t *testing.T) {
 
 		assertIsolatedLibrary(t, mgr.accountHomeDir(id), hostLib)
 	})
+}
+
+func TestIsolateLibraryPreparesKeychain(t *testing.T) {
+	oldGoos := goos
+	oldPrepare := prepareKeychain
+	t.Cleanup(func() {
+		goos = oldGoos
+		prepareKeychain = oldPrepare
+	})
+
+	hostHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(hostHome, "Library"), 0o700); err != nil {
+		t.Fatalf("mkdir host Library failed: %v", err)
+	}
+	mgr, err := NewManager(Options{DataDir: t.TempDir(), HostHome: hostHome})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	var calls []string
+	var stubErr error
+	prepareKeychain = func(path string) error {
+		calls = append(calls, path)
+		return stubErr
+	}
+
+	goos = "darwin"
+	if err := mgr.setupAccountLayout("acc-darwin"); err != nil {
+		t.Fatalf("setupAccountLayout(darwin) failed: %v", err)
+	}
+	wantPath := filepath.Join(mgr.accountHomeDir("acc-darwin"), "Library", "Keychains", "login.keychain-db")
+	if len(calls) != 1 || calls[0] != wantPath {
+		t.Fatalf("prepareKeychain calls = %v, want [%q]", calls, wantPath)
+	}
+
+	calls = nil
+	goos = "windows"
+	if err := mgr.setupAccountLayout("acc-windows"); err != nil {
+		t.Fatalf("setupAccountLayout(windows) failed: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("windows 不应调用 prepareKeychain，实际调用=%v", calls)
+	}
+
+	calls = nil
+	goos = "darwin"
+	stubErr = errors.New("boom")
+	if err := mgr.setupAccountLayout("acc-error"); err != nil {
+		t.Fatalf("prepareKeychain 返回错误时 setupAccountLayout 应仍返回 nil，实际=%v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("prepareKeychain 应被调用 1 次，实际=%d", len(calls))
+	}
 }

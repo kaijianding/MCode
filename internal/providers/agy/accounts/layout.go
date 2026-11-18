@@ -1,18 +1,22 @@
 package accounts
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"mcode/internal/fsutil"
+	"mcode/internal/procattr"
 )
 
 // macOnlyLinks 是只在 macOS 上存在的宿主配置项，Windows 上没有共享意义。
@@ -93,7 +97,82 @@ func (m *Manager) setupAccountLayout(id string) error {
 	return m.isolateLibrary(home)
 }
 
-// isolateLibrary 隔离 Library 目录：共享 Keychains 会让 agy 读宿主钥匙串里的凭据，而不是隔离目录的 token 文件。
+// prepareKeychain 是准备账号隔离钥匙串的可注入副本：测试里替换它即可避免触碰真实钥匙串。
+var prepareKeychain = prepareAccountKeychain
+
+// prepareAccountKeychain 为隔离账号准备并解锁独立的钥匙串。
+// macOS 的 security unlock-keychain 对基名为 login.keychain-db 的文件会校验系统登录密码而非空密码，
+// 因此实际文件落为同目录下的 account.keychain-db，再由 login.keychain-db 软链指向它；
+// 新建时把 HOME 指向临时空目录，避免 create-keychain 把隔离路径写入宿主 com.apple.security.plist。
+func prepareAccountKeychain(path string) error {
+	runSecurity := func(env []string, args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := procattr.HideWindow(exec.CommandContext(ctx, "/usr/bin/security", args...))
+		if env != nil {
+			cmd.Env = env
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("security %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm0700); err != nil {
+		return fmt.Errorf("mkdir keychain dir: %w", err)
+	}
+
+	targetPath := path
+	if base := filepath.Base(path); base == "login.keychain-db" || base == "login.keychain" {
+		targetPath = filepath.Join(filepath.Dir(path), "account.keychain-db")
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink == 0 {
+			if _, terr := os.Stat(targetPath); os.IsNotExist(terr) {
+				if rerr := os.Rename(path, targetPath); rerr != nil {
+					return fmt.Errorf("rename keychain: %w", rerr)
+				}
+			}
+		}
+	}
+
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		tmpHome, err := os.MkdirTemp("", "mcode-keychain-home-*")
+		if err != nil {
+			return fmt.Errorf("create temp home: %w", err)
+		}
+		defer os.RemoveAll(tmpHome)
+
+		environ := os.Environ()
+		env := make([]string, 0, len(environ)+1)
+		for _, e := range environ {
+			if strings.HasPrefix(e, "HOME=") {
+				continue
+			}
+			env = append(env, e)
+		}
+		env = append(env, "HOME="+tmpHome)
+
+		if err := runSecurity(env, "create-keychain", "-p", "", targetPath); err != nil {
+			return err
+		}
+		if err := runSecurity(nil, "set-keychain-settings", targetPath); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return fmt.Errorf("stat keychain: %w", err)
+	}
+
+	if targetPath != path {
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			if err := os.Symlink(filepath.Base(targetPath), path); err != nil {
+				return fmt.Errorf("symlink keychain: %w", err)
+			}
+		}
+	}
+
+	return runSecurity(nil, "unlock-keychain", "-p", "", targetPath)
+}
+
+// isolateLibrary 隔离 Library 目录：共享 Keychains 会让 agy 读写宿主凭据，因此排除 Keychains 并在 macOS 上自建隔离钥匙串，避免 agy 写 token 时因找不到默认钥匙串而弹窗。
 func (m *Manager) isolateLibrary(home string) error {
 	if goos == "windows" {
 		return nil
@@ -120,6 +199,12 @@ func (m *Manager) isolateLibrary(home string) error {
 	if info, err := os.Lstat(keychainsPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		if err := os.Remove(keychainsPath); err != nil {
 			return fmt.Errorf("remove Keychains symlink: %w", err)
+		}
+	}
+
+	if goos == "darwin" {
+		if err := prepareKeychain(filepath.Join(keychainsPath, "login.keychain-db")); err != nil {
+			log.Printf("agy accounts: 无法准备隔离钥匙串（%v），已跳过", err)
 		}
 	}
 
