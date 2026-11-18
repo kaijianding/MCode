@@ -474,6 +474,17 @@ func onlyReads(command string, allowGoChecks bool) bool {
 			p = filepath.Base(p)
 		}
 		p = strings.TrimSuffix(strings.ToLower(p), ".exe")
+		// rtk 是透传包装器：去掉 rtk 前缀后按剩余命令判断，bypass 只表示原样执行。
+		if p == "rtk" {
+			t = t[1:]
+			if len(t) > 0 && t[0] == "bypass" {
+				t = t[1:]
+			}
+			if len(t) == 0 {
+				return false
+			}
+			p = strings.TrimSuffix(strings.ToLower(t[0]), ".exe")
+		}
 		switch p {
 		case "base64":
 			for _, a := range t[1:] {

@@ -334,6 +334,28 @@ func TestOnlyReads(t *testing.T) {
 	}
 }
 
+func TestOnlyReadsRtkPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{"rtk git log -n 10 --oneline", true},
+		{"rtk grep -rn foo internal", true},
+		{"rtk ls internal && rtk grep -rn foo internal", true},
+		{"rtk bypass cat go.mod", true},
+		{"rtk", false},
+		{"rtk bypass", false},
+		{"rtk rm -rf x", false},
+		{"rtk git push", false},
+		{"rtk bypass rm x", false},
+		{"rtk sort -o out.txt in.txt", false},
+	} {
+		if got := OnlyReads(tc.command); got != tc.want {
+			t.Errorf("%q 得到 %v，期望 %v", tc.command, got, tc.want)
+		}
+	}
+}
+
 func TestReadOnlyPrompt(t *testing.T) {
 	plain, sandboxed := ReadOnlyPrompt(false), ReadOnlyPrompt(true)
 	t.Log(plain)
