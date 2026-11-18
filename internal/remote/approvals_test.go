@@ -1634,6 +1634,125 @@ func TestApprovals_ReadOnlyHelperAllowsSafeReadOnlyCommand(t *testing.T) {
 	}
 }
 
+// TestApprovals_ReadOnlyHelperAllowsScopedGoChecks 覆盖：只读档 helper 会话执行有范围的 go build/test/vet
+// 时直接放行且不向前端分发审批；go run、写文件编译参数及非只读命令依然被拦截。
+func TestApprovals_ReadOnlyHelperAllowsScopedGoChecks(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	ctx := context.Background()
+	threadID := "00000000-0000-0000-0000-00000000008f"
+	backend.AddThread(wire.ThreadSummary{
+		ID:          threadID,
+		Title:       "Read-only Go Checks Thread",
+		RuntimeMode: "readonly",
+	}, nil)
+	backend.SetThreadRelation(threadID, "00000000-0000-0000-0000-000000000001", true)
+
+	allowedCmds := []string{
+		"go test -count=1 -timeout 120s -run Foo ./internal/ui/",
+		"rtk go vet ./internal/swarm/",
+		"go build ./...",
+	}
+	blockedCmds := []string{
+		"go run ./cmd/x",
+		"go test -c -o x ./pkg",
+		"awk '{print}' a.go",
+	}
+
+	type cmdResult struct {
+		cmd  string
+		resp harness.ApprovalResponse
+		err  error
+	}
+	var allowedResults, blockedResults []cmdResult
+
+	doneCh := make(chan struct{})
+	mock := &mockHarness{
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			defer close(doneCh)
+			ia, ok := turn.Approver.(harness.Interactor)
+			if !ok {
+				t.Error("turn approver should implement harness.Interactor")
+				return nil
+			}
+			for _, cmd := range allowedCmds {
+				input, _ := json.Marshal(map[string]string{"command": cmd})
+				resp, err := ia.Interact(ctx, harness.ApprovalRequest{
+					ToolName: "bash",
+					Kind:     harness.RequestKindCommand,
+					Input:    input,
+					Summary:  "Bash " + string(input),
+				})
+				allowedResults = append(allowedResults, cmdResult{cmd: cmd, resp: resp, err: err})
+			}
+			for _, cmd := range blockedCmds {
+				input, _ := json.Marshal(map[string]string{"command": cmd})
+				resp, err := ia.Interact(ctx, harness.ApprovalRequest{
+					ToolName: "bash",
+					Kind:     harness.RequestKindCommand,
+					Input:    input,
+					Summary:  "Bash " + string(input),
+				})
+				blockedResults = append(blockedResults, cmdResult{cmd: cmd, resp: resp, err: err})
+			}
+			return nil
+		},
+	}
+	backend.SetHarness(mock, "/workspace", harness.ModeAgent)
+
+	conn := newMockStreamConn()
+	var requestNotified bool
+	conn.notifyFn = func(method string, params any) error {
+		if method == "requests.changed" {
+			requestNotified = true
+		}
+		return nil
+	}
+	if _, err := backend.Subscribe(ctx, conn, threadID); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "执行任务",
+		ActionID: "00000000-0000-0000-0000-000000000090",
+	}); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn execution timed out")
+	}
+
+	for _, r := range allowedResults {
+		if r.err != nil {
+			t.Fatalf("命令 %q 不应返回错误: %v", r.cmd, r.err)
+		}
+		if r.resp.Decision != harness.DecisionAllow {
+			t.Errorf("只读档应放行命令 %q，得到 %v", r.cmd, r.resp.Decision)
+		}
+	}
+	for _, r := range blockedResults {
+		if r.err != nil {
+			t.Fatalf("命令 %q Interact 不应返回错误: %v", r.cmd, r.err)
+		}
+		if r.resp.Decision != harness.DecisionDeny {
+			t.Errorf("只读档应拒绝命令 %q，得到 %v", r.cmd, r.resp.Decision)
+		}
+		if r.resp.Feedback != "只读档子代理不允许写操作" {
+			t.Errorf("命令 %q 应带只读档拒绝说明，得到 %q", r.cmd, r.resp.Feedback)
+		}
+	}
+	if requestNotified {
+		t.Error("只读档拦截/放行都不应向前端推送 requests.changed")
+	}
+}
+
 // TestReadOnlyHelperAllowsAgyRunCommand 覆盖 agy 的 run_command：命令写在 CommandLine 字段里，
 // 只读档 helper 仍应按命令类请求识别并放行只读命令、拒绝写命令。
 func TestReadOnlyHelperAllowsAgyRunCommand(t *testing.T) {

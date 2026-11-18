@@ -369,6 +369,40 @@ func TestOnlyReadsRtkPrefix(t *testing.T) {
 	}
 }
 
+func TestOnlyReadsOrGoChecks(t *testing.T) {
+	allowed := []string{
+		"go test -count=1 -timeout 120s -run Foo ./internal/ui/",
+		"rtk go vet ./internal/swarm/",
+		"go build ./...",
+		"go test -v -race ./internal/agent/gate/",
+		"ls && go test ./...",
+	}
+	for _, cmd := range allowed {
+		if !OnlyReadsOrGoChecks(cmd) {
+			t.Errorf("OnlyReadsOrGoChecks(%q) = false, want true", cmd)
+		}
+		if OnlyReads(cmd) {
+			t.Errorf("OnlyReads(%q) = true, want false", cmd)
+		}
+	}
+
+	blocked := []string{
+		"go run ./cmd/x",
+		"go generate ./...",
+		"go build -o out ./...",
+		"go test -c ./pkg",
+		"go test -c -o x ./pkg",
+		"go test -o x ./pkg",
+		"awk '{print}' a.go",
+		"go test -mod=mod ./...",
+	}
+	for _, cmd := range blocked {
+		if OnlyReadsOrGoChecks(cmd) {
+			t.Errorf("OnlyReadsOrGoChecks(%q) = true, want false", cmd)
+		}
+	}
+}
+
 func TestReadOnlyPrompt(t *testing.T) {
 	plain, sandboxed := ReadOnlyPrompt(false), ReadOnlyPrompt(true)
 	t.Log(plain)

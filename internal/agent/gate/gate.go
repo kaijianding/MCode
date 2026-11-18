@@ -347,6 +347,11 @@ func OnlyReads(command string) bool {
 	return onlyReads(command, false)
 }
 
+// OnlyReadsOrGoChecks 判断 shell 命令是否仅包含只读操作或有范围的 go 检查（只读档子代理可跑有范围的 go 检查）。
+func OnlyReadsOrGoChecks(command string) bool {
+	return onlyReads(command, true)
+}
+
 func onlyReads(command string, allowGoChecks bool) bool {
 	if strings.TrimSpace(command) == "" {
 		return false

@@ -686,9 +686,9 @@ func mcpToolAutoApproved(dataDir, toolName string) bool {
 	return policy.IsAutoApproved(server, tool)
 }
 
-// isSafeReadOnlyCommand 判断命令是否仅由安全只读指令组成，供只读档直接放行。
+// isSafeReadOnlyCommand 判断命令是否仅由安全只读指令或有范围的 go 检查组成，供只读档直接放行。
 func isSafeReadOnlyCommand(cmd string) bool {
-	return gate.OnlyReads(cmd)
+	return gate.OnlyReadsOrGoChecks(cmd)
 }
 
 // approvalCommand 取出命令类请求的真实命令文本：优先输入里的 command 字段，
