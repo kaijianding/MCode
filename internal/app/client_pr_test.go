@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -109,5 +110,117 @@ func TestGitPRCleanupWorktreeSwitchesThreads(t *testing.T) {
 				t.Fatalf("PR 本地分支未删除: %s", out)
 			}
 		})
+	}
+}
+
+// prReviewTestPatch 是用于解析测试的两文件补丁：a.go 新侧有效行号 1-3，b.go 为 1-2。
+const prReviewTestPatch = `diff --git a/a.go b/a.go
+index 1111111..2222222 100644
+--- a/a.go
++++ b/a.go
+@@ -1,2 +1,3 @@
+ package a
++func New() {}
+ func Old() {}
+diff --git a/b.go b/b.go
+--- /dev/null
++++ b/b.go
+@@ -0,0 +1,2 @@
++package b
++func B() {}
+`
+
+func TestGitPRAIReviewParse(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []git.PRReviewComment
+		wantErr bool
+	}{
+		{
+			name: "代码围栏与说明文字",
+			out:  "审查结果如下：\n```json\n[{\"path\":\"a.go\",\"line\":2,\"body\":\"新增的函数缺少空值判断\"}]\n```\n以上。",
+			want: []git.PRReviewComment{{Path: "a.go", Line: 2, Side: "RIGHT", Body: "新增的函数缺少空值判断"}},
+		},
+		{
+			name: "越界行号被丢弃",
+			out:  `[{"path":"a.go","line":4,"body":"越界"},{"path":"b.go","line":3,"body":"越界"}]`,
+			want: []git.PRReviewComment{},
+		},
+		{
+			name: "不存在的路径被丢弃",
+			out:  `[{"path":"c.go","line":1,"body":"不在 diff 里"}]`,
+			want: []git.PRReviewComment{},
+		},
+		{
+			name: "重复项去重",
+			out:  `[{"path":"a.go","line":3,"body":"第一条"},{"path":"a.go","line":3,"body":"重复"},{"path":"b.go","line":2,"body":"另一文件"}]`,
+			want: []git.PRReviewComment{
+				{Path: "a.go", Line: 3, Side: "RIGHT", Body: "第一条"},
+				{Path: "b.go", Line: 2, Side: "RIGHT", Body: "另一文件"},
+			},
+		},
+		{
+			name: "空数组",
+			out:  "[]",
+			want: []git.PRReviewComment{},
+		},
+		{
+			name:    "非法 JSON",
+			out:     `[{"path":"a.go","line":2,"body":}]`,
+			wantErr: true,
+		},
+		{
+			name:    "没有数组",
+			out:     "这里没有评论",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePRAIReview(tc.out, prReviewTestPatch)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AI 审查结果无法解析") {
+					t.Fatalf("错误 = %v，期望解析失败", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("解析失败: %v", err)
+			}
+			if got == nil {
+				t.Fatal("空结果也必须是空切片，不能是 nil")
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("条数 = %d, 期望 %d: %+v", len(got), len(tc.want), got)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("第 %d 条 = %+v, 期望 %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestGitPRAIReviewParseLimit 覆盖最多保留 10 条的限制。
+func TestGitPRAIReviewParseLimit(t *testing.T) {
+	patch := "diff --git a/many.go b/many.go\n--- a/many.go\n+++ b/many.go\n@@ -0,0 +1,12 @@\n"
+	items := make([]string, 0, 12)
+	for i := 1; i <= 12; i++ {
+		patch += "+line " + strconv.Itoa(i) + "\n"
+		items = append(items, `{"path":"many.go","line":`+strconv.Itoa(i)+`,"body":"问题 `+strconv.Itoa(i)+`"}`)
+	}
+	got, err := parsePRAIReview("["+strings.Join(items, ",")+"]", patch)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(got) != 10 {
+		t.Fatalf("条数 = %d, 期望最多 10 条", len(got))
+	}
+	for i, c := range got {
+		if c.Line != i+1 {
+			t.Fatalf("第 %d 条行号 = %d, 期望 %d", i, c.Line, i+1)
+		}
 	}
 }

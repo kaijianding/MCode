@@ -103,38 +103,64 @@ func (r *Runner) PRConflicts(ctx context.Context, root string, forge Forge, numb
 // 合并产生冲突是预期结果：只要 OpState 显示 merge 进行中且有冲突就返回 nil。
 // 复用 worktree 时保留进行中的合并，否则重新合并最新 base。
 func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, number int, head, base string) error {
+	reused, err := r.preparePRWorktree(ctx, root, path, number, head, base)
+	if err != nil {
+		return err
+	}
+	if !reused {
+		return r.mergePRBase(ctx, path, base)
+	}
+	state, err := r.OpState(ctx, path)
+	if err != nil {
+		return err
+	}
+	if state.Kind == OpMerge {
+		return nil
+	}
+	return r.mergePRBase(ctx, path, base)
+}
+
+// PRCheckoutWorktree 在 path 检出 PR/MR 的 worktree：只抓取 head、检出本地分支
+// mcode/pr-<N> 并设置上游，不合并 base。worktree 已存在时直接返回 nil，
+// 保留进行中的合并与已有改动。
+func (r *Runner) PRCheckoutWorktree(ctx context.Context, root, path string, number int, head string) error {
+	_, err := r.preparePRWorktree(ctx, root, path, number, head, "")
+	return err
+}
+
+// preparePRWorktree 校验分支、抓取 head（base 非空时一并抓取）、复用或新建 worktree，
+// 检出本地分支 mcode/pr-<N> 并设置上游；不合并 base。
+// 返回 true 表示复用了已有 worktree，调用方据此决定是否继续合并。
+func (r *Runner) preparePRWorktree(ctx context.Context, root, path string, number int, head, base string) (bool, error) {
 	if number <= 0 {
-		return fmt.Errorf("无效的 PR 编号: %d", number)
+		return false, fmt.Errorf("无效的 PR 编号: %d", number)
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("worktree path must be absolute: %s", path)
+		return false, fmt.Errorf("worktree path must be absolute: %s", path)
 	}
 	if err := r.validatePRBranch(ctx, root, head); err != nil {
-		return err
+		return false, err
 	}
-	if err := r.validatePRBranch(ctx, root, base); err != nil {
-		return err
+	branches := []string{head}
+	if base != "" {
+		if err := r.validatePRBranch(ctx, root, base); err != nil {
+			return false, err
+		}
+		branches = append(branches, base)
 	}
-	for _, branch := range []string{head, base} {
+	for _, branch := range branches {
 		if _, err := r.run(ctx, root, nil, "fetch", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
-			return fmt.Errorf("fetch %s: %w", branch, err)
+			return false, fmt.Errorf("fetch %s: %w", branch, err)
 		}
 	}
 
 	worktrees, err := r.WorktreeList(ctx, root)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, wt := range worktrees {
 		if resolvePath(wt.Path) == resolvePath(path) {
-			state, err := r.OpState(ctx, path)
-			if err != nil {
-				return err
-			}
-			if state.Kind == OpMerge {
-				return nil
-			}
-			return r.mergePRBase(ctx, path, base)
+			return true, nil
 		}
 	}
 
@@ -142,21 +168,21 @@ func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, numbe
 	_, existsErr := r.run(ctx, root, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if existsErr == nil {
 		if _, err := r.run(ctx, root, nil, "worktree", "add", "--", path, branch); err != nil {
-			return fmt.Errorf("git worktree add failed: %w", err)
+			return false, fmt.Errorf("git worktree add failed: %w", err)
 		}
 	} else {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
+			return false, err
 		}
 		if err := r.WorktreeAdd(ctx, root, path, branch, "origin/"+head); err != nil {
-			return err
+			return false, err
 		}
 	}
 
 	if err := r.SetUpstream(ctx, path, branch, "origin/"+head); err != nil {
-		return fmt.Errorf("设置上游分支失败: %w", err)
+		return false, fmt.Errorf("设置上游分支失败: %w", err)
 	}
-	return r.mergePRBase(ctx, path, base)
+	return false, nil
 }
 
 func (r *Runner) mergePRBase(ctx context.Context, path, base string) error {

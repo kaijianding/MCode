@@ -43,9 +43,11 @@ type PRSummary struct {
 }
 
 // PRCheck 是一条 CI 检查及其汇总后的状态（success / failure / pending）。
+// URL 是检查详情或日志的网页地址，没有时为空。
 type PRCheck struct {
 	Name  string
 	State string
+	URL   string
 }
 
 // PRComment 是 PR/MR 下的一条评论。
@@ -220,6 +222,8 @@ type ghCheck struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
+	DetailsURL string `json:"detailsUrl"`
+	TargetURL  string `json:"targetUrl"`
 }
 
 // ghComment 是 gh 输出里的一条评论。
@@ -317,7 +321,8 @@ func ghCheckStates(checks []ghCheck) []string {
 	return states
 }
 
-// ghChecks 返回逐项检查的名称与归一化状态，名称优先取 CheckRun 的 name，其次 StatusContext 的 context。
+// ghChecks 返回逐项检查的名称、归一化状态与详情链接，名称优先取 CheckRun 的 name，
+// 其次 StatusContext 的 context；链接优先取 CheckRun 的 detailsUrl，其次 StatusContext 的 targetUrl。
 func ghChecks(checks []ghCheck) []PRCheck {
 	if len(checks) == 0 {
 		return nil
@@ -332,7 +337,11 @@ func ghChecks(checks []ghCheck) []PRCheck {
 		if state == "" {
 			state = prChecksPending
 		}
-		items = append(items, PRCheck{Name: name, State: state})
+		url := strings.TrimSpace(check.DetailsURL)
+		if url == "" {
+			url = strings.TrimSpace(check.TargetURL)
+		}
+		items = append(items, PRCheck{Name: name, State: state, URL: url})
 	}
 	return items
 }

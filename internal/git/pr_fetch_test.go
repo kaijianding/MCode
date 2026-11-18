@@ -262,3 +262,52 @@ func TestPRResolveWorktree(t *testing.T) {
 		}
 	})
 }
+
+// TestPRCheckoutWorktree 覆盖只检出 PR head、不合并 base，以及 worktree 已存在时不动进行中的合并。
+func TestPRCheckoutWorktree(t *testing.T) {
+	runner, dir, _ := setupPRConflict(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pr-1")
+
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+		t.Fatalf("PRCheckoutWorktree 失败: %v", err)
+	}
+	if branch := runTestGit(t, path, "symbolic-ref", "--short", "HEAD"); branch != "mcode/pr-1" {
+		t.Fatalf("当前分支 = %q, 期望 mcode/pr-1", branch)
+	}
+	head := runTestGit(t, path, "rev-parse", "HEAD")
+	want := runTestGit(t, path, "rev-parse", "origin/pr-head")
+	if head != want {
+		t.Fatalf("HEAD = %s, 期望 origin/pr-head = %s", head, want)
+	}
+	state, err := runner.OpState(ctx, path)
+	if err != nil {
+		t.Fatalf("OpState 失败: %v", err)
+	}
+	if state.Kind != "" {
+		t.Fatalf("不应发生合并，操作类型 = %q", state.Kind)
+	}
+	if merges := runTestGit(t, path, "rev-list", "--merges", "--count", "HEAD"); merges != "0" {
+		t.Fatalf("不应有合并提交，得到 %s", merges)
+	}
+	if got := readTestFile(t, path, "seed.txt"); got != "pr\n" {
+		t.Fatalf("seed.txt = %q, 期望未合并的 pr", got)
+	}
+
+	// 再次检出直接返回 nil，不修改已有 worktree。
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+		t.Fatalf("重复检出应返回 nil: %v", err)
+	}
+
+	// 产生进行中的合并后，检出不能让合并中断。
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+		t.Fatalf("PRResolveWorktree 失败: %v", err)
+	}
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+		t.Fatalf("已有 worktree 时应返回 nil: %v", err)
+	}
+	state, err = runner.OpState(ctx, path)
+	if err != nil || state.Kind != OpMerge || len(state.Conflicts) != 1 {
+		t.Fatalf("进行中的合并被改动: 状态 = %+v，错误 = %v", state, err)
+	}
+}

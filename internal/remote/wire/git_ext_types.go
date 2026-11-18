@@ -139,6 +139,18 @@ type GitExtPRSubmitReviewParams struct {
 	Comments []GitExtPRReviewComment `json:"comments,omitempty"`
 }
 
+// GitExtPRAIReviewParams 对应 git.pr.aiReview 请求参数。
+type GitExtPRAIReviewParams struct {
+	ThreadID string `json:"threadID"`
+	Number   int    `json:"number"`
+}
+
+// GitExtPRAIReviewResult 对应 git.pr.aiReview 成功返回：AI 生成的行内评论草稿，
+// 没有意见时 comments 为空数组。
+type GitExtPRAIReviewResult struct {
+	Comments []GitExtPRReviewComment `json:"comments"`
+}
+
 // GitExtPRReviewComment 是 PR 行内评论。
 type GitExtPRReviewComment struct {
 	Path string `json:"path"`
@@ -151,6 +163,7 @@ type GitExtPRReviewComment struct {
 type GitExtPRCheck struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
+	URL   string `json:"url,omitempty"`
 }
 
 // GitExtPRComment 是 PR/MR 下的一条评论。

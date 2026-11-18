@@ -33,6 +33,7 @@ type gitExtFakeService struct {
 	prCalls        int
 	prNumber       int
 	submitComments []git.PRReviewComment
+	aiComments     []git.PRReviewComment
 	err            error
 
 	// 写操作：pushes 统计推送次数（含失败），pushErr 只让推送失败，
@@ -117,6 +118,16 @@ func (s *gitExtFakeService) GitPRSubmitReview(ctx context.Context, threadID stri
 	s.submitComments = comments
 	_, s.prDeadline = ctx.Deadline()
 	return s.err
+}
+
+func (s *gitExtFakeService) GitPRAIReview(ctx context.Context, threadID string, number int) ([]git.PRReviewComment, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.prCalls++
+	s.prThreadID, s.prNumber = threadID, number
+	_, s.prDeadline = ctx.Deadline()
+	return s.aiComments, nil
 }
 
 func (s *gitExtFakeService) GitPush(ctx context.Context, threadID string) error {
@@ -591,6 +602,48 @@ func TestGitExtPRWriteInvalidParams(t *testing.T) {
 	}
 }
 
+func TestGitExtPRAIReview(t *testing.T) {
+	svc := &gitExtFakeService{aiComments: []git.PRReviewComment{{Path: "a.go", Line: 3, Side: "RIGHT", Body: "新增的函数没有判空"}}}
+	d, conn := newGitExtTestDispatcher(&gitExtTestBackend{services: map[string]any{GitExtServiceName: svc}})
+	resp := callExtension(t, d, conn, `{"jsonrpc":"2.0","id":1,"method":"git.pr.aiReview","params":{"threadID":"`+gitExtTestThreadID+`","number":7}}`)
+	var res wire.GitExtPRAIReviewResult
+	gitExtResult(t, resp, &res)
+	if len(res.Comments) != 1 || res.Comments[0].Path != "a.go" || res.Comments[0].Line != 3 || res.Comments[0].Side != "RIGHT" || res.Comments[0].Body != "新增的函数没有判空" {
+		t.Fatalf("评论结果不符: %+v", res.Comments)
+	}
+	if svc.prCalls != 1 || svc.prNumber != 7 || !svc.prDeadline {
+		t.Fatalf("调用参数不符: calls=%d number=%d deadline=%v", svc.prCalls, svc.prNumber, svc.prDeadline)
+	}
+
+	// 没有意见时返回空数组，而不是省略或 null。
+	empty := &gitExtFakeService{}
+	d2, conn2 := newGitExtTestDispatcher(&gitExtTestBackend{services: map[string]any{GitExtServiceName: empty}})
+	resp = callExtension(t, d2, conn2, `{"jsonrpc":"2.0","id":2,"method":"git.pr.aiReview","params":{"threadID":"`+gitExtTestThreadID+`","number":8}}`)
+	res.Comments = nil
+	gitExtResult(t, resp, &res)
+	if res.Comments == nil || len(res.Comments) != 0 {
+		t.Fatalf("空结果 = %+v, 期望空数组", res.Comments)
+	}
+
+	// 参数校验与 submitReview 一致。
+	for _, params := range []string{
+		`{"number":7}`,
+		`{"threadID":" ","number":7}`,
+		`{"threadID":"` + gitExtTestThreadID + `","number":0}`,
+		`{"threadID":"` + gitExtTestThreadID + `","number":-1}`,
+		`{"threadID":"` + gitExtTestThreadID + `","number":"7"}`,
+		`{"threadID":"` + gitExtTestThreadID + `","number":7,"extra":1}`,
+	} {
+		t.Run(params, func(t *testing.T) {
+			before := empty.prCalls
+			resp := callExtension(t, d2, conn2, `{"jsonrpc":"2.0","id":3,"method":"git.pr.aiReview","params":`+params+`}`)
+			if resp.Error == nil || resp.Error.Code != wire.InvalidParams || empty.prCalls != before {
+				t.Fatalf("无效参数未拦截: %+v", resp.Error)
+			}
+		})
+	}
+}
+
 func TestGitExtPRWriteSchema(t *testing.T) {
 	data, err := os.ReadFile("../../docs/remote-control.schema.json")
 	if err != nil {
@@ -602,7 +655,7 @@ func TestGitExtPRWriteSchema(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"RemoteGitPRMerge", "RemoteGitPRReview"} {
+	for _, name := range []string{"RemoteGitPRMerge", "RemoteGitPRReview", "RemoteGitPRAIReview"} {
 		for _, kind := range []string{"Request", "Response"} {
 			if strings.Count(string(data), `"$ref": "#/$defs/`+name+kind+`"`) != 2 {
 				t.Fatalf("%s%s 未加入顶层和批量 schema", name, kind)

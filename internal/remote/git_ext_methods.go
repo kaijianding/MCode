@@ -51,6 +51,7 @@ type gitExtService interface {
 	GitPRMerge(ctx context.Context, threadID string, number int, method string) error
 	GitPRReview(ctx context.Context, threadID string, number int, event, body string) error
 	GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error
+	GitPRAIReview(ctx context.Context, threadID string, number int) ([]git.PRReviewComment, error)
 	GitPush(ctx context.Context, threadID string) error
 	GitPull(ctx context.Context, threadID string) error
 	GitFetch(ctx context.Context, threadID string) error
@@ -91,6 +92,7 @@ func init() {
 	RegisterMethod("git.pr.merge", handleGitExtPRMerge)
 	RegisterMethod("git.pr.review", handleGitExtPRReview)
 	RegisterMethod("git.pr.submitReview", handleGitExtPRSubmitReview)
+	RegisterMethod("git.pr.aiReview", handleGitExtPRAIReview)
 	RegisterMethod("git.push", handleGitExtPush)
 	RegisterMethod("git.pull", handleGitExtPull)
 	RegisterMethod("git.fetch", handleGitExtFetch)
@@ -219,7 +221,7 @@ func gitExtPRDetail(detail git.PRDetail) wire.GitExtPRDetail {
 		Comments:        make([]wire.GitExtPRComment, 0, len(detail.Comments)),
 	}
 	for _, check := range detail.Checks {
-		out.Checks = append(out.Checks, wire.GitExtPRCheck{Name: check.Name, State: check.State})
+		out.Checks = append(out.Checks, wire.GitExtPRCheck{Name: check.Name, State: check.State, URL: check.URL})
 	}
 	for _, comment := range detail.Comments {
 		item := wire.GitExtPRComment{Author: comment.Author, Body: comment.Body}
@@ -573,6 +575,36 @@ func handleGitExtPRSubmitReview(ctx context.Context, d *Dispatcher, c Conn, para
 		return nil, err
 	}
 	return wire.GitExtWriteActionResult{OK: true}, nil
+}
+
+// handleGitExtPRAIReview 实现 git.pr.aiReview：一次性生成 PR/MR 的行内审查草稿。
+// 生成走模型调用，按网络操作的超时处理；没有意见时返回空数组。
+func handleGitExtPRAIReview(ctx context.Context, d *Dispatcher, c Conn, params json.RawMessage) (any, error) {
+	var p wire.GitExtPRAIReviewParams
+	if err := decodeExtParams(params, &p); err != nil {
+		return nil, err
+	}
+	if err := gitExtThreadIDParam(p.ThreadID); err != nil {
+		return nil, err
+	}
+	if p.Number <= 0 {
+		return nil, ExtInvalidParams("Invalid params: 'number' must be positive")
+	}
+	svc, ok := gitExtServiceFrom(d)
+	if !ok {
+		return nil, ExtNotImplemented()
+	}
+	callCtx, cancel := context.WithTimeout(ctx, gitExtNetworkTimeout)
+	defer cancel()
+	comments, err := svc.GitPRAIReview(callCtx, p.ThreadID, p.Number)
+	if err != nil {
+		return nil, err
+	}
+	res := wire.GitExtPRAIReviewResult{Comments: make([]wire.GitExtPRReviewComment, 0, len(comments))}
+	for _, comment := range comments {
+		res.Comments = append(res.Comments, wire.GitExtPRReviewComment{Path: comment.Path, Line: comment.Line, Side: comment.Side, Body: comment.Body})
+	}
+	return res, nil
 }
 
 // handleGitExtPush 实现 git.push：推送当前分支到远程（网络操作，套超时）。

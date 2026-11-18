@@ -373,3 +373,29 @@ func TestParsePRDetailMergeable(t *testing.T) {
 		})
 	}
 }
+
+// TestGHChecksURL 覆盖 CheckRun 取 detailsUrl、StatusContext 取 targetUrl，以及两者都缺失的情况。
+func TestGHChecksURL(t *testing.T) {
+	t.Parallel()
+	checks := ghChecks([]ghCheck{
+		{TypeName: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS", DetailsURL: "https://github.com/acme/repo/actions/runs/1"},
+		{TypeName: "StatusContext", Context: "ci/lint", State: "SUCCESS", TargetURL: "https://ci.example.com/build/2"},
+		{TypeName: "CheckRun", Name: "deploy", Status: "COMPLETED", Conclusion: "SUCCESS"},
+		{TypeName: "StatusContext", Context: "ci/both", State: "SUCCESS", TargetURL: "https://target.example.com", DetailsURL: "https://details.example.com"},
+	})
+	if len(checks) != 4 {
+		t.Fatalf("条数 = %d, 期望 4", len(checks))
+	}
+	if checks[0].URL != "https://github.com/acme/repo/actions/runs/1" {
+		t.Errorf("CheckRun 链接 = %q", checks[0].URL)
+	}
+	if checks[1].URL != "https://ci.example.com/build/2" {
+		t.Errorf("StatusContext 链接 = %q", checks[1].URL)
+	}
+	if checks[2].URL != "" {
+		t.Errorf("没有链接时应为空，得到 %q", checks[2].URL)
+	}
+	if checks[3].URL != "https://details.example.com" {
+		t.Errorf("两种链接都有时应优先 detailsUrl，得到 %q", checks[3].URL)
+	}
+}
