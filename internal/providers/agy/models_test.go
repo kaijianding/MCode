@@ -17,12 +17,12 @@ func TestParseModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Model{
-		{ID: "gemini-4-carbon", Name: "Gemini 4 Carbon", Efforts: []string{"medium", "high", "low"}},
-		{ID: "gemini-4-argon", Name: "Gemini 4 Argon", Efforts: []string{"medium", "high", "low"}},
-		{ID: "gemini-4-hydrogen", Name: "Gemini 4 Hydrogen", Efforts: []string{"high", "xhigh", "medium", "low"}},
+		{ID: "gemini-4-carbon", Name: "Gemini 4 Carbon", Efforts: []string{"low", "medium", "high"}},
+		{ID: "gemini-4-argon", Name: "Gemini 4 Argon", Efforts: []string{"low", "medium", "high"}},
+		{ID: "gemini-4-hydrogen", Name: "Gemini 4 Hydrogen", Efforts: []string{"low", "medium", "high", "xhigh"}},
 		{ID: "gemini-pro-orchestrator", Name: "Orchestrator (Carbon)"},
 		{ID: "gemini-pro-orchestrator-argon", Name: "Orchestrator (Argon)"},
-		{ID: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", Efforts: []string{"high", "medium", "low"}},
+		{ID: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", Efforts: []string{"low", "medium", "high"}},
 		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6 (Thinking)"},
 		{ID: "claude-opus-4-6-thinking", Name: "Claude Opus 4.6 (Thinking)"},
 		{ID: "gpt-oss-120b", Name: "GPT-OSS 120B", Efforts: []string{"medium"}},
@@ -39,6 +39,19 @@ func TestParseModels(t *testing.T) {
 		{ID: "test", Name: "Test (Thinking)", Efforts: []string{"xhigh", "max"}},
 	}) {
 		t.Fatalf("大小写档位括号解析 = %+v", got)
+	}
+}
+
+func TestParseModelsOrdersEfforts(t *testing.T) {
+	out := "gemini-4-hydrogen-high\tGemini 4 Hydrogen (high)\n" +
+		"gemini-4-hydrogen-low\tGemini 4 Hydrogen (low)\n" +
+		"gemini-4-hydrogen-medium\tGemini 4 Hydrogen (medium)\n" +
+		"gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (xhigh)\n"
+	want := []Model{
+		{ID: "gemini-4-hydrogen", Name: "Gemini 4 Hydrogen", Efforts: []string{"low", "medium", "high", "xhigh"}},
+	}
+	if got := ParseModels(out); !reflect.DeepEqual(got, want) {
+		t.Fatalf("解析目录 = %+v，期望 %+v", got, want)
 	}
 }
 

@@ -21,7 +21,9 @@ type Model struct {
 	Default bool     `json:"default,omitempty"`
 }
 
-// ParseModels 按首次出现顺序合并 agy models 的模型与强度档位。
+var effortOrder = []string{"low", "medium", "high", "xhigh", "max"}
+
+// ParseModels 按首次出现顺序合并 agy models 的模型，档位按由弱到强排序。
 func ParseModels(out string) []Model {
 	var models []Model
 	positions := make(map[string]int)
@@ -44,6 +46,11 @@ func ParseModels(out string) []Model {
 		if effort != "" && !slices.Contains(models[pos].Efforts, effort) {
 			models[pos].Efforts = append(models[pos].Efforts, effort)
 		}
+	}
+	for i := range models {
+		slices.SortFunc(models[i].Efforts, func(a, b string) int {
+			return slices.Index(effortOrder, a) - slices.Index(effortOrder, b)
+		})
 	}
 	return models
 }
