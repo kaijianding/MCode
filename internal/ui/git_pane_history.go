@@ -604,6 +604,11 @@ func renderGitHistoryList(c *ui.Context, s *chatState, ps *gitPaneState, h *gitH
 	h.list.Selected = &h.selected
 	h.list.Key = func(i int) any { return commits[i].SHA }
 	h.list.Label = func(i int) string { return commits[i].Subject }
+	if reduceMotion(c) {
+		h.list.MoveAnimation = nil
+	} else {
+		h.list.MoveAnimation = &springGentle
+	}
 	graphWidth := gitGraphWidth(graph)
 	list := ui.List(c.Key("git-history-list"), &h.list, len(commits), func(i int) {
 		commit := commits[i]

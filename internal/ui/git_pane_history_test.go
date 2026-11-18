@@ -631,3 +631,59 @@ func TestGitHistoryCanceledDiffRetriesOnReturn(t *testing.T) {
 		t.Fatalf("取消后重试次数=%d", calls)
 	}
 }
+
+func TestGitHistoryMoveAnimationSettlesAndRespectsReduceMotion(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		setAppReduceMotion(t, false)
+		s, ps, h, client := gitHistoryTestState(t)
+		client.log = []git.LogCommit{{SHA: "c2", Subject: "第二条"}, {SHA: "c1", Subject: "第一条"}}
+		tt := ui.NewTester(func(c *ui.Context) { renderGitPaneHistory(c, s, ps.threadID, ps) }, 500, 360)
+		gitHistoryWaitLoaded(t, h)
+		tt.Frame()
+		if h.list.MoveAnimation == nil {
+			t.Fatal("正常动效下应设置 MoveAnimation")
+		}
+		if tt.FramePending() {
+			t.Fatal("静止状态下不应请求下一帧")
+		}
+
+		// 插入新提交到列表顶部，触发后续行位移动画。
+		h.mu.Lock()
+		h.commits = []git.LogCommit{{SHA: "c3", Subject: "第三条"}, {SHA: "c2", Subject: "第二条"}, {SHA: "c1", Subject: "第一条"}}
+		h.graph = git.ComputeGraph(h.commits, 6)
+		h.mu.Unlock()
+		tt.Frame()
+		if !tt.FramePending() {
+			t.Fatal("插入行后应启动 MoveAnimation 并请求下一帧")
+		}
+
+		tt.Advance(3 * time.Second)
+		if tt.FramePending() {
+			t.Fatal("动画结束后不应继续请求下一帧")
+		}
+	})
+
+	t.Run("reduceMotion", func(t *testing.T) {
+		setAppReduceMotion(t, true)
+		s, ps, h, client := gitHistoryTestState(t)
+		client.log = []git.LogCommit{{SHA: "c2", Subject: "第二条"}, {SHA: "c1", Subject: "第一条"}}
+		tt := ui.NewTester(func(c *ui.Context) { renderGitPaneHistory(c, s, ps.threadID, ps) }, 500, 360)
+		gitHistoryWaitLoaded(t, h)
+		tt.Frame()
+		if h.list.MoveAnimation != nil {
+			t.Fatal("开启 reduceMotion 时 MoveAnimation 必须为 nil")
+		}
+
+		h.mu.Lock()
+		h.commits = []git.LogCommit{{SHA: "c3", Subject: "第三条"}, {SHA: "c2", Subject: "第二条"}, {SHA: "c1", Subject: "第一条"}}
+		h.graph = git.ComputeGraph(h.commits, 6)
+		h.mu.Unlock()
+		tt.Frame()
+		if h.list.MoveAnimation != nil {
+			t.Fatal("插入行后 reduceMotion 开启时 MoveAnimation 仍必须为 nil")
+		}
+		if tt.FramePending() {
+			t.Fatal("开启 reduceMotion 时插入行不应请求下一帧")
+		}
+	})
+}

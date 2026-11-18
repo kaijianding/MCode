@@ -253,6 +253,11 @@ func renderChat(c *ui.Context, s *chatState) {
 				}
 				return i
 			}
+			if reduceMotion(c) {
+				s.chatListState.MoveAnimation = nil
+			} else {
+				s.chatListState.MoveAnimation = &springGentle
+			}
 
 			// 每个回合最后一条助手消息（按 messagesRev 缓存，长会话不再逐帧重建）
 			lastAssistantPerTurn := s.lastAssistantPerTurn()
