@@ -1004,7 +1004,7 @@ func checkSensitive(in Input, args map[string]any, kind harness.RequestKind, com
 	}
 	// 不同 provider 的路径键名不一致，逐个尝试后再判定。
 	target := ""
-	for _, key := range []string{"path", "file_path", "filePath", "notebook_path"} {
+	for _, key := range []string{"path", "file_path", "filePath", "notebook_path", "Path", "absolute_path", "AbsolutePath", "DirectoryPath", "SearchPath"} {
 		if target = get(key); target != "" {
 			break
 		}

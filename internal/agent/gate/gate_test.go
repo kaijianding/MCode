@@ -260,6 +260,19 @@ func TestSensitiveFor(t *testing.T) {
 	if got := SensitiveFor(harness.RequestKindCommand, "Bash", json.RawMessage(`{"command":"cat ~/.ssh/id_rsa"}`), "cat ~/.ssh/id_rsa", ""); got != "credential" {
 		t.Fatalf("命令敏感标记 = %q，期望 credential", got)
 	}
+	// agy 的工具输入使用大写或下划线键名
+	for _, tc := range []struct {
+		tool  string
+		input string
+	}{
+		{"read_file", `{"Path":"~/.ssh/id_rsa"}`},
+		{"client_view_file", `{"absolute_path":"~/.ssh/id_rsa"}`},
+		{"view_file", `{"AbsolutePath":"~/.ssh/id_rsa"}`},
+	} {
+		if got := SensitiveFor(harness.RequestKindTool, tc.tool, json.RawMessage(tc.input), "", ""); got != "credential" {
+			t.Fatalf("%s 敏感标记 = %q，期望 credential", tc.tool, got)
+		}
+	}
 }
 
 func TestOnlyReads(t *testing.T) {
