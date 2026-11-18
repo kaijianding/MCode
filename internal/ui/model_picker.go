@@ -1212,7 +1212,11 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 // modelPickerPanelBg 是模型面板的底色；Swarm 开关的镂空环内侧也用它盖住彩虹底。
 // 这是固定深色面、不随主题翻转：effort_slider.go 在该面板上画深色 token，面板必须一起保持深色。
 var (
-	modelPickerPanelBg       = ColorSurfaceMainDark.Alpha(0.95)
+	modelPickerPanelBg = ColorSurfaceMainDark.Alpha(0.95)
+	// modelPickerCardBg 是列表页分组卡片的底色，比面板底色更亮一层以区分群组。
+	modelPickerCardBg = ColorSurfacePopoverDark
+	// modelPickerDivider 是分组卡片内标题与模型行之间的细分隔线颜色。
+	modelPickerDivider       = ColorBorderDark
 	modelPickerTextPrimary   = ColorTextPrimaryDark
 	modelPickerTextSecondary = ColorTextSecondaryDark
 )
@@ -1895,9 +1899,12 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 			Background(ui.Transparent)
 	} else {
 		rowBtn.Opacity(1.0)
-		if rowBtn.Hovered() {
+		switch {
+		case opt.IsChecked:
+			rowBtn.Background(ColorSelectedDark)
+		case rowBtn.Hovered():
 			rowBtn.Background(ColorHoverDark)
-		} else {
+		default:
 			rowBtn.Background(ui.Transparent)
 		}
 		rowBtn.OnClick(func() {
@@ -1927,7 +1934,7 @@ func renderModelRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 					MinWidth(0).
 					Grow(1).
 					Children(func() {
-						ui.Text(c, modelDisplayName).
+						ui.Text(c, modelPickerRowName(prov, modelDisplayName)).
 							FontSize(uiFont(TypeProse)).
 							TextColor(modelPickerTextPrimary).SingleLine().Ellipsis("…")
 						if subtitle != "" {

@@ -3,6 +3,7 @@ package mcodeui
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1680,5 +1681,76 @@ func TestModelPickerGrouped_PopoverDrawOverDuringExpand(t *testing.T) {
 	tt.Frame()
 	if picked.ID != "o3-mini" {
 		t.Fatalf("点击模型行后应选中 o3-mini，实际: %+v", picked)
+	}
+}
+
+func TestModelPickerRowNameTrimsAuto(t *testing.T) {
+	cases := []struct {
+		name string
+		prov ProviderInfo
+		in   string
+		want string
+	}{
+		{
+			name: "trims_auto_suffix",
+			prov: ProviderInfo{ID: "claude", Models: []ModelInfo{{ID: "m1", Name: "claude-opus-5-5 (auto)"}}},
+			in:   "claude-opus-5-5 (auto)",
+			want: "claude-opus-5-5",
+		},
+		{
+			name: "keeps_plain_name",
+			prov: ProviderInfo{ID: "claude", Models: []ModelInfo{{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}}},
+			in:   "Claude 3.7 Sonnet",
+			want: "Claude 3.7 Sonnet",
+		},
+		{
+			name: "keeps_auto_when_provider_has_same_base_name",
+			prov: ProviderInfo{
+				ID: "claude",
+				Models: []ModelInfo{
+					{ID: "m1", Name: "claude-opus-5-5 (auto)"},
+					{ID: "m2", Name: "claude-opus-5-5"},
+				},
+			},
+			in:   "claude-opus-5-5 (auto)",
+			want: "claude-opus-5-5 (auto)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modelPickerRowName(tc.prov, tc.in); got != tc.want {
+				t.Fatalf("modelPickerRowName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestModelPickerListRowShowsTrimmedName(t *testing.T) {
+	prov := ProviderInfo{
+		ID:   "magpie",
+		Name: "Magpie",
+		Models: []ModelInfo{
+			{ID: "jp/auto/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash (auto)"},
+		},
+	}
+	props := ModelPickerProps{KeyPrefix: "row-trim-auto-"}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(300).Background(modelPickerPanelBg).Children(func() {
+			renderModelPickerListRow(c, props, modelRowOptions{
+				KeyPrefix: "lead-",
+				Provider:  prov,
+				Model:     prov.Models[0],
+			})
+		})
+	}, 320, 120)
+	tt.Frame()
+
+	texts := tt.Texts()
+	// 可见文本只来自 ui.Text，完整原名只留在 Label/Tooltip 上。
+	if !slices.Contains(texts, "DeepSeek V4.1 Flash") {
+		t.Fatalf("屏幕文本应显示去掉 (auto) 后的名字: %v", texts)
+	}
+	if _, ok := tt.Find("DeepSeek V4.1 Flash (auto)"); !ok {
+		t.Fatalf("按钮 Label 应保留完整原名以便查找/点击: %v", tt.AccessAll())
 	}
 }

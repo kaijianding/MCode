@@ -164,13 +164,24 @@ func modelPickerDefaultOpenAgent(providers []ProviderInfo, current string) strin
 	return firstWithModels
 }
 
+// renderModelPickerListCard 渲染列表页的分组卡片容器，用于分隔收藏与各 Agent 分组。
+func renderModelPickerListCard(c *ui.Context, key string, body func()) {
+	ui.Column(c.Key(key)).
+		Gap(Space0).
+		Padding(Space1).
+		Radius(RadiusLG).
+		Background(modelPickerCardBg).
+		FillWidth().
+		Children(body)
+}
+
 // renderModelPickerGroupedList 渲染非搜索态纵向列表：依次包含档位编辑提示、主导侧配对、
 // 执行侧跟随主导、执行侧档位、收藏以及按 Agent 折叠的模型分组。
 func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *ModelPickerState, side ModelPickerSide,
 	selection ModelSelection, providers []ProviderInfo, pinned []modelPickerPinnedEntry,
 	onPick func(ProviderInfo, ModelInfo)) {
 	ui.Column(c.Key(p.KeyPrefix+"model-list-items")).
-		Gap(Space0).
+		Gap(Space3).
 		MinWidth(0).
 		Padding(0, 0, Space2, 0).
 		FillWidth().
@@ -188,20 +199,27 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				renderModelPickerTiersSection(c, p, state)
 			}
 			if len(pinned) > 0 {
-				ui.Box(c.Key(p.KeyPrefix + "pinned-group-gap")).Height(Space2)
-				renderProviderGroupHeader(c, p.KeyPrefix+"pinned-group-header", "收藏")
-				for _, entry := range pinned {
-					mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
-					renderModelPickerListRow(c, p, modelRowOptions{
-						KeyPrefix: "pinned-",
-						Provider:  entry.Provider,
-						Model:     entry.Model,
-						IsChecked: selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model),
-						IsLocked:  side == ModelPickerSideLead && p.HasMessages && entry.Provider.ID != selection.Provider,
-						ShowGroup: true,
-						OnPick:    onPick,
+				ui.Column(c.Key(p.KeyPrefix+"pinned-section")).
+					Gap(Space0).
+					MinWidth(0).
+					FillWidth().
+					Children(func() {
+						renderProviderGroupHeader(c, p.KeyPrefix+"pinned-group-header", "收藏")
+						renderModelPickerListCard(c, p.KeyPrefix+"pinned-card", func() {
+							for _, entry := range pinned {
+								mIdx := modelIndexByID(entry.Provider.Models, entry.Model.ID)
+								renderModelPickerListRow(c, p, modelRowOptions{
+									KeyPrefix: "pinned-",
+									Provider:  entry.Provider,
+									Model:     entry.Model,
+									IsChecked: selection.Provider == entry.Provider.ID && modelMatches(entry.Provider.Models, selection.Model, mIdx, entry.Model),
+									IsLocked:  side == ModelPickerSideLead && p.HasMessages && entry.Provider.ID != selection.Provider,
+									ShowGroup: true,
+									OnPick:    onPick,
+								})
+							}
+						})
 					})
-				}
 			}
 
 			currentAgent := selection.Provider
@@ -215,7 +233,9 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				}
 				if len(prov.Models) == 0 {
 					if prov.Available && prov.UnavailableReason != "" {
-						renderProviderCatalogNotice(c, p, "", prov)
+						renderModelPickerListCard(c, p.KeyPrefix+"agent-notice-card-"+prov.ID, func() {
+							renderProviderCatalogNotice(c, p, "", prov)
+						})
 						renderedAny = true
 					}
 					continue
@@ -225,38 +245,39 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				if !hasOpen {
 					open = defaultOpenAgent != "" && prov.ID == defaultOpenAgent
 				}
-				ui.Column(c.Key(p.KeyPrefix+"agent-group-wrap-"+prov.ID)).
-					Gap(Space0).
-					Padding(Space2, 0, 0, 0).
-					FillWidth().
-					Children(func() {
-						renderModelPickerAgentHeader(c, p.KeyPrefix+"agent-group-"+prov.ID, prov, modelPickerAgentName(prov), !open, func() {
-							if state.agentOpen == nil {
-								state.agentOpen = make(map[string]bool)
-							}
-							state.agentOpen[prov.ID] = !open
-							modelPickerInvalidate(p)
-						})
-						if !open {
-							return
+				renderModelPickerListCard(c, p.KeyPrefix+"agent-group-wrap-"+prov.ID, func() {
+					renderModelPickerAgentHeader(c, p.KeyPrefix+"agent-group-"+prov.ID, prov, modelPickerAgentName(prov), !open, func() {
+						if state.agentOpen == nil {
+							state.agentOpen = make(map[string]bool)
 						}
-						ui.Column(c.Key(p.KeyPrefix + "agent-group-body-" + prov.ID)).
-							Gap(Space0).
-							FillWidth().
-							Transition(motionCollapse(c)).
-							Children(func() {
-								for mIdx, m := range prov.Models {
-									renderModelPickerListRow(c, p, modelRowOptions{
-										KeyPrefix: "model-",
-										Provider:  prov,
-										Model:     m,
-										IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
-										ShowQuota: mIdx == 0,
-										OnPick:    onPick,
-									})
-								}
-							})
+						state.agentOpen[prov.ID] = !open
+						modelPickerInvalidate(p)
 					})
+					if !open {
+						return
+					}
+					ui.Box(c.Key(p.KeyPrefix + "agent-group-divider-" + prov.ID)).
+						Height(Hairline).
+						Margin(0, Space3).
+						Background(modelPickerDivider).
+						FillWidth()
+					ui.Column(c.Key(p.KeyPrefix + "agent-group-body-" + prov.ID)).
+						Gap(Space0).
+						FillWidth().
+						Transition(motionCollapse(c)).
+						Children(func() {
+							for mIdx, m := range prov.Models {
+								renderModelPickerListRow(c, p, modelRowOptions{
+									KeyPrefix: "model-",
+									Provider:  prov,
+									Model:     m,
+									IsChecked: selection.Provider == prov.ID && modelMatches(prov.Models, selection.Model, mIdx, m),
+									ShowQuota: mIdx == 0,
+									OnPick:    onPick,
+								})
+							}
+						})
+				})
 			}
 			if !renderedAny {
 				ui.Text(c, "没有可用的模型").
@@ -337,9 +358,12 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 			Background(ui.Transparent).
 			Tooltip(modelSideDisabledReason(p.Disabled, p.BeesDisabled))
 	} else {
-		if btn.Hovered() {
+		switch {
+		case selected:
+			btn.Background(ColorSelectedDark)
+		case btn.Hovered():
 			btn.Background(ColorHoverDark)
-		} else {
+		default:
 			btn.Background(ui.Transparent)
 		}
 		btn.OnClick(func() {
@@ -360,15 +384,18 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 			Children(func() {
 				ui.Box(c.Key(p.KeyPrefix+"follow-lead-row-icon-slot")).
 					Size(IconSM, IconSM).
-					Shrink(0)
-				title := ui.Text(c, "跟随主导模型").
+					Center().
+					Shrink(0).
+					Children(func() {
+						ui.Icon(c, IconByName("merge")).
+							Size(IconSM, IconSM).
+							TextColor(modelPickerTextSecondary)
+					})
+				ui.Text(c, "跟随主导模型").
 					FontSize(uiFont(TypeBody)).
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Shrink(0)
-				if selected {
-					title.FontWeight(600)
-				}
 				ui.Row(c.Key(p.KeyPrefix + "follow-lead-row-gap")).Grow(1)
 				if selected {
 					ui.Icon(c, IconCheck()).
@@ -460,6 +487,29 @@ func modelPickerAgentName(prov ProviderInfo) string {
 	return prov.ID
 }
 
+// modelPickerRowName 去掉列表行展示名末尾的「 (auto)」后缀；
+// 若同供应商下已有其他模型的 Name 或 ID 等于去掉后的名字，则保留原名以免两行同名。
+func modelPickerRowName(prov ProviderInfo, name string) string {
+	trimmed := strings.TrimSpace(name)
+	const suffix = " (auto)"
+	if len(trimmed) <= len(suffix) || !strings.EqualFold(trimmed[len(trimmed)-len(suffix):], suffix) {
+		return name
+	}
+	base := strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)])
+	if base == "" {
+		return name
+	}
+	for _, m := range prov.Models {
+		if m.Name == name || (m.Name == "" && m.ID == name) {
+			continue
+		}
+		if m.Name == base || m.ID == base {
+			return name
+		}
+	}
+	return base
+}
+
 // renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽与模型名，右侧按需展示配额、收藏星标与当前选中标记。
 // 星标只反映模型是否在配置的精选列表里（见 ModelPickerProps.Pins），不可点击。
 func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
@@ -492,9 +542,12 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 		}
 		btn.Disabled(true).Opacity(0.45).Background(ui.Transparent).Tooltip(tip)
 	} else {
-		if btn.Hovered() {
+		switch {
+		case opt.IsChecked:
+			btn.Background(ColorSelectedDark)
+		case btn.Hovered():
 			btn.Background(ColorHoverDark)
-		} else {
+		default:
 			btn.Background(ui.Transparent)
 		}
 		btn.OnClick(func() {
@@ -518,14 +571,11 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 							renderProviderIcon(c, prov.ID, IconSM)
 						}
 					})
-				title := ui.Text(c, name).
+				ui.Text(c, modelPickerRowName(prov, name)).
 					FontSize(uiFont(TypeBody)).
 					TextColor(modelPickerTextPrimary).
 					SingleLine().
 					Shrink(0)
-				if opt.IsChecked {
-					title.FontWeight(600)
-				}
 				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
 				if opt.ShowQuota && p.QuotaUsed != nil {
 					if usedPercent, ok := p.QuotaUsed(prov.ID); ok {
