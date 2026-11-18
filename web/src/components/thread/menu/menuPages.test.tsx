@@ -59,14 +59,24 @@ assertEqual(
 );
 
 // 不可路由页：routeForPage 必须为 null，isRoutablePage 必须为 false。
-const NON_ROUTABLE_KINDS = ['main', 'swarm', 'workspace', 'export', 'mcp', 'worktree', 'save-task', 'forward'] as const;
+const NON_ROUTABLE_KINDS = [
+  'main',
+  'swarm',
+  'workspace',
+  'export',
+  'mcp',
+  'worktree',
+  'save-task',
+  'forward',
+  'move-to-project'
+] as const;
 for (const kind of NON_ROUTABLE_KINDS) {
   assertEqual(routeForPage({ kind }), null, `${kind} 的路由`);
   assertFalse(isRoutablePage(kind), `${kind} 可路由`);
 }
 
 // compact 页用 menu（内容高度），详情页用 panel（固定高度）。
-const COMPACT_KINDS = ['main', 'swarm', 'workspace', 'export', 'save-task', 'forward'] as const;
+const COMPACT_KINDS = ['main', 'swarm', 'workspace', 'export', 'save-task', 'forward', 'move-to-project'] as const;
 const DETAIL_KINDS = ['agents', 'review', 'git', 'scripts', 'files', 'mcp', 'worktree'] as const;
 for (const kind of COMPACT_KINDS) {
   assertTrue(isCompactPageKind(kind), `${kind} 是 compact 页`);

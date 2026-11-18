@@ -43,7 +43,11 @@ import { routeAfterPop, shouldIgnoreMenuEscape } from './menu/menuStackActions';
 import { ThreadMenuSwarmPanel } from './menu/ThreadMenuSwarmPanel';
 import { ThreadMenuWorkspacePanel } from './menu/ThreadMenuWorkspacePanel';
 import { ThreadMenuExportPanel } from './menu/ThreadMenuExportPanel';
-import { chatsProject } from '../../utils/builtinProjects';
+import {
+  REMOTE_THREADS_MOVE_TO_PROJECT_METHOD,
+  ThreadMenuMoveToProjectPanel
+} from './menu/ThreadMenuMoveToProjectPanel';
+import { chatsProject, moveTargetProjects } from '../../utils/builtinProjects';
 import {
   ArchiveBoxIcon, ArrowDownIcon, ArrowPathIcon, ArrowUturnRightIcon, CodeBracketIcon,
   DocumentTextIcon, EyeIcon, FolderIcon, GitBranchIcon, LayoutIcon, ListBulletIcon,
@@ -434,6 +438,10 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
   const showSaveTaskRow =
     saveTaskSupported && !latestSummary.taskID && !latestSummary.isArchived && (!swarmSupported || swarmState);
   const showForwardRow = forwardSupported && !latestSummary.isArchived && (!swarmSupported || swarmState);
+  const showMoveToProjectRow =
+    isChatsThread &&
+    supportsMethod(REMOTE_THREADS_MOVE_TO_PROJECT_METHOD) &&
+    moveTargetProjects(projects).length > 0;
   const swarmModeLabel = !swarmAvailable ? '不可用' : !swarmEnabled ? '已关闭' : SWARM_MODE_LABELS[swarmMode];
   const busyExport = isExporting || isCopyingMarkdown;
 
@@ -626,6 +634,15 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
                       }}
                     />
                   )}
+                  {showMoveToProjectRow && (
+                    <MenuRow
+                      icon={<FolderIcon className="h-4 w-4" />}
+                      label="移到项目…"
+                      chevron
+                      disabled={isUpdatingThread}
+                      onClick={() => pushPage({ kind: 'move-to-project' })}
+                    />
+                  )}
                   <MenuRow
                     icon={<ArrowDownIcon className="h-4 w-4" />}
                     label={isExporting ? '正在导出…' : '导出会话'}
@@ -709,6 +726,18 @@ export const ThreadMenuSheet = React.memo(function ThreadMenuSheet({
               isCopyingMarkdown={isCopyingMarkdown}
               handleExportThread={handleExportThread}
               exportNotice={exportNotice}
+            />
+          </div>
+        );
+        break;
+      case 'move-to-project':
+        body = (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <ThreadMenuMoveToProjectPanel
+              ref={handleRefFor(page.id)}
+              threadID={threadID}
+              projects={projects}
+              onCloseMenu={onCloseMenu}
             />
           </div>
         );

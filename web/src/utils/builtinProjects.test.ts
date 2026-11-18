@@ -7,7 +7,7 @@ const assert = {
   }
 };
 import type { RemoteProjectSummary } from '../types/contract';
-import { chatsProject, pickableProjects } from './builtinProjects';
+import { chatsProject, moveTargetProjects, pickableProjects } from './builtinProjects';
 
 type ProjectItem = Pick<RemoteProjectSummary, 'id' | 'kind'>;
 
@@ -43,3 +43,16 @@ assert.deepEqual(
 );
 assert.deepEqual(pickableProjects([{ id: 'steward', kind: 'steward' }]), []);
 assert.deepEqual(pickableProjects([]), []);
+
+assert.deepEqual(
+  moveTargetProjects(withBuiltins).map((project) => project.id),
+  ['p1', 'p2', 'p3']
+);
+assert.deepEqual(
+  moveTargetProjects([
+    { id: 'chats', kind: 'chats' },
+    { id: 'steward', kind: 'steward' }
+  ]),
+  []
+);
+assert.deepEqual(moveTargetProjects([]), []);

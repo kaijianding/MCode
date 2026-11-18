@@ -4,7 +4,7 @@
 export type ThreadMenuPageKind =
   | 'main' | 'swarm' | 'workspace' | 'export'
   | 'agents' | 'review' | 'git' | 'scripts' | 'files'
-  | 'mcp' | 'worktree' | 'save-task' | 'forward';
+  | 'mcp' | 'worktree' | 'save-task' | 'forward' | 'move-to-project';
 
 export type ThreadSubview = 'agents' | 'review' | 'git' | 'scripts' | 'files';
 
@@ -31,7 +31,8 @@ const COMPACT_PAGE_KINDS: ReadonlySet<ThreadMenuPageKind> = new Set<ThreadMenuPa
   'workspace',
   'export',
   'save-task',
-  'forward'
+  'forward',
+  'move-to-project'
 ]);
 
 export function isCompactPageKind(kind: ThreadMenuPageKind): boolean {
@@ -56,7 +57,8 @@ export const MENU_PAGE_TITLES: Record<ThreadMenuPageKind, string> = {
   mcp: 'MCP 服务器',
   worktree: '移到 worktree',
   'save-task': '存为看板任务',
-  forward: '转发到新会话'
+  forward: '转发到新会话',
+  'move-to-project': '移到项目'
 };
 
 /** 可路由页 → hash 后缀；不可路由页返回 null。 */
