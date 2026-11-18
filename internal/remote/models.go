@@ -7,6 +7,7 @@ import (
 	"mcode/internal/config"
 	"mcode/internal/harness"
 	"mcode/internal/modelsdev"
+	"mcode/internal/providers/agy"
 	"mcode/internal/providers/claude"
 	"mcode/internal/providers/cline"
 	"mcode/internal/providers/codex"
@@ -614,6 +615,34 @@ func nativeProviderModels(provider string) []wire.ProviderModel {
 	case "memory":
 		src = memoryModels
 	case "agy", "antigravity":
+		if cached := agy.CachedModels(); len(cached) > 0 {
+			defaultID := cached[0].ID
+			for _, m := range cached {
+				if m.ID == "gemini-3.8-flash" {
+					defaultID = m.ID
+					break
+				}
+			}
+			res := make([]wire.ProviderModel, len(cached))
+			for i, m := range cached {
+				var defaultEffort *string
+				if len(m.Efforts) > 0 {
+					defaultEffort = stringPtr(m.Efforts[0])
+					for _, effort := range m.Efforts {
+						if effort == "high" {
+							defaultEffort = stringPtr(effort)
+							break
+						}
+					}
+				}
+				res[i] = wire.ProviderModel{
+					ID: m.ID, Name: m.Name, Efforts: append([]string(nil), m.Efforts...),
+					DefaultEffort: defaultEffort,
+					IsDefault:     m.ID == defaultID,
+				}
+			}
+			return res
+		}
 		src = agyModels
 	case "openai":
 		src = openaiModels

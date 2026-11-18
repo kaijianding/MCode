@@ -75,6 +75,19 @@ func TestMain(m *testing.M) {
 }
 
 func runFakeAgy(mode string) {
+	if mode == "models" {
+		home := os.Getenv("AGY_MODELS_TEST_HOME")
+		wantArgs := []string{"--gemini_dir=" + filepath.Join(home, ".gemini"), "models"}
+		if home == "" || os.Getenv("HOME") != home || !slices.Equal(os.Args[1:], wantArgs) {
+			os.Exit(2)
+		}
+		out, err := os.ReadFile("testdata/models.txt")
+		if err != nil {
+			os.Exit(3)
+		}
+		_, _ = os.Stdout.Write(out)
+		os.Exit(0)
+	}
 	if mode == "acp_transport" {
 		runFakeAgyACP()
 		return

@@ -34,6 +34,34 @@ func (m *Manager) Route(conversationID, model string, exclude []string) (account
 	return m.buildRuntimeEnv(chosenID)
 }
 
+// ModelsEnv 只读选择模型目录查询账号，不推进调度状态或写入会话绑定。
+func (m *Manager) ModelsEnv() (env []string, args []string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	chosenID := ""
+	for _, acc := range m.index.Accounts {
+		enabled := acc.On
+		if override := m.routing.Accounts[acc.ID]; override.On != nil {
+			enabled = *override.On
+		}
+		if !enabled || acc.Status != StatusActive {
+			continue
+		}
+		if chosenID == "" || acc.ID == m.index.DefaultAccountID {
+			chosenID = acc.ID
+		}
+		if acc.ID == m.index.DefaultAccountID {
+			break
+		}
+	}
+	if chosenID == "" {
+		return nil, nil, errors.New("agy: 没有可查询模型目录的启用账号")
+	}
+	_, env, args, err = m.buildRuntimeEnv(chosenID)
+	return env, args, err
+}
+
 // QuotaView 是额度弹窗需要的账号视图。
 // On 是每个账号应用路由覆盖（agy-routing.json）后的有效启用状态；
 // Target 是新会话当前会被路由到的账号 ID，没有可用账号时为空串。

@@ -6,6 +6,7 @@ import (
 
 	"mcode/internal/config"
 	"mcode/internal/modelsdev"
+	"mcode/internal/providers/agy"
 	"mcode/internal/providers/claude"
 	"mcode/internal/providers/codex"
 	"mcode/internal/remote/wire"
@@ -176,6 +177,7 @@ func TestIsValidModelLegacyCatalogIDs(t *testing.T) {
 // agy 目录保留完整强度档位；gemini-3.1-pro 不含 medium（上游会解析为 high）。
 func TestAgyModelEfforts(t *testing.T) {
 	testenv.TempHome(t)
+	t.Cleanup(agy.SetCachedModelsForTest(nil))
 	for _, m := range ProviderModels("agy") {
 		if m.ID != "gemini-3.1-pro" {
 			continue
@@ -188,6 +190,50 @@ func TestAgyModelEfforts(t *testing.T) {
 		return
 	}
 	t.Fatal("gemini-3.1-pro missing from agy catalog")
+}
+
+func TestAgyDynamicModels(t *testing.T) {
+	for _, withFlash := range []bool{false, true} {
+		t.Run(map[bool]string{false: "首行默认", true: "flash默认"}[withFlash], func(t *testing.T) {
+			models := []agy.Model{
+				{ID: "gemini-4-carbon", Name: "Gemini 4 Carbon", Efforts: []string{"medium", "high", "low"}},
+				{ID: "gemini-4-hydrogen", Name: "Gemini 4 Hydrogen", Efforts: []string{"xhigh", "medium"}},
+				{ID: "gemini-pro-orchestrator", Name: "Orchestrator (Carbon)"},
+			}
+			defaultID := models[0].ID
+			if withFlash {
+				models = append(models, agy.Model{ID: "gemini-3.8-flash", Name: "Gemini 3.8 Flash"})
+				defaultID = "gemini-3.8-flash"
+			}
+			t.Cleanup(agy.SetCachedModelsForTest(models))
+			for _, provider := range []string{"agy", "antigravity"} {
+				got := ProviderModels(provider)
+				if len(got) != len(models) || got[0].ID != models[0].ID || got[0].Name != models[0].Name {
+					t.Fatalf("动态目录未生效: %+v", got)
+				}
+				if got[0].DefaultEffort == nil || *got[0].DefaultEffort != "high" || got[1].DefaultEffort == nil || *got[1].DefaultEffort != "xhigh" || got[2].DefaultEffort != nil {
+					t.Fatalf("动态默认档位错误: %+v", got)
+				}
+				defaults := 0
+				for _, model := range got {
+					if model.IsDefault {
+						defaults++
+						if model.ID != defaultID {
+							t.Fatalf("默认模型错误: %+v", model)
+						}
+					}
+				}
+				if defaults != 1 || !IsValidModel(provider, "gemini-4-carbon") || !IsValidModel(provider, "gemini-pro-orchestrator") {
+					t.Fatalf("动态模型验证或默认行错误: %+v", got)
+				}
+				got[0].Efforts[0] = "changed"
+				*got[0].DefaultEffort = "changed"
+				if fresh := ProviderModels(provider); fresh[0].Efforts[0] != "medium" || *fresh[0].DefaultEffort != "high" {
+					t.Fatalf("调用方改动污染动态目录: %+v", fresh)
+				}
+			}
+		})
+	}
 }
 
 // 配置里的 OpenAI 模型并入目录并置为首选，绝不替换整张目录。

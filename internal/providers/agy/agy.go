@@ -71,6 +71,8 @@ type Options struct {
 	Channel func() string
 	Binary  string
 	Router  Router
+	// ModelsEnv 返回模型目录查询所需的账号环境，不触发会话路由。
+	ModelsEnv func() (env []string, args []string, err error)
 	// BuiltinMCP 是本轮要注入的内置 MCP 端点（mcode），未配置时为空。
 	BuiltinMCP harness.BuiltinMCP
 	// ExternalMCP 按工作目录返回用户配置的外部 MCP 端点。
@@ -104,6 +106,9 @@ func New(opts Options) *Harness {
 			return args.([]string)
 		},
 	})
+	modelCatalogMu.Lock()
+	modelHarness = h
+	modelCatalogMu.Unlock()
 	return h
 }
 
@@ -182,7 +187,7 @@ func (h *Harness) Available() (bool, string) {
 }
 
 func parseModelRow(slug string) (baseSlug string, effort string) {
-	for _, eff := range []string{"high", "medium", "low"} {
+	for _, eff := range []string{"xhigh", "high", "medium", "low", "max"} {
 		suffix := "-" + eff
 		if strings.HasSuffix(slug, suffix) {
 			return strings.TrimSuffix(slug, suffix), eff
@@ -198,6 +203,11 @@ func normalizeModel(model, effort string) (resolvedModel string, resolvedEffort 
 	baseSlug, suffixEffort := parseModelRow(model)
 	if strings.Contains(strings.ToLower(baseSlug), "claude") {
 		return baseSlug, ""
+	}
+	for _, m := range CachedModels() {
+		if m.ID == baseSlug && len(m.Efforts) == 0 {
+			return baseSlug, ""
+		}
 	}
 	// 显式 effort 优先，其次模型 slug 的旧式后缀，最后按模型取默认档位。
 	resolvedEffort = effort

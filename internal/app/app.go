@@ -2146,14 +2146,17 @@ func registerExtraProviders(backend *remote.MemoryBackend, cfg config.Config, da
 		}
 
 		var r agy.Router
+		var modelsEnv func() ([]string, []string, error)
 		if agyMgr != nil {
 			r = agyMgr
+			modelsEnv = agyMgr.ModelsEnv
 		}
 
 		agyHarness = agy.New(agy.Options{
 			Channel:     agyChannelReader(dataDir),
 			Binary:      bin,
 			Router:      r,
+			ModelsEnv:   modelsEnv,
 			BuiltinMCP:  mcpInjection.Builtin,
 			ExternalMCP: mcpInjection.External,
 		})
