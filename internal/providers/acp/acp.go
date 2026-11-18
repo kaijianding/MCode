@@ -1389,6 +1389,9 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	if promptErr == nil && h.opts.Agent == AgentAgy {
 		agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
 	}
+	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil {
+		h.reconcileRoundTasks(p, turn.ThreadID, emit)
+	}
 	if promptErr == nil && agyErr == nil {
 		u := promptResult.Usage
 		if u.InputTokens != 0 || u.OutputTokens != 0 || u.ThoughtTokens != 0 || u.CachedReadTokens != 0 {

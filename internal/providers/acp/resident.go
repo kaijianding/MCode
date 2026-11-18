@@ -302,6 +302,75 @@ func (h *Harness) holdProcess(p *acpProcess, threadID string) bool {
 	return p.keep
 }
 
+// agyTranscriptPath 返回 agy 为 sid 写下的 transcript 路径；两个已知目录都不存在时为空。
+func agyTranscriptPath(p *acpProcess, sid string) string {
+	if !agySessionIDPattern.MatchString(sid) {
+		return ""
+	}
+	geminiDir := agyGeminiDir(p.args, p.cmd.Env)
+	for _, dir := range []string{"antigravity-cli", "antigravity-acp"} {
+		candidate := filepath.Join(geminiDir, dir, "brain", sid, ".system_generated", "logs", "transcript.jsonl")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// reconcileRoundTasks 把本轮 prompt 返回前已经结束的后台任务直接记成完成：
+// holdProcess 不再为它们保留进程，上层也不会为它们补开一个 Attach 轮。
+func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(harness.Event)) {
+	h.residentMu.Lock()
+	sid := p.sessionID
+	h.residentMu.Unlock()
+	path := agyTranscriptPath(p, sid)
+	if path == "" {
+		return
+	}
+	completions, _ := readBackgroundCompletions(path, 0)
+	statuses := make(map[string]string, len(completions))
+	for _, event := range completions {
+		if _, exists := statuses[event.TaskID]; !exists {
+			statuses[event.TaskID] = event.TaskStatus
+		}
+	}
+	var ended []harness.Event
+	h.residentMu.Lock()
+	for taskID, status := range p.tasks {
+		if status != "" {
+			continue
+		}
+		finished, exists := statuses[taskID]
+		if !exists {
+			continue
+		}
+		p.tasks[taskID] = finished
+		ended = append(ended, harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: taskID, TaskStatus: finished})
+	}
+	if len(ended) > 0 {
+		done := make(map[string]bool, len(ended))
+		for _, event := range ended {
+			done[event.TaskID] = true
+		}
+		kept := h.finishedTasks[threadID][:0]
+		for _, event := range h.finishedTasks[threadID] {
+			if !done[event.TaskID] {
+				kept = append(kept, event)
+			}
+		}
+		if len(kept) == 0 {
+			delete(h.finishedTasks, threadID)
+			delete(h.unsolicitedNotified, threadID)
+		} else {
+			h.finishedTasks[threadID] = kept
+		}
+	}
+	h.residentMu.Unlock()
+	for _, event := range ended {
+		_ = harness.Emit(emit, event)
+	}
+}
+
 func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -319,17 +388,8 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 		if dead {
 			return
 		}
-		if agySessionIDPattern.MatchString(sid) {
-			geminiDir := agyGeminiDir(p.args, p.cmd.Env)
-			for _, dir := range []string{"antigravity-cli", "antigravity-acp"} {
-				candidate := filepath.Join(geminiDir, dir, "brain", sid, ".system_generated", "logs", "transcript.jsonl")
-				if _, err := os.Stat(candidate); err == nil {
-					if path != candidate {
-						path, offset = candidate, 0
-					}
-					break
-				}
-			}
+		if candidate := agyTranscriptPath(p, sid); candidate != "" && candidate != path {
+			path, offset = candidate, 0
 		}
 		var ended []harness.Event
 		if path != "" {

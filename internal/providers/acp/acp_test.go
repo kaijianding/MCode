@@ -747,7 +747,11 @@ func runFakeACPFeatures(mode string) {
 					notify := func(update map[string]any) {
 						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
 					}
-					for i := 1; i <= 2; i++ {
+					tasks := 2
+					if mode == "feature_hold_inround" {
+						tasks = 1
+					}
+					for i := 1; i <= tasks; i++ {
 						toolID := fmt.Sprintf("hold-tool-%d", i)
 						output := fmt.Sprintf("Tool is running as a background task with task id: %s/task-%d", fakeHoldSession, i)
 						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command"})
@@ -763,6 +767,23 @@ func runFakeACPFeatures(mode string) {
 						notify(update)
 						// 同一任务的重发不能产生第二个开始事件。
 						notify(update)
+					}
+					if mode == "feature_hold_inround" {
+						// 本轮应答前任务已经结束：完成行落在 transcript 里，watcher 还没来得及扫描。
+						path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), "antigravity-cli", "brain", fakeHoldSession, ".system_generated", "logs", "transcript.jsonl")
+						if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+							panic(err)
+						}
+						line, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q finished with result:\noutput", fakeHoldSession+"/task-1")})
+						file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+						if err != nil {
+							panic(err)
+						}
+						_, err = file.Write(append(line, '\n'))
+						_ = file.Close()
+						if err != nil {
+							panic(err)
+						}
 					}
 				}
 				if promptCount > 1 && mode == "feature_hold_error" {
@@ -1818,6 +1839,40 @@ func TestACPHoldBackgroundTasks(t *testing.T) {
 				t.Fatal("驱逐后进程或后台任务状态未清理")
 			}
 		})
+	}
+}
+
+func TestACPHoldInRoundCompletion(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_inround")
+	calls := make(chan string, 10)
+	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
+	events := f.run(t, f.turn)
+	endedAt, doneAt := -1, -1
+	for i, event := range events {
+		switch event.Type {
+		case harness.EventBackgroundTaskEnd:
+			if event.TaskID != fakeHoldSession+"/task-1" || event.TaskStatus != "completed" {
+				t.Fatalf("结束事件 = %+v", event)
+			}
+			endedAt = i
+		case harness.EventDone:
+			doneAt = i
+		}
+	}
+	if endedAt < 0 || doneAt < 0 || endedAt > doneAt {
+		t.Fatalf("本轮内完成的任务未在完成事件之前上报: %v", events)
+	}
+	messages := f.messages(t)
+	if got := len(featureParams(messages, "session/close")); got != 1 {
+		t.Fatalf("session/close 次数 = %d", got)
+	}
+	if len(f.h.ProcessRootPIDs(f.turn.ThreadID)) != 0 || f.h.HasResidentProcess(f.turn.ThreadID) {
+		t.Fatal("本轮内完成的任务仍保留了进程")
+	}
+	// 超过一个 watcher 周期后也不能再触发续轮。
+	time.Sleep(5 * time.Second)
+	if len(calls) != 0 || f.h.HasUnsolicitedOutput(f.turn.ThreadID) {
+		t.Fatalf("本轮内完成的任务再次触发了续轮: %d", len(calls))
 	}
 }
 
