@@ -292,3 +292,95 @@ func TestThreadsToolOutputRPC(t *testing.T) {
 		t.Fatalf("archive directory remains: %v", err)
 	}
 }
+
+func TestThreadToolOutputSmallLengthMultibyte(t *testing.T) {
+	ctx := context.Background()
+	threadID, messageID := "00000000-0000-0000-0000-000000000301", "00000000-0000-0000-0000-000000000302"
+	backend := NewMemoryBackend(NewStreamHub(StreamHubOptions{}))
+	defer backend.Close()
+	dir := t.TempDir()
+	backend.SetDataDir(dir)
+	backend.AddThread(wire.ThreadSummary{ID: threadID}, nil)
+
+	full := strings.Repeat("汉界测试", 600)
+	if _, err := archiveToolOutput(dir, threadID, messageID, full); err != nil {
+		t.Fatal(err)
+	}
+
+	var chunks strings.Builder
+	for offset := int64(0); ; {
+		part, err := backend.ThreadToolOutput(ctx, threadID, messageID, offset, 1)
+		if err != nil {
+			t.Fatalf("offset=%d err=%v", offset, err)
+		}
+		if part.Text == "" || !utf8.ValidString(part.Text) {
+			t.Fatalf("invalid chunk at offset=%d: %+v", offset, part)
+		}
+		chunks.WriteString(part.Text)
+		next := part.Offset + int64(len(part.Text))
+		if next <= offset {
+			t.Fatalf("chunk made no progress: offset=%d part=%+v", offset, part)
+		}
+		if part.EOF {
+			if next != int64(len(full)) {
+				t.Fatalf("EOF before end: next=%d total=%d", next, len(full))
+			}
+			break
+		}
+		offset = next
+	}
+	if chunks.String() != full {
+		t.Fatalf("chunked read differs from archive")
+	}
+
+	// 从多字节字符中间偏移读取且 length=1 时，应跳过半个字符并返回下一个完整汉字。
+	mid, err := backend.ThreadToolOutput(ctx, threadID, messageID, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mid.Offset != int64(len("汉")) || mid.Text != "界" || mid.EOF {
+		t.Fatalf("mid-rune read=%+v", mid)
+	}
+}
+
+func TestToolEndArchivesOutsideLock(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	threadID := "00000000-0000-0000-0000-000000000401"
+	actionID := "00000000-0000-0000-0000-000000000402"
+	large := strings.Repeat("界", toolOutputStreamMaxRunes+250)
+
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	defer b.Close()
+	b.SetDataDir(dir)
+	b.SetHarness(&mockHarness{runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+		emit(harness.Event{Type: harness.EventToolStart, ToolID: "call-1", ToolName: "Bash"})
+		emit(harness.Event{Type: harness.EventToolEnd, ToolID: "call-1", Output: large})
+		emit(harness.Event{Type: harness.EventDone})
+		return nil
+	}}, dir, harness.ModeAgent)
+	b.AddProject(wire.ProjectSummary{ID: "project", Name: "project", Path: dir})
+	b.AddThread(wire.ThreadSummary{ID: threadID, ProjectID: "project", Title: "Tool archive"}, nil)
+
+	if _, err := b.SendMessage(ctx, wire.SendMessageParams{ThreadID: threadID, Text: "run", ActionID: actionID}); err != nil {
+		t.Fatal(err)
+	}
+	waitThreadIdle(t, b, ctx, threadID)
+	msg := waitToolMessage(t, b, ctx, threadID, "Bash")
+
+	if valueOrZero(msg.OutputBytes) != int64(len(large)) {
+		t.Fatalf("OutputBytes=%v want=%d", msg.OutputBytes, len(large))
+	}
+	if wantPreview := strings.Repeat("界", toolOutputStreamMaxRunes); msg.Text != wantPreview {
+		t.Fatalf("preview len=%d want=%d", len([]rune(msg.Text)), toolOutputStreamMaxRunes)
+	}
+	data, err := os.ReadFile(toolOutputPath(dir, threadID, msg.ID))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	if string(data) != large {
+		t.Fatalf("archived content mismatch: got %d bytes, want %d bytes", len(data), len(large))
+	}
+}

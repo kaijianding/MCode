@@ -4,13 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"mcode/internal/fsutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -84,7 +85,9 @@ func agySessionDB(geminiDir, sid string) string {
 }
 
 func agyOpenSteps(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: dbPath, RawQuery: "mode=ro"}).String())
+	u := fsutil.FileURL(dbPath)
+	u.RawQuery = "mode=ro"
+	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}

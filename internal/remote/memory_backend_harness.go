@@ -513,6 +513,14 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 				}
 			}
 
+			type toolOutputArchiveTask struct {
+				dataDir     string
+				threadID    string
+				messageID   string
+				text        string
+				previewText string
+			}
+
 			var (
 				msgToPublish   []wire.ThreadMessage
 				currentSummary wire.ThreadSummary
@@ -523,6 +531,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 				// 按 TurnIndex 筛不到它们，必须解锁后单独写穿到 store。
 				bgPersistMsgs     []wire.ThreadMessage
 				durationSummaries []wire.ThreadSummary
+				archiveTask       *toolOutputArchiveTask
 			)
 
 			b.mu.Lock()
@@ -828,23 +837,20 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 					for idx, m := range td.messages {
 						if m.ID == toolMsgID {
 							out := e.Output
-							if len([]rune(out)) > toolOutputStreamMaxRunes {
-								dataDir := b.dataDir
-								if size, err := archiveToolOutput(dataDir, threadID, toolMsgID, out); err != nil {
-									log.Printf("archive tool output for thread %s message %s failed: %v", threadID, toolMsgID, err)
-								} else if size > 0 {
-									td.messages[idx].OutputBytes = &size
-								}
-							}
 							if runes := []rune(out); len(runes) > toolOutputStreamMaxRunes {
 								out = string(runes[:toolOutputStreamMaxRunes])
+								// 写盘与 fsync 放到解锁之后执行，避免大输出阻塞 b.mu。
+								archiveTask = &toolOutputArchiveTask{
+									dataDir:     b.dataDir,
+									threadID:    threadID,
+									messageID:   toolMsgID,
+									text:        e.Output,
+									previewText: out,
+								}
 							}
 							// 运行期间已流出的增量只是过程展示：tool_end 带来最终 output 时用它覆盖，
 							// 避免 provider 既推增量又重复一次全量时出现两遍文本；没有最终 output 时保留增量。
-							if td.messages[idx].OutputBytes != nil {
-								// 存档与预览使用相同正文，避免工具名/输入前缀掩盖 outputBytes 的截断判断。
-								td.messages[idx].Text = out
-							} else if stream, streamed := toolStreams[e.ToolID]; streamed {
+							if stream, streamed := toolStreams[e.ToolID]; streamed {
 								td.messages[idx].Text = stream.override(out)
 							} else if out != "" {
 								if td.messages[idx].Text != "" {
@@ -854,7 +860,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 								}
 							}
 							// blocked 表示工具被 hook 拦截（或改道），不是工具自身故障：正文不拼 [failed]，状态单列为 blocked。
-							if e.IsError && !e.Blocked && td.messages[idx].OutputBytes == nil {
+							if e.IsError && !e.Blocked {
 								td.messages[idx].Text += "\n[failed]"
 							}
 							status := "completed"
@@ -1104,6 +1110,37 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 				}
 			}
 			b.mu.Unlock()
+
+			if archiveTask != nil {
+				if size, err := archiveToolOutput(archiveTask.dataDir, archiveTask.threadID, archiveTask.messageID, archiveTask.text); err != nil {
+					log.Printf("archive tool output for thread %s message %s failed: %v", archiveTask.threadID, archiveTask.messageID, err)
+				} else if size > 0 {
+					b.mu.Lock()
+					if cur, ok := b.threads[archiveTask.threadID]; ok {
+						found := false
+						for idx := range cur.messages {
+							if cur.messages[idx].ID == archiveTask.messageID {
+								cur.messages[idx].OutputBytes = &size
+								// 存档与预览使用相同正文，避免工具名/输入前缀掩盖 outputBytes 的截断判断。
+								cur.messages[idx].Text = archiveTask.previewText
+								msgToPublish = []wire.ThreadMessage{cur.messages[idx]}
+								if cur.persisted[archiveTask.messageID] {
+									bgPersistMsgs = append(bgPersistMsgs, cur.messages[idx])
+								}
+								found = true
+								break
+							}
+						}
+						if !found {
+							msgToPublish = nil
+						}
+						currentSummary = b.summaryForPublishLocked(cur)
+					} else {
+						msgToPublish = nil
+					}
+					b.mu.Unlock()
+				}
+			}
 
 			// 后台任务的工具消息可能属于更早回合，回合末批量落库覆盖不到，必须显式写穿。
 			if len(bgPersistMsgs) > 0 {

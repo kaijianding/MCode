@@ -4894,7 +4894,7 @@ export type RemoteGitPanelMethod0Response = {
 export type RemoteGitPanelMethod1Params = {
   threadID: UUID;
   path: string;
-  staged?: boolean;
+  staged: boolean;
 };
 
 export type RemoteGitPanelMethod1Request = {

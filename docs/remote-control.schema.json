@@ -18546,7 +18546,8 @@
         },
         "required": [
           "threadID",
-          "path"
+          "path",
+          "staged"
         ],
         "additionalProperties": false
       },

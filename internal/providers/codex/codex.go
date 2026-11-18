@@ -1441,6 +1441,7 @@ func (h *Harness) runTurnAttempt(ctx context.Context, turn harness.Turn, route *
 				planApproval = &req
 				slashKind = slashRequestNone
 				handler = NewProtocolHandler(turn)
+				handler.interrupt = cancelTurn
 				activeTurn = &activeTurnContext{
 					ctx: ctx, turn: turn, handler: handler, emit: emitter.emit,
 					accept: emitter.emitAccepted, threadID: threadID, turnDoneCh: make(chan struct{}),

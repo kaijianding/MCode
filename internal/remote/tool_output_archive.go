@@ -104,10 +104,25 @@ func (b *MemoryBackend) ThreadToolOutput(ctx context.Context, threadID, messageI
 		data = data[1:]
 		actualOffset++
 	}
+	raw := data
 	limit := int(min(length, toolOutputReadMaxBytes))
 	if len(data) > limit {
 		data = data[:limit]
 	}
 	data = trimPartialRune(data)
+	if len(data) == 0 && actualOffset < total {
+		// 请求长度小于单个多字节字符宽度时裁剪会变空，改为返回一个完整 rune，确保偏移量前进。
+		if !utf8.FullRune(raw) && actualOffset+int64(len(raw)) < total {
+			var runeBuf [utf8.UTFMax]byte
+			if rn, rerr := f.ReadAt(runeBuf[:], actualOffset); rn > 0 && (rerr == nil || errors.Is(rerr, io.EOF)) {
+				raw = runeBuf[:rn]
+			}
+		}
+		_, size := utf8.DecodeRune(raw)
+		if size > len(raw) {
+			size = len(raw)
+		}
+		data = raw[:size]
+	}
 	return wire.ThreadsToolOutputResult{Text: string(data), Offset: actualOffset, TotalBytes: total, EOF: actualOffset+int64(len(data)) >= total}, nil
 }
