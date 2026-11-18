@@ -1876,6 +1876,26 @@ func TestACPHoldInRoundCompletion(t *testing.T) {
 	}
 }
 
+func TestACPHoldReconcileDrainsQueued(t *testing.T) {
+	const threadID = "hold-thread"
+	taskID := fakeHoldSession + "/task-1"
+	h := New(Options{HoldBackgroundTasks: true})
+	p := &acpProcess{tasks: map[string]string{taskID: "completed"}}
+	h.finishedTasks = map[string][]harness.Event{threadID: {{Type: harness.EventBackgroundTaskEnd, TaskID: taskID, TaskStatus: "completed"}}}
+	h.unsolicitedNotified = map[string]bool{threadID: true}
+	var events []harness.Event
+	h.reconcileRoundTasks(p, threadID, func(event harness.Event) { events = append(events, event) })
+	if len(events) != 1 || events[0].Type != harness.EventBackgroundTaskEnd || events[0].TaskID != taskID || events[0].TaskStatus != "completed" {
+		t.Fatalf("排空事件 = %+v", events)
+	}
+	if h.HasUnsolicitedOutput(threadID) {
+		t.Fatal("队列未排空")
+	}
+	if _, exists := h.unsolicitedNotified[threadID]; exists {
+		t.Fatal("通知状态未清理")
+	}
+}
+
 func TestACPHoldAttachContinues(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_content")
 	calls := make(chan string, 10)

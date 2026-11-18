@@ -324,14 +324,14 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 	sid := p.sessionID
 	h.residentMu.Unlock()
 	path := agyTranscriptPath(p, sid)
-	if path == "" {
-		return
-	}
-	completions, _ := readBackgroundCompletions(path, 0)
-	statuses := make(map[string]string, len(completions))
-	for _, event := range completions {
-		if _, exists := statuses[event.TaskID]; !exists {
-			statuses[event.TaskID] = event.TaskStatus
+	statuses := make(map[string]string)
+	if path != "" {
+		completions, _ := readBackgroundCompletions(path, 0)
+		statuses = make(map[string]string, len(completions))
+		for _, event := range completions {
+			if _, exists := statuses[event.TaskID]; !exists {
+				statuses[event.TaskID] = event.TaskStatus
+			}
 		}
 	}
 	var ended []harness.Event
@@ -347,24 +347,19 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 		p.tasks[taskID] = finished
 		ended = append(ended, harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: taskID, TaskStatus: finished})
 	}
-	if len(ended) > 0 {
-		done := make(map[string]bool, len(ended))
-		for _, event := range ended {
+	// 队列里的完成行已经由 agy 注入本轮对话，轮末一并交给本轮，避免多余的续轮。
+	done := make(map[string]bool, len(ended))
+	for _, event := range ended {
+		done[event.TaskID] = true
+	}
+	for _, event := range h.finishedTasks[threadID] {
+		if !done[event.TaskID] {
 			done[event.TaskID] = true
-		}
-		kept := h.finishedTasks[threadID][:0]
-		for _, event := range h.finishedTasks[threadID] {
-			if !done[event.TaskID] {
-				kept = append(kept, event)
-			}
-		}
-		if len(kept) == 0 {
-			delete(h.finishedTasks, threadID)
-			delete(h.unsolicitedNotified, threadID)
-		} else {
-			h.finishedTasks[threadID] = kept
+			ended = append(ended, event)
 		}
 	}
+	delete(h.finishedTasks, threadID)
+	delete(h.unsolicitedNotified, threadID)
 	h.residentMu.Unlock()
 	for _, event := range ended {
 		_ = harness.Emit(emit, event)
