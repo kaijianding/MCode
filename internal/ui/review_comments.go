@@ -409,6 +409,101 @@ func reviewPRComments(dp *diffPanelState, tid, workspace string) []reviewComment
 	return comments
 }
 
+// startReviewPRAI 后台生成行内草稿；同一个 PR 已有请求时不重复发起。
+func startReviewPRAI(s *chatState, dp *diffPanelState, tid string) bool {
+	pr, ok := s.client.(reviewPRAIClient)
+	if !ok || tid == "" || dp == nil {
+		return false
+	}
+	reviewer, ok := s.client.(reviewClient)
+	if !ok {
+		return false
+	}
+	if _, ok := s.client.(reviewPRClient); !ok {
+		return false
+	}
+	workspace := reviewWorkspace(s, tid)
+	diffPanelMu.Lock()
+	if dp.scope != "pr" || dp.prNumber <= 0 || dp.prAIBusy != 0 {
+		diffPanelMu.Unlock()
+		return false
+	}
+	number := dp.prNumber
+	head, base, turn := dp.snapshot.HeadRevision, dp.snapshot.BaseRevision, dp.turnID
+	dp.prAIBusy = number
+	dp.prAIErr, dp.prAIErrNumber = "", 0
+	diffPanelMu.Unlock()
+	s.invalidate()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		comments, err := pr.GitPRAIReview(ctx, tid, number)
+		var drafts []reviewCommentDraft
+		if err == nil {
+			contents := make(map[string]*ReviewFileContent)
+			missing := make(map[string]bool)
+			for _, comment := range comments {
+				path, body := strings.TrimSpace(comment.Path), strings.TrimSpace(comment.Body)
+				if path == "" || body == "" || comment.Line <= 0 {
+					continue
+				}
+				content, found := contents[path]
+				if !found && !missing[path] {
+					snapshot, readErr := getReviewAt(ctx, reviewer, tid, "pr", turn, number, head, path)
+					if readErr != nil || snapshot.File == nil {
+						missing[path] = true
+					} else {
+						content, contents[path] = snapshot.File, snapshot.File
+					}
+				}
+				if content == nil {
+					continue
+				}
+				lines := editor.DiffLineRange{Side: editor.DiffNew, Start: comment.Line - 1, End: comment.Line - 1}
+				original, ok := reviewSelectedText(*content, lines)
+				if !ok {
+					continue
+				}
+				drafts = append(drafts, reviewCommentDraft{key: reviewDiffKey{workspace: workspace, threadID: tid, scope: "pr", turnID: turn, base: base, head: head, prNumber: number, path: path}, lines: lines, original: original, body: body})
+			}
+		}
+		diffPanelMu.Lock()
+		dp.prAIBusy = 0
+		if dp.scope != "pr" || dp.prNumber != number {
+			diffPanelMu.Unlock()
+			s.invalidate()
+			return
+		}
+		if err != nil {
+			dp.prAIErr, dp.prAIErrNumber = err.Error(), number
+			diffPanelMu.Unlock()
+			s.invalidate()
+			return
+		}
+		dp.prAIErr, dp.prAIErrNumber = "", 0
+		for _, draft := range drafts {
+			duplicate := false
+			for _, comment := range dp.comments {
+				if reviewSameFile(comment.key, draft.key) && comment.lines == draft.lines && comment.body == draft.body {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				continue
+			}
+			dp.commentSerial++
+			dp.comments = append(dp.comments, &reviewComment{id: dp.commentSerial, key: draft.key, lines: draft.lines, original: draft.original, body: draft.body})
+		}
+		diffPanelMu.Unlock()
+		if len(comments) == 0 {
+			s.setToast("AI 审查未发现问题")
+		}
+		s.invalidate()
+	}()
+	return true
+}
+
 func submitReviewPR(s *chatState, dp *diffPanelState, tid, event string) bool {
 	client, ok := s.client.(reviewPRClient)
 	if !ok || tid == "" {
@@ -451,6 +546,7 @@ func renderReviewPRAction(c *ui.Context, s *chatState, dp *diffPanelState, tid s
 	if _, ok := s.client.(reviewPRClient); !ok {
 		return
 	}
+	_, ai := s.client.(reviewPRAIClient)
 	workspace := reviewWorkspace(s, tid)
 	diffPanelMu.Lock()
 	count := len(reviewPRComments(dp, tid, workspace))
@@ -459,17 +555,29 @@ func renderReviewPRAction(c *ui.Context, s *chatState, dp *diffPanelState, tid s
 	if !current {
 		errText = ""
 	}
+	aiBusy, aiErr, aiErrNumber, number := dp.prAIBusy, dp.prAIErr, dp.prAIErrNumber, dp.prNumber
 	diffPanelMu.Unlock()
-	if count == 0 {
+	if count == 0 && !ai {
 		return
 	}
+	if aiErrNumber != number {
+		aiErr = ""
+	}
 	ui.Row(c.Key("review-pr-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
-		for _, action := range []struct{ event, title string }{{"comment", "评论"}, {"approve", "批准"}, {"request-changes", "要求修改"}} {
-			variant := ButtonSecondary
-			if action.event == "comment" {
-				variant = ButtonPrimary
+		if ai {
+			Button(c, ButtonOpts{Key: "review-pr-ai", Text: "AI 审查", Variant: ButtonSecondary, Size: ControlSM, Loading: aiBusy == number, Disabled: aiBusy != 0, OnClick: func() { startReviewPRAI(s, dp, tid) }})
+		}
+		if count > 0 {
+			for _, action := range []struct{ event, title string }{{"comment", "评论"}, {"approve", "批准"}, {"request-changes", "要求修改"}} {
+				variant := ButtonSecondary
+				if action.event == "comment" {
+					variant = ButtonPrimary
+				}
+				Button(c, ButtonOpts{Key: "review-pr-" + action.event, Text: action.title, Variant: variant, Size: ControlSM, Loading: current && busy == action.event, Disabled: busy != "" && (!current || busy != action.event), OnClick: func() { submitReviewPR(s, dp, tid, action.event) }})
 			}
-			Button(c, ButtonOpts{Key: "review-pr-" + action.event, Text: action.title, Variant: variant, Size: ControlSM, Loading: current && busy == action.event, Disabled: busy != "" && (!current || busy != action.event), OnClick: func() { submitReviewPR(s, dp, tid, action.event) }})
+		}
+		if aiErr != "" {
+			ui.Text(c, aiErr).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c))
 		}
 		if errText != "" {
 			ui.Text(c, errText).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c))

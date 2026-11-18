@@ -3,6 +3,7 @@ package mcodeui
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,12 @@ func (f *gitPRActionFake) GitPRReview(_ context.Context, threadID string, number
 func (f *gitPRActionFake) GitPRMerge(_ context.Context, threadID string, number int, method string) error {
 	f.calls <- gitPRActionCall{threadID, number, "merge", method}
 	return f.err
+}
+func (f *gitPRActionFake) GitPRAIReview(context.Context, string, int) ([]git.PRReviewComment, error) {
+	return nil, f.err
+}
+func (f *gitPRActionFake) GitPRCheckoutWorktree(context.Context, string, int, string) (string, error) {
+	return "", f.err
 }
 
 func TestGitPRRunAction(t *testing.T) {
@@ -238,6 +245,10 @@ type gitPRDialogFake struct {
 	mergeErr      error
 	mergeStarted  chan struct{}
 	mergeWait     <-chan struct{}
+
+	checkoutCalls []gitPRCheckoutCall
+	checkoutPath  string
+	checkoutErr   error
 }
 
 type gitPRConflictCall struct {
@@ -252,6 +263,11 @@ type gitPRResolveCall struct {
 
 type gitPRSwitchCall struct {
 	threadID, path string
+}
+
+type gitPRCheckoutCall struct {
+	number int
+	head   string
 }
 
 func (f *gitPRDialogFake) GitPRList(context.Context, string, int) ([]git.PRSummary, error) {
@@ -312,6 +328,19 @@ func (f *gitPRDialogFake) GitPRMerge(context.Context, string, int, string) error
 }
 
 func (f *gitPRDialogFake) GitPRReview(context.Context, string, int, string, string) error { return nil }
+
+func (f *gitPRDialogFake) GitPRCheckoutWorktree(_ context.Context, _ string, number int, head string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkoutCalls = append(f.checkoutCalls, gitPRCheckoutCall{number: number, head: head})
+	return f.checkoutPath, f.checkoutErr
+}
+
+func (f *gitPRDialogFake) checkoutCallsSnapshot() []gitPRCheckoutCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gitPRCheckoutCall(nil), f.checkoutCalls...)
+}
 
 func (f *gitPRDialogFake) detailCalls() []int {
 	f.mu.Lock()
@@ -628,5 +657,192 @@ func TestGitPRDialogCrossRepoBlocksResolve(t *testing.T) {
 	st.mu.Unlock()
 	if !open || busy != "" {
 		t.Errorf("弹窗状态 open=%v busy=%q", open, busy)
+	}
+}
+
+func TestGitPRRunActionComment(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       bool
+	}{{"有正文", "评论正文", true}, {"空正文", "  ", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &gitPRActionFake{FakeClient: NewFakeClient(), calls: make(chan gitPRActionCall, 1)}
+			s := newChatState(f)
+			s.selectedThreadID = "thread-1"
+			st := getGitPRDialogState(s)
+			st.mu.Lock()
+			st.open, st.threadID, st.selected, st.reviewBody = true, "thread-1", 42, tc.body
+			st.detail = &git.PRDetail{PRSummary: git.PRSummary{Number: 42, State: "open"}}
+			st.mu.Unlock()
+			s.runGitPRAction("comment", "")
+			if !tc.want {
+				select {
+				case got := <-f.calls:
+					t.Fatalf("空正文仍调用了评论: %+v", got)
+				case <-time.After(20 * time.Millisecond):
+				}
+				st.mu.Lock()
+				busy := st.actionBusy
+				st.mu.Unlock()
+				if busy != "" {
+					t.Fatalf("空正文进入了忙碌状态 %q", busy)
+				}
+				return
+			}
+			select {
+			case got := <-f.calls:
+				if want := (gitPRActionCall{"thread-1", 42, "comment", "评论正文"}); got != want {
+					t.Errorf("调用 = %+v，期望 %+v", got, want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("评论未执行")
+			}
+			deadline := time.Now().Add(time.Second)
+			for {
+				st.mu.Lock()
+				busy, body := st.actionBusy, st.reviewBody
+				st.mu.Unlock()
+				if busy == "" {
+					if body != "" {
+						t.Errorf("评论成功后正文 = %q", body)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("评论未完成")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+}
+
+// TestGitPRCheckRowURL 覆盖 CI 检查行有链接时可点击、无链接时保持原样。
+func TestGitPRCheckRowURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, url string
+		wantOpen  bool
+	}{{"有链接", "https://ci.example.com/run/1", true}, {"无链接", "", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := ui.NewTester(func(c *ui.Context) {
+				renderGitPRCheckRow(c, "modal-git-pr-detail-check-0", git.PRCheck{Name: "build", State: "success", URL: tc.url})
+			}, 600, 100)
+			tt.Frame()
+			if !tt.HasText("build") || !tt.HasText("检查通过") {
+				t.Fatal("检查行缺少名称或状态")
+			}
+			if tc.wantOpen {
+				if err := tt.Click("build"); err != nil {
+					t.Fatalf("点击检查行: %v", err)
+				}
+				tt.Frame()
+			}
+			opened := tt.OpenedURLs()
+			if tc.wantOpen {
+				if len(opened) != 1 || opened[0] != tc.url {
+					t.Fatalf("打开的链接 = %v，期望 %q", opened, tc.url)
+				}
+			} else if len(opened) != 0 {
+				t.Fatalf("无链接的检查行打开了 %v", opened)
+			}
+		})
+	}
+}
+
+// TestGitPRResolveSendsPrompt 覆盖解决冲突后把合并提示发给新会话。
+func TestGitPRResolveSendsPrompt(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "冲突", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "冲突", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+			Mergeable: "CONFLICTING",
+		},
+		conflicts:   []string{"src/a.go"},
+		resolvePath: "/tmp/mcode-pr-42",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading && !st.conflictLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if err := tt.Click("解决冲突"); err != nil {
+		t.Fatalf("点击解决冲突: %v", err)
+	}
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+	renames := f.renameCallsSnapshot()
+	if len(renames) != 1 {
+		t.Fatalf("重命名调用 = %+v", renames)
+	}
+	newID := renames[0].ThreadID
+	f.FakeClient.mu.Lock()
+	sends := append([]sentCall(nil), f.FakeClient.sendCalls...)
+	f.FakeClient.mu.Unlock()
+	if len(sends) != 1 || sends[0].ThreadID != newID || !strings.Contains(sends[0].Text, "PR #42") {
+		t.Fatalf("发送调用 = %+v，期望会话 %q 包含 PR #42", sends, newID)
+	}
+	if !strings.Contains(sends[0].Text, "origin/main") {
+		t.Fatalf("提示缺少目标分支: %q", sends[0].Text)
+	}
+}
+
+// TestGitPRCheckout 覆盖检出后切到新会话，不发送消息。
+func TestGitPRCheckout(t *testing.T) {
+	f := &gitPRDialogFake{
+		FakeClient: NewFakeClient(),
+		prs:        []git.PRSummary{{Number: 42, Title: "检出", State: "open"}},
+		detail: git.PRDetail{
+			PRSummary: git.PRSummary{Number: 42, Title: "检出", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+		},
+		checkoutPath: "/tmp/mcode-pr-42-checkout",
+	}
+	s := newGitPRDialogTestState(t, f)
+	s.openGitPRDialog()
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+		return st.selected == 42 && st.detail != nil && !st.detailLoading
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+	tt.Advance(DurSheet)
+	if !tt.HasText("检出") {
+		t.Fatal("缺少检出按钮")
+	}
+	if err := tt.Click("检出"); err != nil {
+		t.Fatalf("点击检出: %v", err)
+	}
+	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+	calls := f.checkoutCallsSnapshot()
+	if len(calls) != 1 || calls[0] != (gitPRCheckoutCall{number: 42, head: "feat/x"}) {
+		t.Fatalf("检出调用 = %+v", calls)
+	}
+	renames := f.renameCallsSnapshot()
+	if len(renames) != 1 || renames[0].Title != "PR #42" {
+		t.Fatalf("重命名调用 = %+v", renames)
+	}
+	newID := renames[0].ThreadID
+	switches := f.switchCallsSnapshot()
+	if len(switches) != 1 || switches[0] != (gitPRSwitchCall{threadID: newID, path: "/tmp/mcode-pr-42-checkout"}) {
+		t.Fatalf("切换 worktree 调用 = %+v", switches)
+	}
+	if f.SendCalls() != 0 {
+		t.Fatalf("检出不应发送消息，调用了 %d 次", f.SendCalls())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		s.mu.Unlock()
+		if selected == newID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("选中会话 = %q，期望 %q", selected, newID)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

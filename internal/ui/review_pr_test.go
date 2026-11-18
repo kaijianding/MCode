@@ -27,6 +27,7 @@ type reviewPRFake struct {
 	localCalls atomic.Int32
 	get        func(context.Context, string, int, string) (ReviewSnapshot, error)
 	submit     func(context.Context, reviewPRCall) error
+	ai         func(context.Context, string, int) ([]git.PRReviewComment, error)
 }
 
 func (f *reviewPRFake) ReviewGet(ctx context.Context, tid, scope, turn, path string) (ReviewSnapshot, error) {
@@ -48,6 +49,13 @@ func (f *reviewPRFake) ReviewGetPR(ctx context.Context, tid string, number int, 
 
 func (f *reviewPRFake) GitPRSubmitReview(ctx context.Context, tid string, number int, event, body string, comments []git.PRReviewComment) error {
 	return f.submit(ctx, reviewPRCall{threadID: tid, number: number, event: event, body: body, comments: slices.Clone(comments)})
+}
+
+func (f *reviewPRFake) GitPRAIReview(ctx context.Context, tid string, number int) ([]git.PRReviewComment, error) {
+	if f.ai != nil {
+		return f.ai(ctx, tid, number)
+	}
+	return nil, nil
 }
 
 func reviewPRSetup(t *testing.T) (*chatState, *reviewPRFake, *diffPanelState) {
@@ -359,5 +367,130 @@ func TestReviewPRNoHunkRevert(t *testing.T) {
 	hoverReviewHunk(t, tt, view)
 	if view.state.HunkActions || view.state.RenderHunkActions != nil || tt.HasText("撤销此块") {
 		t.Fatal("PR 审阅提供了撤销入口")
+	}
+}
+
+func TestReviewPRAIAddsDrafts(t *testing.T) {
+	s, f, dp := reviewPRSetup(t)
+	tt := ui.NewTester(func(c *ui.Context) { renderReviewPRAction(c, s, dp, "t1") }, 800, 100)
+	tt.Frame()
+	if !tt.HasText("AI 审查") {
+		t.Fatal("没有草稿时缺少 AI 审查按钮")
+	}
+	if tt.HasText("批准") || tt.HasText("要求修改") {
+		t.Fatal("没有草稿时显示了提交审阅按钮")
+	}
+	calls := atomic.Int32{}
+	var first atomic.Bool
+	started, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	f.ai = func(ctx context.Context, _ string, _ int) ([]git.PRReviewComment, error) {
+		calls.Add(1)
+		if first.CompareAndSwap(false, true) {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return []git.PRReviewComment{
+			{Path: "a.go", Line: 2, Side: "RIGHT", Body: " 改用常量 "},
+			{Path: "a.go", Line: 99, Side: "RIGHT", Body: "超出文件"},
+		}, nil
+	}
+	if !startReviewPRAI(s, dp, "t1") {
+		t.Fatal("AI 审查没有启动")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("AI 审查请求未开始")
+	}
+	if startReviewPRAI(s, dp, "t1") {
+		t.Fatal("AI 审查运行中重复启动了请求")
+	}
+	close(release)
+	waitReviewComments(t, func() bool {
+		diffPanelMu.Lock()
+		defer diffPanelMu.Unlock()
+		return dp.prAIBusy == 0 && len(dp.comments) == 1
+	})
+	diffPanelMu.Lock()
+	comment := *dp.comments[0]
+	diffPanelMu.Unlock()
+	if comment.key.path != "a.go" || comment.key.scope != "pr" || comment.key.prNumber != 7 || comment.lines != (editor.DiffLineRange{Side: editor.DiffNew, Start: 1, End: 1}) || comment.original != "var a = 2\n" || comment.body != "改用常量" {
+		t.Fatalf("草稿 = %+v", comment)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("AI 审查调用 %d 次", calls.Load())
+	}
+	if !startReviewPRAI(s, dp, "t1") {
+		t.Fatal("再次 AI 审查没有启动")
+	}
+	waitReviewComments(t, func() bool {
+		diffPanelMu.Lock()
+		defer diffPanelMu.Unlock()
+		return dp.prAIBusy == 0 && calls.Load() == 2
+	})
+	diffPanelMu.Lock()
+	count := len(dp.comments)
+	diffPanelMu.Unlock()
+	if count != 1 {
+		t.Fatalf("重复请求产生了 %d 条草稿", count)
+	}
+	tt.Frame()
+	if !tt.HasText("批准") || !tt.HasText("要求修改") {
+		t.Fatal("有草稿时缺少提交审阅按钮")
+	}
+}
+
+func TestReviewPRAIStalePR(t *testing.T) {
+	s, f, dp := reviewPRSetup(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	f.ai = func(ctx context.Context, _ string, _ int) ([]git.PRReviewComment, error) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return []git.PRReviewComment{{Path: "a.go", Line: 2, Side: "RIGHT", Body: "旧 PR"}}, nil
+	}
+	if !startReviewPRAI(s, dp, "t1") {
+		t.Fatal("AI 审查没有启动")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("AI 审查请求未开始")
+	}
+	diffPanelMu.Lock()
+	dp.prNumber = 8
+	diffPanelMu.Unlock()
+	close(release)
+	waitReviewComments(t, func() bool {
+		diffPanelMu.Lock()
+		defer diffPanelMu.Unlock()
+		return dp.prAIBusy == 0
+	})
+	diffPanelMu.Lock()
+	count := len(dp.comments)
+	diffPanelMu.Unlock()
+	if count != 0 {
+		t.Fatalf("旧 PR 结果生成了 %d 条草稿", count)
 	}
 }

@@ -92,6 +92,12 @@ type diffPanelState struct {
 	prReviewNumber int
 	prReviewErr    string
 
+	// prAIBusy 是正在生成 AI 审查草稿的 PR 编号，0 表示空闲。
+	prAIBusy int
+	// prAIErr 与 prAIErrNumber 是最近一次 AI 审查的错误及所属 PR。
+	prAIErr       string
+	prAIErrNumber int
+
 	// cardOpen 记录用户显式开合过的改动卡片，键为文件路径；未记录的默认折叠。
 	cardOpen map[string]bool
 	// scrolledPath 是卡片列表最近一次滚到的选中文件，选中文件从外部变化时据此滚动。

@@ -49,6 +49,11 @@ type gitPRConflictClient interface {
 	GitPRCleanupWorktree(ctx context.Context, threadID string, number int) (string, error)
 }
 
+// gitPRCheckoutClient 检出 PR 分支到独立 worktree。
+type gitPRCheckoutClient interface {
+	GitPRCheckoutWorktree(ctx context.Context, threadID string, number int, head string) (string, error)
+}
+
 // gitPRDialogState 是 PR 弹窗的状态，按 chatState 附加（与 chatFindStates 的做法一致）。
 type gitPRDialogState struct {
 	mu sync.Mutex
@@ -297,7 +302,7 @@ func (s *chatState) runGitPRAction(kind, method string) {
 	}
 	st := getGitPRDialogState(s)
 	st.mu.Lock()
-	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || (kind == "request-changes" && strings.TrimSpace(st.reviewBody) == "") || (kind == "merge" && (method == "" || gitPRMergeBlocked(*st.detail))) || (kind != "approve" && kind != "request-changes" && kind != "merge") {
+	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || ((kind == "request-changes" || kind == "comment") && strings.TrimSpace(st.reviewBody) == "") || (kind == "merge" && (method == "" || gitPRMergeBlocked(*st.detail))) || (kind != "approve" && kind != "comment" && kind != "request-changes" && kind != "merge") {
 		st.mu.Unlock()
 		return
 	}
@@ -366,7 +371,8 @@ func (s *chatState) runGitPRResolve() {
 		path, err := client.GitPRResolveWorktree(context.Background(), threadID, number, detail.HeadBranch, detail.BaseBranch)
 		newID := ""
 		if err == nil {
-			newID, err = s.createGitPRResolveThread(threadID, number, path)
+			prompt := fmt.Sprintf("这个 worktree 正在把 origin/%s 合并进 PR #%d 的分支 %s，出现了冲突。请逐个解决冲突文件，保持双方意图，跑相关测试，然后完成合并提交。不要推送。", detail.BaseBranch, number, detail.HeadBranch)
+			newID, err = s.createGitPRThread(threadID, number, path, fmt.Sprintf("解决 PR #%d 冲突", number), prompt)
 		}
 		st.mu.Lock()
 		if !st.open || st.detailSeq != seq || st.selected != number {
@@ -386,8 +392,49 @@ func (s *chatState) runGitPRResolve() {
 	}()
 }
 
-// createGitPRResolveThread 在 PR 所属项目新建普通会话，命名后切到冲突 worktree。
-func (s *chatState) createGitPRResolveThread(threadID string, number int, path string) (string, error) {
+// runGitPRCheckout 把 PR 分支检出到独立 worktree，并切到新建的会话。
+func (s *chatState) runGitPRCheckout() {
+	client, ok := s.client.(gitPRCheckoutClient)
+	if !ok {
+		return
+	}
+	st := getGitPRDialogState(s)
+	st.mu.Lock()
+	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || st.detail.CrossRepo {
+		st.mu.Unlock()
+		return
+	}
+	detail := *st.detail
+	number, threadID, seq := st.selected, st.threadID, st.detailSeq
+	st.actionBusy, st.actionErr = "checkout", ""
+	st.mu.Unlock()
+	s.invalidate()
+	go func() {
+		path, err := client.GitPRCheckoutWorktree(context.Background(), threadID, number, detail.HeadBranch)
+		newID := ""
+		if err == nil {
+			newID, err = s.createGitPRThread(threadID, number, path, fmt.Sprintf("PR #%d", number), "")
+		}
+		st.mu.Lock()
+		if !st.open || st.detailSeq != seq || st.selected != number {
+			st.mu.Unlock()
+			return
+		}
+		st.actionBusy = ""
+		if err != nil {
+			st.actionErr = err.Error()
+			st.mu.Unlock()
+			s.invalidate()
+			return
+		}
+		st.mu.Unlock()
+		s.closeGitPRDialog()
+		s.selectThread(newID)
+	}()
+}
+
+// createGitPRThread 在 PR 所属项目新建普通会话，命名后切到 worktree，并按需发送首条消息。
+func (s *chatState) createGitPRThread(threadID string, number int, path, title, prompt string) (string, error) {
 	s.mu.Lock()
 	th, ok := s.threadSnapshotLocked(threadID)
 	s.mu.Unlock()
@@ -400,7 +447,7 @@ func (s *chatState) createGitPRResolveThread(threadID string, number int, path s
 	if err != nil {
 		return "", err
 	}
-	if err := s.client.RenameThread(id, fmt.Sprintf("解决 PR #%d 冲突", number)); err != nil {
+	if err := s.client.RenameThread(id, title); err != nil {
 		return "", err
 	}
 	if err := s.client.GitSwitchWorktree(context.Background(), id, path); err != nil {
@@ -408,6 +455,11 @@ func (s *chatState) createGitPRResolveThread(threadID string, number int, path s
 	}
 	// 让新会话出现在侧栏；列表刷新失败不影响已经切过去的会话。
 	_ = s.refreshProjectThreads(context.Background(), th.ProjectID)
+	if prompt != "" {
+		if _, err := s.client.Send(context.Background(), id, prompt); err != nil {
+			return "", err
+		}
+	}
 	return id, nil
 }
 
@@ -979,6 +1031,9 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 	st.mu.Unlock()
 	area := ui.TextArea(c.Key("modal-git-pr-review-body"), &body).Placeholder("评论").Lines(4, 10).FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).Background(ThemeHover(c)).Border(Hairline, ThemeBorder(c)).Radius(RadiusSM).Padding(Space2, Space3).FillWidth()
 	area.OnChange(func() { st.mu.Lock(); st.reviewBody = body; st.mu.Unlock() })
+	_, canReview := s.client.(reviewPRClient)
+	_, canAI := s.client.(reviewPRAIClient)
+	_, canCheckout := s.client.(gitPRCheckoutClient)
 	ui.Row(c.Key("modal-git-pr-review-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
 		if confirm != "" {
 			ui.Text(c, fmt.Sprintf("合并 #%d？", detail.Number)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
@@ -987,8 +1042,25 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 			Button(c, ButtonOpts{Key: "modal-git-pr-merge-cancel", Text: "取消", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeConfirm = ""; st.mu.Unlock(); s.invalidate() }})
 			return
 		}
+		if canReview && canAI && detail.ChangedFiles > 0 {
+			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() {
+				tid := s.gitPRThreadID()
+				openReviewPR(s, detail.Number)
+				if dp := getDiffPanelState(s); dp != nil {
+					startReviewPRAI(s, dp, tid)
+				}
+			}})
+		}
 		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", OnClick: func() { s.runGitPRAction("approve", "") }})
+		Button(c, ButtonOpts{Key: "modal-git-pr-comment", Text: "评论", Variant: ButtonSecondary, Loading: busy == "comment", Disabled: (busy != "" && busy != "comment") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("comment", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("request-changes", "") }})
+		if canCheckout {
+			checkoutTip := ""
+			if detail.CrossRepo {
+				checkoutTip = "来自 fork 的 PR 无法检出"
+			}
+			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: (busy != "" && busy != "checkout") || detail.CrossRepo, Tooltip: checkoutTip, OnClick: func() { s.runGitPRCheckout() }})
+		}
 		ui.Spacer(c)
 		if gitPRMergeBlocked(detail) {
 			resolveTip := ""
@@ -1079,30 +1151,39 @@ func renderGitPRSectionTitle(c *ui.Context, text string) {
 		SingleLine()
 }
 
-// renderGitPRCheckRow 渲染一条 CI 检查：左侧名称，右侧状态文案。
+// renderGitPRCheckRow 渲染一条 CI 检查：左侧名称，右侧状态文案；有链接时整行可点。
 func renderGitPRCheckRow(c *ui.Context, key string, check git.PRCheck) {
-	ui.Row(c.Key(key)).
+	name := strings.TrimSpace(check.Name)
+	if name == "" {
+		name = "未命名检查"
+	}
+	row := ui.Row(c.Key(key)).
 		FillWidth().
 		Padding(Space0, Space2).
 		Radius(RadiusXS).
 		Background(ThemeHover(c).Alpha(0.4)).
 		Gap(Space3).
-		AlignItems(ui.Center).
-		Children(func() {
-			name := strings.TrimSpace(check.Name)
-			if name == "" {
-				name = "未命名检查"
-			}
-			ui.Text(c, name).
-				FontSize(uiFont(TypeFootnote)).
-				TextColor(ThemePrimaryText(c)).
-				Grow(1).
-				SingleLine()
-			ui.Text(c, gitPRChecksLabel(check.State)).
-				FontSize(uiFont(TypeCaption)).
-				TextColor(ThemeSecondaryText(c)).
-				SingleLine()
-		})
+		AlignItems(ui.Center)
+	if url := strings.TrimSpace(check.URL); url != "" {
+		row.Label("打开检查 " + name)
+		if row.Hovered() {
+			row.Background(ThemeHover(c))
+		}
+		if row.Clicked() {
+			c.OpenURL(url)
+		}
+	}
+	row.Children(func() {
+		ui.Text(c, name).
+			FontSize(uiFont(TypeFootnote)).
+			TextColor(ThemePrimaryText(c)).
+			Grow(1).
+			SingleLine()
+		ui.Text(c, gitPRChecksLabel(check.State)).
+			FontSize(uiFont(TypeCaption)).
+			TextColor(ThemeSecondaryText(c)).
+			SingleLine()
+	})
 }
 
 // renderGitPRCommentRow 渲染一条评论：作者与时间在上，正文在下。

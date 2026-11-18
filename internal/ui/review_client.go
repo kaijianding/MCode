@@ -63,6 +63,11 @@ type reviewPRClient interface {
 	GitPRSubmitReview(ctx context.Context, threadID string, number int, event, body string, comments []git.PRReviewComment) error
 }
 
+// reviewPRAIClient 生成行内审查草稿，旧客户端不必提供。
+type reviewPRAIClient interface {
+	GitPRAIReview(ctx context.Context, threadID string, number int) ([]git.PRReviewComment, error)
+}
+
 func getReview(ctx context.Context, client reviewClient, threadID, scope, turnID string, number int, path string) (ReviewSnapshot, error) {
 	return getReviewAt(ctx, client, threadID, scope, turnID, number, "", path)
 }
