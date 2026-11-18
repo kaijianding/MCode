@@ -318,13 +318,15 @@ func sidebarMarqueeClear(ctx *ui.Context, key string) {
 // 内层文本保持自然宽度（Shrink(0)），因此可以按 LayoutBounds 量出溢出量。
 // 只有紧凑单行模式才调用；悬停且溢出超过 8px 时在 Draw 回调里按 p.Now() 驱动横向往返滚动，
 // 只重画该区域而不重建整棵组件树；鼠标离开或减少动效时保持静态 Ellipsis 显示。
-//
-// 返回值是文本元素本身，调用方仍可继续设置字号与颜色。
-func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool, reserved float32) ui.Element {
+// 文本字号（未缩放的基础字号）、字重（weight > 0 时生效）与颜色均由调用方传入，静态文本与自绘跑马灯共用同一组样式。
+func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool, reserved, size float32, weight int, color ui.Color) ui.Element {
 	var text ui.Element
 	clip := ui.Row(c.Key(key)).Grow(1).Shrink(1).MinWidth(0).ClipX()
 	clip.Children(func() {
-		text = ui.Text(c, title).SingleLine()
+		text = ui.Text(c, title).SingleLine().FontSize(sidebarFont(size)).TextColor(color)
+		if weight > 0 {
+			text.FontWeight(weight)
+		}
 		if hovered && !reduceMotion(c) {
 			text.Shrink(0)
 		} else {
@@ -356,9 +358,9 @@ func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool,
 	}
 	font := ui.Font{
 		Family: family,
-		Size:   sidebarFont(FontSizeThreadTitle),
+		Size:   sidebarFont(size),
+		Weight: weight,
 	}
-	color := ThemePrimaryText(c).Alpha(0.92)
 	layout := ui.ShapeText(title, font, 0)
 	_, textH := layout.Size()
 

@@ -81,7 +81,7 @@ func TestMotionBusyLoops(t *testing.T) {
 func TestMotionBusyMarqueePreferenceChange(t *testing.T) {
 	tester := ui.NewTester(func(c *ui.Context) {
 		ui.Row(c).Width(100).Children(func() {
-			renderSidebarScrollingTitle(c, "title", "很长的会话标题很长的会话标题很长的会话标题", true, 0)
+			renderSidebarScrollingTitle(c, "title", "很长的会话标题很长的会话标题很长的会话标题", true, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 		})
 	}, 120, 40)
 	tester.Frame()

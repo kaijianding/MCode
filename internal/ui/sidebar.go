@@ -1216,28 +1216,35 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 		}
 		// 紧凑模式单行：超长标题在悬停时跑马灯横向滚动。常规模式仍是两行截断，
 		// 换成单行滚动会让行高在悬停瞬间跳变。
-		var tTitle ui.Element
-		if o.compact {
-			tTitle = renderSidebarScrollingTitle(c, "th-title-"+o.projectID+"-"+thVal.ID, title, rowHovered, 0)
-		} else {
-			tTitle = ui.Text(c, title).Grow(1).Shrink(1).MinWidth(0).MaxLines(2).Ellipsis("…")
-		}
+		var titleSize float32
+		var titleWeight int
+		var titleColor ui.Color
 		if o.dormant {
-			tTitle.FontSize(sidebarFont(FontSizeDormantTitle))
+			titleSize = FontSizeDormantTitle
 			if isSelected {
-				tTitle.TextColor(primaryText.Alpha(0.75))
+				titleColor = primaryText.Alpha(0.75)
 			} else {
-				tTitle.TextColor(secondaryText)
+				titleColor = secondaryText
 			}
 		} else {
-			tTitle.FontSize(sidebarFont(FontSizeThreadTitle))
+			titleSize = FontSizeThreadTitle
 			if isSelected {
-				tTitle.TextColor(primaryText).FontWeight(500)
+				titleWeight = 500
+				titleColor = primaryText
 			} else if turnDone != "" {
 				// 跑完未查看：标题与角标同色，长列表里一眼能挑出来；报错才用红色。
-				tTitle.TextColor(turnDoneColor(c, turnDone))
+				titleColor = turnDoneColor(c, turnDone)
 			} else {
-				tTitle.TextColor(primaryText.Alpha(0.92))
+				titleColor = primaryText.Alpha(0.92)
+			}
+		}
+		if o.compact {
+			renderSidebarScrollingTitle(c, "th-title-"+o.projectID+"-"+thVal.ID, title, rowHovered, 0, titleSize, titleWeight, titleColor)
+		} else {
+			tTitle := ui.Text(c, title).Grow(1).Shrink(1).MinWidth(0).MaxLines(2).Ellipsis("…").
+				FontSize(sidebarFont(titleSize)).TextColor(titleColor)
+			if titleWeight > 0 {
+				tTitle.FontWeight(titleWeight)
 			}
 		}
 

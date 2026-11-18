@@ -254,13 +254,14 @@ func TestSidebarCompactTitleEllipsis(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := ui.NewTester(func(c *ui.Context) {
 				ui.Row(c).Width(100).Children(func() {
-					renderSidebarScrollingTitle(c, "title", tc.title, false, 0)
+					renderSidebarScrollingTitle(c, "title", tc.title, false, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 				})
 			}, 120, 40)
 			expected := ui.NewTester(func(c *ui.Context) {
 				ui.Row(c).Width(100).Children(func() {
 					ui.Row(c.Key("title")).Grow(1).Shrink(1).MinWidth(0).ClipX().Children(func() {
-						ui.Text(c, tc.title).SingleLine().Grow(1).Shrink(1).MinWidth(0).Ellipsis("…")
+						ui.Text(c, tc.title).SingleLine().Grow(1).Shrink(1).MinWidth(0).Ellipsis("…").
+							FontSize(sidebarFont(FontSizeThreadTitle)).TextColor(ThemePrimaryText(c))
 					})
 				})
 			}, 120, 40)
@@ -475,7 +476,7 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 		tt := ui.NewTester(func(c *ui.Context) {
 			builds++
 			ui.Row(c).Width(100).Children(func() {
-				el := renderSidebarScrollingTitle(c, "marquee-test", longTitle, true, 0)
+				el := renderSidebarScrollingTitle(c, "marquee-test", longTitle, true, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 				settled = el.Settled("marquee")
 			})
 		}, 120, 40)
@@ -515,7 +516,7 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 			tt := ui.NewTester(func(c *ui.Context) {
 				builds++
 				ui.Row(c).Width(100).Children(func() {
-					renderSidebarScrollingTitle(c, "marquee-idle", longTitle, tc.hovered, 0)
+					renderSidebarScrollingTitle(c, "marquee-idle", longTitle, tc.hovered, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 				})
 			}, 120, 40)
 			tt.Frame()
@@ -541,7 +542,7 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 		hovered := true
 		tt := ui.NewTester(func(c *ui.Context) {
 			ui.Row(c).Width(100).Children(func() {
-				renderSidebarScrollingTitle(c, "marquee-leave", longTitle, hovered, 0)
+				renderSidebarScrollingTitle(c, "marquee-leave", longTitle, hovered, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 			})
 		}, 120, 40)
 		tt.Frame()
@@ -578,4 +579,84 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 			t.Fatalf("t=delay+2*dur: got %v, want 0", got)
 		}
 	})
+}
+
+// TestSidebarScrollingTitleUsesCallerStyle 验证跑马灯与静态文本按调用方传入的字号、字重与颜色布局和绘制。
+// ui.Tester 不直接暴露元素字号与颜色属性，因此通过布局溢出判定（dormant 12pt vs thread 13pt）
+// 与 Draw 自绘像素色差验证传入样式生效。
+func TestSidebarScrollingTitleUsesCallerStyle(t *testing.T) {
+	resetSidebarHoverCardForTest()
+	setAppReduceMotion(t, false)
+	title := strings.Repeat("侧栏样式测试标题", 4)
+
+	measureWidth := func(size float32, weight int) float32 {
+		var w float32
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Row(c).Width(800).Children(func() {
+				el := renderSidebarScrollingTitle(c, "measure", title, true, 0, size, weight, ThemeDanger(c))
+				w = el.LayoutBounds().W
+			})
+		}, 820, 40)
+		tt.Frame()
+		tt.Frame()
+		return w
+	}
+
+	dormantW := measureWidth(FontSizeDormantTitle, 500)
+	threadW := measureWidth(FontSizeThreadTitle, 500)
+	if dormantW <= 0 || threadW <= dormantW+8 {
+		t.Fatalf("expected dormant layout width (%v) to be >8px narrower than thread width (%v)", dormantW, threadW)
+	}
+
+	// 容器宽度恰好等于 dormant 自然宽度：按 dormant 字号布局时不溢出，按 thread 字号则溢出超过 8px。
+	checkOverflow := func(size float32) bool {
+		resetSidebarHoverCardForTest()
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Row(c).Width(dormantW).Children(func() {
+				renderSidebarScrollingTitle(c, "overflow", title, true, 0, size, 500, ThemeDanger(c))
+			})
+		}, int(dormantW)+20, 40)
+		tt.Frame()
+		tt.Frame()
+		return tt.FramePending()
+	}
+	if checkOverflow(FontSizeDormantTitle) {
+		t.Fatal("dormant 字号下宽度未溢出，不应触发跑马灯")
+	}
+	if !checkOverflow(FontSizeThreadTitle) {
+		t.Fatal("thread 字号下溢出超过 8px，应触发跑马灯")
+	}
+
+	// 悬停且溢出进入 Draw 跑马灯时，自绘颜色应使用调用方传入颜色。
+	renderMarqueeImage := func(pickColor func(*ui.Context) ui.Color) *image.RGBA {
+		resetSidebarHoverCardForTest()
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Row(c).Width(100).Children(func() {
+				renderSidebarScrollingTitle(c, "color-test", title, true, 0, FontSizeDormantTitle, 500, pickColor(c))
+			})
+		}, 120, 40)
+		tt.Frame()
+		tt.Frame()
+		return cloneImage(tt.Image())
+	}
+	redImg := renderMarqueeImage(ThemeDanger)
+	blueImg := renderMarqueeImage(ThemeAccent)
+	if bytes.Equal(redImg.Pix, blueImg.Pix) {
+		t.Fatal("跑马灯自绘未应用调用方传入的颜色")
+	}
+	hasRed := false
+	b := redImg.Bounds()
+	for y := b.Min.Y; y < b.Max.Y && !hasRed; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			off := redImg.PixOffset(x, y)
+			r, g, bl := int(redImg.Pix[off]), int(redImg.Pix[off+1]), int(redImg.Pix[off+2])
+			if r-bl > 60 && r-g > 60 {
+				hasRed = true
+				break
+			}
+		}
+	}
+	if !hasRed {
+		t.Fatal("跑马灯自绘像素中未找到调用方传入的红色")
+	}
 }
