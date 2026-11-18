@@ -381,35 +381,37 @@ func (p *Pipeline) Stop() {
 
 // sweep 唤醒所有已到期但仍未被定时器消费的任务。
 func (p *Pipeline) sweep(now time.Time) {
+	type dueJob struct {
+		job    *retryJob
+		cancel func() bool
+	}
 	p.mu.Lock()
-	var due []*retryJob
+	var due []dueJob
 	for job := range p.jobs {
 		if !job.due.After(now) {
-			due = append(due, job)
+			due = append(due, dueJob{job: job, cancel: job.cancel})
 		}
 	}
 	p.mu.Unlock()
-	for _, job := range due {
-		if job.cancel != nil {
-			job.cancel()
+	for _, item := range due {
+		if item.cancel != nil {
+			item.cancel()
 		}
-		p.fire(job)
+		p.fire(item.job)
 	}
 }
 
 // fire 执行一个重试任务；先重新检查 AutoPush，再恢复到失败阶段继续。
 func (p *Pipeline) fire(job *retryJob) {
 	p.mu.Lock()
-	if _, ok := p.jobs[job]; !ok {
-		p.mu.Unlock()
-		return
-	}
-	if p.stopped {
+	if _, ok := p.jobs[job]; !ok || p.stopped {
 		p.mu.Unlock()
 		return
 	}
 	delete(p.jobs, job)
+	p.wg.Add(1)
 	p.mu.Unlock()
+	defer p.wg.Done()
 
 	if !job.manual && !p.currentSettings().AutoPush {
 		p.notifyf(job.batch.LeadThreadID, NoticePrefix+"自动推送已关闭，已取消待重试的远端合入")
@@ -726,9 +728,16 @@ func (p *Pipeline) scheduleRetry(b LandedBatch, manual bool, prep *preparedBatch
 	// 先登记任务再创建定时器：若定时器提前触发，fire 已能找到该任务
 	cancel := afterFunc(delay, func() { p.fire(job) })
 	p.mu.Lock()
-	job.cancel = cancel
+	_, inJobs := p.jobs[job]
+	cancelLate := p.stopped || !inJobs
+	if !cancelLate {
+		job.cancel = cancel
+	}
 	p.mu.Unlock()
-	return true
+	if cancelLate && cancel != nil {
+		cancel()
+	}
+	return !cancelLate
 }
 
 // retryDelay 返回第 attempt 次重试的等待时长：60s * 2^(attempt-1)。

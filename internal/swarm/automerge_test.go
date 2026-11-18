@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1151,4 +1152,115 @@ func TestDefaultCommitMessageType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPipelineStopCancelsTimerRegisteredLate(t *testing.T) {
+	testenv.TempHome(t)
+	runner, dir := initTestRepo(t)
+	ctx := context.Background()
+
+	gitTestRun(t, dir, "remote", "add", "origin", "https://github.com/x/y.git")
+	writePipelineFile(t, dir, "a.txt", "a\n")
+
+	exec := &pipelineForgeExec{handler: func(args []string) ([]byte, error) {
+		return []byte("connection reset by peer"), errors.New("exit status 1")
+	}}
+	var p *Pipeline
+	var cancelCalled atomic.Bool
+	p = NewPipeline(PipelineOptions{
+		Git:      runner,
+		Forge:    git.NewForgeClient(exec.run),
+		Settings: func() Settings { return Settings{AutoMerge: true, AutoPush: true} },
+		Notify:   func(string, string) {},
+		Push:     func(context.Context, string, string, string, string) error { return nil },
+		AfterFunc: func(d time.Duration, f func()) func() bool {
+			p.Stop()
+			return func() bool {
+				cancelCalled.Store(true)
+				return true
+			}
+		},
+	})
+
+	b := newPipelineFileBatch(dir, Bee{Name: "A", Task: "做 A", ChangedFiles: []string{"a.txt"}, Merged: true})
+	addNewFilePatch(t, &b)
+	if err := p.RunBatch(ctx, b, false); err == nil {
+		t.Fatal("可重试失败应返回错误")
+	}
+	if !cancelCalled.Load() {
+		t.Fatal("Stop 后晚登记的定时器应立即被取消")
+	}
+}
+
+func TestPipelineStopWaitsFire(t *testing.T) {
+	testenv.TempHome(t)
+	runner, dir := initTestRepo(t)
+	ctx := context.Background()
+
+	gitTestRun(t, dir, "remote", "add", "origin", "https://github.com/x/y.git")
+	writePipelineFile(t, dir, "a.txt", "a\n")
+
+	forgeEntered := make(chan struct{})
+	blockForge := make(chan struct{})
+	var calls atomic.Int32
+	exec := &pipelineForgeExec{handler: func(args []string) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			return []byte("connection reset by peer"), errors.New("exit status 1")
+		}
+		if len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
+			close(forgeEntered)
+			<-blockForge
+			return []byte("https://github.com/x/y/pull/42\n"), nil
+		}
+		return []byte(""), nil
+	}}
+
+	fireCh := make(chan func(), 1)
+	p := NewPipeline(PipelineOptions{
+		Git:      runner,
+		Forge:    git.NewForgeClient(exec.run),
+		Settings: func() Settings { return Settings{AutoMerge: true, AutoPush: true} },
+		Notify:   func(string, string) {},
+		Push:     func(context.Context, string, string, string, string) error { return nil },
+		AfterFunc: func(d time.Duration, f func()) func() bool {
+			fireCh <- f
+			return func() bool { return true }
+		},
+	})
+	p.Start()
+
+	b := newPipelineFileBatch(dir, Bee{Name: "A", Task: "做 A", ChangedFiles: []string{"a.txt"}, Merged: true})
+	addNewFilePatch(t, &b)
+	if err := p.RunBatch(ctx, b, false); err == nil {
+		t.Fatal("可重试失败应返回错误")
+	}
+
+	fireFn := <-fireCh
+	fireDone := make(chan struct{})
+	go func() {
+		defer close(fireDone)
+		fireFn()
+	}()
+
+	<-forgeEntered
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		p.Stop()
+	}()
+
+	select {
+	case <-stopDone:
+		close(blockForge)
+		t.Fatal("fire 的 runRemote 仍在执行时 Stop 不应返回")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(blockForge)
+	select {
+	case <-stopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("放行后 Stop 未及时返回")
+	}
+	<-fireDone
 }

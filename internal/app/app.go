@@ -764,6 +764,9 @@ func Open(opts Options) (*App, error) {
 		if mcpHub != nil {
 			_ = mcpHub.Close()
 		}
+		if swarmPipeline != nil {
+			swarmPipeline.Stop()
+		}
 		if swarmMgr != nil {
 			swarmMgr.Stop()
 		}
