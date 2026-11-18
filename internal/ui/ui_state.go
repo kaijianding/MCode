@@ -254,7 +254,7 @@ type uiStateFile struct {
 	// SwarmFailedSeen 记录已查看的失败子代理（主会话 ID -> 子代理 ID -> 查看时的 FinishedAt）：
 	// FinishedAt 变化后该记录自动失效，编排按钮的失败角标重新计数。
 	SwarmFailedSeen map[string]map[string]string `json:"swarm_failed_seen,omitempty"`
-	Onboarding        string            `json:"onboarding,omitempty"`
+	Onboarding      string                       `json:"onboarding,omitempty"`
 	// LastModel 是最近一次在模型选择组件中确认的模型选择（provider + model + 推理强度 + 快速模式），
 	// 新建会话或组件初始化时优先使用该记录；零值表示还没有记录。
 	LastModel ModelSelection `json:"last_model,omitempty"`

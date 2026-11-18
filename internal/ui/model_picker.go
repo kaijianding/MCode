@@ -62,7 +62,7 @@ type ModelPickerState struct {
 	tiersOpen   bool            // 列表页档位区是否展开；默认折叠
 	openCard    string          // 列表页当前展开的卡片；"" 表示全部收起；未设置时按默认
 	openCardSet bool
-	searchQuery string          // 列表页搜索框内容，按名称筛选模型
+	searchQuery string // 列表页搜索框内容，按名称筛选模型
 
 	// pageDepth 是上一帧渲染的二级页深度（0 强度卡片、1 模型列表、2 更多模型），
 	// pageDir 是最近一次换页的方向（1 进入、-1 返回）；两者共同驱动换页的滑入淡入动画。
@@ -143,7 +143,7 @@ type ModelPickerProps struct {
 	OnSetTierOverride    func(tierID string, ov *config.SwarmTierOverride)
 	OnResetTierOverrides func()
 	// OnRefreshCatalog 请求重新拉取供应商目录；只有传了它，目录为空的供应商才画出“重新探测”按钮。
-	OnRefreshCatalog  func()
+	OnRefreshCatalog func()
 	// OnOpenList 用户进入模型列表页时调用，用于按需加载限额等数据。
 	OnOpenList        func()
 	CatalogRefreshing bool

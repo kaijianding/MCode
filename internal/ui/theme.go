@@ -40,12 +40,12 @@ var (
 	ColorPlanDark     = ui.Hex("#BF5AF2") // Plan 模式高亮 (系统紫，深色)
 
 	// 交互叠加态 (8% hover, 12% selected)
-	ColorHoverLight    = ui.RGBA(0, 0, 0, 0.08)
-	ColorHoverDark     = ui.RGBA(255, 255, 255, 0.08)
+	ColorHoverLight = ui.RGBA(0, 0, 0, 0.08)
+	ColorHoverDark  = ui.RGBA(255, 255, 255, 0.08)
 	// 深色面板里与选中态并存的列表行悬停底色
 	ColorHoverSubtleDark = ui.RGBA(255, 255, 255, 0.04)
-	ColorSelectedLight = ui.RGBA(0, 0, 0, 0.12)
-	ColorSelectedDark  = ui.RGBA(255, 255, 255, 0.12)
+	ColorSelectedLight   = ui.RGBA(0, 0, 0, 0.12)
+	ColorSelectedDark    = ui.RGBA(255, 255, 255, 0.12)
 
 	// 分隔线与边框 (Divider 22%, Border 14%)
 	ColorDividerLight = ui.RGBA(0, 0, 0, 0.22)
