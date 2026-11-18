@@ -1,9 +1,8 @@
-// 设置页的展示组件：小节卡片、行、堆叠行与「高级」折叠区。
+// 设置页的展示组件：小节卡片、行与堆叠行。
 // 与桌面版 internal/ui/settings_pages.go 的 renderSettingsSection / renderSettingsRow /
-// renderSettingsStackedRow / renderSettingsAdvancedArea 对应，样式全部在 index.css 里。
+// renderSettingsStackedRow 对应，样式全部在 index.css 里。
 
 import React from 'react';
-import { ChevronDownIcon } from '../Icons';
 
 interface SettingsSectionProps {
   title?: string;
@@ -77,37 +76,6 @@ export const SettingsStackedRow: React.FC<SettingsStackedRowProps> = ({
     </div>
   </div>
 );
-
-interface SettingsAdvancedAreaProps {
-  count: number;
-  open: boolean;
-  onToggle: () => void;
-  children?: React.ReactNode;
-}
-
-// SettingsAdvancedArea 是每页底部的「高级（N 项）」折叠区，N 为 0 时不渲染。
-export const SettingsAdvancedArea: React.FC<SettingsAdvancedAreaProps> = ({
-  count,
-  open,
-  onToggle,
-  children
-}) => {
-  if (count <= 0) return null;
-  return (
-    <div className="settings-advanced">
-      <button
-        type="button"
-        className="settings-advanced-toggle"
-        onClick={onToggle}
-        aria-expanded={open}
-      >
-        <span>高级（{count} 项）</span>
-        <ChevronDownIcon className={`w-4 h-4 settings-advanced-chevron${open ? ' is-open' : ''}`} />
-      </button>
-      {open ? <div className="settings-advanced-body">{children}</div> : null}
-    </div>
-  );
-};
 
 interface SettingsSwitchProps {
   checked: boolean;

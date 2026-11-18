@@ -411,13 +411,6 @@ html[data-keyboard-open] .settings-sheet.model-sheet { padding-bottom: 0; }
 @keyframes push-target-flash { from { background-color: color-mix(in srgb, var(--primary) 14%, transparent); } to { background-color: transparent; } }
 .push-target-flash { animation: push-target-flash 1.4s ease-out; }
 
-.settings-advanced { margin-top: 18px; }
-.settings-advanced-toggle { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--foreground-muted); font-size: 13px; font-weight: 600; }
-.settings-advanced-toggle:hover { background: var(--mc-overlay-hover); }
-.settings-advanced-chevron { transition: transform .15s ease; }
-.settings-advanced-chevron.is-open { transform: rotate(180deg); }
-.settings-advanced-body { margin-top: 10px; }
-
 /* 开关统一 36×20、滑块 16px；打开时轨道取 accent。 */
 .settings-switch { position: relative; flex: 0 0 auto; width: 36px; height: 20px; padding: 0; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--foreground-muted) 38%, var(--card)); transition: background .15s ease; }
 .settings-switch.is-on { background: var(--mc-accent); }
@@ -451,7 +444,6 @@ html[data-keyboard-open] .settings-sheet.model-sheet { padding-bottom: 0; }
   .settings-shell textarea { font-size: 16px; min-height: 44px; }
 
   .settings-row { padding: 14px; }
-  .settings-advanced-toggle { min-height: 48px; font-size: 14px; }
   .settings-inline-button { min-height: 40px; }
   .theme-switch__item { min-height: 44px; font-size: 13px; }
 

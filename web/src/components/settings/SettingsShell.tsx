@@ -25,17 +25,12 @@ import {
 import type { SettingsPageIcon } from './settingsIndex';
 import { HapticSection } from './HapticSection';
 
-export interface SettingsAdvancedState {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}
-
 export interface SettingsShellProps {
   onClose: () => void;
   // 当前可见的页与设置项（旧宿主缺键、或宿主不支持远程设置时由调用方过滤）。
   visiblePageIDs: string[];
   visibleItemIDs: string[];
-  renderPage: (pageID: string, advanced: SettingsAdvancedState) => React.ReactNode;
+  renderPage: (pageID: string) => React.ReactNode;
   // 受控页 id：不传时用内部状态（老宿主行为不变）；为空时窄屏回落到上次停留的页或第一页。
   pageID?: string | null;
   onPageChange?: (pageID: string | null) => void;
@@ -102,7 +97,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
   const [lastPageID, setLastPageID] = useState<string | null>(readLastPage);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<{ pageID: string; itemID: string } | null>(null);
   const [scrolled, setScrolled] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -145,10 +139,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
     writeLastPage(effectivePageID);
   }, [isWide, effectivePageID, lastPageID]);
 
-  const setAdvanced = useCallback((targetPage: string, open: boolean) => {
-    setAdvancedOpen((current) => ({ ...current, [targetPage]: open }));
-  }, []);
-
   // 切换 tab 不压浏览历史：宿主用 replace 写 #/settings/<id>，系统返回手势直接关闭设置。
   const setPage = useCallback(
     (nextPageID: string | null) => {
@@ -170,16 +160,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
     [setPage]
   );
 
-  // 跳到某条设置：切页、高级项先展开、滚动到该行并短暂高亮。
+  // 跳到某条设置：切页、滚动到该行并短暂高亮。
   const jumpToItem = useCallback(
-    (itemID: string, targetPage: string, advanced: boolean) => {
+    (itemID: string, targetPage: string) => {
       setQuery('');
       setSearchOpen(false);
       setPage(targetPage);
-      if (advanced) setAdvanced(targetPage, true);
       setPending({ pageID: targetPage, itemID });
     },
-    [setAdvanced, setPage]
+    [setPage]
   );
 
   // 切 tab 或进出搜索时内容回到顶部。
@@ -209,7 +198,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
       row.classList.remove('settings-row--flash');
       flashTimer.current = null;
     }, FLASH_MS);
-  }, [pending, effectivePageID, advancedOpen]);
+  }, [pending, effectivePageID]);
 
   // 选中 tab 滚到可见范围：只影响 tab 条自己的横向滚动。
   useEffect(() => {
@@ -241,13 +230,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
       focusTimer.current = null;
       target.scrollIntoView({ block: 'nearest' });
     }, 260);
-  };
-
-  const advanced: SettingsAdvancedState = {
-    open: effectivePageID ? Boolean(advancedOpen[effectivePageID]) : false,
-    setOpen: (open: boolean) => {
-      if (effectivePageID) setAdvanced(effectivePageID, open);
-    }
   };
 
   const nav = (
@@ -320,7 +302,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
             key={`${item.id}-${rank}`}
             type="button"
             className="settings-result"
-            onClick={() => jumpToItem(item.id, item.page, Boolean(item.advanced))}
+            onClick={() => jumpToItem(item.id, item.page)}
           >
             <span className="settings-result__title">{item.title}</span>
             <span className="settings-result__meta">
@@ -336,7 +318,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({
   const pageView = page ? (
     <div className="settings-page">
       {isWide ? <h3 className="settings-page-title">{page.title}</h3> : null}
-      {renderPage(page.id, advanced)}
+      {renderPage(page.id)}
       {page.id === 'appearance' ? <HapticSection /> : null}
     </div>
   ) : null;

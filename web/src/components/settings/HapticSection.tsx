@@ -22,7 +22,6 @@ export const HapticSection: React.FC = () => {
       <SettingsRow
         itemID={HAPTIC_SETTINGS_ITEM_ID}
         title="触感反馈"
-        desc="左滑、长按与审批提交时轻微振动；仅 Android 支持"
         control={<SettingsSwitch checked={enabled} onChange={toggle} label="触感反馈" />}
       />
     </SettingsSection>

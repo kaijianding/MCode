@@ -9,10 +9,6 @@ interface AttentionSettingsRowViewProps {
   onOpen: () => void;
 }
 
-// 说明文案与 settingsIndex.ts 里 web-attention-inbox 条目保持一致，避免搜索索引和设置页说法分叉。
-const ATTENTION_ROW_DESC =
-  '会话卡住、出错、额度用尽、等待审批，以及看板与自动化失败的汇总在这里逐条处理。';
-
 // 待处理行的展示部分单独导出：走设置页统一的 SettingsSection / SettingsRow，
 // 也便于不带 RemoteProvider 的静态渲染测试。
 export const AttentionSettingsRowView: React.FC<AttentionSettingsRowViewProps> = ({
@@ -23,7 +19,6 @@ export const AttentionSettingsRowView: React.FC<AttentionSettingsRowViewProps> =
     <SettingsRow
       itemID="web-attention-inbox"
       title="待处理事项"
-      desc={ATTENTION_ROW_DESC}
       control={
         <button type="button" className="secondary-button settings-inline-button" onClick={onOpen}>
           <span>打开</span>

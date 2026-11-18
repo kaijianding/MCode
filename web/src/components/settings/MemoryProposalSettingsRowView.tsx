@@ -9,10 +9,6 @@ interface MemoryProposalSettingsRowViewProps {
   onOpen: () => void;
 }
 
-// 说明文案与 settingsIndex.ts 里 web-memory-proposals 条目保持一致，避免搜索索引和设置页说法分叉。
-const MEMORY_PROPOSAL_ROW_DESC =
-  '待审的会话记忆先落本地收件箱，接受后写入 Nowledge Mem，驳回只改本地状态；也可搜索记忆或手动新建一条待审记忆。';
-
 // 记忆提议行的展示部分单独导出：走设置页统一的 SettingsSection / SettingsRow，
 // 也便于不带 RemoteProvider 的静态渲染测试。
 export const MemoryProposalSettingsRowView: React.FC<MemoryProposalSettingsRowViewProps> = ({
@@ -23,7 +19,6 @@ export const MemoryProposalSettingsRowView: React.FC<MemoryProposalSettingsRowVi
     <SettingsRow
       itemID="web-memory-proposals"
       title="记忆提议"
-      desc={MEMORY_PROPOSAL_ROW_DESC}
       control={
         <button type="button" className="secondary-button settings-inline-button" onClick={onOpen}>
           <span>打开</span>

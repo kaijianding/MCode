@@ -117,9 +117,7 @@ export interface SettingsItemDef {
   page: string;
   section: string;
   title: string;
-  desc?: string;
   aliases?: string[];
-  advanced?: boolean;
   // 对应宿主 settings.set 的键；宿主没给这个键时该项隐藏。
   settingsKey?: string;
   // Web 独有的设置项（桌面版索引里没有对应行）。
@@ -283,11 +281,11 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     webOnly: true
   },
 
-  // ---- 外观：主题与字体 ----
+  // ---- 外观：主题 ----
   {
     id: 'row-theme',
     page: 'appearance',
-    section: '主题与字体',
+    section: '主题',
     title: '主题',
     aliases: ['深色', '浅色']
   },
@@ -414,14 +412,14 @@ export function findSettingsPage(pageID: string): SettingsPageDef | undefined {
   return SETTINGS_PAGES.find((page) => page.id === pageID);
 }
 
-// 匹配一条设置项，rank 越小越靠前：标题前缀 0、标题包含 1、别名 2、说明/小节/页名/页关键词 3。
+// 匹配一条设置项，rank 越小越靠前：标题前缀 0、标题包含 1、别名 2、小节/页名/页关键词 3。
 function matchRank(item: SettingsItemDef, query: string): number | null {
   const title = item.title.toLowerCase();
   if (title.startsWith(query)) return 0;
   if (title.includes(query)) return 1;
   if ((item.aliases ?? []).some((alias) => alias.toLowerCase().includes(query))) return 2;
   const page = findSettingsPage(item.page);
-  const rest: Array<string | undefined> = [item.desc, item.section, page?.title, ...(page?.keywords ?? [])];
+  const rest: Array<string | undefined> = [item.section, page?.title, ...(page?.keywords ?? [])];
   if (rest.some((value) => typeof value === 'string' && value.toLowerCase().includes(query))) return 3;
   return null;
 }

@@ -73,3 +73,8 @@ assert.ok(
   permissionHits.some((hit) => hit.item.id === 'row-mode'),
   'matchSettingsItems("权限") 应命中 row-mode'
 );
+
+for (const item of SETTINGS_ITEMS) {
+  assert.ok(!('advanced' in item), `设置项 ${item.id} 不应再带 advanced 属性`);
+  assert.ok(!('desc' in item), `设置项 ${item.id} 不应再带 desc 属性`);
+}

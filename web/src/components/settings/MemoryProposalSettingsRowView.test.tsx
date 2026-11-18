@@ -37,19 +37,18 @@ assertIncludes(pendingHtml, 'settings-section-title');
 assertIncludes(pendingHtml, 'settings-card');
 assertIncludes(pendingHtml, 'settings-row');
 assertIncludes(pendingHtml, 'settings-row-title');
-assertIncludes(pendingHtml, 'settings-row-desc');
+assertNotIncludes(pendingHtml, 'settings-row-desc');
 assertIncludes(pendingHtml, 'settings-row-control');
 assertIncludes(pendingHtml, 'data-settings-item="web-memory-proposals"');
 assertNotIncludes(pendingHtml, 'settings-action');
 assertNotIncludes(pendingHtml, 'settings-label');
 assertNotIncludes(pendingHtml, 'settings-note');
 
-// 文案：小节标题、行标题、说明与搜索索引一致。
+// 文案：小节标题、行标题与搜索索引一致。
 assertIncludes(pendingHtml, entry.section);
 assertIncludes(pendingHtml, entry.title);
 assertIncludes(pendingHtml, '打开');
 assertIncludes(pendingHtml, 'secondary-button settings-inline-button');
-assertIncludes(pendingHtml, '待审的会话记忆先落本地收件箱，接受后写入 Nowledge Mem，驳回只改本地状态；也可搜索记忆或手动新建一条待审记忆。');
 
 // 角标：0 不显示，超过 99 显示 99+，其余显示原始数量。
 assertNotIncludes(emptyHtml, 'rounded-full');

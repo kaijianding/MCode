@@ -698,7 +698,7 @@ export const Header: React.FC<HeaderProps> = ({
                 );
               case 'appearance':
                 return (
-                  <SettingsSection title="主题与字体">
+                  <SettingsSection title="主题">
                     <SettingsStackedRow itemID="row-theme" title="主题">
                       <div className="theme-switch" role="radiogroup" aria-label="主题">
                         {([
