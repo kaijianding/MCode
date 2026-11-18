@@ -699,6 +699,10 @@ func runFakeACPFeatures(mode string) {
 			caps["sessionCapabilities"] = sessionCaps
 			result["agentCapabilities"] = caps
 		case "session/new", "session/load", "session/resume":
+			if mode == "feature_resume_missing" && msg["method"] == "session/resume" {
+				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": -32603, "message": "Failed to read session X; retry, or load it with session/load"}})
+				continue
+			}
 			result["sessionId"] = "feature-session"
 			result["configOptions"] = options
 			current := "default"
@@ -1525,5 +1529,22 @@ func TestACPAgyMCPUsesHTTPWithoutCapability(t *testing.T) {
 	server, ok := servers[0].(map[string]any)
 	if !ok || server["type"] != "http" || server["command"] != nil {
 		t.Fatalf("MCP 服务 = %v", servers[0])
+	}
+}
+
+func TestResumeMissingSessionReportsLostSession(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_resume_missing", AgentAgy, harness.Turn{SessionID: "missing-session-123"})
+	if err == nil {
+		t.Fatal("expected error when resuming missing session")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "原会话") || !strings.Contains(msg, "请新开会话") {
+		t.Fatalf("unexpected error message: %q", msg)
+	}
+	if strings.Contains(msg, "-32603") {
+		t.Fatalf("error message should not expose -32603: %q", msg)
+	}
+	if len(featureParams(messages, "session/new")) != 0 {
+		t.Fatalf("should not fall back to session/new: %v", messages)
 	}
 }

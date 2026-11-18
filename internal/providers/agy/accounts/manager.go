@@ -18,6 +18,8 @@ var (
 	ErrSystemAccount = errors.New("cannot delete system account")
 	// ErrAccountNotFound 找不到指定的账号。
 	ErrAccountNotFound = errors.New("account not found")
+	// ErrAccountInUse 账号正在被运行中的会话使用。
+	ErrAccountInUse = errors.New("账号正在被运行中的会话使用，请等会话结束后再删除")
 )
 
 // ErrAccountGone 账号已不存在（已删除），用于异步任务防幽灵写入校验。
@@ -225,6 +227,13 @@ func (m *Manager) AccountForConversation(conversationID string) (Account, bool) 
 func (m *Manager) Remove(id string) error {
 	if id == SystemAccountID {
 		return ErrSystemAccount
+	}
+
+	m.lastRefreshMu.Lock()
+	inUse := m.activeQuota[id] > 0
+	m.lastRefreshMu.Unlock()
+	if inUse {
+		return ErrAccountInUse
 	}
 
 	m.mu.Lock()

@@ -1213,3 +1213,46 @@ func TestSetupAccountLayoutSkipsMacOnlyLinksOnWindows(t *testing.T) {
 		t.Errorf("installation_id 应已创建: %v", err)
 	}
 }
+
+func TestRemoveRefusesAccountInUse(t *testing.T) {
+	mgr, err := NewManager(Options{
+		DataDir:  t.TempDir(),
+		HostHome: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	tok := OAuthTokenFile{
+		AuthMethod: "consumer",
+		Token: OAuthTokenData{
+			AccessToken:  "in-use-token",
+			TokenType:    "Bearer",
+			RefreshToken: "in-use-refresh",
+			Expiry:       time.Now().Add(time.Hour),
+		},
+	}
+	acc, err := mgr.mergeAndSaveAccount(tok, "inuse@example.com", "In Use")
+	if err != nil {
+		t.Fatalf("mergeAndSaveAccount failed: %v", err)
+	}
+	id := acc.ID
+	accDir := mgr.accountDir(id)
+
+	end := mgr.QuotaUse(id)
+	err = mgr.Remove(id)
+	if !errors.Is(err, ErrAccountInUse) {
+		t.Fatalf("expected ErrAccountInUse, got %v", err)
+	}
+	if _, statErr := os.Stat(accDir); statErr != nil {
+		t.Fatalf("account dir should remain while in use: %v", statErr)
+	}
+
+	end()
+	if err := mgr.Remove(id); err != nil {
+		t.Fatalf("Remove after QuotaUse ended failed: %v", err)
+	}
+	if _, statErr := os.Stat(accDir); !os.IsNotExist(statErr) {
+		t.Fatalf("account dir should be deleted after Remove, stat err: %v", statErr)
+	}
+}

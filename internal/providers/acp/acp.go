@@ -1135,6 +1135,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if turn.SessionID != "" && strings.Contains(err.Error(), "Failed to read session") {
+			return fmt.Errorf("原会话 %s 的数据已不存在（所属账号可能已删除），请新开会话", turn.SessionID)
+		}
 		tail := strings.TrimSpace(stderrBuf.String())
 		if tail != "" {
 			return fmt.Errorf("acp session setup failed: %w (stderr: %s)", err, tail)
