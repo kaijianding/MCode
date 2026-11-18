@@ -3,6 +3,9 @@ package mcodeui
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // todoToolMsg 构造一条待办工具消息（TodoWrite 的正文格式与时间线里的真实消息一致）。
@@ -196,5 +199,28 @@ func TestPlanPill_StaleAfterUserMessage(t *testing.T) {
 	}
 	if got := planPillText(buildPlanPillView(msgs, false)); got != "1/2 · 改代码" {
 		t.Fatalf("planPillText = %q", got)
+	}
+}
+
+// TestPlanPillRunningNoFramePending 验证运行中待办胶囊不再通过 c.After 持续请求整窗重建。
+func TestPlanPillRunningNoFramePending(t *testing.T) {
+	setAppReduceMotion(t, false)
+	s := &chatState{
+		threads:  []Thread{{ID: "thread", IsRunning: true}},
+		messages: []Message{todoToolMsg("plan", `{"todos":[{"content":"进行中","status":"in_progress"}]}`)},
+	}
+	builds := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		renderComposerPlanPill(c, s, "thread")
+	}, 400, 100)
+	tt.Frame()
+	beforeBuilds := builds
+	tt.Advance(time.Second)
+	if builds != beforeBuilds {
+		t.Errorf("待办胶囊不应重建组件树：%d → %d", beforeBuilds, builds)
+	}
+	if tt.FramePending() {
+		t.Error("待办胶囊运行中不应持续请求下一帧")
 	}
 }

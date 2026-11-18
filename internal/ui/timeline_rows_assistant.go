@@ -462,16 +462,8 @@ func renderReasoningMessage(c *ui.Context, s *chatState, m Message, liveID strin
 			ui.Icon(c, IconBrain()).Size(12, 12).TextColor(ThemeSecondaryText(c))
 			label := ui.Text(c, headerText).FontSize(scaledFont(TypeFootnote))
 			// 摘要只占一行，超出宽度尾端省略：不抢正文的垂直空间。
-			label.MaxLines(1).Ellipsis("…").Shrink(1).MinWidth(0)
-			if isLive && !reduceMotion(c) {
-				// 流式中「思考中…」呼吸：透明度在 0.45 与 1 之间往返循环。
-				// 按 175ms 一档低频重建，而不是用无限循环关键帧逐显示刷新驱动整窗重建。
-				pulse := thinkPulseAlpha(c.Now())
-				c.After(175 * time.Millisecond)
-				label.TextColor(ThemeSecondaryText(c).Alpha(float32(pulse)))
-			} else {
-				label.TextColor(ThemeSecondaryText(c))
-			}
+			label.MaxLines(1).Ellipsis("…").Shrink(1).MinWidth(0).
+				TextColor(ThemeSecondaryText(c))
 			ui.Icon(c, IconChevronRight()).Size(11, 11).TextColor(ThemeSecondaryText(c)).Rotate(chevronRotation)
 		})
 

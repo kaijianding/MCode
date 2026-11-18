@@ -146,7 +146,7 @@ func swarmDispatchPlaceholder(s *chatState, liveID string) swarmDispatchPlacehol
 }
 
 // renderSwarmDispatchPlaceholder 渲染派发占位胶囊：尺寸、圆角、内边距与描边沿用 renderSwarmCapsuleButton
-// 的胶囊外观（同一套 RadiusXL / Space 令牌），但不带点击与浮窗，左侧是一个按定时器低频重建的呼吸状态点。
+// 的胶囊外观（同一套 RadiusXL / Space 令牌），但不带点击与浮窗，左侧是一个在 Draw 内重画的呼吸状态点。
 func renderSwarmDispatchPlaceholder(c *ui.Context, key string, view swarmDispatchPlaceholderView) {
 	if !view.Visible {
 		return
@@ -160,19 +160,20 @@ func renderSwarmDispatchPlaceholder(c *ui.Context, key string, view swarmDispatc
 			Background(ThemeSurface(c)).
 			AlignItems(ui.Center).
 			Gap(Space2)
-		// 呼吸动画改由低频定时重建驱动：按帧时间算三角波透明度并量化成 8 档，每周期请求 8 次重绘，
-		// 不再用框架动画帧（那会按屏幕刷新率、最高 120Hz 整窗重建）。占位消失后本函数不再运行，
-		// 定时器也就自然停下。
-		pulse := 1.0
-		if !reduceMotion(c) {
-			pulse = swarmDispatchPulseAlpha(c.Now())
-			c.After(swarmDispatchPulsePeriod / swarmDispatchPulseSteps)
-		}
+		accent := ThemeAccent(c)
+		reduced := reduceMotion(c)
 		pill.Children(func() {
 			ui.Box(c.Key(key+"-dot")).
 				Size(Space2, Space2).
 				Radius(RadiusPill).
-				Background(ThemeAccent(c).Alpha(float32(pulse)))
+				Draw(func(p *ui.Painter, r ui.Rect) {
+					pulse := 1.0
+					if !reduced {
+						pulse = swarmDispatchPulseAlpha(p.Now())
+						p.After(swarmDispatchPulsePeriod / swarmDispatchPulseSteps)
+					}
+					p.Fill(r, accent.Alpha(float32(pulse)), r.H/2)
+				})
 			ui.Text(c, view.Text).
 				FontSize(scaledFont(TypeFootnote)).
 				FontWeight(600).

@@ -1,8 +1,10 @@
 package mcodeui
 
 import (
+	"bytes"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -289,5 +291,51 @@ func TestOnboardingProbingDisablesRefresh(t *testing.T) {
 	u.mu.Unlock()
 	if !probing {
 		t.Fatal("检测中按钮不应启动新的检测")
+	}
+}
+
+// TestOnboardingHeroNoTreeRebuild 验证引导欢迎页与检查中徽章只做 Draw 级重画，不持续重建组件树。
+func TestOnboardingHeroNoTreeRebuild(t *testing.T) {
+	cases := []struct {
+		name   string
+		settle time.Duration
+		view   func(*ui.Context)
+	}{
+		{"hero", 0, renderOnboardingHero},
+		{"badge", 2 * motionIconFade, func(c *ui.Context) {
+			onboardingBadge(c, "check", "检查中", ToneNeutral)
+		}},
+	}
+	for _, tc := range cases {
+		for _, reduced := range []bool{false, true} {
+			mode := "animated"
+			if reduced {
+				mode = "reduced"
+			}
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				setAppReduceMotion(t, reduced)
+				builds := 0
+				tt := ui.NewTesterWith(func(c *ui.Context) {
+					builds++
+					tc.view(c)
+				}, 600, 200, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced}})
+				tt.Frame()
+				if tc.settle > 0 {
+					tt.Advance(tc.settle)
+				}
+				beforeBuilds := builds
+				before := append([]byte(nil), tt.Image().Pix...)
+				tt.Advance(motionSweep / 2)
+				if builds != beforeBuilds {
+					t.Errorf("视图重建：%d → %d", beforeBuilds, builds)
+				}
+				if tt.FramePending() {
+					t.Error("不应请求组件树的下一帧")
+				}
+				if same := bytes.Equal(before, tt.Image().Pix); same != reduced {
+					t.Errorf("图像相同=%v，减少动效=%v", same, reduced)
+				}
+			})
+		}
 	}
 }

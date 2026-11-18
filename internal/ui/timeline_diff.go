@@ -506,10 +506,20 @@ func (s *chatState) loadToolDiff(threadID string, turnIndex int, turnID string, 
 		s.toolDiff.turnKey = make(map[string]string)
 	}
 	if resolved != "" {
+		// 在途期间若目标键或序号占位条目又被标了待重取，写回时保留 stale，让下一帧补拉最新 diff。
+		if prev := s.toolDiff.entries[resolved]; prev != nil && prev.stale {
+			entry.stale = true
+		}
+		if prev := s.toolDiff.entries[idxKey]; prev != nil && prev.stale {
+			entry.stale = true
+		}
 		s.toolDiff.entries[resolved] = entry
 		s.toolDiff.turnKey[idxKey] = resolved
 		delete(s.toolDiff.entries, idxKey)
 	} else {
+		if prev := s.toolDiff.entries[idxKey]; prev != nil && prev.stale {
+			entry.stale = true
+		}
 		s.toolDiff.entries[idxKey] = entry
 	}
 	s.mu.Unlock()

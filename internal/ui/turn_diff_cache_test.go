@@ -1,6 +1,8 @@
 package mcodeui
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -95,5 +97,81 @@ func TestToolDiffEntryServesStaleCache(t *testing.T) {
 	defer state.mu.Unlock()
 	if e := state.toolDiff.entries["t1|turn-a"]; e != nil && e.stale {
 		t.Fatal("取出后应清掉待重取标记，避免每帧重复发起请求")
+	}
+}
+
+type blockingToolDiffClient struct {
+	*FakeClient
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingToolDiffClient) Diff(ctx context.Context, threadID, turnID string) (ThreadDiff, error) {
+	c.once.Do(func() {
+		if c.started != nil {
+			close(c.started)
+		}
+	})
+	if c.release != nil {
+		<-c.release
+	}
+	return c.FakeClient.Diff(ctx, threadID, turnID)
+}
+
+// TestToolDiffKeepsStaleDuringInflightLoad 验证加载在途期间若轮次又被标成 stale，
+// loadToolDiff 写回新条目时必须保留 stale=true，避免用旧 diff 覆盖待重取标记。
+func TestToolDiffKeepsStaleDuringInflightLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  Message
+	}{
+		{"by_turn_id", Message{ID: "m1", Role: "tool", TurnIndex: 1, TurnID: "turn-a"}},
+		{"by_turn_index", Message{ID: "m1", Role: "tool", TurnIndex: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := NewFakeClient()
+			patch := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+			fake.SetThreadDiff("t1", "", ThreadDiff{
+				Turns: []DiffTurn{{Index: 1, TurnID: "turn-a"}},
+			})
+			fake.SetThreadDiff("t1", "turn-a", ThreadDiff{
+				Diff: patch,
+			})
+			blocking := &blockingToolDiffClient{
+				FakeClient: fake,
+				started:    make(chan struct{}),
+				release:    make(chan struct{}),
+			}
+			var state *chatState
+			tt := ui.NewTester(Root(blocking, func(s *chatState) { state = s }), 1000, 700)
+			waitFor(t, tt, func() bool { return state != nil })
+			t.Cleanup(state.close)
+
+			entry := state.toolDiffEntryFor("t1", tc.msg)
+			if !entry.loading {
+				t.Fatalf("首次读取应处于加载中: %+v", entry)
+			}
+			<-blocking.started
+
+			state.mu.Lock()
+			state.invalidateToolDiffTurnsLocked("t1", []Message{tc.msg})
+			state.mu.Unlock()
+
+			close(blocking.release)
+			waitFor(t, tt, func() bool {
+				state.mu.Lock()
+				defer state.mu.Unlock()
+				e := state.toolDiff.entries["t1|turn-a"]
+				return e != nil && !e.loading
+			})
+
+			state.mu.Lock()
+			e := state.toolDiff.entries["t1|turn-a"]
+			state.mu.Unlock()
+			if e == nil || !e.stale {
+				t.Fatalf("在途期间被标为 stale 后，写回条目应保留 stale=true，实际=%+v", e)
+			}
+		})
 	}
 }

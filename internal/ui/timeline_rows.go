@@ -88,28 +88,6 @@ func isHiddenTimelineMessage(m Message) bool {
 	return !m.IsFinal && text != "" && strings.HasPrefix(stewardSilentMarker, text)
 }
 
-// thinkPulseAlpha 返回「思考中…」呼吸标识的透明度：1400ms 一个周期的三角波
-// （0ms 为 0.45、700ms 为 1、1400ms 回到 0.45，与原关键帧一致），相位按 8 档量化、
-// 每档约 175ms，配合调用方 c.After(175ms) 请求下一帧即可，无需逐帧关键帧动画。
-func thinkPulseAlpha(now time.Time) float64 {
-	const (
-		period = int64(1400) // 一个呼吸周期的毫秒数
-		steps  = int64(8)    // 相位量化档数
-		stepMs = period / steps
-	)
-	phase := now.UnixMilli() % period
-	if phase < 0 {
-		phase += period
-	}
-	// 四舍五入到最近一档，避免同一档内每次调用都取到不同值
-	step := (phase + stepMs/2) / stepMs
-	half := steps / 2
-	if step > half { // 后半程透明度回落
-		step = steps - step
-	}
-	return 0.45 + 0.55*float64(step)/float64(half)
-}
-
 // copyFeedbackActive 返回 key 对应的复制反馈是否仍在显示窗口（1.4 秒）内，供按钮决定显示对勾还是复制图标。
 func copyFeedbackActive(key string, now time.Time) bool {
 	if key == "" {

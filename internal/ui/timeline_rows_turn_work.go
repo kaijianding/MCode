@@ -357,7 +357,7 @@ func toolBeatReasoningNeedsTruncation(text string) bool {
 // renderToolBeatReasoning 渲染节拍里的思考叙事：小号次要色正文，默认最多两行，
 // 超出时在末尾给一个「展开」/「收起」文字按钮；展开后走思考正文的 Markdown 全量渲染。
 // 展开状态记在 expandedReasoning 的 "beat-full:<ID>" 键下（true 表示已展开全文）。
-// 这条思考还在流式输出时，沿用独立思考行的「思考中…」呼吸标识与流式渲染。
+// 这条思考还在流式输出时，沿用独立思考行的「思考中…」标识与流式渲染。
 // 关闭「自动折叠思考内容」开关后不再做两行截断，也不渲染「收起」按钮。
 func renderToolBeatReasoning(c *ui.Context, s *chatState, m Message, liveID string) {
 	s.mu.Lock()
@@ -372,18 +372,11 @@ func renderToolBeatReasoning(c *ui.Context, s *chatState, m Message, liveID stri
 		Gap(Space0).
 		Children(func() {
 			if isLive {
-				// 流式输出时沿用思考行的「思考中…」呼吸标识；同样按 175ms 一档低频重建。
-				// 减少动效时不呼吸，直接给满不透明度。
-				pulse := float32(1)
-				if !reduceMotion(c) {
-					pulse = float32(thinkPulseAlpha(c.Now()))
-					c.After(175 * time.Millisecond)
-				}
 				live := ui.Row(c.Key("tool-beat-think-live-" + m.ID)).AlignItems(ui.Center)
 				live.Children(func() {
 					ui.Text(c, reasoningHeaderLabel(true)).
 						FontSize(scaledFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c).Alpha(pulse))
+						TextColor(ThemeSecondaryText(c))
 				})
 			}
 
