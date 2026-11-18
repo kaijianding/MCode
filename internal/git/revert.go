@@ -134,6 +134,15 @@ func (r *Runner) RestoreFiles(ctx context.Context, root, commit string, paths []
 			return fmt.Errorf("restore mkdir for %s: %w", relPath, err)
 		}
 
+		// 若目标路径当前是符号链接，先删除再写回普通文件，避免沿链接写穿外部目标
+		if info, err := os.Lstat(fullPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("restore lstat %s: %w", relPath, err)
+		} else if info != nil && info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("restore replace symlink %s: %w", relPath, err)
+			}
+		}
+
 		// 写回文件内容；os.WriteFile 的权限位只在新文件上生效，已存在的文件需单独 chmod 才能还原可执行位
 		if err := os.WriteFile(fullPath, content, fileMode); err != nil {
 			return fmt.Errorf("restore write file %s: %w", relPath, err)

@@ -441,3 +441,51 @@ func TestRevertSymlinkFallbackWritesFile(t *testing.T) {
 		t.Errorf("文件内容 = %q, want %q", got, target)
 	}
 }
+
+func TestRestoreFilesReplacesSymlink(t *testing.T) {
+	testenv.TempHome(t)
+	runner, dir := newRevertTestRepo(t)
+	ctx := context.Background()
+
+	writeTestFile(t, dir, "tracked.txt", "original\n")
+	runTestGit(t, dir, "add", "-A")
+	runTestGit(t, dir, "commit", "-q", "-m", "add tracked")
+	commit := runTestGit(t, dir, "rev-parse", "HEAD")
+
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("keep-me\n"), 0644); err != nil {
+		t.Fatalf("写入仓库外文件失败: %v", err)
+	}
+
+	trackedPath := filepath.Join(dir, "tracked.txt")
+	if err := os.Remove(trackedPath); err != nil {
+		t.Fatalf("删除跟踪文件失败: %v", err)
+	}
+	if err := os.Symlink(outsideFile, trackedPath); err != nil {
+		t.Fatalf("创建符号链接失败: %v", err)
+	}
+
+	if err := runner.RestoreFiles(ctx, dir, commit, []string{"tracked.txt"}); err != nil {
+		t.Fatalf("RestoreFiles: %v", err)
+	}
+
+	outsideData, err := os.ReadFile(outsideFile)
+	if err != nil {
+		t.Fatalf("读取仓库外文件失败: %v", err)
+	}
+	if string(outsideData) != "keep-me\n" {
+		t.Errorf("仓库外文件被写穿修改: got %q, want %q", string(outsideData), "keep-me\n")
+	}
+
+	info, err := os.Lstat(trackedPath)
+	if err != nil {
+		t.Fatalf("lstat 还原文件失败: %v", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("工作区路径应还原为普通文件，实际 mode=%v", info.Mode())
+	}
+	if got := readTestFile(t, dir, "tracked.txt"); got != "original\n" {
+		t.Errorf("还原文件内容 = %q, want %q", got, "original\n")
+	}
+}

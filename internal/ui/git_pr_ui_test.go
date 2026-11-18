@@ -984,3 +984,105 @@ func TestGitPRCheckout(t *testing.T) {
 		t.Fatalf("检出不应打开 PR 改动视图：open=%v scope=%q number=%d", inspectorPaneOpen(s, sidePaneDiffID), scope, number)
 	}
 }
+
+// TestCreateGitPRThreadRollsBackOnSendFailure 覆盖首条消息发送失败时回滚删掉已创建会话。
+func TestCreateGitPRThreadRollsBackOnSendFailure(t *testing.T) {
+	f := NewFakeClient()
+	f.mu.Lock()
+	f.sendErr = errors.New("send failed")
+	f.mu.Unlock()
+
+	s := newGitPRDialogTestState(t, &gitPRDialogFake{FakeClient: f})
+	newID, err := s.createGitPRThread("thread-1", 42, "/tmp/mcode-pr-42", "解决 PR #42 冲突", "请处理冲突")
+	if err == nil {
+		t.Fatalf("Send 失败时应返回错误，got newID=%q", newID)
+	}
+	if newID != "" {
+		t.Fatalf("失败时不应返回新会话 ID: %q", newID)
+	}
+
+	f.mu.Lock()
+	deletes := append([]string(nil), f.deleteCalls...)
+	threads := append([]Thread(nil), f.threads["p1"]...)
+	f.mu.Unlock()
+
+	if len(deletes) != 1 || deletes[0] == "" {
+		t.Fatalf("期望 DeleteThread 被调用一次，实际 deleteCalls=%v", deletes)
+	}
+	for _, th := range threads {
+		if th.ID == deletes[0] {
+			t.Fatalf("回滚后项目仍残留孤儿会话 %q", th.ID)
+		}
+	}
+}
+
+// TestGitPRCheckRowRejectsUnsafeURL 覆盖 CI 检查行拒绝不安全 scheme，仅允许安全链接点击打开。
+func TestGitPRCheckRowRejectsUnsafeURL(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"https 允许", "https://ci.example.com/run/1", true},
+		{"javascript 拒绝", "javascript:alert(1)", false},
+		{"file 拒绝", "file:///etc/passwd", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotURL, ok := gitPRCheckURLSafe(tc.url)
+			if ok != tc.want {
+				t.Fatalf("gitPRCheckURLSafe(%q) = (%q, %v), want ok=%v", tc.url, gotURL, ok, tc.want)
+			}
+
+			tt := ui.NewTester(func(c *ui.Context) {
+				renderGitPRCheckRow(c, "modal-git-pr-detail-check-0", git.PRCheck{Name: "build", State: "success", URL: tc.url})
+			}, 600, 100)
+			tt.Frame()
+			_ = tt.Click("build")
+			tt.Frame()
+			opened := tt.OpenedURLs()
+			if tc.want {
+				if len(opened) != 1 || opened[0] != tc.url {
+					t.Fatalf("安全链接点击结果 = %v，期望 [%q]", opened, tc.url)
+				}
+			} else if len(opened) != 0 {
+				t.Fatalf("不安全链接 %q 不应触发打开，实际 %v", tc.url, opened)
+			}
+		})
+	}
+}
+
+// TestGitPRStaleThreadCallback 覆盖创建 PR 会话回调在弹窗关闭或切换 PR 后的处理。
+func TestGitPRStaleThreadCallback(t *testing.T) {
+	t.Run("弹窗已关切入新会话", func(t *testing.T) {
+		f := &gitPRDialogFake{FakeClient: NewFakeClient()}
+		s := newGitPRDialogTestState(t, f)
+		s.notifyStaleGitPRThread(false, 42, "t-new-1")
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		toast := s.toastMessage
+		s.mu.Unlock()
+		if selected != "t-new-1" {
+			t.Fatalf("selectedThreadID = %q, want t-new-1", selected)
+		}
+		if toast != "" {
+			t.Fatalf("弹窗已关直接切换时不应弹 toast，got %q", toast)
+		}
+	})
+
+	t.Run("切到别的PR只弹提示不跳转", func(t *testing.T) {
+		f := &gitPRDialogFake{FakeClient: NewFakeClient()}
+		s := newGitPRDialogTestState(t, f)
+		s.notifyStaleGitPRThread(true, 42, "t-new-2")
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		toast := s.toastMessage
+		s.mu.Unlock()
+		if selected != "thread-1" {
+			t.Fatalf("切到别的 PR 时不应跳转会话，selectedThreadID = %q", selected)
+		}
+		if toast != "PR #42 的会话已创建" {
+			t.Fatalf("toast = %q, want %q", toast, "PR #42 的会话已创建")
+		}
+	})
+}

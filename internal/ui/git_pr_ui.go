@@ -376,7 +376,11 @@ func (s *chatState) runGitPRResolve() {
 		}
 		st.mu.Lock()
 		if !st.open || st.detailSeq != seq || st.selected != number {
+			open := st.open
 			st.mu.Unlock()
+			if err == nil {
+				s.notifyStaleGitPRThread(open, number, newID)
+			}
 			return
 		}
 		st.actionBusy = ""
@@ -431,7 +435,11 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 		}
 		st.mu.Lock()
 		if !st.open || st.detailSeq != seq || st.selected != number {
+			open := st.open
 			st.mu.Unlock()
+			if err == nil {
+				s.notifyStaleGitPRThread(open, number, newID)
+			}
 			return
 		}
 		st.actionBusy = ""
@@ -451,6 +459,18 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 	}()
 }
 
+// notifyStaleGitPRThread 处理新建 PR 会话完成时弹窗已关闭或切到别的 PR 的情况。
+func (s *chatState) notifyStaleGitPRThread(open bool, number int, newID string) {
+	if newID == "" {
+		return
+	}
+	if !open {
+		s.selectThread(newID)
+		return
+	}
+	s.setToast(fmt.Sprintf("PR #%d 的会话已创建", number))
+}
+
 // createGitPRThread 在 PR 所属项目新建普通会话，命名后切到 worktree，并按需发送首条消息。
 func (s *chatState) createGitPRThread(threadID string, number int, path, title, prompt string) (string, error) {
 	s.mu.Lock()
@@ -466,18 +486,21 @@ func (s *chatState) createGitPRThread(threadID string, number int, path, title, 
 		return "", err
 	}
 	if err := s.client.RenameThread(id, title); err != nil {
+		_ = s.client.DeleteThread(id)
 		return "", err
 	}
 	if err := s.client.GitSwitchWorktree(context.Background(), id, path); err != nil {
+		_ = s.client.DeleteThread(id)
 		return "", err
 	}
-	// 让新会话出现在侧栏；列表刷新失败不影响已经切过去的会话。
-	_ = s.refreshProjectThreads(context.Background(), th.ProjectID)
 	if prompt != "" {
 		if _, err := s.client.Send(context.Background(), id, prompt); err != nil {
+			_ = s.client.DeleteThread(id)
 			return "", err
 		}
 	}
+	// 让新会话出现在侧栏；列表刷新失败不影响已经切过去的会话。
+	_ = s.refreshProjectThreads(context.Background(), th.ProjectID)
 	return id, nil
 }
 
@@ -1161,7 +1184,16 @@ func renderGitPRSectionTitle(c *ui.Context, text string) {
 		SingleLine()
 }
 
-// renderGitPRCheckRow 渲染一条 CI 检查：左侧名称，右侧状态文案；有链接时整行可点。
+// gitPRCheckURLSafe 判断 CI 检查链接是否允许在浏览器中打开。
+func gitPRCheckURLSafe(raw string) (string, bool) {
+	url := strings.TrimSpace(raw)
+	if url == "" || !ui.SafeToOpen(url) {
+		return "", false
+	}
+	return url, true
+}
+
+// renderGitPRCheckRow 渲染一条 CI 检查：左侧名称，右侧状态文案；有安全链接时整行可点。
 func renderGitPRCheckRow(c *ui.Context, key string, check git.PRCheck) {
 	name := strings.TrimSpace(check.Name)
 	if name == "" {
@@ -1174,7 +1206,7 @@ func renderGitPRCheckRow(c *ui.Context, key string, check git.PRCheck) {
 		Background(ThemeHover(c).Alpha(0.4)).
 		Gap(Space3).
 		AlignItems(ui.Center)
-	if url := strings.TrimSpace(check.URL); url != "" {
+	if url, ok := gitPRCheckURLSafe(check.URL); ok {
 		row.Label("打开检查 " + name)
 		if row.Hovered() {
 			row.Background(ThemeHover(c))

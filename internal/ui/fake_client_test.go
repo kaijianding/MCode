@@ -286,7 +286,9 @@ type FakeClient struct {
 	// interruptAlreadyStopped 让 FakeClient.Interrupt 模拟后端返回 already_stopped。
 	interruptAlreadyStopped bool
 	// sendDelegated 让 FakeClient.Send/SendWithAttachments 模拟消息被交给子线程。
-	sendDelegated       bool
+	sendDelegated bool
+	sendErr       error
+	deleteCalls   []string
 	addProjectCalls     []string
 	setRuntimeModeCalls []setRuntimeModeCall
 	SetAgentCalls       []SetAgentCall
@@ -829,6 +831,9 @@ func (f *FakeClient) Send(ctx context.Context, threadID, text string) (bool, err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sendCalls = append(f.sendCalls, sentCall{ThreadID: threadID, Text: text})
+	if f.sendErr != nil {
+		return false, f.sendErr
+	}
 	return f.sendDelegated, nil
 }
 
@@ -1578,6 +1583,7 @@ func (f *FakeClient) ReleaseProvisionalThread(threadID string) error {
 func (f *FakeClient) DeleteThread(threadID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.deleteCalls = append(f.deleteCalls, threadID)
 	for pid, list := range f.threads {
 		var filtered []Thread
 		for _, th := range list {
