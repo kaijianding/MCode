@@ -352,6 +352,12 @@ func OnlyReadsOrGoChecks(command string) bool {
 	return onlyReads(command, true)
 }
 
+var currentOS = runtime.GOOS
+
+func isDoubleQuoteEscapable(c byte) bool {
+	return c == '"' || c == '\\' || c == '$' || c == '`' || c == '\n'
+}
+
 func onlyReads(command string, allowGoChecks bool) bool {
 	if strings.TrimSpace(command) == "" {
 		return false
@@ -359,7 +365,8 @@ func onlyReads(command string, allowGoChecks bool) bool {
 	// 丢弃输出及复制文件描述符不属于写文件。
 	text := nullRedirect.ReplaceAllString(command, "$1")
 	text = fdRedirect.ReplaceAllString(text, "")
-	if strings.ContainsAny(text, "\r\n`") || strings.Contains(text, "$(") {
+	windows := currentOS == "windows"
+	if windows && (strings.ContainsAny(text, "\r\n`") || strings.Contains(text, "$(")) {
 		return false
 	}
 	for i := 0; i < len(text); i++ {
@@ -374,6 +381,9 @@ func onlyReads(command string, allowGoChecks bool) bool {
 	for i := 0; i < len(text); i++ {
 		c := text[i]
 		if quote == '\'' {
+			if !windows && (c == '\r' || c == '\n' || c == '`' || c == '$' && i+1 < len(text) && text[i+1] == '(') {
+				return false
+			}
 			if c == '\'' {
 				quote = 0
 			}
@@ -393,12 +403,21 @@ func onlyReads(command string, allowGoChecks bool) bool {
 				}
 				return false
 			}
-			// PowerShell 双引号内反斜杠不转义，bash 与 PowerShell 对引号结束位置的判断不一致。
-			if quote == '"' && i+1 < len(text) && text[i+1] == '"' {
-				return false
+			// Windows 下 PowerShell 双引号内反斜杠不转义，仅在非 Windows 下按 POSIX 规则识别双引号转义。
+			if windows {
+				if quote == '"' && i+1 < len(text) && text[i+1] == '"' {
+					return false
+				}
+				i++
+				continue
 			}
-			i++
+			if i+1 < len(text) && isDoubleQuoteEscapable(text[i+1]) {
+				i++
+			}
 			continue
+		}
+		if !windows && (c == '\r' || c == '\n' || c == '`') {
+			return false
 		}
 		if c == '$' {
 			if quote == 0 || i+1 < len(text) && (text[i+1] >= 'a' && text[i+1] <= 'z' || text[i+1] >= 'A' && text[i+1] <= 'Z' || text[i+1] >= '0' && text[i+1] <= '9' || strings.ContainsRune("_{(@*#?$!-", rune(text[i+1]))) {
@@ -438,10 +457,23 @@ func onlyReads(command string, allowGoChecks bool) bool {
 		for i := 0; i < len(piece); i++ {
 			c := piece[i]
 			if c == '\\' && q == '"' && i+1 < len(piece) {
-				i++
-				word.WriteByte(piece[i])
-				started = true
-				continue
+				next := piece[i+1]
+				if windows {
+					i++
+					word.WriteByte(next)
+					started = true
+					continue
+				}
+				if next == '\n' {
+					i++
+					continue
+				}
+				if isDoubleQuoteEscapable(next) {
+					i++
+					word.WriteByte(next)
+					started = true
+					continue
+				}
 			}
 			if c == '\'' || c == '"' {
 				if q == 0 {

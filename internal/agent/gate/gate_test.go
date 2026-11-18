@@ -316,7 +316,7 @@ func TestOnlyReads(t *testing.T) {
 		{"ls (Remove-Item x)", false}, {"Get-ChildItem | Where-Object { Remove-Item x }", false},
 		{"Get-Process | Stop-Process", false}, {"sc a.txt x", false}, {"Set-Content a x", false}, {"iwr https://x", false},
 		{`echo \"; rm x; echo \"`, false}, {`cat a\;rm x`, false}, {"ipconfig /release", false}, {`reg add HKCU\x`, false},
-		{`echo "a\"; Remove-Item x; echo "`, false}, {`grep "x\"" a`, false},
+		{`echo "a\"; Remove-Item x; echo "`, currentOS != "windows"}, {`grep "x\"" a`, currentOS != "windows"},
 		{`grep "a\.b" f`, true}, {`echo "a\\b"`, true},
 		{"go list -toolexec x ./...", false}, {"go list -mod=mod ./...", false}, {"gh pr create", false},
 		{"adb pull /sdcard/a.txt", false}, {"adb shell rm /sdcard/x", false}, {"fd -x rm", false}, {"fd -Hx rm", false},
@@ -343,6 +343,53 @@ func TestOnlyReads(t *testing.T) {
 	for _, sub := range strings.Fields("describe rev-parse rev-list shortlog cat-file ls-tree ls-remote show-ref name-rev merge-base for-each-ref count-objects grep whatchanged") {
 		if !OnlyReads("git "+sub) || OnlyReads("git "+sub+" --ext-diff") || OnlyReads("git "+sub+" --output=x") {
 			t.Errorf("git %s 参数检查失败", sub)
+		}
+	}
+}
+
+func TestOnlyReadsEscapedQuoteInDoubleQuotes(t *testing.T) {
+	origOS := currentOS
+	t.Cleanup(func() { currentOS = origOS })
+
+	currentOS = "darwin"
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{`rg -n "BuiltInServerName|BuiltinServer|ServerName|builtinMCP|\"mcode\"" internal/`, true},
+		{`grep "x\"" a`, true},
+		{`grep "a\"; rm -rf x; echo \"" f`, true},
+		{`grep "a\\"; rm x`, false},
+		{`grep "\$(rm x)" f`, true},
+		{`grep "$(rm x)" f`, false},
+		{"grep \"`id`\" f", false},
+		{"grep \"\\`id\\`\" f", true},
+		{"grep \"a\\\nb\" f", true},
+		{"grep \"a\nb\" f", false},
+		{"git \"--output\\\n=x\"", false},
+		{`grep '$(rm x)' f`, false},
+		{"grep '`id`' f", false},
+	} {
+		if got := OnlyReads(tc.command); got != tc.want {
+			t.Errorf("非 Windows %q 得到 %v，期望 %v", tc.command, got, tc.want)
+		}
+		if got := OnlyReadsOrGoChecks(tc.command); got != tc.want {
+			t.Errorf("非 Windows OnlyReadsOrGoChecks(%q) 得到 %v，期望 %v", tc.command, got, tc.want)
+		}
+	}
+
+	currentOS = "windows"
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{`grep "x\"" a`, false},
+		{`echo "a\"; Remove-Item x; echo "`, false},
+		{`grep "\$(rm x)" f`, false},
+		{`grep "a\.b" f`, true},
+	} {
+		if got := OnlyReads(tc.command); got != tc.want {
+			t.Errorf("Windows %q 得到 %v，期望 %v", tc.command, got, tc.want)
 		}
 	}
 }
