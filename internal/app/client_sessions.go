@@ -732,6 +732,15 @@ type deleteThreadWorktreeTarget struct {
 	isMcodeWT bool
 }
 
+// resolveDeleteThreadMainRepoRoot 解析会话工作目录所属的主仓库根目录；测试中可替换以模拟不可用场景。
+var resolveDeleteThreadMainRepoRoot = func(c *Client, ctx context.Context, workDir string) (string, error) {
+	runner := c.gitRunner()
+	if runner == nil {
+		return "", errors.New("git runner 不可用")
+	}
+	return runner.MainRepoRoot(ctx, workDir)
+}
+
 // resolveDeleteThreadWorktree 解析待删除会话的 worktree 清理目标与主仓库根。
 // 若会话工作目录就是主仓库检出根目录，则返回 isMcodeWT=false 以保护主仓库不被删除。
 func (c *Client) resolveDeleteThreadWorktree(ctx context.Context, threadID string) deleteThreadWorktreeTarget {
@@ -744,26 +753,28 @@ func (c *Client) resolveDeleteThreadWorktree(ctx context.Context, threadID strin
 	}
 
 	var target deleteThreadWorktreeTarget
-	if runner := c.gitRunner(); runner != nil {
-		if mainRoot, err := runner.MainRepoRoot(ctx, workDir); err == nil && mainRoot != "" {
-			target.repoRoot = mainRoot
-		}
+	if mainRoot, err := resolveDeleteThreadMainRepoRoot(c, ctx, workDir); err == nil && mainRoot != "" {
+		target.repoRoot = mainRoot
 	}
-	if target.repoRoot != "" && legacyResolvedPath(workDir) == legacyResolvedPath(target.repoRoot) {
-		return deleteThreadWorktreeTarget{}
-	}
-
-	if st, err := c.backend.GitState(ctx, threadID); err == nil {
-		if target.repoRoot == "" {
-			target.repoRoot = st.WorkDir
+	cleanWD := legacyResolvedPath(workDir)
+	if target.repoRoot != "" {
+		cleanRoot := legacyResolvedPath(target.repoRoot)
+		if cleanWD == cleanRoot {
+			return deleteThreadWorktreeTarget{}
 		}
-		cleanWD := legacyResolvedPath(workDir)
-		for _, wt := range st.Worktrees {
-			if legacyResolvedPath(wt.Path) == cleanWD {
-				target.wtPath = wt.Path
-				target.wtBranch = wt.Branch
-				target.isMcodeWT = true
-				break
+		// 仅在已知主仓库根时匹配 GitState 中的 worktree，避免主仓库根未知时误把主检出当成 worktree。
+		if st, err := c.backend.GitState(ctx, threadID); err == nil {
+			for _, wt := range st.Worktrees {
+				cleanWT := legacyResolvedPath(wt.Path)
+				if cleanWT == cleanRoot {
+					continue
+				}
+				if cleanWT == cleanWD {
+					target.wtPath = wt.Path
+					target.wtBranch = wt.Branch
+					target.isMcodeWT = true
+					break
+				}
 			}
 		}
 	}
@@ -778,8 +789,8 @@ func (c *Client) resolveDeleteThreadWorktree(ctx context.Context, threadID strin
 			swarmDir := filepath.Join(dataDir, "swarm-worktrees")
 			// 旧版本建在 hydra-worktrees 下，过渡期两个目录都认。
 			legacySwarmDir := filepath.Join(dataDir, "hydra-worktrees")
-			cleanWD := filepath.Clean(workDir)
-			if strings.HasPrefix(cleanWD, filepath.Clean(managedDir)) || strings.HasPrefix(cleanWD, filepath.Clean(swarmDir)) || strings.HasPrefix(cleanWD, filepath.Clean(legacySwarmDir)) {
+			cleanPath := filepath.Clean(workDir)
+			if strings.HasPrefix(cleanPath, filepath.Clean(managedDir)) || strings.HasPrefix(cleanPath, filepath.Clean(swarmDir)) || strings.HasPrefix(cleanPath, filepath.Clean(legacySwarmDir)) {
 				target.wtPath = workDir
 				target.isMcodeWT = true
 			}

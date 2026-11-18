@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,5 +53,48 @@ func TestDeleteThreadWorktreeCleanup(t *testing.T) {
 	}
 	if got := branchGit(t, root, "branch", "--list", mainBranch); got == "" {
 		t.Fatalf("主分支 %s 应保留", mainBranch)
+	}
+}
+
+func TestResolveDeleteThreadWorktreeMainRootUnknown(t *testing.T) {
+	c, root, thread := branchClient(t)
+	ctx := context.Background()
+
+	st, err := c.backend.GitState(ctx, thread)
+	if err != nil {
+		t.Fatalf("GitState 失败: %v", err)
+	}
+	foundMain := false
+	for _, wt := range st.Worktrees {
+		if legacyResolvedPath(wt.Path) == legacyResolvedPath(root) {
+			foundMain = true
+			break
+		}
+	}
+	if !foundMain {
+		t.Fatalf("GitState 应包含主检出条目 %q: %+v", root, st.Worktrees)
+	}
+
+	orig := resolveDeleteThreadMainRepoRoot
+	resolveDeleteThreadMainRepoRoot = func(*Client, context.Context, string) (string, error) {
+		return "", errors.New("main repo root unavailable")
+	}
+	t.Cleanup(func() {
+		resolveDeleteThreadMainRepoRoot = orig
+	})
+
+	target := c.resolveDeleteThreadWorktree(ctx, thread)
+	if target.isMcodeWT {
+		t.Fatalf("MainRepoRoot 不可用时不应把主检出识别为 worktree: %+v", target)
+	}
+	if target.wtPath != "" {
+		t.Fatalf("MainRepoRoot 不可用时 wtPath 应为空，实际为 %q", target.wtPath)
+	}
+
+	if err := c.DeleteThread(thread); err != nil {
+		t.Fatalf("DeleteThread 失败: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "file.txt")); err != nil {
+		t.Fatalf("主仓库文件被误删: %v", err)
 	}
 }
