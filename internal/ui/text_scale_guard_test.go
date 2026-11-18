@@ -15,6 +15,7 @@ var chatScaleFiles = map[string]bool{
 	"composer_plan_pill.go": true, "kbd.go": true, "session_stats_popover.go": true,
 	"steward_decision_card.go": true, "steward_reply.go": true, "steward_task_page.go": true,
 	"steward_split.go": true, "steward_timeline.go": true, "steward_turn_time.go": true,
+	"swarm_bee_window.go":           true,
 	"swarm_dispatch_placeholder.go": true, "swarm_mentions.go": true,
 	"swarm_report_markdown.go": true, "swarm_timeline_capsule.go": true, "text_scale.go": true,
 	"timeline_answered_question.go": true, "timeline_background_tasks.go": true, "timeline_banner.go": true,
