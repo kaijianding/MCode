@@ -585,3 +585,21 @@ func TestBuiltinTierCustomized(t *testing.T) {
 		t.Fatal("非内置档位不应标记")
 	}
 }
+
+func TestUpgradeReadTierPromptFromPreviousDefault(t *testing.T) {
+	const previousDefault = "你是只读调研档。逐条回答 brief 里的问题，每条发现写成 path:line，后面紧跟用反引号包住的源码原文。可以用 grep、git log、git blame 等只读命令，也可以跑有范围的测试或命令来复现、二分、测量。汇报根因时附上证据：path:line、复现命令和输出。不给改法；brief 没问到的不展开。"
+	got := UpgradeBuiltinTierTexts([]SwarmTier{
+		{ID: "read", SystemPrompt: previousDefault},
+		{ID: "read", SystemPrompt: "自定义只读提示词"},
+		{ID: "read", SystemPrompt: ""},
+	})
+	if got[0].SystemPrompt != readTierSystemPrompt {
+		t.Errorf("旧默认只读提示词未升级：got=%q want=%q", got[0].SystemPrompt, readTierSystemPrompt)
+	}
+	if got[1].SystemPrompt != "自定义只读提示词" {
+		t.Errorf("自定义只读提示词不应被修改：got=%q", got[1].SystemPrompt)
+	}
+	if got[2].SystemPrompt != "" {
+		t.Errorf("已清空的只读提示词不应被回填：got=%q", got[2].SystemPrompt)
+	}
+}
