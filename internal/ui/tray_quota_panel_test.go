@@ -578,8 +578,8 @@ func TestBuildTrayQuotaModel(t *testing.T) {
 			},
 		}
 		mDisabled := buildTrayQuotaModel(gDisabled, now, now, false)
-		if mDisabled.Groups[0].MultiAccount {
-			t.Errorf("单个已停用账号 expected MultiAccount=false, got true")
+		if len(mDisabled.Groups) != 0 {
+			t.Errorf("全部账号已停用的分组应被丢弃, got %d groups", len(mDisabled.Groups))
 		}
 
 		gMulti := []TrayQuotaGroup{
@@ -588,7 +588,7 @@ func TestBuildTrayQuotaModel(t *testing.T) {
 				Title:    "Claude",
 				Windows: []ProviderQuotaWindow{
 					{Account: "a@a.com", Label: "5h", Period: "5h", UsedPercent: 20},
-					{Account: "b@a.com", Label: "5h", Period: "5h", UsedPercent: 20, Disabled: true},
+					{Account: "b@a.com", Label: "5h", Period: "5h", UsedPercent: 20},
 				},
 			},
 		}
@@ -660,7 +660,7 @@ func TestBuildTrayQuotaModel(t *testing.T) {
 		}
 	})
 
-	t.Run("行模型构建 - 停用账号无头部倒计时", func(t *testing.T) {
+	t.Run("行模型构建 - 全部停用账号分组不展示", func(t *testing.T) {
 		groups := []TrayQuotaGroup{
 			{
 				Provider: "claude",
@@ -671,9 +671,8 @@ func TestBuildTrayQuotaModel(t *testing.T) {
 			},
 		}
 		m := buildTrayQuotaModel(groups, now, now, false)
-		acc := m.Groups[0].Accounts[0]
-		if acc.HeadText != "" || acc.HeadWarn {
-			t.Errorf("停用账号不应有头部倒计时：HeadText=%q, HeadWarn=%v", acc.HeadText, acc.HeadWarn)
+		if len(m.Groups) != 0 {
+			t.Errorf("全部停用账号的分组不应出现：got %d groups", len(m.Groups))
 		}
 	})
 }
@@ -973,11 +972,11 @@ func TestBuildTrayQuotaModel_AccountDisplayName(t *testing.T) {
 	if len(m.Groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(m.Groups))
 	}
-	if len(m.Groups[0].Accounts) != 4 {
-		t.Fatalf("expected 4 accounts, got %d", len(m.Groups[0].Accounts))
+	if len(m.Groups[0].Accounts) != 3 {
+		t.Fatalf("expected 3 accounts, got %d", len(m.Groups[0].Accounts))
 	}
 
-	byAccount := make(map[string]trayQuotaAccountModel, 4)
+	byAccount := make(map[string]trayQuotaAccountModel, 3)
 	for _, acc := range m.Groups[0].Accounts {
 		byAccount[acc.Account] = acc
 	}
@@ -1011,17 +1010,47 @@ func TestBuildTrayQuotaModel_AccountDisplayName(t *testing.T) {
 	if other.DisplayName != "other · c@z.com" {
 		t.Errorf("DisplayName = %q, want 'other · c@z.com'", other.DisplayName)
 	}
+}
 
-	// 已停用账号在名字后追加『已停止』
-	disabled, ok := byAccount["codex · {{EMAIL_dn2fh6qk}}"]
-	if !ok {
-		t.Fatalf("账号 'codex · {{EMAIL_dn2fh6qk}}' 未出现在模型中")
+func TestBuildTrayQuotaModel_HidesDisabledAccounts(t *testing.T) {
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.Local)
+	groups := []TrayQuotaGroup{
+		{
+			Provider: "codex",
+			Title:    "Codex",
+			Windows: []ProviderQuotaWindow{
+				{Account: "active@x.com", Label: "5h", Period: "5h", UsedPercent: 25, Active: true},
+				{Account: "stopped@x.com", Label: "5h", Period: "5h", UsedPercent: 80, Disabled: true},
+			},
+		},
+		{
+			Provider: "claude",
+			Title:    "Claude",
+			Windows: []ProviderQuotaWindow{
+				{Account: "only-stopped@y.com", Label: "5h", Period: "5h", UsedPercent: 50, Disabled: true},
+			},
+		},
 	}
-	if !strings.HasSuffix(disabled.DisplayName, " · 已停止") {
-		t.Errorf("Disabled DisplayName = %q, want 以 ' · 已停止' 结尾", disabled.DisplayName)
+
+	m := buildTrayQuotaModel(groups, now, now, false)
+	if len(m.Groups) != 1 {
+		t.Fatalf("expected 1 group (only-disabled group hidden), got %d", len(m.Groups))
 	}
-	if disabled.DisplayName != "{{EMAIL_dn2fh6qk}} · 已停止" {
-		t.Errorf("Disabled DisplayName = %q, want '{{EMAIL_dn2fh6qk}} · 已停止'", disabled.DisplayName)
+	g := m.Groups[0]
+	if g.Provider != "codex" {
+		t.Fatalf("expected remaining group to be 'codex', got %q", g.Provider)
+	}
+	if g.MultiAccount {
+		t.Errorf("过滤停用账号后只剩 1 个账号, expected MultiAccount=false, got true")
+	}
+	if len(g.Accounts) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(g.Accounts))
+	}
+	if g.Accounts[0].Account != "active@x.com" {
+		t.Errorf("expected remaining account 'active@x.com', got %q", g.Accounts[0].Account)
+	}
+	if strings.Contains(g.Accounts[0].DisplayName, "已停止") {
+		t.Errorf("DisplayName 不应包含「已停止」, got %q", g.Accounts[0].DisplayName)
 	}
 }
 

@@ -372,8 +372,7 @@ type trayQuotaAccountModel struct {
 	IsActive bool
 	// IsRecent 表示这是 Magpie 记录的、该 provider 最近应答过请求的账号。
 	// 托盘没有会话上下文，只能说明「最近使用」，不代表当前会话在用。
-	IsRecent   bool
-	IsDisabled bool
+	IsRecent bool
 	// HeadText 是该账号的头部文案，多账号时显示在账号名行右侧。
 	HeadText string
 	// HeadWarn 表示 HeadText 是提前用尽提示（需要警示色）。
@@ -492,17 +491,19 @@ func buildTrayQuotaModel(groups []TrayQuotaGroup, refreshedAt, now time.Time, lo
 
 		accGroups := groupQuotaWindowsByAccount(g.Windows)
 		for _, acc := range accGroups {
+			if acc.disabled {
+				continue
+			}
 			am := trayQuotaAccountModel{
 				Account:     acc.account,
 				DisplayName: trayQuotaAccountDisplayName(acc.account, g.Provider, iconID, g.Title),
 				Plan:        quotaGroupPlan(acc.windows),
-				IsDisabled:  acc.disabled,
 			}
-			if acc.active && !acc.disabled && !quotaWindowsFromMagpie(acc.windows) {
+			if acc.active && !quotaWindowsFromMagpie(acc.windows) {
 				am.IsActive = true
 			}
 			// Magpie 卡片没有 Active 标记，账号组里任一窗口的 Last 表示最近应答过请求。
-			if !acc.disabled && quotaWindowsFromMagpie(acc.windows) {
+			if quotaWindowsFromMagpie(acc.windows) {
 				for _, w := range acc.windows {
 					if w.Last {
 						am.IsRecent = true
@@ -510,107 +511,107 @@ func buildTrayQuotaModel(groups []TrayQuotaGroup, refreshedAt, now time.Time, lo
 					}
 				}
 			}
-			if acc.disabled {
-				am.DisplayName += " · 已停止"
-			} else if am.IsRecent {
+			if am.IsRecent {
 				am.DisplayName += " · 最近使用"
 			}
 
-			if !acc.disabled {
-				isAgy := strings.EqualFold(g.Provider, "agy")
-				for _, w := range acc.windows {
-					if quotaWindowIsAuxiliary(w) {
-						continue
-					}
-
-					var shortLabel string
-					var sortMinutes int
-					if isAgy {
-						key, ok := agyQuotaStripWindowKey(w.Label)
-						if !ok {
-							continue
-						}
-						shortLabel = key
-						switch key {
-						case "5h":
-							sortMinutes = 5 * quotaHourMinutes
-						case "周":
-							sortMinutes = quotaWeekMinutes
-						}
-					} else {
-						key, minutes, ok := quotaStripWindowKey(w)
-						if ok {
-							shortLabel = key
-							sortMinutes = minutes
-						} else {
-							shortLabel = trayQuotaFallbackLabel(w.Label)
-							sortMinutes = trayQuotaFallbackSortMinutes
-						}
-					}
-
-					state, runOutAt := quotaPace(now, w)
-					rightText := paceRunOutText(now, runOutAt, state)
-					elapsedRatio, hasElapsed := quotaElapsedRatio(now, w)
-					isEarly := false
-					if rightText != "" {
-						isEarly = true
-					} else {
-						rightText = formatLimitReset(now, w.ResetsAt)
-					}
-
-					winModel := trayQuotaWindowModel{
-						ShortLabel:    shortLabel,
-						UsedPercent:   w.UsedPercent,
-						RightText:     rightText,
-						IsEarlyRunOut: isEarly,
-						resetsAt:      w.ResetsAt,
-						sortMinutes:   sortMinutes,
-						elapsedRatio:  elapsedRatio,
-						hasElapsed:    hasElapsed,
-						paceKnown:     state != paceStateUnknown,
-					}
-					switch {
-					case w.Text:
-						winModel.NoBar = true
-						winModel.Text = true
-						winModel.Display = truncateRunes(strings.TrimSpace(w.Display), 24)
-					case w.Balance != nil && w.UsedPercent == 0:
-						winModel.NoBar = true
-						winModel.BalanceText = truncateRunes(formatTrayQuotaBalance(*w.Balance, w.Unit), 24)
-					case w.Unlimited:
-						winModel.NoBar = true
-						winModel.Unlimited = true
-					default:
-						if d := strings.TrimSpace(w.Display); d != "" {
-							winModel.Display = truncateRunes(d, 32)
-						}
-					}
-					winModel.Wide = winModel.NoBar || winModel.Display != ""
-
-					resetText := formatLimitReset(now, w.ResetsAt)
-					var tipParts []string
-					if winModel.ShortLabel != "" {
-						tipParts = append(tipParts, winModel.ShortLabel)
-					}
-					if resetText != "" {
-						tipParts = append(tipParts, resetText)
-					}
-					if winModel.IsEarlyRunOut && winModel.RightText != "" {
-						tipParts = append(tipParts, winModel.RightText)
-					}
-					winModel.Tooltip = strings.Join(tipParts, " · ")
-
-					am.Windows = append(am.Windows, winModel)
+			isAgy := strings.EqualFold(g.Provider, "agy")
+			for _, w := range acc.windows {
+				if quotaWindowIsAuxiliary(w) {
+					continue
 				}
 
-				slices.SortStableFunc(am.Windows, func(a, b trayQuotaWindowModel) int {
-					return a.sortMinutes - b.sortMinutes
-				})
+				var shortLabel string
+				var sortMinutes int
+				if isAgy {
+					key, ok := agyQuotaStripWindowKey(w.Label)
+					if !ok {
+						continue
+					}
+					shortLabel = key
+					switch key {
+					case "5h":
+						sortMinutes = 5 * quotaHourMinutes
+					case "周":
+						sortMinutes = quotaWeekMinutes
+					}
+				} else {
+					key, minutes, ok := quotaStripWindowKey(w)
+					if ok {
+						shortLabel = key
+						sortMinutes = minutes
+					} else {
+						shortLabel = trayQuotaFallbackLabel(w.Label)
+						sortMinutes = trayQuotaFallbackSortMinutes
+					}
+				}
 
-				am.HeadText, am.HeadWarn = trayQuotaHead(am.Windows, now)
+				state, runOutAt := quotaPace(now, w)
+				rightText := paceRunOutText(now, runOutAt, state)
+				elapsedRatio, hasElapsed := quotaElapsedRatio(now, w)
+				isEarly := false
+				if rightText != "" {
+					isEarly = true
+				} else {
+					rightText = formatLimitReset(now, w.ResetsAt)
+				}
+
+				winModel := trayQuotaWindowModel{
+					ShortLabel:    shortLabel,
+					UsedPercent:   w.UsedPercent,
+					RightText:     rightText,
+					IsEarlyRunOut: isEarly,
+					resetsAt:      w.ResetsAt,
+					sortMinutes:   sortMinutes,
+					elapsedRatio:  elapsedRatio,
+					hasElapsed:    hasElapsed,
+					paceKnown:     state != paceStateUnknown,
+				}
+				switch {
+				case w.Text:
+					winModel.NoBar = true
+					winModel.Text = true
+					winModel.Display = truncateRunes(strings.TrimSpace(w.Display), 24)
+				case w.Balance != nil && w.UsedPercent == 0:
+					winModel.NoBar = true
+					winModel.BalanceText = truncateRunes(formatTrayQuotaBalance(*w.Balance, w.Unit), 24)
+				case w.Unlimited:
+					winModel.NoBar = true
+					winModel.Unlimited = true
+				default:
+					if d := strings.TrimSpace(w.Display); d != "" {
+						winModel.Display = truncateRunes(d, 32)
+					}
+				}
+				winModel.Wide = winModel.NoBar || winModel.Display != ""
+
+				resetText := formatLimitReset(now, w.ResetsAt)
+				var tipParts []string
+				if winModel.ShortLabel != "" {
+					tipParts = append(tipParts, winModel.ShortLabel)
+				}
+				if resetText != "" {
+					tipParts = append(tipParts, resetText)
+				}
+				if winModel.IsEarlyRunOut && winModel.RightText != "" {
+					tipParts = append(tipParts, winModel.RightText)
+				}
+				winModel.Tooltip = strings.Join(tipParts, " · ")
+
+				am.Windows = append(am.Windows, winModel)
 			}
 
+			slices.SortStableFunc(am.Windows, func(a, b trayQuotaWindowModel) int {
+				return a.sortMinutes - b.sortMinutes
+			})
+
+			am.HeadText, am.HeadWarn = trayQuotaHead(am.Windows, now)
+
 			gm.Accounts = append(gm.Accounts, am)
+		}
+
+		if len(accGroups) > 0 && len(gm.Accounts) == 0 {
+			continue
 		}
 
 		gm.MultiAccount = len(gm.Accounts) > 1
@@ -621,9 +622,6 @@ func buildTrayQuotaModel(groups []TrayQuotaGroup, refreshedAt, now time.Time, lo
 		// 多账号时倒计时按账号分别显示，组头部不再汇总。
 		if !gm.MultiAccount {
 			for _, am := range gm.Accounts {
-				if am.IsDisabled {
-					continue
-				}
 				gm.HeadText = am.HeadText
 				gm.HeadWarn = am.HeadWarn
 				break

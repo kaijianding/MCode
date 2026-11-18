@@ -102,9 +102,9 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 							// 圆点：在用账号用强调色，最近使用的账号用弱一级的次要色，其他账号用更弱的遮罩色
 							renderDot := func(n int) {
 								dotColor := ThemeOverlay(c, 0.18)
-								if curAcc.IsActive && !curAcc.IsDisabled {
+								if curAcc.IsActive {
 									dotColor = ThemeAccent(c)
-								} else if curAcc.IsRecent && !curAcc.IsDisabled {
+								} else if curAcc.IsRecent {
 									dotColor = ThemeSecondaryText(c)
 								}
 								ui.Box(c.Key(fmt.Sprintf("%s-dot-%d", accKey, n))).
@@ -331,21 +331,6 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 								FillWidth().
 								Gap(Space3).
 								Children(func() {
-									if !g.MultiAccount && curAcc.IsDisabled {
-										ui.Row(c.Key(accKey + "-stopped")).
-											FillWidth().
-											Height(ControlXS).
-											AlignItems(ui.Center).
-											Children(func() {
-												ui.Box(c.Key(accKey + "-stopped-indent")).Width(rowIndent)
-												ui.Text(c, "已停止").
-													FontSize(uiFont(TypeFootnote)).
-													TextColor(ThemeSecondaryText(c)).
-													SingleLine()
-											})
-										return
-									}
-
 									// 多账号时账号名单独一行（含状态圆点与套餐名），额度行统一缩进到供应商名。
 									if g.MultiAccount {
 										ui.Row(c.Key(accKey + "-namerow")).
@@ -363,13 +348,9 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 													Children(func() {
 														renderDot(0)
 
-														nameColor := ThemePrimaryText(c)
-														if curAcc.IsDisabled {
-															nameColor = ThemeSecondaryText(c)
-														}
 														ui.Text(c, curAcc.DisplayName).
 															FontSize(uiFont(TypeFootnote)).
-															TextColor(nameColor).
+															TextColor(ThemePrimaryText(c)).
 															SingleLine().
 															Ellipsis("…").
 															Shrink(1).

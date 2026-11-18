@@ -907,8 +907,8 @@ func composerQuotaGroupModels(provider, title string, windows []ProviderQuotaWin
 					account.DisplayName = quotaAccountDisplayName(account.DisplayName, prefix)
 				}
 			}
-			account.IsActive = !account.IsDisabled && account.Account == activeAccount && (activeAccount != "" || soleKnown)
-			account.IsRecent = !account.IsDisabled && recentAccount != "" && account.Account == recentAccount
+			account.IsActive = account.Account == activeAccount && (activeAccount != "" || soleKnown)
+			account.IsRecent = recentAccount != "" && account.Account == recentAccount
 			if account.IsRecent {
 				account.DisplayName += " · 最近使用"
 			}
