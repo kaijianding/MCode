@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"mcode/internal/harness"
+	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/providers/cliupdate"
 	"mcode/internal/providers/loginenv"
 )
@@ -92,7 +93,7 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		if routeKey == "" {
 			routeKey = threadKey
 		}
-		var accountID string
+		accountID := accounts.SystemAccountID
 		var args, env []string
 		if h.opts.Router != nil {
 			var err error
@@ -106,6 +107,7 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		}
 		attempt := turn
 		attempt.SessionID = sessionID
+		attempt.Prompt = prependIsolatedHomeHint(accountID, turn.Prompt)
 		attempt.Env = append(append([]string{}, turn.Env...), env...)
 		// 每次尝试单独分配参数键，空 ID、并发调用和重试都不会串账号参数。
 		attempt.ID = uuid.NewString()

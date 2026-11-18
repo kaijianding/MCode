@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"mcode/internal/procattr"
 	"mcode/internal/procutil"
 	"mcode/internal/providers/acp"
+	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/redact"
 )
@@ -57,6 +59,33 @@ CRITICAL:
 	// 作为 stdin 的基础用户提示词，避免模型重复整轮已完成的任务步骤。
 	networkRetryPrompt = "上一次请求因网络中断（连接被重置或提前断开）而失败，请从中断处继续完成原任务，不要重复已完成的步骤或已输出的内容。"
 )
+
+// userHomeDir 是 os.UserHomeDir 的可替换副本，方便测试覆盖主目录获取失败分支。
+var userHomeDir = os.UserHomeDir
+
+// isolatedHomeHint 在路由到隔离账号时生成主目录提示，告知模型当前进程 HOME 已被替换为账号隔离目录，
+// 并给出真实用户主目录绝对路径；系统账号或获取主目录失败时返回空串。
+func isolatedHomeHint(accountID string) string {
+	if accountID == "" || accountID == accounts.SystemAccountID {
+		return ""
+	}
+	homeDir, err := userHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return ""
+	}
+	return fmt.Sprintf("命令里的 ~ 和 $HOME 指向账号隔离目录，不是用户主目录。用户主目录是 %s，访问其中的文件请写绝对路径。", homeDir)
+}
+
+func prependIsolatedHomeHint(accountID, prompt string) string {
+	hint := isolatedHomeHint(accountID)
+	if hint == "" || strings.Contains(prompt, hint) {
+		return prompt
+	}
+	if prompt == "" {
+		return hint
+	}
+	return hint + "\n\n" + prompt
+}
 
 type Router interface {
 	// Route 为本轮选择账号。conversationID 为空表示新会话；exclude 是本轮已因限流换掉的账号 id。
@@ -497,7 +526,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 
 	for retryCount := 0; retryCount <= maxRetries; retryCount++ {
-		accountID := "system"
+		accountID := accounts.SystemAccountID
 		var routeEnv []string
 		var routeArgs []string
 
@@ -613,6 +642,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		if !strings.Contains(promptText, visibleOutputPromptGuard) {
 			promptText = visibleOutputPromptGuard + promptText
 		}
+		promptText = prependIsolatedHomeHint(accountID, promptText)
 
 		// 异步写入 user prompt
 		userMsg := userMsgPayload{

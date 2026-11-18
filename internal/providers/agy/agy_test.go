@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"mcode/internal/harness"
+	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/testenv"
 )
@@ -105,6 +107,9 @@ func runFakeAgy(mode string) {
 
 	switch mode {
 	case "normal":
+		if rec := os.Getenv("MCODE_TEST_AGY_RECORD_FILE"); rec != "" {
+			_ = recordFakeInvocation(rec, os.Args, string(firstLine))
+		}
 		writeMsg(map[string]any{
 			"event":           "init",
 			"conversation_id": "test-conv-001",
@@ -2043,4 +2048,171 @@ func TestAgy_NetworkErrorRetryAfterIncompleteOutput(t *testing.T) {
 	if strings.Contains(secondStdin, originalPrompt) {
 		t.Errorf("second invocation stdin should NOT contain original prompt, got: %s", secondStdin)
 	}
+}
+
+type staticAccountRouter struct {
+	accountID string
+}
+
+func (r *staticAccountRouter) Route(conversationID, model string, exclude []string) (string, []string, []string, error) {
+	if r.accountID == accounts.SystemAccountID {
+		return accounts.SystemAccountID, []string{"AGY_CLI_DISABLE_AUTO_UPDATE=true"}, nil, nil
+	}
+	return r.accountID, []string{"HOME=/mock/isolated/home"}, []string{"--gemini_dir=/mock/isolated/home/.gemini"}, nil
+}
+
+func (r *staticAccountRouter) Bind(conversationID, accountID string) {}
+
+func (r *staticAccountRouter) MarkLimited(conversationID, accountID string, resetAt time.Time) bool {
+	return false
+}
+
+// 隔离账号会话在 ACP 与 PrintMode 两条路径下都必须告知真实主目录，系统账号与主目录获取失败时不注入。
+func TestAgyIsolatedHomeHint(t *testing.T) {
+	realHome := testenv.TempHome(t)
+	wantHint := fmt.Sprintf("命令里的 ~ 和 $HOME 指向账号隔离目录，不是用户主目录。用户主目录是 %s，访问其中的文件请写绝对路径。", realHome)
+	const rawPrompt = "check files under home"
+
+	t.Run("helper", func(t *testing.T) {
+		gotIsolated := prependIsolatedHomeHint("acc-isolated", rawPrompt)
+		if gotIsolated != wantHint+"\n\n"+rawPrompt {
+			t.Fatalf("isolated prompt = %q, want %q", gotIsolated, wantHint+"\n\n"+rawPrompt)
+		}
+		if gotTwice := prependIsolatedHomeHint("acc-isolated", gotIsolated); gotTwice != gotIsolated {
+			t.Fatalf("expected idempotent hint, got %q", gotTwice)
+		}
+		if gotSystem := prependIsolatedHomeHint(accounts.SystemAccountID, rawPrompt); gotSystem != rawPrompt {
+			t.Fatalf("system account should keep raw prompt, got %q", gotSystem)
+		}
+		if gotEmpty := prependIsolatedHomeHint("", rawPrompt); gotEmpty != rawPrompt {
+			t.Fatalf("empty account should keep raw prompt, got %q", gotEmpty)
+		}
+
+		origUserHomeDir := userHomeDir
+		t.Cleanup(func() { userHomeDir = origUserHomeDir })
+		userHomeDir = func() (string, error) { return "", errors.New("no home") }
+		if gotErr := prependIsolatedHomeHint("acc-isolated", rawPrompt); gotErr != rawPrompt {
+			t.Fatalf("UserHomeDir failure should keep raw prompt, got %q", gotErr)
+		}
+	})
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	t.Run("printmode", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			accountID string
+			wantHint  bool
+		}{
+			{name: "isolated", accountID: "acc-isolated", wantHint: true},
+			{name: "system", accountID: accounts.SystemAccountID, wantHint: false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				recordFile := filepath.Join(t.TempDir(), "record.json")
+				h := New(Options{
+					Binary:  exe,
+					Channel: func() string { return ChannelPrintMode },
+					Router:  &staticAccountRouter{accountID: tc.accountID},
+				})
+				turn := harness.Turn{
+					Prompt:  rawPrompt,
+					Mode:    harness.ModeSupervised,
+					WorkDir: t.TempDir(),
+					Env: []string{
+						fakeAgyEnv + "=normal",
+						"MCODE_TEST_AGY_RECORD_FILE=" + recordFile,
+					},
+				}
+				if err := h.Run(context.Background(), turn, nil); err != nil {
+					t.Fatalf("Run failed: %v", err)
+				}
+				if turn.Prompt != rawPrompt {
+					t.Fatalf("mutated caller turn.Prompt: %q", turn.Prompt)
+				}
+
+				data, err := os.ReadFile(recordFile)
+				if err != nil {
+					t.Fatalf("read record file: %v", err)
+				}
+				var records []fakeInvocationRecord
+				if err := json.Unmarshal(data, &records); err != nil {
+					t.Fatalf("unmarshal records: %v", err)
+				}
+				if len(records) != 1 {
+					t.Fatalf("expected 1 invocation, got %d", len(records))
+				}
+				var msg userMsgPayload
+				if err := json.Unmarshal([]byte(records[0].Stdin), &msg); err != nil {
+					t.Fatalf("unmarshal stdin prompt: %v", err)
+				}
+				if !strings.Contains(msg.Message.Content, rawPrompt) {
+					t.Fatalf("sent prompt missing raw prompt: %q", msg.Message.Content)
+				}
+				hasHint := strings.Contains(msg.Message.Content, wantHint)
+				if hasHint != tc.wantHint {
+					t.Fatalf("wantHint=%v, got content=%q", tc.wantHint, msg.Message.Content)
+				}
+			})
+		}
+	})
+
+	t.Run("acp", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			accountID string
+			wantHint  bool
+		}{
+			{name: "isolated", accountID: "acc-isolated", wantHint: true},
+			{name: "system", accountID: accounts.SystemAccountID, wantHint: false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h := New(Options{
+					Binary: exe,
+					Router: &staticAccountRouter{accountID: tc.accountID},
+				})
+				turn := harness.Turn{
+					ThreadID: "thread-hint-" + tc.name,
+					Prompt:   rawPrompt,
+					WorkDir:  t.TempDir(),
+					Env:      []string{fakeAgyEnv + "=acp_transport"},
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				var gotText string
+				err := h.runACP(ctx, turn, func(event harness.Event) {
+					if event.Type == harness.EventText {
+						gotText = event.Text
+					}
+				})
+				if err != nil {
+					t.Fatalf("runACP failed: %v", err)
+				}
+				if turn.Prompt != rawPrompt {
+					t.Fatalf("mutated caller turn.Prompt: %q", turn.Prompt)
+				}
+
+				var got struct {
+					Prompt []struct {
+						Text string `json:"text"`
+					} `json:"prompt"`
+				}
+				if err := json.Unmarshal([]byte(gotText), &got); err != nil {
+					t.Fatalf("unmarshal acp payload %q: %v", gotText, err)
+				}
+				if len(got.Prompt) != 1 {
+					t.Fatalf("expected 1 prompt item, got %+v", got.Prompt)
+				}
+				wantPrompt := rawPrompt
+				if tc.wantHint {
+					wantPrompt = wantHint + "\n\n" + rawPrompt
+				}
+				if got.Prompt[0].Text != wantPrompt {
+					t.Fatalf("acp prompt = %q, want %q", got.Prompt[0].Text, wantPrompt)
+				}
+			})
+		}
+	})
 }

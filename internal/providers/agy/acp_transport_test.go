@@ -174,8 +174,11 @@ func TestAgyACPRouting(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if !reflect.DeepEqual(got.Args, []string{"acp", "--gemini_dir", account}) || got.Env != account || len(got.Prompt) != 1 || got.Prompt[0].Text != "raw prompt" {
+				if !reflect.DeepEqual(got.Args, []string{"acp", "--gemini_dir", account}) || got.Env != account || len(got.Prompt) != 1 || got.Prompt[0].Text != prependIsolatedHomeHint(account, "raw prompt") {
 					t.Errorf("wrong ACP route: %+v", got)
+				}
+				if turn.Prompt != "raw prompt" {
+					t.Errorf("mutated caller prompt: %q", turn.Prompt)
 				}
 			})
 			if err != nil {
