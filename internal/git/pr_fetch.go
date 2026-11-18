@@ -208,6 +208,12 @@ func (r *Runner) PRWorktreeKeepReason(ctx context.Context, root, path string, fo
 		if resolvePath(wt.Path) != resolvePath(path) {
 			continue
 		}
+		if wt.Prunable {
+			return "", nil
+		}
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			return "", nil
+		}
 		out, err := r.run(ctx, path, nil, "status", "--porcelain")
 		if err != nil {
 			return "", err
@@ -257,7 +263,11 @@ func (r *Runner) PRRemoveWorktree(ctx context.Context, root, path string, number
 	}
 	for _, wt := range worktrees {
 		if resolvePath(wt.Path) == resolvePath(path) {
-			if err := r.WorktreeRemove(ctx, root, path, false); err != nil {
+			if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+				if _, err := r.run(ctx, root, nil, "worktree", "prune"); err != nil {
+					return err
+				}
+			} else if err := r.WorktreeRemove(ctx, root, path, false); err != nil {
 				return err
 			}
 			break
@@ -291,7 +301,10 @@ func (r *Runner) ReviewPRBase(ctx context.Context, root, baseBranch, head string
 	if baseBranch == "" || head == "" {
 		return "", fmt.Errorf("PR base 或 head 为空")
 	}
-	if _, err := r.run(ctx, root, nil, "fetch", "origin", baseBranch); err != nil {
+	if err := r.validatePRBranch(ctx, root, baseBranch); err != nil {
+		return "", err
+	}
+	if _, err := r.run(ctx, root, nil, "fetch", "origin", "+refs/heads/"+baseBranch+":refs/remotes/origin/"+baseBranch); err != nil {
 		return "", fmt.Errorf("fetch PR base: %w", err)
 	}
 	out, err := r.run(ctx, root, nil, "merge-base", "origin/"+baseBranch, head)

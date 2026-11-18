@@ -133,7 +133,12 @@ func PRReviewPrompt(title, body, patch string) string {
 	sb.WriteString("- body 用一两句话说清问题和后果，语言与 PR 标题和正文一致\n")
 	sb.WriteString("\nPR 标题：\n" + truncateUTF8(strings.TrimSpace(title), 2000))
 	sb.WriteString("\n\nPR 正文：\n" + truncateUTF8(strings.TrimSpace(body), 8000))
-	sb.WriteString("\n\nDiff 详情：\n" + truncateUTF8(strings.TrimSpace(patch), 12000))
+	trimmedPatch := strings.TrimSpace(patch)
+	truncatedPatch := truncateUTF8(trimmedPatch, 12000)
+	sb.WriteString("\n\nDiff 详情：\n" + truncatedPatch)
+	if len(truncatedPatch) < len(trimmedPatch) {
+		sb.WriteString("\ndiff 已截断，仅含前 12000 字节，只对可见部分给出评论")
+	}
 	return sb.String()
 }
 

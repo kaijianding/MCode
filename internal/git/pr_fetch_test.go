@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -309,5 +312,70 @@ func TestPRCheckoutWorktree(t *testing.T) {
 	state, err = runner.OpState(ctx, path)
 	if err != nil || state.Kind != OpMerge || len(state.Conflicts) != 1 {
 		t.Fatalf("进行中的合并被改动: 状态 = %+v，错误 = %v", state, err)
+	}
+}
+
+func TestReviewPRBaseRejectsInvalidBranch(t *testing.T) {
+	runner, dir, _ := initSyncRemote(t)
+	ctx := context.Background()
+
+	fetchMarker := filepath.Join(t.TempDir(), "fetch-called")
+	if runtime.GOOS != "windows" {
+		gitBin, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrapper := filepath.Join(t.TempDir(), "git")
+		script := "#!/bin/sh\nif [ \"$1\" = fetch ]; then\n  : > '" + strings.ReplaceAll(fetchMarker, "'", "'\\''") + "'\n  exit 1\nfi\nexec '" + strings.ReplaceAll(gitBin, "'", "'\\''") + "' \"$@\"\n"
+		if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runner = NewRunner(wrapper, 2)
+	}
+
+	for _, bad := range []string{"-main", "--upload-pack=evil"} {
+		if _, err := runner.ReviewPRBase(ctx, dir, bad, "HEAD"); err == nil {
+			t.Fatalf("应拒绝非法分支名 %q", bad)
+		} else if strings.Contains(err.Error(), "fetch PR base") {
+			t.Fatalf("校验前不应执行 fetch: %v", err)
+		}
+		if _, err := os.Stat(fetchMarker); !os.IsNotExist(err) {
+			t.Fatalf("非法分支名 %q 不应触发 git fetch", bad)
+		}
+	}
+}
+
+func TestPRWorktreeCleanupPrunable(t *testing.T) {
+	runner, dir, _ := setupPRConflict(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pr-1")
+	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.AbortOp(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+
+	reason, err := runner.PRWorktreeKeepReason(ctx, dir, path, ForgeGitHub, 1)
+	if err != nil || reason != "" {
+		t.Fatalf("PRWorktreeKeepReason = (%q, %v), 期望 (\"\", nil)", reason, err)
+	}
+	if err := runner.PRRemoveWorktree(ctx, dir, path, 1); err != nil {
+		t.Fatalf("PRRemoveWorktree 失败: %v", err)
+	}
+	if out := runTestGit(t, dir, "branch", "--list", "mcode/pr-1"); out != "" {
+		t.Fatalf("本地分支仍存在: %s", out)
+	}
+	worktrees, err := runner.WorktreeList(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wt := range worktrees {
+		if resolvePath(wt.Path) == resolvePath(path) {
+			t.Fatalf("prunable worktree 记录未清理: %+v", wt)
+		}
 	}
 }

@@ -224,3 +224,90 @@ func TestGitPRAIReviewParseLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestPRDiffNewLinesHunkPlusPlus(t *testing.T) {
+	patch := strings.Join([]string{
+		"diff --git a/a.go b/a.go",
+		"index 1111111..2222222 100644",
+		"--- a/a.go",
+		"+++ b/a.go",
+		"@@ -1,2 +1,4 @@",
+		" package a",
+		"+++ x",
+		"+func New() {}",
+		" func Old() {}",
+		"diff --git a/b.go b/b.go",
+		"--- /dev/null",
+		"+++ b/b.go",
+		"@@ -0,0 +1,1 @@",
+		"+package b",
+	}, "\n")
+
+	valid := prDiffNewLines(patch)
+	for _, line := range []int{1, 2, 3, 4} {
+		if !valid["a.go"][line] {
+			t.Fatalf("a.go 第 %d 行应有效: %+v", line, valid)
+		}
+	}
+	if !valid["b.go"][1] {
+		t.Fatalf("b.go 第 1 行应有效: %+v", valid)
+	}
+	if len(valid) != 2 {
+		t.Fatalf("文件映射数量 = %d, 期望 2: %+v", len(valid), valid)
+	}
+}
+
+func TestParsePRReviewBracketPreamble(t *testing.T) {
+	out := "[PR #12] 说明如下：\n```json\n[{\"path\":\"a.go\",\"line\":2,\"body\":\"缺少边界检查\"}]\n```\n[注] 结束"
+	got, err := parsePRAIReview(out, prReviewTestPatch)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "a.go" || got[0].Line != 2 || got[0].Body != "缺少边界检查" {
+		t.Fatalf("解析结果 = %+v", got)
+	}
+
+	emptyGot, err := parsePRAIReview("[PR #12] 无问题 []", prReviewTestPatch)
+	if err != nil || len(emptyGot) != 0 {
+		t.Fatalf("空数组解析 = (%+v, %v)", emptyGot, err)
+	}
+
+	if _, err := parsePRAIReview("[PR #12] 没有 JSON", prReviewTestPatch); err == nil {
+		t.Fatal("缺少 JSON 数组时应返回错误")
+	}
+}
+
+func TestGitPRDiffQuotedPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git 不可用")
+	}
+	root := t.TempDir()
+	branchGit(t, root, "init")
+	branchGit(t, root, "config", "user.name", "测试")
+	branchGit(t, root, "config", "user.email", "test@example.com")
+	branchGit(t, root, "config", "core.quotePath", "true")
+	branchGit(t, root, "config", "diff.noprefix", "true")
+
+	writeRevertRepoFile(t, root, "seed.txt", "seed\n")
+	branchGit(t, root, "add", "seed.txt")
+	branchGit(t, root, "commit", "-m", "base")
+	base := branchGit(t, root, "rev-parse", "HEAD")
+
+	const cnPath = "中文目录/示例.go"
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(cnPath)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRevertRepoFile(t, root, cnPath, "package cn\nfunc Hello() {}\n")
+	branchGit(t, root, "add", cnPath)
+	branchGit(t, root, "commit", "-m", "add chinese file")
+	head := branchGit(t, root, "rev-parse", "HEAD")
+
+	patch, err := gitPRDiff(context.Background(), root, base, head)
+	if err != nil {
+		t.Fatalf("gitPRDiff 失败: %v", err)
+	}
+	valid := prDiffNewLines(patch)
+	if !valid[cnPath][1] || !valid[cnPath][2] {
+		t.Fatalf("中文路径未正确解析: %+v\npatch:\n%s", valid, patch)
+	}
+}

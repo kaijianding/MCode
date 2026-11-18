@@ -725,51 +725,75 @@ func (c *Client) ReleaseProvisionalThread(threadID string) error {
 	return nil
 }
 
+type deleteThreadWorktreeTarget struct {
+	repoRoot  string
+	wtPath    string
+	wtBranch  string
+	isMcodeWT bool
+}
+
+// resolveDeleteThreadWorktree 解析待删除会话的 worktree 清理目标与主仓库根。
+// 若会话工作目录就是主仓库检出根目录，则返回 isMcodeWT=false 以保护主仓库不被删除。
+func (c *Client) resolveDeleteThreadWorktree(ctx context.Context, threadID string) deleteThreadWorktreeTarget {
+	if c.backend == nil {
+		return deleteThreadWorktreeTarget{}
+	}
+	workDir, ok := c.backend.ThreadWorkDir(threadID)
+	if !ok || workDir == "" {
+		return deleteThreadWorktreeTarget{}
+	}
+
+	var target deleteThreadWorktreeTarget
+	if runner := c.gitRunner(); runner != nil {
+		if mainRoot, err := runner.MainRepoRoot(ctx, workDir); err == nil && mainRoot != "" {
+			target.repoRoot = mainRoot
+		}
+	}
+	if target.repoRoot != "" && legacyResolvedPath(workDir) == legacyResolvedPath(target.repoRoot) {
+		return deleteThreadWorktreeTarget{}
+	}
+
+	if st, err := c.backend.GitState(ctx, threadID); err == nil {
+		if target.repoRoot == "" {
+			target.repoRoot = st.WorkDir
+		}
+		cleanWD := legacyResolvedPath(workDir)
+		for _, wt := range st.Worktrees {
+			if legacyResolvedPath(wt.Path) == cleanWD {
+				target.wtPath = wt.Path
+				target.wtBranch = wt.Branch
+				target.isMcodeWT = true
+				break
+			}
+		}
+	}
+	if !target.isMcodeWT && git.IsProjectWorktreePath(workDir) {
+		target.wtPath = workDir
+		target.isMcodeWT = true
+	}
+	if !target.isMcodeWT {
+		dataDir := c.effectiveDataDir()
+		if dataDir != "" {
+			managedDir := filepath.Join(dataDir, "worktrees")
+			swarmDir := filepath.Join(dataDir, "swarm-worktrees")
+			// 旧版本建在 hydra-worktrees 下，过渡期两个目录都认。
+			legacySwarmDir := filepath.Join(dataDir, "hydra-worktrees")
+			cleanWD := filepath.Clean(workDir)
+			if strings.HasPrefix(cleanWD, filepath.Clean(managedDir)) || strings.HasPrefix(cleanWD, filepath.Clean(swarmDir)) || strings.HasPrefix(cleanWD, filepath.Clean(legacySwarmDir)) {
+				target.wtPath = workDir
+				target.isMcodeWT = true
+			}
+		}
+	}
+	return target
+}
+
 // DeleteThread 调用 backend.DeleteThread 删除指定会话。
 // 若会话运行在 mcode 管理的 worktree 中且 AutoCleanupWorktreesOnDeleteEnabled 开启，
 // 删除会话后会自动执行 git worktree remove --force 并删除对应的任务分支。
 func (c *Client) DeleteThread(threadID string) error {
 	ctx := context.Background()
-
-	var (
-		wtPath    string
-		wtBranch  string
-		repoRoot  string
-		isMcodeWT bool
-	)
-	if c.backend != nil {
-		if workDir, ok := c.backend.ThreadWorkDir(threadID); ok && workDir != "" {
-			if st, err := c.backend.GitState(ctx, threadID); err == nil {
-				repoRoot = st.WorkDir
-				for _, wt := range st.Worktrees {
-					if filepath.Clean(wt.Path) == filepath.Clean(workDir) && !wt.Current {
-						wtPath = wt.Path
-						wtBranch = wt.Branch
-						isMcodeWT = true
-						break
-					}
-				}
-			}
-			if !isMcodeWT && git.IsProjectWorktreePath(workDir) {
-				wtPath = workDir
-				isMcodeWT = true
-			}
-			if !isMcodeWT {
-				dataDir := c.effectiveDataDir()
-				if dataDir != "" {
-					managedDir := filepath.Join(dataDir, "worktrees")
-					swarmDir := filepath.Join(dataDir, "swarm-worktrees")
-					// 旧版本建在 hydra-worktrees 下，过渡期两个目录都认。
-					legacySwarmDir := filepath.Join(dataDir, "hydra-worktrees")
-					cleanWD := filepath.Clean(workDir)
-					if strings.HasPrefix(cleanWD, filepath.Clean(managedDir)) || strings.HasPrefix(cleanWD, filepath.Clean(swarmDir)) || strings.HasPrefix(cleanWD, filepath.Clean(legacySwarmDir)) {
-						wtPath = workDir
-						isMcodeWT = true
-					}
-				}
-			}
-		}
-	}
+	target := c.resolveDeleteThreadWorktree(ctx, threadID)
 
 	cleanupEnabled := true
 	if cfg, ok := c.loadConfig(); ok {
@@ -780,15 +804,16 @@ func (c *Client) DeleteThread(threadID string) error {
 		return err
 	}
 
-	if isMcodeWT && cleanupEnabled && wtPath != "" && c.gitRunner() != nil {
+	if target.isMcodeWT && cleanupEnabled && target.wtPath != "" && c.gitRunner() != nil {
+		repoRoot := target.repoRoot
 		if repoRoot == "" {
-			repoRoot = wtPath
+			repoRoot = target.wtPath
 		}
-		_ = c.gitRunner().WorktreeRemove(ctx, repoRoot, wtPath, true)
-		if wtBranch != "" {
-			_ = c.gitRunner().BranchDelete(ctx, repoRoot, wtBranch, true)
+		_ = c.gitRunner().WorktreeRemove(ctx, repoRoot, target.wtPath, true)
+		if target.wtBranch != "" {
+			_ = c.gitRunner().BranchDelete(ctx, repoRoot, target.wtBranch, true)
 		}
-		_ = os.RemoveAll(wtPath)
+		_ = os.RemoveAll(target.wtPath)
 	}
 
 	return nil

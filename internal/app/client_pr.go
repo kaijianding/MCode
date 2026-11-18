@@ -214,7 +214,10 @@ func (c *Client) GitPRAIReview(ctx context.Context, threadID string, number int)
 
 // gitPRDiff 在仓库根目录取 base 到 head 的补丁。
 func gitPRDiff(ctx context.Context, root, base, head string) (string, error) {
-	cmd := procattr.TerminateOnCancel(procattr.HideWindow(exec.CommandContext(ctx, "git", "diff", "--no-color", base, head)))
+	cmd := procattr.TerminateOnCancel(procattr.HideWindow(exec.CommandContext(
+		ctx, "git", "-c", "core.quotePath=false", "diff",
+		"--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, head,
+	)))
 	cmd.Dir = root
 	cmd.Env = loginenv.Environ()
 	var out bytes.Buffer
@@ -235,14 +238,31 @@ type prReviewResult struct {
 // parsePRAIReview 解析模型输出：容忍代码围栏与数组前后的说明文字，
 // 只保留落在 diff 新侧有效行号上的评论，按 path+line 去重，最多 10 条。
 func parsePRAIReview(out, patch string) ([]git.PRReviewComment, error) {
-	start := strings.Index(out, "[")
-	end := strings.LastIndex(out, "]")
-	if start < 0 || end < start {
-		return nil, errors.New("AI 审查结果无法解析")
-	}
 	var items []prReviewResult
-	if err := json.Unmarshal([]byte(out[start:end+1]), &items); err != nil {
-		return nil, fmt.Errorf("AI 审查结果无法解析: %w", err)
+	var lastErr error
+	parsed := false
+	for offset := 0; offset < len(out); {
+		rel := strings.IndexByte(out[offset:], '[')
+		if rel < 0 {
+			break
+		}
+		start := offset + rel
+		var candidate []prReviewResult
+		dec := json.NewDecoder(strings.NewReader(out[start:]))
+		if err := dec.Decode(&candidate); err == nil {
+			items = candidate
+			parsed = true
+			break
+		} else {
+			lastErr = err
+		}
+		offset = start + 1
+	}
+	if !parsed {
+		if lastErr != nil {
+			return nil, fmt.Errorf("AI 审查结果无法解析: %w", lastErr)
+		}
+		return nil, errors.New("AI 审查结果无法解析")
 	}
 	valid := prDiffNewLines(patch)
 	seen := make(map[string]bool, len(items))
@@ -275,8 +295,11 @@ func prDiffNewLines(patch string) map[string]map[int]bool {
 	inHunk := false
 	for _, line := range strings.Split(patch, "\n") {
 		switch {
-		case strings.HasPrefix(line, "+++ "):
+		case strings.HasPrefix(line, "diff --git "):
 			inHunk = false
+			path = ""
+			newLine = 0
+		case !inHunk && strings.HasPrefix(line, "+++ "):
 			path = ""
 			if rest, ok := strings.CutPrefix(line, "+++ b/"); ok {
 				path = strings.TrimSpace(strings.SplitN(rest, "\t", 2)[0])
