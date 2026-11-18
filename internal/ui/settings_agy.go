@@ -490,6 +490,7 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 	for k, v := range st.agy.warmupRowErr {
 		warmupRowErr[k] = v
 	}
+	loginBrowserBusy := st.agy.loginBrowserBusy
 
 	// localLogin 表示本机是否真的有系统凭证；没有时系统账号不能当作正常账号展示。
 	localLogin := st.agy.localLogin
@@ -906,6 +907,30 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 								ui.Text(c, "只修改 MCode 自己的账号配置，不改动系统 ~/.gemini").
 									FontSize(uiFont(TypeCaption)).
 									TextColor(ThemeSecondaryText(c))
+							}
+
+							// 重新登录：复用浏览器登录，系统账号的凭证来自宿主机，不提供。
+							if !isSystem {
+								reloginBtn := ui.ButtonBase(c.Key(accKey+"-btn-relogin")).
+									Label("重新登录").
+									Radius(RadiusSM).
+									Padding(Space1, Space3)
+								if loginBrowserBusy {
+									reloginBtn.Disabled(true)
+								} else if reloginBtn.Hovered() {
+									reloginBtn.Background(ThemeHover(c))
+								}
+								if reloginBtn.Clicked() && !loginBrowserBusy && client != nil {
+									st.mu.Lock()
+									st.jumpToItemID = "row-agy-browser-login"
+									st.mu.Unlock()
+									st.startBrowserLogin()
+								}
+								reloginBtn.Children(func() {
+									ui.Text(c, "重新登录").
+										FontSize(uiFont(TypeFootnote)).
+										TextColor(ThemeAccent(c))
+								})
 							}
 
 							ui.Spacer(c)
@@ -1514,6 +1539,8 @@ func (st *SettingsState) startBrowserLogin() {
 			st.agy.loginBrowserURL = ""
 			st.agy.loginBrowserErr = ""
 			st.agy.loginInputCode = ""
+			// 重新登录成功即恢复凭证：旧的预热失败（如令牌文件缺失）不再成立。
+			delete(st.agy.warmupRowErr, acc.ID)
 		}
 		st.mu.Unlock()
 

@@ -339,6 +339,7 @@ type FakeClient struct {
 	agyDefaultAccountID   string
 	agyLoginURL           string
 	agyLoginStartErr      error
+	agyLoginStartCalls    int
 	agyLoginSubmitErr     error
 	agyLoginSubmitCalls   []string
 	agyLoginWaitAccount   accounts.Account
@@ -2785,6 +2786,7 @@ func (f *FakeClient) AgyDefaultAccountID() string {
 func (f *FakeClient) AgyLoginStart(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.agyLoginStartCalls++
 	if f.agyLoginStartErr != nil {
 		return "", f.agyLoginStartErr
 	}

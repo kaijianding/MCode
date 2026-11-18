@@ -603,6 +603,62 @@ func TestSettingsAgy_WarmupButtonBusyState(t *testing.T) {
 	fake.mu.Unlock()
 }
 
+// 重新登录：普通账号卡片提供按钮，复用浏览器登录；系统账号不提供；登录成功后清掉旧的预热失败。
+func TestAgyAccountReloginButton(t *testing.T) {
+	fake := NewFakeClient()
+	acc := accounts.Account{ID: "acc-relogin", Email: "relogin@example.com", Status: accounts.StatusActive, On: true}
+	fake.agyAccounts = []accounts.Account{
+		{ID: accounts.SystemAccountID, Email: "sys@example.com", Status: accounts.StatusActive, On: true},
+		acc,
+	}
+	fake.agyDefaultAccountID = accounts.SystemAccountID
+	fake.agyLoginWaitAccount = acc
+	tt, st := openAgySettingsTest(t, fake)
+	waitFor(t, tt, func() bool { return tt.HasText("sys@example.com") && tt.HasText("relogin@example.com") })
+
+	st.mu.Lock()
+	if st.agy.warmupRowErr == nil {
+		st.agy.warmupRowErr = make(map[string]string)
+	}
+	st.agy.warmupRowErr[acc.ID] = "read token file: no such file or directory"
+	st.mu.Unlock()
+	tt.Frame()
+	waitFor(t, tt, func() bool { return tt.HasText("预热失败: read token file") })
+
+	// Tester 按可见文案查找按钮（Key 不参与查找），按钮要落在普通账号卡片里。
+	relogin, ok := tt.Find("重新登录")
+	if !ok {
+		t.Fatalf("普通账号卡片缺少重新登录按钮: %v", tt.Texts())
+	}
+	accountRow, ok := tt.Find("relogin@example.com")
+	if !ok || relogin.Y <= accountRow.Y {
+		t.Fatalf("重新登录按钮不在普通账号卡片上: %v", tt.Texts())
+	}
+	if err := tt.Click("重新登录"); err != nil {
+		t.Fatalf("click '重新登录' failed: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return fake.agyLoginStartCalls == 1
+	})
+	waitFor(t, tt, func() bool {
+		st.mu.Lock()
+		_, exists := st.agy.warmupRowErr[acc.ID]
+		st.mu.Unlock()
+		return !exists && !tt.HasText("预热失败: read token file")
+	})
+
+	// 系统账号的凭证来自宿主机，不显示重新登录。
+	sysFake := NewFakeClient()
+	sysFake.agyAccounts = []accounts.Account{{ID: accounts.SystemAccountID, Email: "sys-only@example.com", Status: accounts.StatusActive, On: true}}
+	sysTT, _ := openAgySettingsTest(t, sysFake)
+	waitFor(t, sysTT, func() bool { return sysTT.HasText("sys-only@example.com") })
+	if _, ok := sysTT.Find("重新登录"); ok {
+		t.Fatalf("系统账号不应有重新登录按钮: %v", sysTT.Texts())
+	}
+}
+
 // agy 面板的节定义顺序固定：账号 → 通道 → 调度策略 → 会话保持模式 → 调度 → 终端登录。
 func TestAgyProviderSheetSectionsOrder(t *testing.T) {
 	testenv.TempHome(t)
