@@ -67,7 +67,8 @@ echo "==> 依赖规则检查"
 bash scripts/check-deps.sh
 
 echo "==> go test"
-CGO_ENABLED=0 go test -timeout 120s "${pkgs[@]}"
+# internal/ui 单包已接近 2 分钟，留出余量。
+CGO_ENABLED=0 go test -timeout 300s "${pkgs[@]}"
 
 if [[ $RACE -eq 1 ]]; then
     echo "==> go test -race"

@@ -198,3 +198,14 @@ func TestCheckScriptRunsMygoVet(t *testing.T) {
 	}
 	t.Fatalf("缺少 mygo vet 调用:\n%s", strings.Join(lines, "\n"))
 }
+
+func TestCheckScriptGoTestTimeout(t *testing.T) {
+	data, err := os.ReadFile("check.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `go test -timeout 300s "${pkgs[@]}"`
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("check.sh 缺少预期超时配置 %q", want)
+	}
+}
