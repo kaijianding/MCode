@@ -395,7 +395,8 @@ func swarmMentionIconSize() float32 {
 // 图标与颜色由段落在绘制时叠画，图标缺失时退化成同色圆点。
 // 字框只有布局之后才有，所以坐标不能在建视图时算，只能留到 DrawOver 里取。
 type mentionIconSlot struct {
-	slot  ui.Element
+	// 只留占位元素的字框读取函数，在 DrawOver 里取本帧布局。
+	box   func() ui.Rect
 	icon  *ui.SVG
 	color ui.Color
 	size  float32
@@ -403,7 +404,7 @@ type mentionIconSlot struct {
 
 // paint 在占位框（本帧字框）里叠画头像：图标按 12pt 缩放后垂直居中，颜色用人设色。
 func (slot mentionIconSlot) paint(p *ui.Painter) {
-	box := slot.slot.LayoutBounds()
+	box := slot.box()
 	if box.W <= 0 || box.H <= 0 {
 		return
 	}
@@ -452,7 +453,7 @@ func renderSwarmMentionInline(c *ui.Context, s *chatState, key string, bee Swarm
 		// 行内元素没有圆角，只用很淡的同色底色把名字标出来。
 		name.Background(color.Alpha(0.12))
 	}
-	return mentionIconSlot{slot: slot, icon: safePersonaIcon(persona.Asset), color: color, size: size}
+	return mentionIconSlot{box: slot.LayoutBounds, icon: safePersonaIcon(persona.Asset), color: color, size: size}
 }
 
 // renderSwarmPersonaIcon 画 bee 的人设图标：正文行内与底部胶囊共用同一套图标，无圆底，
