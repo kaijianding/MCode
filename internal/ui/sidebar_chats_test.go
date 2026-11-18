@@ -277,3 +277,64 @@ func TestChatsCreateNewThreadSkipsStewardThread(t *testing.T) {
 		t.Fatalf("选中总管会话时新建会话应落在第一个普通项目 p1, got %q", got)
 	}
 }
+
+// (h) 侧栏「对话」段仅在默认树视图且无搜索词时渲染，动态视图与搜索时不显示。
+func TestChatsSidebarSectionHiddenInActivityAndSearch(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "内置对话"},
+			{ID: "p1", Name: "普通项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {{ID: "c1", ProjectID: "chats-builtin", Title: "闲聊一号", UpdatedAt: now}},
+			"p1":            {{ID: "t1", ProjectID: "p1", Title: "项目会话", UpdatedAt: now}},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	// (a) 默认树视图下显示「对话」段。
+	waitFor(t, tt, func() bool {
+		_, hasNewChat := tt.Find("新建对话")
+		return hasNewChat && tt.HasText("对话") && tt.HasText("闲聊一号") && tt.HasText("项目会话")
+	})
+
+	// (b) 打开动态视图后，「对话」段不再渲染。
+	state.toggleActivityView()
+	tt.Frame()
+	if _, ok := tt.Find("新建对话"); ok {
+		t.Fatal("动态视图下不应渲染「对话」段")
+	}
+
+	// 关闭动态视图后恢复显示。
+	state.toggleActivityView()
+	tt.Frame()
+	if _, ok := tt.Find("新建对话"); !ok {
+		t.Fatal("关闭动态视图后应恢复渲染「对话」段")
+	}
+
+	// (c) 侧栏搜索词非空时，「对话」段不渲染。
+	*getSearchQuery(state) = "项目"
+	state.invalidate()
+	tt.Frame()
+	if _, ok := tt.Find("新建对话"); ok {
+		t.Fatal("侧栏搜索时不应渲染「对话」段")
+	}
+	if _, ok := tt.Find("打开会话 项目会话"); !ok {
+		t.Fatal("侧栏搜索应保留命中的普通项目会话")
+	}
+
+	// 清空搜索词后恢复显示。
+	*getSearchQuery(state) = ""
+	state.invalidate()
+	tt.Frame()
+	if _, ok := tt.Find("新建对话"); !ok {
+		t.Fatal("清空侧栏搜索词后应恢复渲染「对话」段")
+	}
+}

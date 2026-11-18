@@ -502,7 +502,6 @@ func renderSidebar(c *ui.Context, s *chatState) {
 		// 总管段：头像、「昵称 · 总管」与待处理数徽标合成一行；
 		// 客户端不支持总管或会话还没建好时退回只渲染待处理行。
 		renderSidebarStewardSection(c, s)
-		renderSidebarChatsSection(c, s)
 
 		// 3. 项目与会话列表
 		ui.Scroll(c.Key("sidebar-projects-list")).Grow(1).Children(func() {
@@ -550,6 +549,10 @@ func renderSidebar(c *ui.Context, s *chatState) {
 					compact:         isCompact,
 				})
 				return
+			}
+
+			if lowerQuery == "" {
+				renderSidebarChatsSection(c, s)
 			}
 
 			if len(projects) == 0 {
