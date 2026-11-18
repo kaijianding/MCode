@@ -111,7 +111,7 @@ func renderThemesHeader(c *ui.Context, st *SettingsState) {
 		trigger.Children(func() {
 			ui.Box(c).Size(settingsPreviewTileW, settingsPreviewTileH).Radius(RadiusMD).Border(Hairline, ThemeBorder(c)).Center().Children(func() { ui.Text(c, "+").FontSize(uiFont(TypeHeading)).TextColor(ThemeSecondaryText(c)) })
 		})
-		PopoverCard(c, PopoverProps{Key: "theme-add-popover", Anchor: trigger, Open: &page.menuOpen}, func() {
+		PopoverCard(c, trigger, PopoverProps{Key: "theme-add-popover", Open: &page.menuOpen}, func() {
 			Button(c, ButtonOpts{Key: "theme-add", Text: "新增", Variant: ButtonGhost, OnClick: func() { page.menuOpen = false; addSheetTheme(st, page) }})
 			Button(c, ButtonOpts{Key: "theme-import", Text: "从剪贴板导入", Variant: ButtonGhost, OnClick: func() {
 				page.menuOpen = false
@@ -267,7 +267,7 @@ func renderThemeColor(c *ui.Context, st *SettingsState, page *themesSheetState, 
 	trigger.Children(func() {
 		ui.Box(c).Size(Space6, Space6).Radius(RadiusXS).Background(color).Border(Hairline, ThemeBorder(c))
 	})
-	PopoverCard(c, PopoverProps{Key: "theme-color-picker-" + valueKey, Anchor: trigger, Open: open}, func() {
+	PopoverCard(c, trigger, PopoverProps{Key: "theme-color-picker-" + valueKey, Open: open}, func() {
 		if ui.ColorPicker(c.Key("picker"), value).Changed() && !follows {
 			next := formatThemeColor(*value)
 			mutateTheme(st, func(a *config.AppearanceConfig) { _ = a.SetThemeColor(id, key, next) })

@@ -79,6 +79,7 @@ func TestMotionBusyLoops(t *testing.T) {
 }
 
 func TestMotionBusyMarqueePreferenceChange(t *testing.T) {
+	setAppReduceMotion(t, false)
 	tester := ui.NewTester(func(c *ui.Context) {
 		ui.Row(c).Width(100).Children(func() {
 			renderSidebarScrollingTitle(c, "title", "很长的会话标题很长的会话标题很长的会话标题", true, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
@@ -86,8 +87,11 @@ func TestMotionBusyMarqueePreferenceChange(t *testing.T) {
 	}, 120, 40)
 	tester.Frame()
 	tester.Frame()
-	if !tester.FramePending() {
-		t.Fatal("悬停溢出标题应请求跑马灯帧")
+	tester.Advance(sidebarMarqueeDelay + 300*time.Millisecond)
+	before := cloneImage(tester.Image())
+	tester.Advance(200 * time.Millisecond)
+	if !bandDiffers(before, tester.Image(), tester.Image().Bounds()) {
+		t.Fatal("悬停溢出标题应持续滚动")
 	}
 	setAppReduceMotion(t, true)
 	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
@@ -95,5 +99,10 @@ func TestMotionBusyMarqueePreferenceChange(t *testing.T) {
 	tester.Advance(2 * time.Second)
 	if tester.FramePending() {
 		t.Fatal("切换减少动效后跑马灯仍持续请求帧")
+	}
+	afterReduce := cloneImage(tester.Image())
+	tester.Advance(200 * time.Millisecond)
+	if bandDiffers(afterReduce, tester.Image(), tester.Image().Bounds()) {
+		t.Fatal("切换减少动效后跑马灯不应继续滚动")
 	}
 }

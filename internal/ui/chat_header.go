@@ -1794,7 +1794,7 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 			if sidebarCollapsed {
 				threadsBtn := IconButton(c, IconButtonProps{Key: "chat-header-threads-btn", Icon: IconChevronDown(), Size: ControlMD, Variant: ButtonGhost,
 					Label: "会话列表", Active: ts.threadsPopoverOpen, OnClick: func() { s.headerToggleThreadsPopover() }})
-				PopoverCard(c, PopoverProps{Key: "chat-header-threads-popover", Anchor: threadsBtn, Open: &ts.threadsPopoverOpen, Width: chatThreadsPopoverWidth}, func() {
+				PopoverCard(c, threadsBtn, PopoverProps{Key: "chat-header-threads-popover", Open: &ts.threadsPopoverOpen, Width: chatThreadsPopoverWidth}, func() {
 					renderChatThreadsPopover(c, s)
 				})
 			}
@@ -1813,7 +1813,7 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 			if collapsed {
 				more := IconButton(c, IconButtonProps{Key: "chat-header-more-btn", Icon: IconMoreHorizontal(), Size: ControlMD, Variant: ButtonGhost,
 					Label: "更多头部操作", Active: ts.morePopoverOpen, OnClick: func() { ts.morePopoverOpen = !ts.morePopoverOpen }})
-				PopoverCard(c, PopoverProps{Key: "chat-header-more-popover", Anchor: more, Open: &ts.morePopoverOpen, Align: BelowEnd}, func() {
+				PopoverCard(c, more, PopoverProps{Key: "chat-header-more-popover", Open: &ts.morePopoverOpen, Align: BelowEnd}, func() {
 					renderChatHeaderAuxGroup(c, s)
 				})
 			} else {

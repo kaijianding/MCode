@@ -180,3 +180,21 @@ func TestCheckScriptStopsOnGofmtDiff(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckScriptRunsMygoVet(t *testing.T) {
+	f := newCheckFixture(t)
+	output, lines, err := f.run(t, nil)
+	if err != nil {
+		t.Fatalf("check.sh 应当成功退出: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+
+	if !strings.Contains(output, "==> mygo vet") {
+		t.Fatalf("缺少 mygo vet 步骤输出:\n%s", output)
+	}
+	for _, line := range lines {
+		if line == "go run github.com/egoist/mygo/cmd/mygo vet ." {
+			return
+		}
+	}
+	t.Fatalf("缺少 mygo vet 调用:\n%s", strings.Join(lines, "\n"))
+}

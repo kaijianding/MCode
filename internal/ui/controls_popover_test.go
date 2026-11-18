@@ -11,7 +11,7 @@ func TestPopoverCardDismissedAfterOutsideClick(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Box(c).Fill().Children(func() {
 			anchor := ui.Box(c).Absolute().Left(20).Top(20).Width(80).Height(24)
-			PopoverCard(c, PopoverProps{Anchor: anchor, Open: &open, Width: 120, OnDismiss: func() { dismissed++ }}, func() {
+			PopoverCard(c, anchor, PopoverProps{Open: &open, Width: 120, OnDismiss: func() { dismissed++ }}, func() {
 				ui.Text(c, "浮层内容")
 			})
 		})
@@ -29,8 +29,8 @@ func TestPopoverCardClosedDoesNotRender(t *testing.T) {
 	open, rendered := false, 0
 	tt := ui.NewTester(func(c *ui.Context) {
 		anchor := ui.Box(c).Width(80).Height(24)
-		PopoverCard(c, PopoverProps{Anchor: anchor, Open: &open}, func() { rendered++ })
-		PopoverCard(c, PopoverProps{Anchor: anchor}, func() { rendered++ })
+		PopoverCard(c, anchor, PopoverProps{Open: &open}, func() { rendered++ })
+		PopoverCard(c, anchor, PopoverProps{}, func() { rendered++ })
 	}, 400, 300)
 	tt.Frame()
 	if rendered != 0 {

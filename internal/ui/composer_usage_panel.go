@@ -1494,9 +1494,8 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 	if contentMaxHeight > Space2*2 {
 		contentMaxHeight -= Space2 * 2
 	}
-	popover := PopoverCard(c, PopoverProps{
+	popover := PopoverCard(c, group, PopoverProps{
 		Key:       "composer-quota-popover-" + keySuffix,
-		Anchor:    group,
 		Open:      &open,
 		Width:     quotaPopoverWidth,
 		MaxHeight: popoverMaxHeight,

@@ -105,7 +105,7 @@ func TestAnchoredPopoverPlacementAndWidth(t *testing.T) {
 			tt := ui.NewTester(func(c *ui.Context) {
 				ui.Box(c).Fill().Children(func() {
 					anchor := ui.Box(c).Label("锚点").Absolute().Left(200).Top(150).Width(80).Height(24)
-					anchoredPopover(c, anchoredPopoverProps{Anchor: anchor, Open: &open, Align: tc.align, MinWidth: tc.minWidth, MaxWidth: tc.maxWidth, MaxHeight: 90}, func(panel ui.Element) {
+					anchoredPopover(c, anchor, anchoredPopoverProps{Open: &open, Align: tc.align, MinWidth: tc.minWidth, MaxWidth: tc.maxWidth, MaxHeight: 90}, func(panel ui.Element) {
 						panel.Label("浮层面板")
 						ui.Box(c).Width(tc.width).Height(60)
 					})

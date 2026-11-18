@@ -86,10 +86,7 @@ func (st *sidebarHoverState) observe(c *ui.Context, now time.Time, threadID, pro
 
 	// 状态按窗口隔离：上一个窗口刚离开的会话行与时刻不能带进新窗口，
 	// 否则新窗口第一帧就会落进 180ms 宽限期，在从未悬停的情况下把卡片显示出来。
-	var win ui.Services
-	if c != nil {
-		win = c.Services()
-	}
+	win := c.Services()
 	if st.win != win {
 		st.resetLocked(win)
 	}
@@ -144,7 +141,7 @@ func renderSidebarHoverCard(c *ui.Context, s *chatState, row ui.Element, hovered
 	// 局部开关：PopoverBase 点外部或 Esc 时把它置回 false，下一帧由状态机重新决定。
 	panelOpen := true
 	winW, winH := c.Size()
-	panel := PopoverCard(c, PopoverProps{Key: "hover-card-" + thVal.ID, Anchor: row, Open: &panelOpen, Width: sidebarHoverCardWidth, MaxWidth: max(1, winW-Space8), MaxHeight: max(1, winH-Space8)}, func() {
+	panel := PopoverCard(c, row, PopoverProps{Key: "hover-card-" + thVal.ID, Open: &panelOpen, Width: sidebarHoverCardWidth, MaxWidth: max(1, winW-Space8), MaxHeight: max(1, winH-Space8)}, func() {
 		ui.Scroll(c.Key("hover-card-scroll-" + thVal.ID)).MaxHeight(max(1, winH-Space8-Space4)).Children(func() {
 			ui.Column(c.Key("hover-card-body-" + thVal.ID)).
 				FillWidth().
@@ -301,11 +298,7 @@ func sidebarMarqueePhase(elapsed, dur time.Duration) float32 {
 }
 
 func sidebarMarqueeEnsureStart(c *ui.Context, key string, now time.Time) time.Time {
-	var win ui.Services
-	if c != nil {
-		win = c.Services()
-	}
-	mk := sidebarMarqueeKey{win: win, key: key}
+	mk := sidebarMarqueeKey{win: c.Services(), key: key}
 	sidebarMarqueeMu.Lock()
 	defer sidebarMarqueeMu.Unlock()
 	if start, ok := sidebarMarqueeStart[mk]; ok {
@@ -316,11 +309,7 @@ func sidebarMarqueeEnsureStart(c *ui.Context, key string, now time.Time) time.Ti
 }
 
 func sidebarMarqueeClear(c *ui.Context, key string) {
-	var win ui.Services
-	if c != nil {
-		win = c.Services()
-	}
-	mk := sidebarMarqueeKey{win: win, key: key}
+	mk := sidebarMarqueeKey{win: c.Services(), key: key}
 	sidebarMarqueeMu.Lock()
 	delete(sidebarMarqueeStart, mk)
 	sidebarMarqueeMu.Unlock()
@@ -350,7 +339,17 @@ func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool,
 		return text
 	}
 
-	natural := text.LayoutBounds().W
+	var family string
+	if t := c.Theme(); t != nil {
+		family = t.Font
+	}
+	font := ui.Font{
+		Family: family,
+		Size:   sidebarFont(size),
+		Weight: weight,
+	}
+	layout := ui.ShapeText(title, font, 0)
+	natural, textH := layout.Size()
 	avail := clip.LayoutBounds().W
 	if !sidebarMarqueeActive(natural, avail, reserved, hovered) {
 		sidebarMarqueeClear(c, key)
@@ -364,24 +363,13 @@ func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool,
 	// 跑马灯在 clip 的 Draw 回调里按 p.Now() 自绘，只重画该区域而不重建组件树。
 	text.Opacity(0)
 
-	var family string
-	if t := c.Theme(); t != nil {
-		family = t.Font
-	}
-	font := ui.Font{
-		Family: family,
-		Size:   sidebarFont(size),
-		Weight: weight,
-	}
-	layout := ui.ShapeText(title, font, 0)
-	_, textH := layout.Size()
-
 	clip.Draw(func(p *ui.Painter, r ui.Rect) {
 		k := sidebarMarqueePhase(p.Now().Sub(startAt), dur)
 		p.Clip(r, 0, func() {
 			p.TextLayout(layout, r.X-over*k, r.Y+(r.H-textH)/2, color)
 		})
-		p.AnimationFrameRate(30)
+		// shortcut: AnimationFrameRate 在真机上没有驱动这块重画（headless 复现不了），改用与 renderRunningGlyph 相同的 p.After；mygo 修好后再换回。
+		p.After(time.Second / 30)
 	})
 	return text
 }

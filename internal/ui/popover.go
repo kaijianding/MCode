@@ -35,14 +35,14 @@ func popoverRiseOffset(panel, anchor ui.Element) float32 {
 // 注意：按钮自己的 OnClick 里若把开合状态取反，点按钮本身时会与 PopoverBase 写入的
 // 关闭相互抵消（先关后开），需要 onDismiss 或“打开时不取反”的判断来避免。
 func appPopover(c *ui.Context, anchor ui.Element, open *bool, onDismiss func(), fn func()) ui.Element {
-	return anchoredPopover(c, anchoredPopoverProps{Anchor: anchor, Open: open, OnDismiss: onDismiss}, func(_ ui.Element) { fn() })
+	return anchoredPopover(c, anchor, anchoredPopoverProps{Open: open, OnDismiss: onDismiss}, func(_ ui.Element) { fn() })
 }
 
 // appPopoverAbove 是 appPopover 的向上展开版本：面板的左下角贴在锚点左上角，
 // 用于输入框上方的胶囊，避免浮层遮住输入框；空间不够时由框架翻转或夹紧位置。
 // 除落点外与 appPopover 完全一致，外观仍由 fn 内容中的卡片承担。
 func appPopoverAbove(c *ui.Context, anchor ui.Element, open *bool, onDismiss func(), fn func()) ui.Element {
-	return anchoredPopover(c, anchoredPopoverProps{Anchor: anchor, Open: open, Align: AboveStart, OnDismiss: onDismiss}, func(_ ui.Element) { fn() })
+	return anchoredPopover(c, anchor, anchoredPopoverProps{Open: open, Align: AboveStart, OnDismiss: onDismiss}, func(_ ui.Element) { fn() })
 }
 
 // anchoredMenu 在 Overlay 里渲染锚定在 trigger 下方的菜单面板：与触发按钮左对齐，
@@ -52,7 +52,7 @@ func appPopoverAbove(c *ui.Context, anchor ui.Element, open *bool, onDismiss fun
 // 面板就是 PopoverBase 的面板本身：尺寸约束与锚点直接作用在可见卡片的容器上，
 // 点外部或 Esc 关闭时写回 open 并调用 onDismiss（可为 nil）。
 func anchoredMenu(c *ui.Context, key string, trigger ui.Element, open *bool, onDismiss func(), minWidth, maxWidth, maxHeight float32, children func()) {
-	anchoredPopover(c, anchoredPopoverProps{Key: key, Anchor: trigger, Open: open, MinWidth: minWidth, MaxWidth: maxWidth, MaxHeight: maxHeight, OnDismiss: onDismiss}, func(panel ui.Element) {
+	anchoredPopover(c, trigger, anchoredPopoverProps{Key: key, Open: open, MinWidth: minWidth, MaxWidth: maxWidth, MaxHeight: maxHeight, OnDismiss: onDismiss}, func(panel ui.Element) {
 		panel.Label(key)
 		children()
 	})

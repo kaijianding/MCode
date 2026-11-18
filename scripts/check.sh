@@ -60,6 +60,9 @@ CGO_ENABLED=0 go build "${build_pkgs[@]}"
 echo "==> go vet"
 CGO_ENABLED=0 go vet "${pkgs[@]}"
 
+echo "==> mygo vet"
+go run github.com/egoist/mygo/cmd/mygo vet .
+
 echo "==> 依赖规则检查"
 bash scripts/check-deps.sh
 

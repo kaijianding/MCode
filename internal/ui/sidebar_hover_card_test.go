@@ -486,8 +486,11 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 		if !settled {
 			t.Fatal("悬停且溢出时不应再挂组件级 Keyframes(\"marquee\")")
 		}
-		if !tt.FramePending() {
-			t.Fatal("悬停且溢出时应由 Draw 请求重画帧")
+		sidebarMarqueeMu.Lock()
+		marqueeCount := len(sidebarMarqueeStart)
+		sidebarMarqueeMu.Unlock()
+		if marqueeCount == 0 {
+			t.Fatal("悬停且溢出时应进入 Draw 跑马灯分支")
 		}
 
 		beforeBuilds := builds
@@ -540,21 +543,33 @@ func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
 		resetSidebarHoverCardForTest()
 		setAppReduceMotion(t, false)
 		hovered := true
+		builds := 0
 		tt := ui.NewTester(func(c *ui.Context) {
+			builds++
 			ui.Row(c).Width(100).Children(func() {
 				renderSidebarScrollingTitle(c, "marquee-leave", longTitle, hovered, 0, FontSizeThreadTitle, 0, ThemePrimaryText(c))
 			})
 		}, 120, 40)
 		tt.Frame()
 		tt.Frame()
-		if !tt.FramePending() {
-			t.Fatal("悬停溢出标题应请求跑马灯帧")
+		beforeHover := cloneImage(tt.Image())
+		tt.Advance(sidebarMarqueeDelay + 200*time.Millisecond)
+		if bytes.Equal(beforeHover.Pix, tt.Image().Pix) {
+			t.Fatal("悬停溢出标题应通过 p.After 驱动跑马灯重画")
 		}
 		hovered = false
 		tt.Frame()
+		afterLeave := cloneImage(tt.Image())
+		beforeBuilds := builds
 		tt.Advance(2 * time.Second)
 		if tt.FramePending() {
 			t.Fatal("离开悬停并推进时钟后不应再请求下一帧")
+		}
+		if builds != beforeBuilds {
+			t.Fatalf("离开悬停后不应再重建组件树: builds %d -> %d", beforeBuilds, builds)
+		}
+		if !bytes.Equal(afterLeave.Pix, tt.Image().Pix) {
+			t.Fatal("离开悬停后画面不应继续滚动")
 		}
 	})
 
@@ -618,7 +633,9 @@ func TestSidebarScrollingTitleUsesCallerStyle(t *testing.T) {
 		}, int(dormantW)+20, 40)
 		tt.Frame()
 		tt.Frame()
-		return tt.FramePending()
+		before := cloneImage(tt.Image())
+		tt.Advance(sidebarMarqueeDelay + 200*time.Millisecond)
+		return !bytes.Equal(before.Pix, tt.Image().Pix)
 	}
 	if checkOverflow(FontSizeDormantTitle) {
 		t.Fatal("dormant 字号下宽度未溢出，不应触发跑马灯")
@@ -689,22 +706,33 @@ func TestSidebarCompactMarqueeStartsOnFirstHover(t *testing.T) {
 		t.Fatalf("expected to find thread title %q, texts: %q", longTitle, tt.Texts())
 	}
 	tt.Move(rect.X+8, rect.Y+rect.H/2)
+	hoverAt := tt.Now()
 	titleRect := image.Rect(int(rect.X), int(rect.Y), int(rect.X+rect.W), int(rect.Y+rect.H))
 	before := cloneImage(tt.Image())
 
-	// 推进到 sidebarMarqueeDelay 之后（仍在 hoverCard 650ms 预热之前），只靠时钟驱动重画，不手动重建。
-	tt.Advance(sidebarMarqueeDelay + 40*time.Millisecond)
+	// 悬停后只推进一次时钟到 sidebarMarqueeDelay + 100ms，只靠时钟驱动重画，不手动重建。
+	tt.Advance(sidebarMarqueeDelay + 100*time.Millisecond)
 
 	sidebarMarqueeMu.Lock()
 	marqueeCount := len(sidebarMarqueeStart)
+	var recordedStart time.Time
+	for _, start := range sidebarMarqueeStart {
+		recordedStart = start
+		break
+	}
 	sidebarMarqueeMu.Unlock()
 	if marqueeCount == 0 {
 		t.Fatalf("expected sidebarMarqueeStart to record start time on first hover")
 	}
-	if !tt.FramePending() {
-		t.Fatalf("expected marquee to keep requesting next frame after sidebarMarqueeDelay")
+	if recordedStart.Before(hoverAt) || recordedStart.Sub(hoverAt) > time.Second/30 {
+		t.Fatalf("expected marquee start %v to equal hover time %v (within one frame)", recordedStart, hoverAt)
 	}
 	if !bandDiffers(before, tt.Image(), titleRect) {
 		t.Fatalf("expected title pixels to start scrolling after sidebarMarqueeDelay")
+	}
+	mid := cloneImage(tt.Image())
+	tt.Advance(200 * time.Millisecond)
+	if !bandDiffers(mid, tt.Image(), titleRect) {
+		t.Fatalf("expected marquee to keep scrolling after sidebarMarqueeDelay")
 	}
 }
