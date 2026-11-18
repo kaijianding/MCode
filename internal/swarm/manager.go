@@ -3574,9 +3574,12 @@ func BuildReport(bees []Bee) string {
 			}
 		}
 
-		if reason := failureReasonText(h); reason != "" {
+		reason := failureReasonText(h)
+		if reason != "" {
 			sb.WriteString(fmt.Sprintf("- 失败原因：%s\n", reason))
 		}
+		disputed := strings.HasPrefix(strings.TrimSpace(reason), "验收存疑") ||
+			strings.HasPrefix(strings.TrimSpace(h.ReviewReason), "验收存疑")
 		if len(h.ConflictFiles) > 0 {
 			sb.WriteString(fmt.Sprintf("- 冲突处理：请先解决 %s 中的冲突标记（<<<<<<<、=======、>>>>>>>），再进行构建或后续改动。\n", strings.Join(h.ConflictFiles, ", ")))
 		}
@@ -3585,7 +3588,12 @@ func BuildReport(bees []Bee) string {
 			sb.WriteString(fmt.Sprintf("- 补丁改动文件：%s\n", joinOrNone(h.ChangedFiles)))
 			sb.WriteString(fmt.Sprintf("- 补丁冲突或脏路径：%s\n", joinOrNone(patchBlockedPaths(h))))
 			sb.WriteString(fmt.Sprintf("- 补丁失败原因：%s\n", h.MergeError))
-			sb.WriteString("- 补丁处理指引：请派一个默认档位的 bee 读取该补丁文件，在主工作区当前内容之上按补丁意图重新实现；不得覆盖这些文件里已有的未提交改动，只能在其基础上追加修改；每个补丁只重试一次，仍失败则向用户报告，不要再次派发。\n")
+			if !disputed {
+				sb.WriteString("- 补丁处理指引：请派一个默认档位的 bee 读取该补丁文件，在主工作区当前内容之上按补丁意图重新实现；不得覆盖这些文件里已有的未提交改动，只能在其基础上追加修改；每个补丁只重试一次，仍失败则向用户报告，不要再次派发。\n")
+			}
+		}
+		if disputed {
+			sb.WriteString("- 提示：bee 认为验收命令有误，先核对验收命令；工作副本已保留\n")
 		}
 
 		// Summary
@@ -4735,7 +4743,10 @@ func (m *Manager) mergeBee(ctx context.Context, leadThreadID, targetWorkDir stri
 // finishAcceptanceFailure 保留 off 档的失败补丁；晚到的验收不能覆盖停止或删除。
 func (m *Manager) finishAcceptanceFailure(leadThreadID string, h Bee, detail string) {
 	path, err := m.savePatch(leadThreadID, h.Index, h.MergePatch)
-	reason := "验收命令失败：" + detail
+	reason := detail
+	if !strings.HasPrefix(strings.TrimSpace(detail), "验收存疑") {
+		reason = "验收命令失败：" + detail
+	}
 	if err == nil {
 		reason += "，补丁已保存到 " + path
 	} else {

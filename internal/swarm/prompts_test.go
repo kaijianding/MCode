@@ -467,6 +467,7 @@ func TestLeadPolicyAcceptance(t *testing.T) {
 				"At least one must fail on the code before the change",
 				"merges only if every command exits 0",
 				"A go test acceptance command must use -run to target the tests for this change; entries whose acceptance uses grep -q, a leading timeout, or go test without -run are rejected before the bee starts. Do not repeat the acceptance commands as self-test steps in the prompt.",
+				"When acceptance fails, mcode first sends the output back to the same bee once, so a failed report has already had that retry; a reason starting with 验收存疑 means the bee judged the acceptance command wrong, so check the command before anything else.",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("tool=%v mode=%s missing %q", tool, mode, want)

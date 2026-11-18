@@ -62,6 +62,9 @@ const (
 	ReviewStageL3       ReviewStage = "l3"
 )
 
+// acceptanceReturnLimit 限制单个 bee 因验收失败被发回原会话续修的次数上限。
+const acceptanceReturnLimit = 1
+
 // Bee 表示单个编排子代理会话的完整元信息与运行时状态。
 type Bee struct {
 	ThreadID string `json:"threadId"`
@@ -148,6 +151,8 @@ type Bee struct {
 	// 验收命令的瞬时进度不持久化，重启后不恢复过期状态。
 	AcceptanceStep      int        `json:"-"`
 	AcceptanceStartedAt *time.Time `json:"-"`
+	// AcceptanceReturns 记录因验收失败发回原 bee 续修的次数。
+	AcceptanceReturns   int        `json:"acceptanceReturns,omitempty"`
 	ReviewFingerprint   string     `json:"reviewFingerprint,omitempty"`
 	ReviewProvider      string     `json:"reviewProvider,omitempty"`
 	ReviewModel         string     `json:"reviewModel,omitempty"`

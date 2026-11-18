@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"mcode/internal/kanban"
 	"mcode/internal/procattr"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/reviewcheck"
@@ -274,11 +275,23 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 		return
 	}
 	if m.reviewMode() == reviewModeOff {
+		if h.AcceptanceReturns > 0 {
+			if dispute, ok := acceptanceDisputeReason(h.Summary); ok {
+				m.finishAcceptanceFailure(leadThreadID, h, "验收存疑："+dispute)
+				return
+			}
+		}
 		passed, detail := m.runAcceptance(ctx, leadThreadID, h)
 		if ctx.Err() != nil || m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
 			return
 		}
 		if !passed {
+			if m.returnAcceptanceFailure(ctx, leadThreadID, h, patchSHA, detail) {
+				return
+			}
+			if m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
+				return
+			}
 			m.finishAcceptanceFailure(leadThreadID, h, detail)
 			return
 		}
@@ -329,11 +342,23 @@ func (m *Manager) runL0(ctx context.Context, leadThreadID string, h Bee) {
 		return
 	}
 
+	if h.AcceptanceReturns > 0 {
+		if dispute, ok := acceptanceDisputeReason(h.Summary); ok {
+			m.finishL0Reject(leadThreadID, h, fingerprint, concerns, "验收存疑："+dispute)
+			return
+		}
+	}
 	passed, detail := m.runAcceptance(ctx, leadThreadID, h)
 	if ctx.Err() != nil || m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
 		return
 	}
 	if !passed {
+		if m.returnAcceptanceFailure(ctx, leadThreadID, h, patchSHA, detail) {
+			return
+		}
+		if m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
+			return
+		}
 		m.finishL0Reject(leadThreadID, h, fingerprint, concerns, "验收命令失败："+detail)
 		return
 	}
@@ -467,6 +492,111 @@ func (m *Manager) reviewProjectRuntime(ctx context.Context, leadThreadID, beeWor
 func (m *Manager) reviewCheckBudget(leadThreadID string, h Bee) time.Duration {
 	rt := m.reviewProjectRuntime(context.Background(), leadThreadID, "")
 	return rt.timeout*time.Duration(1+len(h.Acceptance)) + reviewCheckBudgetMargin
+}
+
+const acceptanceFailurePromptSuffix = "\n\n在当前工作副本里修复，让验收命令通过，然后重新输出最终报告。用失败的那条命令确认，等它跑完、看到结果再结束本轮。如果你确认是验收命令本身写错了（与任务要求矛盾，或检查了与本任务无关的内容），不要为迁就它改代码，直接输出最终报告，第一行写「验收存疑：<理由>」。"
+
+// acceptanceDisputeReason 从 bee 汇报的第一个非空行中提取「验收存疑：<理由>」的理由。
+func acceptanceDisputeReason(summary string) (string, bool) {
+	for _, line := range strings.Split(summary, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "验收存疑") {
+			return "", false
+		}
+		rest := strings.TrimPrefix(trimmed, "验收存疑")
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimPrefix(rest, "：")
+		rest = strings.TrimPrefix(rest, ":")
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			return "", false
+		}
+		return rest, true
+	}
+	return "", false
+}
+
+// returnAcceptanceFailure 在首次验收失败时把失败详情发回原 bee 会话继续修复；不满足条件或发送失败返回 false。
+func (m *Manager) returnAcceptanceFailure(ctx context.Context, leadThreadID string, h Bee, patchSHA, detail string) bool {
+	if ctx.Err() != nil || h.ReadOnly || h.ThreadID == "" || h.AcceptanceReturns >= acceptanceReturnLimit {
+		return false
+	}
+	if _, disputed := acceptanceDisputeReason(h.Summary); disputed {
+		return false
+	}
+	messenger, ok := m.opts.Driver.(kanban.SessionMessenger)
+	if !ok {
+		return false
+	}
+	if m.beeAcceptanceStopped(leadThreadID, h.ThreadID) {
+		return false
+	}
+	msg := "mcode 在你汇报后运行验收命令，失败了：\n\n" + detail + acceptanceFailurePromptSuffix
+	if err := messenger.SendFollowUp(ctx, h.ThreadID, msg); err != nil {
+		return false
+	}
+	now := m.now()
+	if !m.funnelUpdate(leadThreadID, h.ThreadID, ReviewStageL0, patchSHA, func(b *Bee) {
+		b.Status = StatusRunning
+		b.FinishedAt = nil
+		b.LastProgressAt = now
+		b.ThinkingMinutes = 0
+		b.Summary = ""
+		b.Activity = ""
+		b.Reported = false
+		b.Delivered = false
+		b.PendingMerge = false
+		b.MergeWaitSince = nil
+		b.MergeError = ""
+		b.LandMessage = ""
+		b.LandedPatchPath = ""
+		b.LandedCommit = ""
+		b.Merged = false
+		b.ConflictFiles = nil
+		b.MergePatch = nil
+		b.ChangedFiles = nil
+		b.LinesAdded = 0
+		b.LinesDeleted = 0
+		b.DiscardedPaths = nil
+		b.ArchivedPatchPath = ""
+		b.ReviewState = ReviewNone
+		b.ReviewStage = ""
+		b.ReviewLayer = ""
+		b.ReviewReason = ""
+		b.ReviewConcerns = nil
+		b.ReviewThreadID = ""
+		b.ReviewPatchPath = ""
+		b.ReviewPatchSHA = ""
+		b.ReviewStartedAt = nil
+		b.ReviewQueuedAt = nil
+		b.ReviewFingerprint = ""
+		b.ReviewProvider = ""
+		b.ReviewModel = ""
+		b.ReviewEffort = ""
+		b.ReviewTokens = 0
+		b.ReviewTokensEstimated = false
+		b.ReviewAttempts = 0
+		b.ReviewApplyPending = false
+		b.AcceptanceStep = 0
+		b.AcceptanceStartedAt = nil
+		b.AutoMergeState = AutoMergeNone
+		b.AutoMergeSHA = ""
+		b.AutoMergeStage = ""
+		b.AutoMergeError = ""
+		b.Credibility = nil
+		b.AcceptanceReturns++
+		delete(m.beeProgress, h.ThreadID)
+	}) {
+		return false
+	}
+	m.setEmptyNudge(h.ThreadID, false)
+	m.setContinueNudge(h.ThreadID, false)
+	m.persistLead(leadThreadID)
+	m.notifyChange(leadThreadID)
+	return true
 }
 
 // finishL0Reject 写回 L0 失败结论并驳回。

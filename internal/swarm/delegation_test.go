@@ -355,7 +355,7 @@ func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 func TestBeePromptListsAcceptance(t *testing.T) {
 	d := Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test ./...", "go vet ./..."}}
 	got := beePrompt("Aspen", d, BeeConfig{})
-	for _, want := range []string{"## 验收", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
+	for _, want := range []string{"## 验收", "不必在汇报前自己重复跑这些命令，失败时 mcode 会把输出发回给你修。", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("提示词缺少 %q: %s", want, got)
 		}

@@ -3,6 +3,7 @@ package swarm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,8 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"mcode/internal/kanban"
 	"mcode/internal/reviewcheck"
 )
+
+type noMessengerDriver struct {
+	kanban.SessionDriver
+}
 
 func TestParseDelegationsAcceptance(t *testing.T) {
 	for _, tc := range []struct {
@@ -433,6 +439,11 @@ func TestAcceptanceOffReportsAfterSettlement(t *testing.T) {
 	for _, result := range []string{"false", "true"} {
 		t.Run(result, func(t *testing.T) {
 			m, dir := newFunnelManager(t, &funnelFake{})
+			driver := m.opts.Driver.(*fakeDriver)
+			if result == "false" {
+				// 覆盖不实现 SessionMessenger 的驱动在首次验收失败时直接结算并汇报。
+				m.opts.Driver = noMessengerDriver{SessionDriver: driver}
+			}
 			settings := m.Settings()
 			settings.ReviewMode = "off"
 			m.SetSettingsFunc(func() Settings { return settings })
@@ -472,9 +483,9 @@ func TestAcceptanceOffReportsAfterSettlement(t *testing.T) {
 			}
 			bee := bees[0]
 			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
-			completeBee(t, m, bee, "完成")
+			driver.setSessionState(bee.ThreadID, kanban.SessionState{Running: false, LastAssistantText: "完成"})
 			writeBeeFile(t, bees[1], "internal/other.go", "package feature\n")
-			completeBee(t, m, bees[1], "完成")
+			driver.setSessionState(bees[1].ThreadID, kanban.SessionState{Running: false, LastAssistantText: "完成"})
 			m.Tick(ctx)
 			for {
 				if _, err := os.Stat(filepath.Join(bee.WorktreePath, "started")); err == nil {
@@ -873,5 +884,260 @@ func TestAcceptancePassedMarkerHiddenFromReport(t *testing.T) {
 	}
 	if !strings.Contains(report, "审查疑点：internal/a.go:12 缺少错误处理") {
 		t.Fatalf("BuildReport 应保留普通审查疑点:\n%s", report)
+	}
+}
+
+func TestAcceptanceFailureReturnsToSameBee(t *testing.T) {
+	for _, mode := range []string{"off", "ai"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			defer m.Stop()
+			settings := m.Settings()
+			settings.ReviewMode = mode
+			m.SetSettingsFunc(func() Settings { return settings })
+
+			var reports []string
+			m.opts.OnReport = func(_ string, report string) error {
+				reports = append(reports, report)
+				return nil
+			}
+			driver := m.opts.Driver.(*fakeDriver)
+			driver.onFollowUp = func(threadID, _ string) error {
+				driver.sessions[threadID] = kanban.SessionState{Running: true}
+				return nil
+			}
+
+			command := "test -f internal/fixed.txt || (printf 'missing fixed.txt' >&2; exit 2)"
+			leadID := "lead-acc-return-" + mode
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{command}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "第一轮完成")
+
+			h := waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				return b.Status == StatusRunning && b.AcceptanceReturns == 1
+			})
+			m.wg.Wait()
+			m.Tick(context.Background())
+
+			driver.mu.Lock()
+			followUps := append([]fakeFollowUp(nil), driver.followUps...)
+			driver.mu.Unlock()
+			if len(followUps) != 1 || followUps[0].threadID != bee.ThreadID {
+				t.Fatalf("期望向原 bee 发送 1 次 followUp，实际 %+v", followUps)
+			}
+			if !strings.Contains(followUps[0].text, "missing fixed.txt") || !strings.Contains(followUps[0].text, "验收存疑：") {
+				t.Fatalf("followUp 文本缺少失败输出或存疑提示: %q", followUps[0].text)
+			}
+			if h.PendingMerge || h.ReviewState != ReviewNone || h.Summary != "" || h.FinishedAt != nil {
+				t.Fatalf("发回运行后字段未重置: %+v", h)
+			}
+			if len(reports) != 0 {
+				t.Fatalf("发回续修期间不应产生汇报: %v", reports)
+			}
+			if entries, err := os.ReadDir(filepath.Join(m.DataDir(), "swarm-patches")); err == nil && len(entries) > 0 {
+				t.Fatalf("首次验收失败发回时不应写入 swarm-patches: %v", entries)
+			}
+
+			// 模拟 bee 在当前工作副本内修复并结束第二轮。
+			writeBeeFile(t, bee, "internal/fixed.txt", "ok\n")
+			completeBee(t, m, bee, "已修复并通过")
+
+			h = waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool { return b.Merged && b.Reported })
+			if h.AcceptanceReturns != 1 || h.Status != StatusCompleted {
+				t.Fatalf("第二轮修复后状态不符: %+v", h)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "internal/fixed.txt")); err != nil {
+				t.Fatalf("修复文件未合入主工作区: %v", err)
+			}
+			if len(reports) != 1 {
+				t.Fatalf("期望最终产生 1 次汇报，实际 %d", len(reports))
+			}
+			driver.mu.Lock()
+			followUpCount := len(driver.followUps)
+			driver.mu.Unlock()
+			if followUpCount != 1 {
+				t.Fatalf("合并后不应再发 followUp，实际 %d", followUpCount)
+			}
+		})
+	}
+}
+
+func TestAcceptanceFailureAfterReturnReportsFailure(t *testing.T) {
+	for _, mode := range []string{"off", "ai"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			defer m.Stop()
+			settings := m.Settings()
+			settings.ReviewMode = mode
+			m.SetSettingsFunc(func() Settings { return settings })
+
+			var reports []string
+			m.opts.OnReport = func(_ string, report string) error {
+				reports = append(reports, report)
+				return nil
+			}
+			driver := m.opts.Driver.(*fakeDriver)
+			driver.onFollowUp = func(threadID, _ string) error {
+				driver.sessions[threadID] = kanban.SessionState{Running: true}
+				return nil
+			}
+
+			leadID := "lead-acc-fail2-" + mode
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{"printf 'still failing' >&2; exit 3"}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "第一轮")
+
+			waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				return b.Status == StatusRunning && b.AcceptanceReturns == 1
+			})
+
+			completeBee(t, m, bee, "第二轮仍失败")
+			h := waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				if mode == "off" {
+					return b.Status == StatusFailed && b.Reported
+				}
+				return isRejected(b) && b.Reported
+			})
+
+			driver.mu.Lock()
+			followUpCount := len(driver.followUps)
+			driver.mu.Unlock()
+			if followUpCount != 1 {
+				t.Fatalf("第二次失败不应再次 SendFollowUp，实际 %d", followUpCount)
+			}
+			if h.Merged || h.AcceptanceReturns != 1 {
+				t.Fatalf("第二次失败结果不符: %+v", h)
+			}
+			if len(reports) != 1 || !strings.Contains(reports[0], "still failing") {
+				t.Fatalf("第二次失败汇报不符: %v", reports)
+			}
+			if mode == "off" {
+				if _, err := os.Stat(h.ArchivedPatchPath); err != nil {
+					t.Fatalf("off 档第二次失败应保存补丁: %v", err)
+				}
+			} else if !strings.HasPrefix(h.ReviewReason, "验收命令失败：") || !strings.Contains(h.ReviewReason, "still failing") {
+				t.Fatalf("ai 档拒绝原因不符: %q", h.ReviewReason)
+			}
+		})
+	}
+}
+
+func TestAcceptanceDisputeSkipsRerun(t *testing.T) {
+	for _, mode := range []string{"off", "ai"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			defer m.Stop()
+			settings := m.Settings()
+			settings.ReviewMode = mode
+			m.SetSettingsFunc(func() Settings { return settings })
+
+			var reports []string
+			m.opts.OnReport = func(_ string, report string) error {
+				reports = append(reports, report)
+				return nil
+			}
+			driver := m.opts.Driver.(*fakeDriver)
+			driver.onFollowUp = func(threadID, _ string) error {
+				driver.sessions[threadID] = kanban.SessionState{Running: true}
+				return nil
+			}
+
+			marker := filepath.Join(t.TempDir(), "acceptance-runs")
+			command := "printf x >> '" + filepath.ToSlash(marker) + "'; printf 'wrong command' >&2; exit 1"
+			leadID := "lead-acc-dispute-" + mode
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{command}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "第一轮完成")
+
+			waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				return b.Status == StatusRunning && b.AcceptanceReturns == 1
+			})
+
+			completeBee(t, m, bee, "\n验收存疑：验收命令检查了无关模块\n\n保持现有代码。")
+			h := waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				if mode == "off" {
+					return b.Status == StatusFailed && b.Reported
+				}
+				return isRejected(b) && b.Reported
+			})
+
+			data, err := os.ReadFile(marker)
+			if err != nil || string(data) != "x" {
+				t.Fatalf("存疑后不应重跑验收命令，marker=%q err=%v", string(data), err)
+			}
+			if h.Merged || len(reports) != 1 {
+				t.Fatalf("存疑状态或汇报次数不符: h=%+v reports=%v", h, reports)
+			}
+			if !strings.Contains(reports[0], "验收存疑：验收命令检查了无关模块") {
+				t.Fatalf("汇报缺少存疑理由:\n%s", reports[0])
+			}
+			if !strings.Contains(reports[0], "- 提示：bee 认为验收命令有误，先核对验收命令；工作副本已保留") {
+				t.Fatalf("汇报缺少存疑提示行:\n%s", reports[0])
+			}
+			if strings.Contains(reports[0], "补丁处理指引") {
+				t.Fatalf("存疑汇报不应输出补丁处理指引:\n%s", reports[0])
+			}
+			if _, err := os.Stat(h.WorktreePath); err != nil {
+				t.Fatalf("存疑后工作副本应保留: %v", err)
+			}
+		})
+	}
+}
+
+func TestAcceptanceReturnGuardsAndDisputeParsing(t *testing.T) {
+	for _, tc := range []struct {
+		summary string
+		want    string
+		ok      bool
+	}{
+		{"验收存疑：命令路径错误", "命令路径错误", true},
+		{"\n  \n验收存疑: bad test\n其余说明", "bad test", true},
+		{"验收存疑   缺少理由吗\n第二行", "缺少理由吗", true},
+		{"验收存疑：", "", false},
+		{"正常汇报\n验收存疑：第二行不算", "", false},
+	} {
+		got, ok := acceptanceDisputeReason(tc.summary)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("acceptanceDisputeReason(%q) = (%q, %v), want (%q, %v)", tc.summary, got, ok, tc.want, tc.ok)
+		}
+	}
+
+	driver := newFakeDriver()
+	driver.onFollowUp = func(string, string) error { return errors.New("send failed") }
+	m := NewManager(Options{Driver: driver})
+	h := Bee{ThreadID: "bee-1", PendingMerge: true, ReviewState: ReviewRunning, ReviewStage: ReviewStageL0}
+	m.leads["lead"] = &leadState{leadThreadID: "lead", bees: []Bee{h}}
+	if m.returnAcceptanceFailure(context.Background(), "lead", Bee{ThreadID: "bee-1", ReadOnly: true}, "", "fail") {
+		t.Fatal("只读 bee 不应发回")
+	}
+	if m.returnAcceptanceFailure(context.Background(), "lead", Bee{ThreadID: "bee-1", Summary: "验收存疑：有误"}, "", "fail") {
+		t.Fatal("存疑 bee 不应发回")
+	}
+	if m.returnAcceptanceFailure(context.Background(), "lead", h, "", "fail") {
+		t.Fatal("SendFollowUp 失败时应返回 false")
 	}
 }
