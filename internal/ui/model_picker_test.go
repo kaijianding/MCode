@@ -859,37 +859,40 @@ func TestRenderModelList_ProviderCatalogNotice(t *testing.T) {
 	}
 }
 
-func TestModelPickerListPageLockedAgentRail(t *testing.T) {
+func TestModelPickerListPageLockedAgents(t *testing.T) {
 	providers := modelPickerTestProviders()
 	for _, locked := range []bool{false, true} {
 		t.Run(fmt.Sprintf("hasMessages=%v", locked), func(t *testing.T) {
 			state := &ModelPickerState{}
-			state.setListOpen("agent-rail-lock-"+fmt.Sprint(locked), ModelPickerSideLead, true)
-			var switched bool
+			scope := "agent-group-lock-" + fmt.Sprint(locked)
+			state.setListOpen(scope, ModelPickerSideLead, true)
 			props := ModelPickerProps{
-				Mode: ModelPickerSwarm, KeyPrefix: "agent-rail-", ScopeKey: "agent-rail-lock-" + fmt.Sprint(locked),
+				Mode: ModelPickerSwarm, KeyPrefix: "agent-group-", ScopeKey: scope,
 				Providers: providers, HasMessages: locked,
 				Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
 			}
 			tt := ui.NewTester(func(c *ui.Context) {
 				renderModelPickerListPage(c, props, state, ModelPickerSideLead)
 			}, 330, 640)
+			settleModelPickerPage(tt)
 			if !tt.HasText("Claude 3.7 Sonnet") {
-				t.Fatalf("应默认列出当前模型所属 Agent: %v", tt.Texts())
+				t.Fatalf("应默认展开当前模型所属 Agent: %v", tt.Texts())
 			}
-			if err := tt.Click("Codex"); err != nil {
-				if !locked {
-					t.Fatalf("点击 Agent 失败：%v", err)
+			if locked {
+				if tt.HasText("Codex") {
+					t.Fatalf("已有消息后不应出现其他 Agent 分组: %v", tt.Texts())
 				}
 				return
 			}
-			tt.Frame()
-			switched = state.activeAgent == "codex"
-			if locked && switched {
-				t.Fatal("已有消息后不应能换 Agent 选模型")
+			if tt.HasText("o3-mini") {
+				t.Fatalf("未展开前不应显示其他 Agent 的模型: %v", tt.Texts())
 			}
-			if !locked && (!switched || !tt.HasText("o3-mini")) {
-				t.Fatalf("应切到 Codex 的模型: active=%q texts=%v", state.activeAgent, tt.Texts())
+			if err := tt.Click("Codex"); err != nil {
+				t.Fatalf("点击 Agent 分组失败：%v", err)
+			}
+			settleModelPickerPage(tt)
+			if !state.agentOpen["codex"] || !tt.HasText("o3-mini") {
+				t.Fatalf("应展开 Codex 的模型: open=%v texts=%v", state.agentOpen, tt.Texts())
 			}
 		})
 	}
@@ -1023,30 +1026,7 @@ func TestModelPickerSelectedRowSubtitleFitsSingleLine(t *testing.T) {
 	}
 }
 
-func TestModelPickerAgentModelsPinnedFirstThenAll(t *testing.T) {
-	agent := ProviderInfo{ID: "claude", Name: "Claude", Models: []ModelInfo{
-		{ID: "sonnet", Name: "Sonnet"},
-		{ID: "opus", Name: "Opus"},
-		{ID: "haiku", Name: "Haiku"},
-	}}
-	pinned := []modelPickerPinnedEntry{
-		{Provider: agent, Model: ModelInfo{ID: "opus"}},
-		{Provider: ProviderInfo{ID: "codex"}, Model: ModelInfo{ID: "o3-mini"}},
-		{Provider: agent, Model: ModelInfo{ID: "sonnet"}},
-	}
-	got := modelPickerAgentModels(agent, pinned)
-	want := []string{"opus", "sonnet", "haiku"}
-	if len(got) != len(want) {
-		t.Fatalf("模型数量 = %d，期望 %d: %+v", len(got), len(want), got)
-	}
-	for i, id := range want {
-		if got[i].Model.ID != id || got[i].Provider.ID != "claude" {
-			t.Fatalf("第 %d 个模型 = %+v，期望 %s", i, got[i], id)
-		}
-	}
-}
-
-func TestModelPickerFollowLeadOnlyOnBeesRail(t *testing.T) {
+func TestModelPickerFollowLeadOnlyOnBeesList(t *testing.T) {
 	providers := modelPickerTestProviders()
 	for _, side := range []ModelPickerSide{ModelPickerSideLead, ModelPickerSideBees} {
 		state := &ModelPickerState{}
@@ -1106,31 +1086,36 @@ func TestModelPickerListRowShowsGroupNameAndPinStar(t *testing.T) {
 	plain := ModelInfo{ID: "dewuopenai/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash"}
 	props := ModelPickerProps{KeyPrefix: "row-pin-", Pins: []ModelPin{{Provider: "claude", ModelID: pinned.ID}}}
 
-	render := func(m ModelInfo) *ui.Tester {
+	render := func(m ModelInfo, showGroup bool) *ui.Tester {
 		tt := ui.NewTester(func(c *ui.Context) {
 			ui.Column(c).Width(300).Background(modelPickerPanelBg).Children(func() {
-				renderModelPickerListRow(c, props, modelRowOptions{KeyPrefix: "lead-", Provider: prov, Model: m})
+				renderModelPickerListRow(c, props, modelRowOptions{KeyPrefix: "lead-", Provider: prov, Model: m, ShowGroup: showGroup})
 			})
 		}, 320, 120)
 		tt.Frame()
 		return tt
 	}
 
-	pinnedTT := render(pinned)
+	pinnedTT := render(pinned, true)
 	if !pinnedTT.HasText("Claude 3.7 Sonnet") || !pinnedTT.HasText("claude") {
-		t.Fatalf("行内应同时显示模型名与分组名: %v", pinnedTT.Texts())
+		t.Fatalf("ShowGroup=true 时行内应同时显示模型名与分组名: %v", pinnedTT.Texts())
 	}
 	if _, ok := pinnedTT.Find("已收藏"); !ok {
 		t.Fatalf("收藏模型应显示星标: %v", pinnedTT.AccessAll())
 	}
 
-	plainTT := render(plain)
+	plainTT := render(plain, true)
 	// 模型 ID 自带网关前缀时，右侧只显示斜杠前的分组名。
 	if plainTT.HasText("dewuopenai/deepseek-v4.1-flash") || !plainTT.HasText("dewuopenai") {
 		t.Fatalf("分组名应只取斜杠前的部分: %v", plainTT.Texts())
 	}
 	if _, ok := plainTT.Find("已收藏"); ok {
 		t.Fatalf("未收藏模型不应显示星标")
+	}
+
+	noGroupTT := render(pinned, false)
+	if !noGroupTT.HasText("Claude 3.7 Sonnet") || noGroupTT.HasText("claude") {
+		t.Fatalf("ShowGroup=false 时不应显示右侧分组名: %v", noGroupTT.Texts())
 	}
 }
 
@@ -1167,7 +1152,7 @@ func TestModelPickerTabSwitchKeepsListOpen(t *testing.T) {
 
 func TestModelPickerBackButtonReturnsToEffortCard(t *testing.T) {
 	providers := modelPickerTestProviders()
-	state := &ModelPickerState{}
+	state := &ModelPickerState{agentOpen: map[string]bool{"codex": true}}
 	props := ModelPickerProps{
 		Mode: ModelPickerSwarm, KeyPrefix: "back-", ScopeKey: "back-test", State: state,
 		Providers: providers,
@@ -1182,8 +1167,8 @@ func TestModelPickerBackButtonReturnsToEffortCard(t *testing.T) {
 	if state.listOpen(props.ScopeKey, ModelPickerSideLead) {
 		t.Fatal("返回后应关闭模型列表页")
 	}
-	if state.searchQuery != "" || state.activeAgent != "" {
-		t.Fatalf("返回后应清空查询与所选 Agent: %q %q", state.searchQuery, state.activeAgent)
+	if state.searchQuery != "" || state.agentOpen != nil {
+		t.Fatalf("返回后应清空查询与分组展开状态: %q %v", state.searchQuery, state.agentOpen)
 	}
 }
 
@@ -1277,5 +1262,348 @@ func TestModelPickerSwarmReopenExpires(t *testing.T) {
 	tt.Frame()
 	if state.MenuOpen {
 		t.Fatalf("等待窗口过期后不应把弹层拉回来")
+	}
+}
+
+func TestModelPickerGrouped_DefaultOnlyCurrentAgentOpen(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "grouped-default-open"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "grouped-default-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("默认应展开当前 Agent 的模型: %v", tt.Texts())
+	}
+	if tt.HasText("o3-mini") {
+		t.Fatalf("默认不应展开其他 Agent 的模型: %v", tt.Texts())
+	}
+	if err := tt.Click("展开 Codex"); err != nil {
+		t.Fatalf("点击展开 Codex 分组失败: %v", err)
+	}
+	settleModelPickerPage(tt)
+	if !tt.HasText("o3-mini") {
+		t.Fatalf("点击其他 Agent 分组标题后应展示其模型: %v", tt.Texts())
+	}
+}
+
+func TestModelPickerGrouped_LeadHasMessagesHidesOtherAgents(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "grouped-has-messages"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:        ModelPickerSwarm,
+		KeyPrefix:   "grouped-locked-",
+		ScopeKey:    scope,
+		State:       state,
+		Providers:   providers,
+		HasMessages: true,
+		Selection:   ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("Claude") || !tt.HasText("Claude 3.7 Sonnet") {
+		t.Fatalf("已有消息时应保留当前 Agent 分组: %v", tt.Texts())
+	}
+	if tt.HasText("Codex") {
+		t.Fatalf("Lead 侧 HasMessages=true 时不应出现其他 Agent 分组标题: %v", tt.Texts())
+	}
+}
+
+func TestModelPickerGrouped_EmptyProviderCatalogNotice(t *testing.T) {
+	providers := []ProviderInfo{
+		{ID: "claude", Name: "Claude", Available: true, UnavailableReason: "未安装 Claude Code CLI"},
+		{ID: "codex", Name: "Codex", Available: true, Models: []ModelInfo{{ID: "o3-mini", Name: "o3-mini"}}},
+	}
+	state := &ModelPickerState{}
+	scope := "grouped-empty-notice"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:             ModelPickerSimple,
+		KeyPrefix:        "grouped-notice-",
+		ScopeKey:         scope,
+		State:            state,
+		Providers:        providers,
+		Selection:        ModelSelection{Provider: "codex", Model: "o3-mini"},
+		OnRefreshCatalog: func() {},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("Claude · 未安装 Claude Code CLI") || !tt.HasText("重新探测") {
+		t.Fatalf("空目录且有原因的可用 provider 应显示原因与重新探测: %v", tt.Texts())
+	}
+}
+
+func TestModelPickerGrouped_TierEditingClearsAfterPick(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{TierEditing: "read"}
+	scope := "grouped-tier-edit"
+	state.setListOpen(scope, ModelPickerSideBees, true)
+	var gotTier string
+	var gotOverride *config.SwarmTierOverride
+	props := ModelPickerProps{
+		Mode:      ModelPickerSwarm,
+		KeyPrefix: "grouped-tier-",
+		ScopeKey:  scope,
+		State:     state,
+		SwarmOn:   true,
+		Providers: providers,
+		Tiers:     []config.SwarmTier{{ID: "read", Name: "只读", Provider: "claude", Model: "claude-3-7-sonnet"}},
+		Bees:      ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		OnSetTierOverride: func(tierID string, ov *config.SwarmTierOverride) {
+			gotTier = tierID
+			gotOverride = ov
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideBees)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("Claude 3.5 Haiku"); err != nil {
+		t.Fatalf("点击档位模型失败: %v", err)
+	}
+	if gotTier != "read" || gotOverride == nil || gotOverride.Provider != "claude" || gotOverride.Model != "claude-3-5-haiku" {
+		t.Fatalf("未按预期调用 OnSetTierOverride: tier=%q ov=%+v", gotTier, gotOverride)
+	}
+	if state.TierEditing != "" {
+		t.Fatalf("选择档位模型后应清空 TierEditing, got %q", state.TierEditing)
+	}
+}
+
+func TestModelPickerGrouped_EmptySelectionChecksOnlyFirstRow(t *testing.T) {
+	providers := []ProviderInfo{{
+		ID:        "codex",
+		Name:      "Codex",
+		Available: true,
+		Models: []ModelInfo{
+			{ID: "o3-mini", Name: "o3-mini"},
+			{ID: "gpt-5", Name: "GPT-5"},
+		},
+	}}
+	state := &ModelPickerState{}
+	scope := "grouped-empty-sel"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "grouped-empty-sel-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "codex", Model: ""},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	first, ok1 := tt.Access("o3-mini")
+	second, ok2 := tt.Access("GPT-5")
+	if !ok1 || !ok2 {
+		t.Fatalf("模型行未找到: ok1=%v ok2=%v", ok1, ok2)
+	}
+	if !first.Checked {
+		t.Fatalf("Selection.Model 为空且无 IsDefault 时应选中第一行: %+v", first)
+	}
+	if second.Checked {
+		t.Fatalf("Selection.Model 为空且无 IsDefault 时不应选中第二行: %+v", second)
+	}
+}
+
+func TestModelPickerGrouped_BeesSwarmFollowLeadRow(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "grouped-follow-lead"
+	state.setListOpen(scope, ModelPickerSideBees, true)
+	followed := false
+	props := ModelPickerProps{
+		Mode:      ModelPickerSwarm,
+		KeyPrefix: "grouped-follow-",
+		ScopeKey:  scope,
+		State:     state,
+		SwarmOn:   true,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		Bees:      ModelSelection{Provider: "codex", Model: "o3-mini"},
+		OnFollowLead: func() {
+			followed = true
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideBees)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("跟随主导模型") {
+		t.Fatalf("Bees 侧 Swarm 模式应显示「跟随主导模型」行: %v", tt.Texts())
+	}
+	if err := tt.Click("跟随主导模型"); err != nil {
+		t.Fatalf("点击跟随主导模型失败: %v", err)
+	}
+	if !followed {
+		t.Fatal("点击「跟随主导模型」应调用 OnFollowLead")
+	}
+}
+
+func TestModelPickerGrouped_ExpandMotionSettles(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	scope := "grouped-motion-settle"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "grouped-motion-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("展开 Codex"); err != nil {
+		t.Fatalf("点击展开 Codex 失败: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+	}
+	if tt.FramePending() {
+		t.Fatal("展开分组动画结束后不应继续请求下一帧")
+	}
+}
+
+func TestModelPickerGroupedDefaultOpenFallback(t *testing.T) {
+	cases := []struct {
+		name      string
+		providers []ProviderInfo
+		selection ModelSelection
+		wantOpen  string
+		wantHide  string
+	}{
+		{
+			name:      "empty selection provider falls back to first with models",
+			providers: modelPickerTestProviders(),
+			selection: ModelSelection{Provider: "", Model: ""},
+			wantOpen:  "Claude 3.7 Sonnet",
+			wantHide:  "o3-mini",
+		},
+		{
+			name:      "missing selection provider falls back to first with models",
+			providers: modelPickerTestProviders(),
+			selection: ModelSelection{Provider: "missing-provider", Model: "x"},
+			wantOpen:  "Claude 3.7 Sonnet",
+			wantHide:  "o3-mini",
+		},
+		{
+			name: "skips empty provider before first with models",
+			providers: []ProviderInfo{
+				{ID: "claude", Name: "Claude", Available: true},
+				{ID: "codex", Name: "Codex", Available: true, Models: []ModelInfo{{ID: "o3-mini", Name: "o3-mini"}}},
+			},
+			selection: ModelSelection{Provider: "claude"},
+			wantOpen:  "o3-mini",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &ModelPickerState{}
+			scope := "grouped-fallback-" + tc.name
+			state.setListOpen(scope, ModelPickerSideLead, true)
+			props := ModelPickerProps{
+				Mode:      ModelPickerSimple,
+				KeyPrefix: "grouped-fallback-",
+				ScopeKey:  scope,
+				State:     state,
+				Providers: tc.providers,
+				Selection: tc.selection,
+			}
+			tt := ui.NewTester(func(c *ui.Context) {
+				renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+			}, 330, 640)
+			settleModelPickerPage(tt)
+
+			if !tt.HasText(tc.wantOpen) {
+				t.Fatalf("应默认展开首个有模型的 Agent 并显示 %q: %v", tc.wantOpen, tt.Texts())
+			}
+			if tc.wantHide != "" && tt.HasText(tc.wantHide) {
+				t.Fatalf("不应同时展开其他 Agent 模型 %q: %v", tc.wantHide, tt.Texts())
+			}
+		})
+	}
+}
+
+func TestModelPickerGrouped_PopoverDrawOverDuringExpand(t *testing.T) {
+	testenv.TempHome(t)
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{}
+	var picked ModelInfo
+	props := ModelPickerProps{
+		Mode:         ModelPickerSimple,
+		KeyPrefix:    "grouped-popover-drawover-",
+		ScopeKey:     "grouped-popover-drawover",
+		State:        state,
+		Providers:    providers,
+		Selection:    ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		CapsuleLabel: "Sonnet 3.7",
+		OnPickModel: func(_ ModelPickerSide, _ ProviderInfo, m ModelInfo) {
+			picked = m
+			state.Reset()
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(420).Height(740).Children(func() {
+			ui.Box(c).Grow(1)
+			renderModelPicker(c, props)
+		})
+	}, 460, 760)
+	tt.Frame()
+
+	if err := tt.Click("选择模型"); err != nil {
+		t.Fatalf("打开模型弹层失败: %v", err)
+	}
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("选择其他模型"); err != nil {
+		t.Fatalf("进入列表页失败: %v", err)
+	}
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("展开 Codex"); err != nil {
+		t.Fatalf("展开 Codex 分组失败: %v", err)
+	}
+	// 推进少数帧，使分组展开动画仍在行进并暴露模型行。
+	for i := 0; i < 3; i++ {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+	}
+
+	if err := tt.Click("o3-mini"); err != nil {
+		t.Fatalf("展开动画进行中点击模型行失败: %v", err)
+	}
+	tt.Frame()
+	if picked.ID != "o3-mini" {
+		t.Fatalf("点击模型行后应选中 o3-mini，实际: %+v", picked)
 	}
 }

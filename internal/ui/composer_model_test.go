@@ -269,15 +269,14 @@ func TestComposerModel_HasMessagesCannotSwitchAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 列表按 Agent 竖栏切换；当前 Agent 已有消息后其他 Agent 在竖栏里禁用，点击不会切换。
+	// 已有消息后只渲染当前 Agent 分组，其他 Agent 不出现。
 	settleModelPickerPage(tt)
-	if info, ok := tt.Access("Codex"); !ok || !info.Disabled {
-		t.Fatalf("已有消息时其他 Agent 应在竖栏禁用: %+v, %v", info, ok)
+	if tt.HasText("Codex") {
+		t.Fatalf("已有消息时不应渲染其他 Agent 分组: %v", tt.Texts())
 	}
-	_ = tt.Click("Codex")
 	tt.Frame()
 	if !tt.HasText("Claude 3.7 Sonnet") {
-		t.Fatalf("点击被禁用的 Agent 不应切换列表")
+		t.Fatalf("已有消息时应保留当前 Agent 模型列表")
 	}
 
 	// 验证假 Client 没有收到对 codex 的调用

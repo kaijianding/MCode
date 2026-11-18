@@ -59,7 +59,7 @@ type ModelPickerState struct {
 	ListOpen    map[string]bool // 二级模型列表页展开状态，key 为 ScopeKey+"/"+side
 	MaxBeesOpen bool            // 并发 Bee 上限下拉菜单展开状态
 	TierEditing string          // 正在为其选择模型的档位 ID，空表示未编辑档位
-	activeAgent string          // 模型列表页竖栏选中的 Agent；空表示跟随当前模型所属 Agent
+	agentOpen   map[string]bool // 模型列表页各 Agent 分组展开状态；键为 provider ID，未记录时仅当前 Agent 展开
 	searchQuery string          // 列表页搜索框内容，按名称筛选模型
 
 	// pageDepth 是上一帧渲染的二级页深度（0 强度卡片、1 模型列表、2 更多模型），
@@ -83,7 +83,7 @@ func (st *ModelPickerState) Reset() {
 	st.ListOpen = nil
 	st.MaxBeesOpen = false
 	st.TierEditing = ""
-	st.activeAgent = ""
+	st.agentOpen = nil
 	st.searchQuery = ""
 	st.pageDepth = 0
 	st.pageDir = 0
@@ -1158,6 +1158,8 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 			ui.PopoverBase(c.Key(p.KeyPrefix+"model-popover"), anchor, &state.MenuOpen, func(panel ui.Element) {
 				panelBg := modelPickerPanelBg
 				borderColor := ColorBorderDark
+				// DrawOver 可能在只重绘的 pass 执行，那时旧 Element 已过期：构建期先读出锚点位置。
+				anchorBounds := anchor.Bounds()
 				// 面板是固定深色面（与 effort_slider.go 共用 modelPickerPanelBg），阴影取
 				// 固定深色面一致的 ElevDialog，不再写死一档 rgba 阴影。
 				panel = applyElevation(c, panel, ElevDialog)
@@ -1170,7 +1172,6 @@ func renderModelPicker(c *ui.Context, p ModelPickerProps) {
 					DrawOver(func(painter *ui.Painter, r ui.Rect) {
 						// 底部箭头指向锚点（模型胶囊）的水平中心：用锚点 Bounds 的中心与面板左边缘的差值
 						// 算出偏移，并限制在面板圆角区域之内，避免箭头压到圆角上。
-						anchorBounds := anchor.Bounds()
 						tipOffset := r.W / 2
 						if anchorBounds.W > 0 {
 							tipOffset = anchorBounds.X + anchorBounds.W/2 - r.X
@@ -1226,9 +1227,6 @@ const modelPickerRowHeight = float32(34)
 
 // modelPickerRowHeightTwoLine 是模型列表两行内容（名称 + 说明）的行高。
 const modelPickerRowHeightTwoLine = float32(46)
-
-// modelPickerAgentButtonSize 是竖栏里每个 Agent 按钮的边长。
-const modelPickerAgentButtonSize = float32(32)
 
 // modelPickerBeeLineHeight 是模型胶囊里子代理行的行高：11pt 字号的子代理名留出余量，
 // 与上行 IconSM、行距 Space0 相加正好等于发送按钮的 ControlMD。
@@ -1341,7 +1339,7 @@ func renderModelPickerSideTabs(c *ui.Context, p ModelPickerProps, state *ModelPi
 					if state.listOpen(p.ScopeKey, modelPickerSideFromTab(state.Tab)) {
 						state.setListOpen(p.ScopeKey, modelPickerSideFromTab(state.Tab), false)
 						state.setListOpen(p.ScopeKey, modelPickerSideFromTab(item.id), true)
-						state.activeAgent = ""
+						state.agentOpen = nil
 					}
 					state.Tab = item.id
 					state.TierEditing = ""
