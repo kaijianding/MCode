@@ -336,6 +336,27 @@ func TestParseDelegations_ReworkOf(t *testing.T) {
 	}
 }
 
+func TestParseDelegations_Rerun(t *testing.T) {
+	text := "```swarm\n" + `[{"prompt": "重跑", "reworkOf": "Aspen", "rerun": true, "acceptance": ["go test -run TestFoo ./p"]}, {"prompt": "普通"}]` + "\n```"
+	entries, found, err := ParseDelegations(text)
+	if !found || err != nil {
+		t.Fatalf("unexpected found=%v, err=%v", found, err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if !entries[0].Rerun || entries[0].ReworkOf != "Aspen" || len(entries[0].Acceptance) != 1 {
+		t.Fatalf("Rerun 条目解析错误: %+v", entries[0])
+	}
+	if entries[1].Rerun {
+		t.Fatalf("未写 rerun 时应为 false: %+v", entries[1])
+	}
+	parsed, ok := ParseEntry(map[string]any{"prompt": "tool", "reworkOf": "Birch", "rerun": true, "acceptance": []any{"true"}})
+	if !ok || !parsed.Rerun || parsed.ReworkOf != "Birch" {
+		t.Fatalf("ParseEntry Rerun 解析错误: ok=%v %+v", ok, parsed)
+	}
+}
+
 // beePrompt 不参与技能拼接：不含 skills 的条目输出固定为各段以空行分隔。
 func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 	d := Delegation{Task: "T", Prompt: "P"}

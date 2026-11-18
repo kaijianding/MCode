@@ -2093,6 +2093,143 @@ func (m *Manager) roundLimitError(leadThreadID string, counted bool) error {
 	return fmt.Errorf("%w（%d 轮）", ErrMaxRounds, limit)
 }
 
+// isAcceptanceFailureReason 判断原因文本是否源自验收命令失败或 bee 报出的验收存疑。
+func isAcceptanceFailureReason(reason string) bool {
+	trimmed := strings.TrimSpace(reason)
+	return strings.HasPrefix(trimmed, "验收命令失败") || strings.HasPrefix(trimmed, "验收存疑")
+}
+
+// isAcceptanceFailureBee 判断 bee 是否因验收命令失败或验收存疑结束。
+func isAcceptanceFailureBee(b Bee) bool {
+	return isAcceptanceFailureReason(b.MergeError) || isAcceptanceFailureReason(b.ReviewReason)
+}
+
+// rerunAcceptance 在已因验收失败结束的 bee 保留副本上替换验收命令并直接重跑收尾漏斗，不启动新 bee。
+func (m *Manager) rerunAcceptance(ctx context.Context, leadThreadID string, d Delegation) (string, error) {
+	if msg := AcceptanceRejection(d); msg != "" {
+		return "", errors.New(msg)
+	}
+	if len(d.Acceptance) == 0 {
+		return "", errors.New("重跑验收失败：未提供新的 acceptance 验收命令")
+	}
+	reworkOf := strings.TrimSpace(d.ReworkOf)
+	if reworkOf == "" {
+		return "", errors.New("重跑验收失败：未指定 reworkOf（目标 bee 名字或线程 ID）")
+	}
+
+	mergeMu := m.getLeadMergeMutex(leadThreadID)
+	mergeMu.Lock()
+
+	m.mu.Lock()
+	var target Bee
+	var bestTime time.Time
+	found := false
+	if lead, ok := m.leads[leadThreadID]; ok {
+		for i := range lead.bees {
+			b := &lead.bees[i]
+			if b.ThreadID != reworkOf && b.Name != reworkOf {
+				continue
+			}
+			at := b.StartedAt
+			if b.FinishedAt != nil {
+				at = *b.FinishedAt
+			}
+			if !found || at.After(bestTime) {
+				target = b.clone()
+				bestTime = at
+				found = true
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	if !found {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：未找到子代理 %s", reworkOf)
+	}
+	targetName := strings.TrimSpace(target.Name)
+	if targetName == "" {
+		targetName = reworkOf
+	}
+	if target.Status == StatusRunning || target.ReviewState == ReviewRunning || target.PendingMerge || target.Interrupted {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：%s 仍在运行或等待审查，无法重跑验收", targetName)
+	}
+	if target.ReadOnly {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：%s 是只读子代理，不能重跑验收", targetName)
+	}
+	if target.Merged || target.MergeDiscarded || !isAcceptanceFailureBee(target) {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：%s 不是因验收失败结束的，不能重跑验收", targetName)
+	}
+	if target.WorktreePath == "" || !dirExists(target.WorktreePath) {
+		mergeMu.Unlock()
+		return "", fmt.Errorf("重跑验收失败：%s 的副本已回收，只能派新 bee 按补丁重做", targetName)
+	}
+
+	origStatus := target.Status
+	origReviewState := target.ReviewState
+	summary := target.Summary
+	finishedAt := target.FinishedAt
+	now := m.now()
+
+	h := target.clone()
+	resetBeeForAnotherTurn(&h, now)
+	// 不置回 StatusRunning，避免下轮 Tick 触发请求超时看门狗、保活或空摘要催促；直接按结束态走收尾漏斗。
+	h.Status = StatusCompleted
+	h.Summary = summary
+	if finishedAt != nil {
+		t := *finishedAt
+		h.FinishedAt = &t
+	} else {
+		t := now
+		h.FinishedAt = &t
+	}
+	h.Acceptance = append([]string(nil), d.Acceptance...)
+	h.AcceptanceReturns = 0
+
+	patch, ok := m.prepareMerge(ctx, &h)
+	if ok && len(bytes.TrimSpace(patch)) > 0 {
+		h.PendingMerge = true
+		h.MergePatch = patch
+		h.ReviewConcerns = nil
+		h.ReviewState = ReviewRunning
+		h.ReviewStage = ReviewStageL0
+		queuedAt := m.now()
+		h.ReviewQueuedAt = &queuedAt
+	}
+
+	m.mu.Lock()
+	updated := false
+	if lead, ok := m.leads[leadThreadID]; ok {
+		for i := range lead.bees {
+			b := &lead.bees[i]
+			if b.ThreadID != h.ThreadID {
+				continue
+			}
+			if b.Status == origStatus && b.ReviewState == origReviewState && !b.PendingMerge && !b.Interrupted {
+				*b = h
+				delete(m.beeProgress, h.ThreadID)
+				updated = true
+			}
+			break
+		}
+	}
+	m.mu.Unlock()
+	mergeMu.Unlock()
+
+	if !updated {
+		return "", fmt.Errorf("重跑验收失败：%s 状态已变化，请稍后重试", targetName)
+	}
+	m.setEmptyNudge(h.ThreadID, false)
+	m.setContinueNudge(h.ThreadID, false)
+	m.persistLead(leadThreadID)
+	m.notifyChange(leadThreadID)
+	m.startReviewFunnelWorkers(context.WithoutCancel(ctx))
+	return fmt.Sprintf("已在 %s 保留的副本上重跑验收（%d 条），结果稍后汇报", targetName, len(d.Acceptance)), nil
+}
+
 // DispatchSingleEntry 立即派发流式解析出的单条委派条目；与 DispatchFromReply 共用派发锁，保证并发调用按顺序分派。
 // 配置未启用或未开启自动委派时返回零值 Bee 与 nil 错误（req.Host 非 nil 时返回 ErrSwarmDisabled）；本次请求已超过总时长预算时返回 ErrRequestTimeout；
 // 已达配置的派发轮次上限时返回 ErrMaxRounds；已启动 bee 达到预算时返回 ErrBeeBudget。
@@ -2106,6 +2243,13 @@ func (m *Manager) DispatchSingleEntry(ctx context.Context, req SingleEntryReques
 			return Bee{}, nil, ErrSwarmDisabled
 		}
 		return Bee{}, nil, nil
+	}
+	if req.Entry.Rerun {
+		msg, err := m.rerunAcceptance(ctx, req.LeadThreadID, req.Entry)
+		if err != nil {
+			return Bee{}, []string{err.Error()}, err
+		}
+		return Bee{}, []string{msg}, nil
 	}
 	// 总时长检查排在轮次检查之前：超时后派发一律拒绝，管理器这一层也不把它算作一轮。
 	if m.requestTimedOut(req.LeadThreadID) {
@@ -2171,6 +2315,16 @@ func (m *Manager) DispatchFromReply(ctx context.Context, req ReplyDispatchReques
 	beeSpecs := make([]BeeSpec, 0, len(entries))
 	var rejectedNotices []string
 	for _, d := range entries {
+		if d.Rerun {
+			msg, err := m.rerunAcceptance(ctx, req.LeadThreadID, d)
+			if err != nil {
+				rejectedNotices = append(rejectedNotices, err.Error())
+				notices = append(notices, err.Error())
+				continue
+			}
+			notices = append(notices, msg)
+			continue
+		}
 		plan := m.planEntry(ctx, req.LeadThreadID, d, nil, projectID, leadWorkDir, taken, seqIdx)
 		seqIdx = plan.seqIdx
 		notices = append(notices, plan.notices...)
@@ -3594,6 +3748,13 @@ func BuildReport(bees []Bee) string {
 		}
 		if disputed {
 			sb.WriteString("- 提示：bee 认为验收命令有误，先核对验收命令；工作副本已保留\n")
+		}
+		if !h.Merged && !h.MergeDiscarded && !h.ReadOnly && isAcceptanceFailureBee(h) && h.WorktreePath != "" && dirExists(h.WorktreePath) {
+			target := strings.TrimSpace(h.Name)
+			if target == "" {
+				target = h.ThreadID
+			}
+			sb.WriteString(fmt.Sprintf("- 重跑验收：若是验收命令写错，改正后派一条 reworkOf=%s、rerun=true、带新 acceptance 的条目，在保留副本上重跑，不启动新 bee\n", target))
 		}
 
 		// Summary
@@ -5841,10 +6002,13 @@ func (m *Manager) beeCopyReclaimableLocked(h *Bee, now time.Time) bool {
 	if m.reviewEnabled() && m.opts.OnReport != nil && !h.Reported {
 		return false
 	}
-	if h.MergeDiscarded || h.ReviewState == ReviewRejected {
-		// 改动已放弃或审查未通过，副本不再有用，可以回收；两种情况的补丁都还在 MergePatch 里，
-		// 审查未通过的另有 ReviewPatchPath 指向 swarm-reviews 下的补丁文件，随时可查 diff。
+	if h.MergeDiscarded {
 		return true
+	}
+	if h.ReviewState == ReviewRejected {
+		// 验收命令失败或存疑被驳回时保留副本用于重跑验收，交给 24 小时 beeCopyStaleIdle 存档回收；
+		// 其余审查未通过情况不再需要副本，补丁仍在 MergePatch / ReviewPatchPath 里，可直接回收。
+		return !isAcceptanceFailureReason(h.ReviewReason)
 	}
 	if h.Merged {
 		// 已合并且没有残留改动、或有补丁存档可查 diff 时才回收，避免用户再也看不到改动内容。
@@ -6119,8 +6283,8 @@ func (m *Manager) autoClearFinished(ctx context.Context) {
 				clearable = false
 				break
 			}
-			// 落地失败或带冲突的 bee，其 worktree 可能是成果唯一副本，不自动清理，留给用户处理。
-			if h.MergeError != "" || len(h.ConflictFiles) > 0 {
+			// 落地失败、带冲突或因验收失败被驳回的 bee，其 worktree 需要留给用户或重跑验收，不自动清理。
+			if h.MergeError != "" || len(h.ConflictFiles) > 0 || (h.ReviewState == ReviewRejected && isAcceptanceFailureReason(h.ReviewReason)) {
 				clearable = false
 				break
 			}

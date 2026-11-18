@@ -83,6 +83,8 @@ type Delegation struct {
 	Replaces string
 	// ReworkOf 是要返工的已驳回 bee 的名字或 ThreadID；为空时按 brief 里的补丁路径推断。
 	ReworkOf string
+	// Rerun 为 true 时与 ReworkOf/Acceptance 配合，在目标 bee 保留的副本上重跑验收命令，不启动新 bee。
+	Rerun bool
 }
 
 // delegationSkillsMax 是单个条目最多保留的技能名数量，避免一条派发就能把全部技能塞进提示词。
@@ -179,6 +181,7 @@ func parseEntry(m map[string]any) (Delegation, bool) {
 		reworkRaw, _ = m["rework_of"].(string)
 	}
 	reworkOf := strings.TrimSpace(reworkRaw)
+	rerun, _ := m["rerun"].(bool)
 
 	return Delegation{
 		Task:       task,
@@ -194,6 +197,7 @@ func parseEntry(m map[string]any) (Delegation, bool) {
 		Acceptance: parseAcceptance(m["acceptance"]),
 		Replaces:   replaces,
 		ReworkOf:   reworkOf,
+		Rerun:      rerun,
 	}, true
 }
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -322,5 +323,64 @@ func TestSubmitAndBlockRejectBadAcceptance(t *testing.T) {
 	bd.settleTurn("lead", "project", fixedBlock)
 	if bh.dispatched != 1 || bh.rounds != 1 {
 		t.Fatalf("改正验收命令后应正常派发: %+v", bh)
+	}
+}
+
+func TestSubmitAndBlockRerunAcceptance(t *testing.T) {
+	var rerunErr error
+	var rerunCalls int
+	var dispatchedCalls int
+	d := newSwarmStreamDispatcher(context.Background(),
+		func(ctx context.Context, req swarm.SingleEntryRequest) (swarm.Bee, []string, error) {
+			if req.Entry.Rerun {
+				rerunCalls++
+				if rerunErr != nil {
+					return swarm.Bee{}, []string{rerunErr.Error()}, rerunErr
+				}
+				return swarm.Bee{}, []string{"已在 Aspen 保留的副本上重跑验收（1 条），结果稍后汇报"}, nil
+			}
+			dispatchedCalls++
+			return swarm.Bee{}, nil, nil
+		},
+		func(string) int { return 0 },
+		func(string) int { return 1 },
+		func(string) (string, bool) { return t.TempDir(), true },
+		func(string, string) error { return nil },
+		func() int { return 0 },
+	)
+	var blockProblems []string
+	d.report = func(_ string, text string) error {
+		blockProblems = append(blockProblems, text)
+		return nil
+	}
+
+	// 1. submit 路径：先测成功，再测后端拒绝错误回传到工具结果。
+	d.reset("lead")
+	got := d.submit("lead", "project", []swarm.Delegation{{
+		Prompt: "重跑验收", ReworkOf: "Aspen", Rerun: true, Acceptance: []string{"go test -run TestFoo ./p"},
+	}})
+	if !strings.Contains(got, "已在 Aspen 保留的副本上重跑验收（1 条），结果稍后汇报") || dispatchedCalls != 0 || rerunCalls != 1 {
+		t.Fatalf("submit 成功重跑结果异常: %q dispatched=%d rerun=%d", got, dispatchedCalls, rerunCalls)
+	}
+
+	d.reset("lead")
+	rerunErr = errors.New("重跑验收失败：Aspen 的副本已回收，只能派新 bee 按补丁重做")
+	got = d.submit("lead", "project", []swarm.Delegation{{
+		Prompt: "重跑验收", ReworkOf: "Aspen", Rerun: true, Acceptance: []string{"go test -run TestFoo ./p"},
+	}})
+	if !strings.Contains(got, "重跑验收失败：Aspen 的副本已回收，只能派新 bee 按补丁重做") {
+		t.Fatalf("submit 失败结果未带回错误: %q", got)
+	}
+
+	// 2. ```swarm 块路径：后端失败经 reportBlockProblem 回送主代理。
+	d.reset("lead")
+	block := "```swarm\n[{\"prompt\":\"块重跑\",\"reworkOf\":\"Aspen\",\"rerun\":true,\"acceptance\":[\"go test -run TestFoo ./p\"]}]\n```"
+	d.feed("lead", "project", block)
+	d.settleTurn("lead", "project", block)
+	if len(blockProblems) != 1 || !strings.Contains(blockProblems[0], "重跑验收失败：Aspen 的副本已回收，只能派新 bee 按补丁重做") {
+		t.Fatalf("块路径未回送重跑失败原因: %+v", blockProblems)
+	}
+	if dispatchedCalls != 0 {
+		t.Fatalf("重跑不应触发普通派发: %d", dispatchedCalls)
 	}
 }

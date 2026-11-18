@@ -1141,3 +1141,322 @@ func TestAcceptanceReturnGuardsAndDisputeParsing(t *testing.T) {
 		t.Fatal("SendFollowUp 失败时应返回 false")
 	}
 }
+
+func TestAcceptanceRerunOnKeptCopy(t *testing.T) {
+	for _, mode := range []string{"off", "ai"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &funnelFake{}
+			m, dir := newFunnelManager(t, fake)
+			defer m.Stop()
+			settings := m.Settings()
+			settings.ReviewMode = mode
+			m.SetSettingsFunc(func() Settings { return settings })
+
+			var reports []string
+			m.opts.OnReport = func(_ string, report string) error {
+				reports = append(reports, report)
+				return nil
+			}
+
+			leadID := "lead-acc-rerun-" + mode
+			bees, err := m.Dispatch(context.Background(), DispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				Bees: []BeeSpec{{Name: "Aspen", Task: "修改 internal/feature.go", Acceptance: []string{"printf 'wrong check' >&2; exit 1"}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bee := bees[0]
+			// 预置 AcceptanceReturns=1，跳过首次失败发回原 bee，直接落定失败并保留副本。
+			m.mu.Lock()
+			m.leads[leadID].bees[0].AcceptanceReturns = acceptanceReturnLimit
+			m.mu.Unlock()
+
+			writeBeeFile(t, bee, "internal/feature.go", "package feature\n")
+			completeBee(t, m, bee, "已完成改动")
+
+			h := waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				if mode == "off" {
+					return b.Status == StatusFailed && b.Reported
+				}
+				return isRejected(b) && b.Reported
+			})
+			if h.Merged || len(reports) != 1 {
+				t.Fatalf("初始失败状态异常: h=%+v reports=%v", h, reports)
+			}
+			wantRerunHint := "- 重跑验收：若是验收命令写错，改正后派一条 reworkOf=Aspen、rerun=true、带新 acceptance 的条目，在保留副本上重跑，不启动新 bee"
+			if !strings.Contains(reports[0], wantRerunHint) {
+				t.Fatalf("初始失败汇报缺少重跑验收提示:\n%s", reports[0])
+			}
+
+			fake.mu.Lock()
+			startsBefore := fake.starts
+			fake.mu.Unlock()
+			worktreeBefore := h.WorktreePath
+			worktreeEntriesBefore, err := os.ReadDir(m.opts.WorktreeDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			passCmd := "test -f internal/feature.go"
+			var notices []string
+			if mode == "off" {
+				var created Bee
+				created, notices, err = m.DispatchSingleEntry(context.Background(), SingleEntryRequest{
+					LeadThreadID: leadID, LeadWorkDir: dir,
+					Entry: Delegation{
+						Prompt:     "重跑验收",
+						ReworkOf:   bee.Name,
+						Rerun:      true,
+						Acceptance: []string{passCmd},
+					},
+				})
+				if created.ThreadID != "" {
+					t.Fatalf("重跑不应返回新 bee: %+v", created)
+				}
+			} else {
+				var created []Bee
+				created, notices, err = m.DispatchFromReply(context.Background(), ReplyDispatchRequest{
+					LeadThreadID: leadID, LeadWorkDir: dir,
+					ReplyText: "```swarm\n" + `[{"prompt":"重跑验收","reworkOf":"Aspen","rerun":true,"acceptance":["` + passCmd + `"]}]` + "\n```",
+				})
+				if len(created) != 0 {
+					t.Fatalf("重跑不应启动新 bee: %+v", created)
+				}
+			}
+			if err != nil {
+				t.Fatalf("重跑验收派发失败: %v", err)
+			}
+			wantMsg := "已在 Aspen 保留的副本上重跑验收（1 条），结果稍后汇报"
+			if len(notices) != 1 || notices[0] != wantMsg {
+				t.Fatalf("重跑返回提示异常: %v", notices)
+			}
+
+			h = waitFunnel(t, m, leadID, bee.ThreadID, func(b Bee) bool {
+				return b.Merged && b.Reported
+			})
+
+			fake.mu.Lock()
+			startsAfter := fake.starts
+			fake.mu.Unlock()
+			if startsAfter != startsBefore {
+				t.Fatalf("重跑不应启动新 bee: starts %d -> %d", startsBefore, startsAfter)
+			}
+			worktreeEntriesAfter, err := os.ReadDir(m.opts.WorktreeDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(worktreeEntriesAfter) != len(worktreeEntriesBefore) || h.WorktreePath != worktreeBefore {
+				t.Fatalf("重跑不应新建副本: before=%d (%s) after=%d (%s)", len(worktreeEntriesBefore), worktreeBefore, len(worktreeEntriesAfter), h.WorktreePath)
+			}
+			if !reflect.DeepEqual(h.Acceptance, []string{passCmd}) {
+				t.Fatalf("Acceptance 未替换为新命令: %v", h.Acceptance)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "internal/feature.go")); err != nil {
+				t.Fatalf("重跑通过后未合入主工作区: %v", err)
+			}
+			if len(reports) != 2 {
+				t.Fatalf("重跑通过后应重新汇报，实际汇报 %d 次: %v", len(reports), reports)
+			}
+			if strings.Contains(reports[1], "- 重跑验收：") {
+				t.Fatalf("重跑通过后的汇报不应再输出重跑验收提示:\n%s", reports[1])
+			}
+		})
+	}
+}
+
+func TestAcceptanceRerunRejected(t *testing.T) {
+	fake := &funnelFake{}
+	m, dir := newFunnelManager(t, fake)
+	defer m.Stop()
+	settings := m.Settings()
+	settings.ReviewMode = "ai"
+	m.SetSettingsFunc(func() Settings { return settings })
+
+	leadID := "lead-acc-rerun-reject"
+	bees, err := m.Dispatch(context.Background(), DispatchRequest{
+		LeadThreadID: leadID, LeadWorkDir: dir,
+		Bees: []BeeSpec{
+			{Name: "Aspen", Task: "已删除副本的验收失败", Acceptance: []string{"false"}},
+			{Name: "Birch", Task: "非验收失败被驳回"},
+			{Name: "Cedar", Task: "仍在运行中"},
+			{Name: "Dune", Task: "只读", ReadOnly: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aspen, birch, cedar, dune := bees[0], bees[1], bees[2], bees[3]
+	_ = cedar
+
+	// Aspen：验收失败结束，随后删掉它的工作副本目录。
+	if err := os.RemoveAll(aspen.WorktreePath); err != nil {
+		t.Fatal(err)
+	}
+	// Birch：普通 L2 驳回，不是验收失败。
+	// Dune：只读且置为已结束。
+	m.mu.Lock()
+	for i := range m.leads[leadID].bees {
+		b := &m.leads[leadID].bees[i]
+		switch b.ThreadID {
+		case aspen.ThreadID:
+			b.Status = StatusCompleted
+			b.ReviewState = ReviewRejected
+			b.ReviewReason = "验收命令失败：false（退出码 1）"
+			b.Reported = true
+		case birch.ThreadID:
+			b.Status = StatusCompleted
+			b.ReviewState = ReviewRejected
+			b.ReviewReason = "L2 审查未通过：缺少测试"
+			b.Reported = true
+		case dune.ThreadID:
+			b.Status = StatusFailed
+			b.MergeError = "验收命令失败：x"
+			b.Reported = true
+		}
+	}
+	m.mu.Unlock()
+
+	fake.mu.Lock()
+	startsBefore := fake.starts
+	fake.mu.Unlock()
+
+	cases := []struct {
+		name string
+		d    Delegation
+		want string
+	}{
+		{
+			name: "missing target",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "NoSuchBee", Rerun: true, Acceptance: []string{"true"}},
+			want: "未找到子代理",
+		},
+		{
+			name: "reclaimed copy",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Aspen", Rerun: true, Acceptance: []string{"true"}},
+			want: "副本已回收",
+		},
+		{
+			name: "not acceptance failure",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Birch", Rerun: true, Acceptance: []string{"true"}},
+			want: "不是因验收失败结束",
+		},
+		{
+			name: "running target",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Cedar", Rerun: true, Acceptance: []string{"true"}},
+			want: "仍在运行或等待审查",
+		},
+		{
+			name: "readonly target",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Dune", Rerun: true, Acceptance: []string{"true"}},
+			want: "只读子代理",
+		},
+		{
+			name: "grep -q rejected",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Aspen", Rerun: true, Acceptance: []string{"grep -q foo bar.txt"}},
+			want: "不要用 grep -q",
+		},
+		{
+			name: "empty acceptance",
+			d:    Delegation{Prompt: "重跑", ReworkOf: "Aspen", Rerun: true},
+			want: "未提供新的 acceptance",
+		},
+		{
+			name: "empty reworkOf",
+			d:    Delegation{Prompt: "重跑", Rerun: true, Acceptance: []string{"true"}},
+			want: "未指定 reworkOf",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/SingleEntry", func(t *testing.T) {
+			_, _, err := m.DispatchSingleEntry(context.Background(), SingleEntryRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir, Entry: tc.d,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("期望包含 %q 的错误，实际: %v", tc.want, err)
+			}
+		})
+		t.Run(tc.name+"/FromReply", func(t *testing.T) {
+			payload, _ := json.Marshal([]map[string]any{{
+				"prompt": tc.d.Prompt, "reworkOf": tc.d.ReworkOf, "rerun": true, "acceptance": tc.d.Acceptance,
+			}})
+			_, _, err := m.DispatchFromReply(context.Background(), ReplyDispatchRequest{
+				LeadThreadID: leadID, LeadWorkDir: dir,
+				ReplyText: "```swarm\n" + string(payload) + "\n```",
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("FromReply 期望包含 %q 的错误，实际: %v", tc.want, err)
+			}
+		})
+	}
+
+	fake.mu.Lock()
+	startsAfter := fake.starts
+	fake.mu.Unlock()
+	if startsAfter != startsBefore {
+		t.Fatalf("被拒绝的重跑不应启动新 bee: %d -> %d", startsBefore, startsAfter)
+	}
+}
+
+func TestAcceptanceRejectedCopyKeptForRerun(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	finished := now.Add(-beeCopyReclaimIdle - time.Minute)
+
+	m := NewManager(Options{WorktreeDir: t.TempDir()})
+	m.SetSettingsFunc(func() Settings {
+		return Settings{Enabled: true, ReviewMode: "ai", AutoClearFinished: true}
+	})
+
+	accFailed := &Bee{
+		ThreadID:     "bee-acc-fail",
+		Name:         "Aspen",
+		Status:       StatusCompleted,
+		WorktreePath: t.TempDir(),
+		FinishedAt:   &finished,
+		Reported:     true,
+		ReviewState:  ReviewRejected,
+		ReviewReason: "验收命令失败：go test -run TestX ./p（退出码 1）",
+	}
+	accDisputed := &Bee{
+		ThreadID:     "bee-acc-dispute",
+		Name:         "Birch",
+		Status:       StatusCompleted,
+		WorktreePath: t.TempDir(),
+		FinishedAt:   &finished,
+		Reported:     true,
+		ReviewState:  ReviewRejected,
+		ReviewReason: "验收存疑：测试名字写错",
+	}
+	otherRejected := &Bee{
+		ThreadID:     "bee-l2-reject",
+		Name:         "Cedar",
+		Status:       StatusCompleted,
+		WorktreePath: t.TempDir(),
+		FinishedAt:   &finished,
+		Reported:     true,
+		ReviewState:  ReviewRejected,
+		ReviewReason: "L2 审查未通过：缺少测试",
+	}
+
+	if m.beeCopyReclaimableLocked(accFailed, now) {
+		t.Fatal("ai 档因验收命令失败被驳回的副本在 10 分钟后不应被直接回收")
+	}
+	if m.beeCopyReclaimableLocked(accDisputed, now) {
+		t.Fatal("ai 档因验收存疑被驳回的副本在 10 分钟后不应被直接回收")
+	}
+	if !m.beeCopyReclaimableLocked(otherRejected, now) {
+		t.Fatal("非验收原因被驳回的副本在超过 beeCopyReclaimIdle 后仍应直接回收")
+	}
+	if d := m.beeCopyReclaimDecisionLocked(accFailed, finished.Add(beeCopyStaleIdle)); d != beeCopyArchive {
+		t.Fatalf("超过 24 小时后应进入存档回收，实际 %v", d)
+	}
+
+	m.mu.Lock()
+	m.leads["lead-keep"] = &leadState{leadThreadID: "lead-keep", bees: []Bee{*accFailed}}
+	m.mu.Unlock()
+	m.autoClearFinished(context.Background())
+	if got := len(m.State("lead-keep").Bees); got != 1 {
+		t.Fatalf("AutoClearFinished 不应提前删掉验收失败待重跑的 bee，实际剩 %d 个", got)
+	}
+}

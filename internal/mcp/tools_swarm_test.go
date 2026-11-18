@@ -192,6 +192,14 @@ func TestSwarmDelegateSchemaDeclaresReplaces(t *testing.T) {
 	if field["type"] != "string" {
 		t.Fatalf("replaces 类型期望 string, 实际为 %v", field["type"])
 	}
+	reworkOf, ok := entryProps["reworkOf"].(map[string]any)
+	if !ok || reworkOf["type"] != "string" {
+		t.Fatalf("reworkOf schema=%v", reworkOf)
+	}
+	rerun, ok := entryProps["rerun"].(map[string]any)
+	if !ok || rerun["type"] != "boolean" {
+		t.Fatalf("rerun schema=%v", rerun)
+	}
 	acceptance, ok := entryProps["acceptance"].(map[string]any)
 	if !ok || acceptance["type"] != "array" {
 		t.Fatalf("acceptance schema=%v", acceptance)

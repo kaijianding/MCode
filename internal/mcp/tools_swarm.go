@@ -83,6 +83,8 @@ func (r *Registry) registerSwarmTools(s *Server) {
 							"task":       str("Short title."),
 							"bee":        str("Name from the roster."),
 							"replaces":   str("Name of a running bee this entry supersedes; mcode stops that bee before starting this one. Use it only when a running bee's brief must change."),
+							"reworkOf":   str("Name or thread id of a finished bee whose review or acceptance failed; with rerun it targets that bee's kept copy."),
+							"rerun":      map[string]any{"type": "boolean", "description": "With reworkOf and acceptance: rerun the corrected acceptance commands on that bee's kept copy instead of starting a bee. The prompt can be a short note."},
 							"tier":       str("Tier id or name."),
 							"project":    str("Another project to work in."),
 							"provider":   str("Provider override."),

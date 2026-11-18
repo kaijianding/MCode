@@ -734,6 +734,14 @@ func (d *swarmStreamDispatcher) checkAcceptanceLocked(st *swarmStreamState, entr
 	return msg, false
 }
 
+func dispatchEntryKey(entry swarm.Delegation) string {
+	key := strings.TrimSpace(entry.Prompt)
+	if entry.Rerun {
+		return "rerun\x00" + strings.TrimSpace(entry.ReworkOf) + "\x00" + key
+	}
+	return key
+}
+
 // feed 追加一段助手正文增量，条目在闭合大括号到达时立即入队派发。
 // 本轮首个条目先校验委派轮次上限；超限后置抑制标记并丢弃本轮全部条目，
 // 原因在回合末由 settleTurn 回送主代理，feed 里只记录，不阻塞流回调。
@@ -752,6 +760,18 @@ func (d *swarmStreamDispatcher) feed(threadID, projectID, delta string) {
 			continue
 		}
 		if _, ok := d.checkAcceptanceLocked(st, entry, true); !ok {
+			continue
+		}
+		if entry.Rerun {
+			key := dispatchEntryKey(entry)
+			if st.dispatched[key] {
+				continue
+			}
+			if st.dispatched == nil {
+				st.dispatched = make(map[string]bool)
+			}
+			st.dispatched[key] = true
+			entries = append(entries, swarmPendingEntry{entry: entry})
 			continue
 		}
 		// 跨回合去重先于轮次与条目上限：跳过的条目既不占名额，也不消耗派发轮次。
@@ -800,8 +820,10 @@ func (d *swarmStreamDispatcher) submit(threadID, projectID string, entries []swa
 		st.dispatched = make(map[string]bool)
 	}
 	var queued []swarmPendingEntry
+	var reruns []swarm.Delegation
 	var skippedEntries []*swarmStartedEntry
 	var acceptanceRejected []string
+	var rerunNotes []string
 	var duplicates, overCap, refused, skipped, planRefused int
 	for _, entry := range entries {
 		var allowed bool
@@ -812,6 +834,14 @@ func (d *swarmStreamDispatcher) submit(threadID, projectID string, entries []swa
 		}
 		if msg, ok := d.checkAcceptanceLocked(st, entry, false); !ok {
 			acceptanceRejected = append(acceptanceRejected, msg)
+			continue
+		}
+		if entry.Rerun {
+			if st.dispatched[dispatchEntryKey(entry)] {
+				duplicates++
+				continue
+			}
+			reruns = append(reruns, entry)
 			continue
 		}
 		key := strings.TrimSpace(entry.Prompt)
@@ -846,8 +876,35 @@ func (d *swarmStreamDispatcher) submit(threadID, projectID string, entries []swa
 	d.mu.Unlock()
 
 	d.enqueue(threadID, projectID, queued)
+	if len(reruns) > 0 {
+		dir, _ := d.workDir(threadID)
+		for _, entry := range reruns {
+			_, notices, err := d.dispatch(d.ctx, swarm.SingleEntryRequest{
+				LeadThreadID: threadID,
+				ProjectID:    projectID,
+				LeadWorkDir:  dir,
+				Entry:        entry,
+			})
+			if err != nil {
+				acceptanceRejected = append(acceptanceRejected, err.Error())
+				continue
+			}
+			d.mu.Lock()
+			if cur := d.states[threadID]; cur != nil {
+				if cur.dispatched == nil {
+					cur.dispatched = make(map[string]bool)
+				}
+				cur.dispatched[dispatchEntryKey(entry)] = true
+			}
+			d.mu.Unlock()
+			rerunNotes = append(rerunNotes, notices...)
+		}
+	}
 
 	parts := []string{fmt.Sprintf("Started %d bee(s).", len(queued))}
+	if len(rerunNotes) > 0 {
+		parts = append(parts, rerunNotes...)
+	}
 	if len(acceptanceRejected) > 0 {
 		parts = append(parts, acceptanceRejected...)
 	}
@@ -992,7 +1049,20 @@ func (d *swarmStreamDispatcher) settleRemaining(threadID, projectID, fullText st
 
 	d.mu.Lock()
 	pending := make([]swarmPendingEntry, 0, len(entries))
+	var rerunPending []swarmPendingEntry
 	for _, entry := range entries {
+		if entry.Rerun {
+			key := dispatchEntryKey(entry)
+			if st.dispatched[key] {
+				continue
+			}
+			if st.dispatched == nil {
+				st.dispatched = make(map[string]bool)
+			}
+			st.dispatched[key] = true
+			rerunPending = append(rerunPending, swarmPendingEntry{entry: entry})
+			continue
+		}
 		key := strings.TrimSpace(entry.Prompt)
 		if st.dispatched[key] {
 			continue
@@ -1005,31 +1075,35 @@ func (d *swarmStreamDispatcher) settleRemaining(threadID, projectID, fullText st
 		pending = append(pending, swarmPendingEntry{entry: entry})
 	}
 	// 空块（[]）与全部已派发都无需补派；只有真的有条目没出去才可能触发上限回送。
-	if len(pending) == 0 {
+	if len(pending) == 0 && len(rerunPending) == 0 {
 		d.mu.Unlock()
 		return
 	}
-	if !d.beginRoundLocked(st, threadID) {
-		d.mu.Unlock()
-		d.reportBlockProblem(threadID, fmt.Sprintf("本轮委派块里的 %d 条没有派出：已达本次请求的 %d 轮派发上限，请汇总已有结果或自己完成剩余工作。", len(pending), st.limitHit))
-		return
-	}
-	// 同一回合的补派也不得越过单块条目上限：只派 cap-streamed 条，其余计入 overCap 等回合末回送。
-	if limit := d.entryCap(); limit > 0 {
-		allowedEntries := limit - st.streamed
-		if allowedEntries < 0 {
-			allowedEntries = 0
+	if len(pending) > 0 {
+		if !d.beginRoundLocked(st, threadID) {
+			d.mu.Unlock()
+			d.reportBlockProblem(threadID, fmt.Sprintf("本轮委派块里的 %d 条没有派出：已达本次请求的 %d 轮派发上限，请汇总已有结果或自己完成剩余工作。", len(pending), st.limitHit))
+			d.enqueue(threadID, projectID, rerunPending)
+			return
 		}
-		if len(pending) > allowedEntries {
-			st.overCap += len(pending) - allowedEntries
-			pending = pending[:allowedEntries]
+		// 同一回合的补派也不得越过单块条目上限：只派 cap-streamed 条，其余计入 overCap 等回合末回送。
+		if limit := d.entryCap(); limit > 0 {
+			allowedEntries := limit - st.streamed
+			if allowedEntries < 0 {
+				allowedEntries = 0
+			}
+			if len(pending) > allowedEntries {
+				st.overCap += len(pending) - allowedEntries
+				pending = pending[:allowedEntries]
+			}
 		}
+		for i := range pending {
+			pending[i].rec = d.rememberSentLocked(threadID, pending[i].entry, st)
+		}
+		st.settled += len(pending)
 	}
-	for i := range pending {
-		pending[i].rec = d.rememberSentLocked(threadID, pending[i].entry, st)
-	}
-	st.settled += len(pending)
 	d.mu.Unlock()
+	d.enqueue(threadID, projectID, rerunPending)
 	d.enqueue(threadID, projectID, pending)
 }
 
@@ -1127,8 +1201,10 @@ func (d *swarmStreamDispatcher) runQueue(q *swarmDispatchQueue) {
 
 // dispatchJob 派发单条条目，并把派发结果与提示回送主会话。
 func (d *swarmStreamDispatcher) dispatchJob(job swarmStreamJob) {
-	// 带 replaces 的条目先停掉被取代的在跑 bee，否则新旧两个 bee 会同时干活。
-	d.stopReplacedBee(job)
+	if !job.entry.Rerun {
+		// 带 replaces 的条目先停掉被取代的在跑 bee，否则新旧两个 bee 会同时干活。
+		d.stopReplacedBee(job)
+	}
 	bee, notices, err := d.dispatch(d.ctx, swarm.SingleEntryRequest{
 		LeadThreadID: job.leadThreadID,
 		ProjectID:    job.projectID,
@@ -1138,6 +1214,10 @@ func (d *swarmStreamDispatcher) dispatchJob(job swarmStreamJob) {
 	if err != nil {
 		// 派发失败就不该再占着去重名额，否则主代理重发同一条目会被误判成重复而跳过。
 		d.forgetSent(job.rec)
+		if job.entry.Rerun {
+			d.reportBlockProblem(job.leadThreadID, err.Error())
+			return
+		}
 		if errors.Is(err, swarm.ErrRequestTimeout) {
 			// 超时后派发一律被拒：告知主代理汇总现有结果，等用户发新消息后重新计时。
 			d.reportBlockProblem(job.leadThreadID, "本轮委派块里的条目没有派出："+err.Error()+"，计时从用户最新消息起算。请汇总已有结果；如需继续派发，请用户发送新消息。")

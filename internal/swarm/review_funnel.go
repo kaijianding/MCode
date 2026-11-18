@@ -519,6 +519,58 @@ func acceptanceDisputeReason(summary string) (string, bool) {
 	return "", false
 }
 
+// resetBeeForAnotherTurn 把 bee 的回合产出、合入与审查状态重置为「待重新收尾/续跑」，
+// 供发回续修与保留副本重跑验收共用（不含 AcceptanceReturns 与内存标记更新）。
+func resetBeeForAnotherTurn(b *Bee, now time.Time) {
+	b.Status = StatusRunning
+	b.FinishedAt = nil
+	b.LastProgressAt = now
+	b.ThinkingMinutes = 0
+	b.Summary = ""
+	b.Activity = ""
+	b.Reported = false
+	b.Delivered = false
+	b.PendingMerge = false
+	b.MergeWaitSince = nil
+	b.MergeError = ""
+	b.LandMessage = ""
+	b.LandedPatchPath = ""
+	b.LandedCommit = ""
+	b.Merged = false
+	b.ConflictFiles = nil
+	b.MergePatch = nil
+	b.ChangedFiles = nil
+	b.LinesAdded = 0
+	b.LinesDeleted = 0
+	b.DiscardedPaths = nil
+	b.ArchivedPatchPath = ""
+	b.ReviewState = ReviewNone
+	b.ReviewStage = ""
+	b.ReviewLayer = ""
+	b.ReviewReason = ""
+	b.ReviewConcerns = nil
+	b.ReviewThreadID = ""
+	b.ReviewPatchPath = ""
+	b.ReviewPatchSHA = ""
+	b.ReviewStartedAt = nil
+	b.ReviewQueuedAt = nil
+	b.ReviewFingerprint = ""
+	b.ReviewProvider = ""
+	b.ReviewModel = ""
+	b.ReviewEffort = ""
+	b.ReviewTokens = 0
+	b.ReviewTokensEstimated = false
+	b.ReviewAttempts = 0
+	b.ReviewApplyPending = false
+	b.AcceptanceStep = 0
+	b.AcceptanceStartedAt = nil
+	b.AutoMergeState = AutoMergeNone
+	b.AutoMergeSHA = ""
+	b.AutoMergeStage = ""
+	b.AutoMergeError = ""
+	b.Credibility = nil
+}
+
 // returnAcceptanceFailure 在首次验收失败时把失败详情发回原 bee 会话继续修复；不满足条件或发送失败返回 false。
 func (m *Manager) returnAcceptanceFailure(ctx context.Context, leadThreadID string, h Bee, patchSHA, detail string) bool {
 	if ctx.Err() != nil || h.ReadOnly || h.ThreadID == "" || h.AcceptanceReturns >= acceptanceReturnLimit {
@@ -540,53 +592,7 @@ func (m *Manager) returnAcceptanceFailure(ctx context.Context, leadThreadID stri
 	}
 	now := m.now()
 	if !m.funnelUpdate(leadThreadID, h.ThreadID, ReviewStageL0, patchSHA, func(b *Bee) {
-		b.Status = StatusRunning
-		b.FinishedAt = nil
-		b.LastProgressAt = now
-		b.ThinkingMinutes = 0
-		b.Summary = ""
-		b.Activity = ""
-		b.Reported = false
-		b.Delivered = false
-		b.PendingMerge = false
-		b.MergeWaitSince = nil
-		b.MergeError = ""
-		b.LandMessage = ""
-		b.LandedPatchPath = ""
-		b.LandedCommit = ""
-		b.Merged = false
-		b.ConflictFiles = nil
-		b.MergePatch = nil
-		b.ChangedFiles = nil
-		b.LinesAdded = 0
-		b.LinesDeleted = 0
-		b.DiscardedPaths = nil
-		b.ArchivedPatchPath = ""
-		b.ReviewState = ReviewNone
-		b.ReviewStage = ""
-		b.ReviewLayer = ""
-		b.ReviewReason = ""
-		b.ReviewConcerns = nil
-		b.ReviewThreadID = ""
-		b.ReviewPatchPath = ""
-		b.ReviewPatchSHA = ""
-		b.ReviewStartedAt = nil
-		b.ReviewQueuedAt = nil
-		b.ReviewFingerprint = ""
-		b.ReviewProvider = ""
-		b.ReviewModel = ""
-		b.ReviewEffort = ""
-		b.ReviewTokens = 0
-		b.ReviewTokensEstimated = false
-		b.ReviewAttempts = 0
-		b.ReviewApplyPending = false
-		b.AcceptanceStep = 0
-		b.AcceptanceStartedAt = nil
-		b.AutoMergeState = AutoMergeNone
-		b.AutoMergeSHA = ""
-		b.AutoMergeStage = ""
-		b.AutoMergeError = ""
-		b.Credibility = nil
+		resetBeeForAnotherTurn(b, now)
 		b.AcceptanceReturns++
 		delete(m.beeProgress, h.ThreadID)
 	}) {
