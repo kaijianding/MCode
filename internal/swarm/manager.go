@@ -51,6 +51,9 @@ const defaultDescribeTimeout = 30 * time.Second
 // Claude 主会话缓存为 1 小时，保活留 10 分钟余量。
 const leadCacheKeepaliveAfter = 50 * time.Minute
 
+// emptyNudgeLimit 是子代理未输出最终汇报时允许催促的最大次数。
+const emptyNudgeLimit = 3
+
 // IsNotice 判断文本是否为 mcode 下发的系统通知（含汇报），兼容旧前缀。
 func IsNotice(text string) bool {
 	return strings.HasPrefix(text, strings.TrimSpace(NoticePrefix)) || strings.HasPrefix(text, legacyNoticePrefix)
@@ -178,7 +181,7 @@ type Manager struct {
 	beeTimeout      time.Duration
 	queue           []queuedBee
 	retriedBees     map[string]int
-	emptyNudgedBees map[string]bool
+	emptyNudgedBees map[string]int
 	// retryingBees 记录用户手动「沿用改动续做」正在派发中的 bee 线程，
 	// 防止连点在同一份半成品上派出两个子会话；派发结束即清除。
 	retryingBees map[string]bool
@@ -650,19 +653,25 @@ func (m *Manager) setRetryCount(threadID string, count int) {
 	m.retriedBees[threadID] = count
 }
 
-func (m *Manager) hasEmptyNudge(threadID string) bool {
+func (m *Manager) emptyNudgeCount(threadID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.emptyNudgedBees[threadID]
 }
 
-func (m *Manager) setEmptyNudge(threadID string, v bool) {
+func (m *Manager) addEmptyNudge(threadID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.emptyNudgedBees == nil {
-		m.emptyNudgedBees = make(map[string]bool)
+		m.emptyNudgedBees = make(map[string]int)
 	}
-	m.emptyNudgedBees[threadID] = v
+	m.emptyNudgedBees[threadID]++
+}
+
+func (m *Manager) resetEmptyNudge(threadID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.emptyNudgedBees, threadID)
 }
 
 func (m *Manager) hasContinueNudge(threadID string) bool {
@@ -709,7 +718,7 @@ func NewManager(opts Options) *Manager {
 		mergeMus:           make(map[string]*sync.Mutex),
 		beeProgress:        make(map[string]progressSnapshot),
 		retriedBees:        make(map[string]int),
-		emptyNudgedBees:    make(map[string]bool),
+		emptyNudgedBees:    make(map[string]int),
 		acceptanceCancels:  make(map[string]context.CancelFunc),
 		continueNudgedBees: make(map[string]bool),
 		reactivateSeen:     make(map[string]int),
@@ -2224,7 +2233,7 @@ func (m *Manager) rerunAcceptance(ctx context.Context, leadThreadID string, d De
 	if !updated {
 		return "", fmt.Errorf("重跑验收失败：%s 状态已变化，请稍后重试", targetName)
 	}
-	m.setEmptyNudge(h.ThreadID, false)
+	m.resetEmptyNudge(h.ThreadID)
 	m.setContinueNudge(h.ThreadID, false)
 	m.persistLead(leadThreadID)
 	m.notifyChange(leadThreadID)
@@ -2849,8 +2858,8 @@ func (m *Manager) Tick(ctx context.Context) {
 		}
 
 		if strings.TrimSpace(st.LastAssistantText) == "" {
-			if !m.hasEmptyNudge(tgt.bee.ThreadID) {
-				m.setEmptyNudge(tgt.bee.ThreadID, true)
+			if m.emptyNudgeCount(tgt.bee.ThreadID) < emptyNudgeLimit {
+				m.addEmptyNudge(tgt.bee.ThreadID)
 				var sentErr error
 				if messenger, ok := m.opts.Driver.(kanban.SessionMessenger); ok {
 					sentErr = messenger.SendFollowUp(ctx, tgt.bee.ThreadID, "上一轮没有输出最终报告就结束了。如果是命令被拒，改用读文件工具或 grep 继续，不要重试同类命令；任务未完成就接着做，完成后输出最终报告。")
@@ -3148,7 +3157,7 @@ func (m *Manager) detectReactivatedBees(ctx context.Context) {
 		m.mu.Unlock()
 
 		// 让空汇报催促、失败重试与中断续接在这一轮重新生效。
-		m.setEmptyNudge(c.bee.ThreadID, false)
+		m.resetEmptyNudge(c.bee.ThreadID)
 		m.setContinueNudge(c.bee.ThreadID, false)
 		m.setRetryCount(c.bee.ThreadID, 0)
 		m.notifyChange(c.leadThreadID)
@@ -6570,7 +6579,7 @@ func (m *Manager) continueInterruptedBee(ctx context.Context, leadThreadID strin
 
 	m.setContinueNudge(old.ThreadID, true)
 	m.setRetryCount(old.ThreadID, 0)
-	m.setEmptyNudge(old.ThreadID, false)
+	m.resetEmptyNudge(old.ThreadID)
 	m.mu.Lock()
 	delete(m.beeProgress, old.ThreadID)
 	m.mu.Unlock()

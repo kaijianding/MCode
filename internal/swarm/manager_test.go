@@ -2216,7 +2216,7 @@ func TestManager_BeeParentThreadRelation(t *testing.T) {
 	}
 }
 
-// 验证 LastAssistantText 为空时先追问，仍为空则标记失败
+// 验证 LastAssistantText 为空时最多追问 emptyNudgeLimit 次，超限后仍为空则标记失败
 func TestManager_EmptyAssistantNudgeAndFallback(t *testing.T) {
 	t.Parallel()
 	runner, dir := initTestRepo(t)
@@ -2252,30 +2252,103 @@ func TestManager_EmptyAssistantNudgeAndFallback(t *testing.T) {
 		LastAssistantText: "",
 	})
 
-	// 第一次 Tick：应触发追问，保持 Running，不按完成处理
+	// 前 3 次 Tick：每次均应触发追问并保持 Running
+	for i := 1; i <= emptyNudgeLimit; i++ {
+		mgr.Tick(ctx)
+
+		driver.mu.Lock()
+		followUpCount := len(driver.followUps)
+		driver.mu.Unlock()
+		if followUpCount != i {
+			t.Fatalf("tick %d: expected %d followUps sent, got %d", i, i, followUpCount)
+		}
+
+		st := mgr.State(leadID)
+		if st.Bees[0].Status != StatusRunning {
+			t.Fatalf("tick %d: expected bee to remain StatusRunning after empty nudge, got %v", i, st.Bees[0].Status)
+		}
+	}
+
+	// 2. 第 4 次 Tick：达到催促上限后仍为空，应标记为 StatusFailed，Summary 为 '子代理未输出最终汇报'
+	mgr.Tick(ctx)
+
+	st2 := mgr.State(leadID)
+	if st2.Bees[0].Status != StatusFailed {
+		t.Fatalf("expected StatusFailed after exceeding empty nudge limit, got %v", st2.Bees[0].Status)
+	}
+	if st2.Bees[0].Summary != "子代理未输出最终汇报" {
+		t.Errorf("expected summary '子代理未输出最终汇报', got %q", st2.Bees[0].Summary)
+	}
+}
+
+// 验证同一 bee 连续 3 次空轮结束均收到催促且不失败，第 4 次空轮后标为 StatusFailed。
+func TestEmptyReportNudgedUpToLimit(t *testing.T) {
+	t.Parallel()
+	runner, dir := initTestRepo(t)
+	driver := newFakeDriver()
+
+	mgr := NewManager(Options{
+		Git:         runner,
+		Driver:      driver,
+		WorktreeDir: t.TempDir(),
+	})
+	mgr.Start()
+	defer mgr.Stop()
+
+	ctx := context.Background()
+	leadID := "lead-empty-nudge-limit-01"
+	bees, err := mgr.Dispatch(ctx, DispatchRequest{
+		LeadThreadID: leadID,
+		ProjectID:    "p1",
+		LeadWorkDir:  dir,
+		Bees: []BeeSpec{
+			{Name: "Bee-Empty-Limit", Task: "test empty limit", Prompt: "p"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+	thID := bees[0].ThreadID
+
+	driver.setSessionState(thID, kanban.SessionState{
+		Running:           false,
+		Failed:            false,
+		LastAssistantText: "",
+	})
+
+	for i := 1; i <= 3; i++ {
+		mgr.Tick(ctx)
+
+		driver.mu.Lock()
+		followUps := append([]fakeFollowUp(nil), driver.followUps...)
+		driver.mu.Unlock()
+		if len(followUps) != i {
+			t.Fatalf("第 %d 次空轮期望累计 %d 次催促，实际 %d", i, i, len(followUps))
+		}
+		if followUps[i-1].threadID != thID {
+			t.Fatalf("第 %d 次催促目标线程错误：got %q, want %q", i, followUps[i-1].threadID, thID)
+		}
+		if st := mgr.State(leadID).Bees[0].Status; st == StatusFailed {
+			t.Fatalf("第 %d 次空轮不应标记失败，实际状态 %v", i, st)
+		}
+	}
+
+	// 第 4 次空轮超过上限，不再追问并标记失败。
 	mgr.Tick(ctx)
 
 	driver.mu.Lock()
 	followUpCount := len(driver.followUps)
 	driver.mu.Unlock()
-	if followUpCount != 1 {
-		t.Fatalf("expected 1 followUp sent, got %d", followUpCount)
+	if followUpCount != 3 {
+		t.Fatalf("第 4 次空轮不应再发送催促，期望仍为 3 次，实际 %d", followUpCount)
 	}
 
-	st1 := mgr.State(leadID)
-	if st1.Bees[0].Status != StatusRunning {
-		t.Fatalf("expected bee to remain StatusRunning after first empty nudge, got %v", st1.Bees[0].Status)
+	bee := mgr.State(leadID).Bees[0]
+	if bee.Status != StatusFailed {
+		t.Fatalf("第 4 次空轮期望 StatusFailed，实际 %v", bee.Status)
 	}
-
-	// 2. 第二次 Tick：追问后仍为空，应标记为 StatusFailed，Summary 为 '子代理未输出最终汇报'
-	mgr.Tick(ctx)
-
-	st2 := mgr.State(leadID)
-	if st2.Bees[0].Status != StatusFailed {
-		t.Fatalf("expected StatusFailed after repeated empty response, got %v", st2.Bees[0].Status)
-	}
-	if st2.Bees[0].Summary != "子代理未输出最终汇报" {
-		t.Errorf("expected summary '子代理未输出最终汇报', got %q", st2.Bees[0].Summary)
+	if bee.Summary != "子代理未输出最终汇报" {
+		t.Errorf("期望 Summary 为 '子代理未输出最终汇报'，实际 %q", bee.Summary)
 	}
 }
 

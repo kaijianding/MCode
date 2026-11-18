@@ -601,7 +601,7 @@ func TestManager_ResumeInterrupted_ContinuesOriginalSession(t *testing.T) {
 			mgr.leads[leadID].bees[0].waitTickAt = staleStart
 			mgr.mu.Unlock()
 			mgr.setRetryCount(threadID, 1)
-			mgr.setEmptyNudge(threadID, true)
+			mgr.addEmptyNudge(threadID)
 
 			n, err := mgr.ResumeInterrupted(ctx, leadID)
 			if err != nil || n != 1 {
@@ -632,7 +632,7 @@ func TestManager_ResumeInterrupted_ContinuesOriginalSession(t *testing.T) {
 				!bee.StartedAt.Equal(now) || bee.WaitedFor != 0 || !bee.waitTickAt.IsZero() || bee.ThinkingMinutes != 0 || bee.Summary != tc.summary {
 				t.Fatalf("未清理中断前的生命周期状态：%+v", bee)
 			}
-			if !mgr.hasContinueNudge(threadID) || mgr.getRetryCount(threadID) != 0 || mgr.hasEmptyNudge(threadID) {
+			if !mgr.hasContinueNudge(threadID) || mgr.getRetryCount(threadID) != 0 || mgr.emptyNudgeCount(threadID) != 0 {
 				t.Fatal("续接应耗掉续接消息机会，重置新会话重试与空汇报催促机会")
 			}
 			mgr.mu.Lock()

@@ -598,7 +598,7 @@ func (m *Manager) returnAcceptanceFailure(ctx context.Context, leadThreadID stri
 	}) {
 		return false
 	}
-	m.setEmptyNudge(h.ThreadID, false)
+	m.resetEmptyNudge(h.ThreadID)
 	m.setContinueNudge(h.ThreadID, false)
 	m.persistLead(leadThreadID)
 	m.notifyChange(leadThreadID)
