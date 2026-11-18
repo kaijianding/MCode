@@ -17,8 +17,7 @@ import (
 
 // macOnlyLinks 是只在 macOS 上存在的宿主配置项，Windows 上没有共享意义。
 var macOnlyLinks = map[string]bool{
-	".zshrc":  true,
-	"Library": true,
+	".zshrc": true,
 }
 
 // accountDir 返回该隔离账号的根目录 <dataDir>/agy-accounts/<id>。
@@ -65,11 +64,10 @@ func (m *Manager) setupAccountLayout(id string) error {
 		".config",
 		".npmrc",
 		".zshrc",
-		"Library",
 	}
 
 	for _, rel := range symlinks {
-		// .zshrc、Library 是 macOS 专属路径，Windows 上跳过。
+		// .zshrc 是 macOS 专属路径，Windows 上跳过。
 		if goos == "windows" && macOnlyLinks[rel] {
 			continue
 		}
@@ -89,6 +87,61 @@ func (m *Manager) setupAccountLayout(id string) error {
 		// 共享宿主配置只是便利，失败不阻断账号创建；Windows 无权限建软链接时由 LinkOrCopy 退化。
 		if err := fsutil.LinkOrCopy(target, linkPath); err != nil {
 			log.Printf("agy accounts: 无法共享宿主配置 %s（%v），已跳过", rel, err)
+		}
+	}
+
+	return m.isolateLibrary(home)
+}
+
+// isolateLibrary 隔离 Library 目录：共享 Keychains 会让 agy 读宿主钥匙串里的凭据，而不是隔离目录的 token 文件。
+func (m *Manager) isolateLibrary(home string) error {
+	if goos == "windows" {
+		return nil
+	}
+
+	libPath := filepath.Join(home, "Library")
+	if info, err := os.Lstat(libPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(libPath); err != nil {
+				return fmt.Errorf("remove Library symlink: %w", err)
+			}
+		} else if !info.IsDir() {
+			return fmt.Errorf("Library exists and is not a directory or symlink: %s", libPath)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat Library: %w", err)
+	}
+
+	if err := os.MkdirAll(libPath, dirPerm0700); err != nil {
+		return fmt.Errorf("create Library dir: %w", err)
+	}
+
+	keychainsPath := filepath.Join(libPath, "Keychains")
+	if info, err := os.Lstat(keychainsPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(keychainsPath); err != nil {
+			return fmt.Errorf("remove Keychains symlink: %w", err)
+		}
+	}
+
+	hostLib := filepath.Join(m.opts.HostHome, "Library")
+	entries, err := os.ReadDir(hostLib)
+	if err != nil {
+		log.Printf("agy accounts: 无法读取宿主 Library 目录（%v），已跳过", err)
+		return nil
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "Keychains" {
+			continue
+		}
+		linkPath := filepath.Join(libPath, name)
+		if _, err := os.Lstat(linkPath); err == nil {
+			continue
+		}
+		target := filepath.Join(hostLib, name)
+		if err := os.Symlink(target, linkPath); err != nil {
+			log.Printf("agy accounts: 无法共享宿主 Library 条目 %s（%v），已跳过", name, err)
 		}
 	}
 

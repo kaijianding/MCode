@@ -206,6 +206,9 @@ func (m *Manager) buildRuntimeEnv(accountID string) (string, []string, []string,
 	}
 
 	homeDir := m.accountHomeDir(accountID)
+	if err := m.isolateLibrary(homeDir); err != nil {
+		return "", nil, nil, err
+	}
 	env, args := isolatedAgyEnvArgs(homeDir)
 	return accountID, env, args, nil
 }
