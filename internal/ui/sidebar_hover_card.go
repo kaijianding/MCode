@@ -48,6 +48,16 @@ type sidebarHoverState struct {
 
 var sidebarHover sidebarHoverState
 
+type sidebarMarqueeKey struct {
+	ctx *ui.Context
+	key string
+}
+
+var (
+	sidebarMarqueeMu    sync.Mutex
+	sidebarMarqueeStart = make(map[sidebarMarqueeKey]time.Time)
+)
+
 // resetSidebarHoverStateLocked 清空状态，调用方需持有 mu。
 func (st *sidebarHoverState) resetLocked(ctx *ui.Context) {
 	st.ctx = ctx
@@ -57,11 +67,14 @@ func (st *sidebarHoverState) resetLocked(ctx *ui.Context) {
 	st.leftAt = time.Time{}
 }
 
-// resetSidebarHoverCardForTest 清空悬停卡的包级状态，避免测试之间串味。
+// resetSidebarHoverCardForTest 清空悬停卡和跑马灯的包级状态，避免测试之间串味。
 func resetSidebarHoverCardForTest() {
 	sidebarHover.mu.Lock()
 	sidebarHover.resetLocked(nil)
 	sidebarHover.mu.Unlock()
+	sidebarMarqueeMu.Lock()
+	clear(sidebarMarqueeStart)
+	sidebarMarqueeMu.Unlock()
 }
 
 // observe 推进悬停状态机：返回本帧是否应显示卡片，以及需要等多久再请求下一帧。
@@ -268,10 +281,43 @@ func sidebarMarqueeActive(natural, avail, reserved float32, hovered bool) bool {
 	return natural-(avail-reserved) > sidebarMarqueeMinOverflow
 }
 
+// sidebarMarqueePhase 按悬停已持续时间与单程时长算跑马灯往返相位 [0, 1]：
+// 起始延迟 sidebarMarqueeDelay 内停在 0，之后以 dur 为单程在 0..1 之间往返。
+func sidebarMarqueePhase(elapsed, dur time.Duration) float32 {
+	if elapsed <= sidebarMarqueeDelay || dur <= 0 {
+		return 0
+	}
+	active := elapsed - sidebarMarqueeDelay
+	period := 2 * dur
+	pos := active % period
+	if pos <= dur {
+		return float32(pos) / float32(dur)
+	}
+	return float32(period-pos) / float32(dur)
+}
+
+func sidebarMarqueeEnsureStart(ctx *ui.Context, key string, now time.Time) time.Time {
+	mk := sidebarMarqueeKey{ctx: ctx, key: key}
+	sidebarMarqueeMu.Lock()
+	defer sidebarMarqueeMu.Unlock()
+	if start, ok := sidebarMarqueeStart[mk]; ok {
+		return start
+	}
+	sidebarMarqueeStart[mk] = now
+	return now
+}
+
+func sidebarMarqueeClear(ctx *ui.Context, key string) {
+	mk := sidebarMarqueeKey{ctx: ctx, key: key}
+	sidebarMarqueeMu.Lock()
+	delete(sidebarMarqueeStart, mk)
+	sidebarMarqueeMu.Unlock()
+}
+
 // renderSidebarScrollingTitle 渲染会话标题：外层 ClipX 负责裁掉溢出部分，
 // 内层文本保持自然宽度（Shrink(0)），因此可以按 LayoutBounds 量出溢出量。
-// 只有紧凑单行模式才调用；悬停且溢出超过 8px 时挂 Keyframes 横向滚动，
-// 鼠标离开后不再挂动画，标题立即回位（避免常驻无限动画持续重绘）。
+// 只有紧凑单行模式才调用；悬停且溢出超过 8px 时在 Draw 回调里按 p.Now() 驱动横向往返滚动，
+// 只重画该区域而不重建整棵组件树；鼠标离开或减少动效时保持静态 Ellipsis 显示。
 //
 // 返回值是文本元素本身，调用方仍可继续设置字号与颜色。
 func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool, reserved float32) ui.Element {
@@ -286,24 +332,42 @@ func renderSidebarScrollingTitle(c *ui.Context, key, title string, hovered bool,
 		}
 	})
 	if !hovered || reduceMotion(c) {
+		sidebarMarqueeClear(c, key)
 		return text
 	}
 
 	natural := text.LayoutBounds().W
 	avail := clip.LayoutBounds().W
 	if !sidebarMarqueeActive(natural, avail, reserved, hovered) {
+		sidebarMarqueeClear(c, key)
 		return text
 	}
 	over := natural - (avail - reserved)
+	dur := sidebarMarqueeDuration(over)
+	startAt := sidebarMarqueeEnsureStart(c, key, c.Now())
 
-	k := text.Keyframes("marquee", []ui.Keyframe{
-		{Value: 0},
-		{At: sidebarMarqueeDuration(over), Value: 1},
-	}, ui.KeyframeOptions{
-		Repeat:    ui.RepeatForever,
-		Alternate: true,
-		Delay:     sidebarMarqueeDelay,
+	// 隐藏原 Text 的静态绘制但保留其布局尺寸与 Tester.Find 标签；
+	// 跑马灯在 clip 的 Draw 回调里按 p.Now() 自绘，只重画该区域而不重建组件树。
+	text.Opacity(0)
+
+	var family string
+	if t := c.Theme(); t != nil {
+		family = t.Font
+	}
+	font := ui.Font{
+		Family: family,
+		Size:   sidebarFont(FontSizeThreadTitle),
+	}
+	color := ThemePrimaryText(c).Alpha(0.92)
+	layout := ui.ShapeText(title, font, 0)
+	_, textH := layout.Size()
+
+	clip.Draw(func(p *ui.Painter, r ui.Rect) {
+		k := sidebarMarqueePhase(p.Now().Sub(startAt), dur)
+		p.Clip(r, 0, func() {
+			p.TextLayout(layout, r.X-over*k, r.Y+(r.H-textH)/2, color)
+		})
+		p.AnimationFrameRate(30)
 	})
-	text.Translate(-over*k, 0)
 	return text
 }

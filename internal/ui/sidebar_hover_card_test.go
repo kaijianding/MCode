@@ -459,3 +459,123 @@ func TestSidebarRemoveProjectDialogCallbacks(t *testing.T) {
 	}
 	waitFor(t, tt, func() bool { return !tt.HasText("mcode-test") })
 }
+
+// TestSidebarMarqueeDrawDrivenAndStopsWhenIdle 验证跑马灯改为 Draw 驱动：
+// 1. 悬停且溢出时不挂组件级 Keyframes，推进时钟只重绘不重建组件树，并产生像素滚动；
+// 2. 不悬停或开启减少动效时，推进时钟后不再请求下一帧；
+// 3. sidebarMarqueePhase 保留起始延迟与往返相位。
+func TestSidebarMarqueeDrawDrivenAndStopsWhenIdle(t *testing.T) {
+	longTitle := strings.Repeat("侧栏超长跑马灯标题", 5)
+
+	t.Run("悬停且溢出时不挂Keyframes且不重建组件树", func(t *testing.T) {
+		resetSidebarHoverCardForTest()
+		setAppReduceMotion(t, false)
+		builds := 0
+		settled := false
+		tt := ui.NewTester(func(c *ui.Context) {
+			builds++
+			ui.Row(c).Width(100).Children(func() {
+				el := renderSidebarScrollingTitle(c, "marquee-test", longTitle, true, 0)
+				settled = el.Settled("marquee")
+			})
+		}, 120, 40)
+		// 第 2 帧拿到布局宽高并挂载 Draw 跑马灯。
+		tt.Frame()
+		tt.Frame()
+		if !settled {
+			t.Fatal("悬停且溢出时不应再挂组件级 Keyframes(\"marquee\")")
+		}
+		if !tt.FramePending() {
+			t.Fatal("悬停且溢出时应由 Draw 请求重画帧")
+		}
+
+		beforeBuilds := builds
+		before := cloneImage(tt.Image())
+		tt.Advance(sidebarMarqueeDelay + 800*time.Millisecond)
+		if builds != beforeBuilds {
+			t.Fatalf("跑马灯滚动期间不应重建组件树: builds %d -> %d", beforeBuilds, builds)
+		}
+		if bytes.Equal(before.Pix, tt.Image().Pix) {
+			t.Fatal("越过起始延迟后跑马灯像素应发生变化")
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		hovered bool
+		reduced bool
+	}{
+		{"未悬停", false, false},
+		{"减少动效", true, true},
+	} {
+		t.Run(tc.name+"推进时钟后不再请求下一帧", func(t *testing.T) {
+			resetSidebarHoverCardForTest()
+			setAppReduceMotion(t, tc.reduced)
+			builds := 0
+			tt := ui.NewTester(func(c *ui.Context) {
+				builds++
+				ui.Row(c).Width(100).Children(func() {
+					renderSidebarScrollingTitle(c, "marquee-idle", longTitle, tc.hovered, 0)
+				})
+			}, 120, 40)
+			tt.Frame()
+			tt.Frame()
+			beforeBuilds := builds
+			before := cloneImage(tt.Image())
+			tt.Advance(2 * time.Second)
+			if tt.FramePending() {
+				t.Fatalf("%s 推进时钟后不应再请求下一帧", tc.name)
+			}
+			if builds != beforeBuilds {
+				t.Fatalf("%s 推进时钟不应重建组件树: builds %d -> %d", tc.name, beforeBuilds, builds)
+			}
+			if !bytes.Equal(before.Pix, tt.Image().Pix) {
+				t.Fatalf("%s 推进时钟后画面不应变化", tc.name)
+			}
+		})
+	}
+
+	t.Run("离开悬停后停止请求下一帧", func(t *testing.T) {
+		resetSidebarHoverCardForTest()
+		setAppReduceMotion(t, false)
+		hovered := true
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Row(c).Width(100).Children(func() {
+				renderSidebarScrollingTitle(c, "marquee-leave", longTitle, hovered, 0)
+			})
+		}, 120, 40)
+		tt.Frame()
+		tt.Frame()
+		if !tt.FramePending() {
+			t.Fatal("悬停溢出标题应请求跑马灯帧")
+		}
+		hovered = false
+		tt.Frame()
+		tt.Advance(2 * time.Second)
+		if tt.FramePending() {
+			t.Fatal("离开悬停并推进时钟后不应再请求下一帧")
+		}
+	})
+
+	t.Run("往返相位与起始延迟", func(t *testing.T) {
+		dur := 4 * time.Second
+		if got := sidebarMarqueePhase(0, dur); got != 0 {
+			t.Fatalf("t=0: got %v, want 0", got)
+		}
+		if got := sidebarMarqueePhase(sidebarMarqueeDelay, dur); got != 0 {
+			t.Fatalf("t=delay: got %v, want 0", got)
+		}
+		if got := sidebarMarqueePhase(sidebarMarqueeDelay+dur/2, dur); got != 0.5 {
+			t.Fatalf("t=delay+dur/2: got %v, want 0.5", got)
+		}
+		if got := sidebarMarqueePhase(sidebarMarqueeDelay+dur, dur); got != 1 {
+			t.Fatalf("t=delay+dur: got %v, want 1", got)
+		}
+		if got := sidebarMarqueePhase(sidebarMarqueeDelay+dur+dur/2, dur); got != 0.5 {
+			t.Fatalf("t=delay+1.5*dur: got %v, want 0.5", got)
+		}
+		if got := sidebarMarqueePhase(sidebarMarqueeDelay+2*dur, dur); got != 0 {
+			t.Fatalf("t=delay+2*dur: got %v, want 0", got)
+		}
+	})
+}

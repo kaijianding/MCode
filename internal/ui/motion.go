@@ -44,7 +44,7 @@ var motionEaseEmphasis = ui.CubicBezier(0.2, 0.9, 0.1, 1)
 var appReduceMotion atomic.Bool
 
 func reduceMotion(c *ui.Context) bool {
-	// 系统偏好会覆盖应用开关，Windows 远程桌面或虚拟机常默认关闭动画。
+	// 减少动效只看应用内开关，有意不读系统偏好。
 	return appReduceMotion.Load()
 }
 
