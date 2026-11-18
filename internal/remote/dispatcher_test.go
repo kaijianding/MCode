@@ -78,24 +78,24 @@ func (a *fakeAuth) RenameDevice(deviceID, name string) error {
 }
 
 type fakeBackend struct {
-	capabilitiesFunc   func(ctx context.Context) (wire.Capabilities, error)
-	kanbanBoardFunc    func(ctx context.Context) (wire.KanbanBoard, error)
-	listProjectsFunc   func(ctx context.Context) (wire.ProjectList, error)
-	listThreadsFunc    func(ctx context.Context, params wire.ThreadListParams) (wire.ThreadList, error)
-	getThreadFunc      func(ctx context.Context, threadID string) (wire.ThreadSummary, error)
-	threadHistoryFunc  func(ctx context.Context, params wire.HistoryParams) (wire.HistoryPage, error)
-	subscribeFunc      func(ctx context.Context, c Conn, threadID string) (wire.SubscribeResult, error)
-	unsubscribeFunc    func(ctx context.Context, c Conn, threadID string) error
-	sendMessageFunc    func(ctx context.Context, params wire.SendMessageParams) (wire.SendMessageResult, error)
-	interruptFunc      func(ctx context.Context, params wire.InterruptParams) (wire.InterruptResult, error)
+	capabilitiesFunc        func(ctx context.Context) (wire.Capabilities, error)
+	kanbanBoardFunc         func(ctx context.Context) (wire.KanbanBoard, error)
+	listProjectsFunc        func(ctx context.Context) (wire.ProjectList, error)
+	listThreadsFunc         func(ctx context.Context, params wire.ThreadListParams) (wire.ThreadList, error)
+	getThreadFunc           func(ctx context.Context, threadID string) (wire.ThreadSummary, error)
+	threadHistoryFunc       func(ctx context.Context, params wire.HistoryParams) (wire.HistoryPage, error)
+	subscribeFunc           func(ctx context.Context, c Conn, threadID string) (wire.SubscribeResult, error)
+	unsubscribeFunc         func(ctx context.Context, c Conn, threadID string) error
+	sendMessageFunc         func(ctx context.Context, params wire.SendMessageParams) (wire.SendMessageResult, error)
+	interruptFunc           func(ctx context.Context, params wire.InterruptParams) (wire.InterruptResult, error)
 	createThreadFunc        func(ctx context.Context, params wire.ThreadCreateParams) (wire.ThreadCreateResult, error)
 	updateThreadFunc        func(ctx context.Context, params wire.ThreadUpdateParams) (wire.ThreadUpdateResult, error)
 	moveThreadToProjectFunc func(ctx context.Context, params wire.ThreadsMoveToProjectParams) (wire.ThreadSummary, error)
 	actionStatusFunc        func(ctx context.Context, actionID string) (wire.ActionStatusResult, error)
-	listRequestsFunc   func(ctx context.Context, threadID string) (wire.RequestsListResult, error)
-	respondRequestFunc func(ctx context.Context, params wire.RequestsRespondParams) (wire.RequestsRespondResult, error)
-	listProvidersFunc  func(ctx context.Context) (wire.ProvidersListResult, error)
-	removeConnFunc     func(c Conn)
+	listRequestsFunc        func(ctx context.Context, threadID string) (wire.RequestsListResult, error)
+	respondRequestFunc      func(ctx context.Context, params wire.RequestsRespondParams) (wire.RequestsRespondResult, error)
+	listProvidersFunc       func(ctx context.Context) (wire.ProvidersListResult, error)
+	removeConnFunc          func(c Conn)
 }
 
 func (b *fakeBackend) Capabilities(ctx context.Context) (wire.Capabilities, error) {

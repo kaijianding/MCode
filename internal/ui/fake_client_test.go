@@ -287,9 +287,9 @@ type FakeClient struct {
 	// interruptAlreadyStopped 让 FakeClient.Interrupt 模拟后端返回 already_stopped。
 	interruptAlreadyStopped bool
 	// sendDelegated 让 FakeClient.Send/SendWithAttachments 模拟消息被交给子线程。
-	sendDelegated bool
-	sendErr       error
-	deleteCalls   []string
+	sendDelegated       bool
+	sendErr             error
+	deleteCalls         []string
 	addProjectCalls     []string
 	setRuntimeModeCalls []setRuntimeModeCall
 	SetAgentCalls       []SetAgentCall

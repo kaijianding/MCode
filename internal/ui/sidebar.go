@@ -2439,7 +2439,7 @@ func renderMoveToProjectModal(c *ui.Context, s *chatState) {
 			Children(func() {
 				for _, p := range projects {
 					project := p
-					item := ui.ButtonBase(c.Key("modal-move-to-project-item-" + project.ID)).
+					item := ui.ButtonBase(c.Key("modal-move-to-project-item-"+project.ID)).
 						Label(project.Name).
 						Padding(Space2, Space3).
 						Radius(RadiusSM).

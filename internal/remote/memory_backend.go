@@ -183,16 +183,16 @@ type memoryThread struct {
 		valid           bool
 	}
 
-	phase         runtimePhase
-	historyOp     chan struct{}
-	sessionEpoch  int
-	watchdogStop  func() bool
-	idleWaiters   []chan struct{}
-	takingBack    bool
-	nextTurnIndex   int
-	needsHandoff    bool
+	phase            runtimePhase
+	historyOp        chan struct{}
+	sessionEpoch     int
+	watchdogStop     func() bool
+	idleWaiters      []chan struct{}
+	takingBack       bool
+	nextTurnIndex    int
+	needsHandoff     bool
 	reinjectGuidance bool
-	composeEdit   *queueComposeEdit
+	composeEdit      *queueComposeEdit
 	// pendingFollowUpEvents 暂存本次队列变更要写入的审计事件；commitQueueChange 取走后清空。
 	// 只在持有 b.mu 期间读写。
 	pendingFollowUpEvents []store.FollowUpEvent
