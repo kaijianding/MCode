@@ -636,6 +636,11 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				summary = toolName
 			}
 
+			// 命令类工具调用：执行类 kind、agy 的命令输入或常见 shell 工具名。
+			isCommandCall := p.ToolCall.Kind == "execute" ||
+				(h.opts.Agent == AgentAgy && p.ToolCall.Kind == "" && agyCommand(input) != "") ||
+				toolName == "bash" || toolName == "shell_command" || toolName == "run_command"
+
 			// Droid 的计划退出（Approve Spec / ExitSpecMode）单独走计划类审批。
 			optionIDs := make([]string, 0, len(p.Options))
 			optionNames := make([]string, 0, len(p.Options))
@@ -658,6 +663,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 					ToolName: toolName,
 					Input:    input,
 					Summary:  summary,
+				}
+				if isCommandCall {
+					approveReq.Kind = harness.RequestKindCommand
 				}
 				if planExit {
 					// 计划正文随计划类请求带给前端（planCompleted 事件）。
@@ -688,7 +696,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 					} else {
 						command, _ = values["command"].(string)
 					}
-					if p.ToolCall.Kind == "execute" || (h.opts.Agent == AgentAgy && p.ToolCall.Kind == "" && command != "") || name == "bash" || name == "shell_command" || name == "run_command" {
+					if isCommandCall {
 						name, arg = "bash", command
 					} else if p.ToolCall.Kind == "edit" {
 						name = "edit_file"

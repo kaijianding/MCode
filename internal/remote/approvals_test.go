@@ -1634,6 +1634,92 @@ func TestApprovals_ReadOnlyHelperAllowsSafeReadOnlyCommand(t *testing.T) {
 	}
 }
 
+// TestReadOnlyHelperAllowsAgyRunCommand 覆盖 agy 的 run_command：命令写在 CommandLine 字段里，
+// 只读档 helper 仍应按命令类请求识别并放行只读命令、拒绝写命令。
+func TestReadOnlyHelperAllowsAgyRunCommand(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	ctx := context.Background()
+	threadID := "00000000-0000-0000-0000-0000000000a1"
+	backend.AddThread(wire.ThreadSummary{
+		ID:          threadID,
+		Title:       "Agy Read-only Thread",
+		RuntimeMode: "readonly",
+	}, nil)
+	backend.SetThreadRelation(threadID, "00000000-0000-0000-0000-000000000001", true)
+
+	var (
+		readDecision  harness.Decision
+		readErr       error
+		writeDecision harness.Decision
+		writeErr      error
+	)
+
+	doneCh := make(chan struct{})
+	mock := &mockHarness{
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			defer close(doneCh)
+			readDecision, readErr = turn.Approver.Approve(ctx, harness.ApprovalRequest{
+				Kind:     harness.RequestKindCommand,
+				ToolName: "run_command",
+				Input:    json.RawMessage(`{"CommandLine":"git log -n 10 --oneline"}`),
+			})
+			writeDecision, writeErr = turn.Approver.Approve(ctx, harness.ApprovalRequest{
+				Kind:     harness.RequestKindCommand,
+				ToolName: "run_command",
+				Input:    json.RawMessage(`{"CommandLine":"rm -rf x"}`),
+			})
+			return nil
+		},
+	}
+	backend.SetHarness(mock, "/workspace", harness.ModeAgent)
+
+	conn := newMockStreamConn()
+	var requestNotified bool
+	conn.notifyFn = func(method string, params any) error {
+		if method == "requests.changed" {
+			requestNotified = true
+		}
+		return nil
+	}
+	if _, err := backend.Subscribe(ctx, conn, threadID); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "执行任务",
+		ActionID: "00000000-0000-0000-0000-0000000000a2",
+	}); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn execution timed out")
+	}
+
+	if readErr != nil {
+		t.Fatalf("只读命令审批不应返回错误: %v", readErr)
+	}
+	if readDecision != harness.DecisionAllow {
+		t.Errorf("git log 应放行，得到 %v", readDecision)
+	}
+	if writeErr != nil {
+		t.Fatalf("写命令审批不应返回错误: %v", writeErr)
+	}
+	if writeDecision != harness.DecisionDeny {
+		t.Errorf("rm -rf x 应被拒绝，得到 %v", writeDecision)
+	}
+	if requestNotified {
+		t.Error("只读档放行/拒绝都不应向前端推送 requests.changed")
+	}
+}
+
 // TestApprovals_HelperThreadAutoApprovesUnattended 覆盖无人值守的 Swarm bee：
 // 非敏感审批（命令、文件改动、计划）自动放行，敏感操作自动拒绝，提问得到固定答复，
 // 全程不产生前端待处理请求。

@@ -791,6 +791,22 @@ func runFakeACPFeatures(mode string) {
 				}})
 				read()
 			}
+			if mode == "feature_command_kind" {
+				calls := []map[string]any{
+					{"toolCallId": "kind-execute", "name": "execute", "kind": "execute", "rawInput": map[string]any{"command": "ls"}},
+					{"toolCallId": "kind-agy-command", "name": "run_command", "rawInput": map[string]any{"CommandLine": "git log -n 10 --oneline"}},
+					{"toolCallId": "kind-edit", "name": "edit_file", "kind": "edit", "rawInput": map[string]any{"path": "a.txt"}},
+				}
+				for i, call := range calls {
+					write(map[string]any{"jsonrpc": "2.0", "id": 9110 + i, "method": "session/request_permission", "params": map[string]any{
+						"toolCall": call,
+						"options":  []any{map[string]any{"optionId": "allow", "kind": "allow_once"}, map[string]any{"optionId": "deny", "kind": "reject_once"}},
+					}})
+					if read() == nil {
+						return
+					}
+				}
+			}
 			if strings.HasPrefix(mode, "feature_tool_") {
 				notify := func(update map[string]any) {
 					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
@@ -1084,6 +1100,43 @@ func TestAgyNativeCommandField(t *testing.T) {
 	outcome, _ := result["outcome"].(map[string]any)
 	if outcome["optionId"] != "allow" {
 		t.Fatalf("optionId = %v", outcome["optionId"])
+	}
+}
+
+// recordingApprover 记录每次审批请求并按 Allow 答复。
+type recordingApprover struct {
+	mu   sync.Mutex
+	reqs []harness.ApprovalRequest
+}
+
+func (a *recordingApprover) Approve(_ context.Context, req harness.ApprovalRequest) (harness.Decision, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.reqs = append(a.reqs, req)
+	return harness.DecisionAllow, nil
+}
+
+// TestRequestPermissionMarksExecuteAsCommand 覆盖 session/request_permission 的请求种类：
+// 执行类 kind 与 agy 的 run_command 标为命令类，编辑类不标。
+func TestRequestPermissionMarksExecuteAsCommand(t *testing.T) {
+	approver := &recordingApprover{}
+	if _, _, err := runACPFeature(t, "feature_command_kind", AgentAgy, harness.Turn{Mode: harness.ModeSupervised, Approver: approver}); err != nil {
+		t.Fatal(err)
+	}
+
+	approver.mu.Lock()
+	defer approver.mu.Unlock()
+	if len(approver.reqs) != 3 {
+		t.Fatalf("got %d approval requests, want 3", len(approver.reqs))
+	}
+	if got := approver.reqs[0].Kind; got != harness.RequestKindCommand {
+		t.Errorf("execute 调用应标为命令类，得到 %q", got)
+	}
+	if got := approver.reqs[1]; got.ToolName != "run_command" || got.Kind != harness.RequestKindCommand {
+		t.Errorf("agy run_command 应标为命令类，得到 toolName=%q kind=%q", got.ToolName, got.Kind)
+	}
+	if got := approver.reqs[2].Kind; got == harness.RequestKindCommand {
+		t.Errorf("编辑类调用不应标为命令类，得到 %q", got)
 	}
 }
 

@@ -692,9 +692,12 @@ func isSafeReadOnlyCommand(cmd string) bool {
 }
 
 // approvalCommand 取出命令类请求的真实命令文本：优先输入里的 command 字段，
-// 缺失时退回 Summary（个别 provider 只把命令写进摘要）。
+// 其次 agy 的 CommandLine 字段，缺失时退回 Summary（个别 provider 只把命令写进摘要）。
 func approvalCommand(req harness.ApprovalRequest) string {
 	if cmd := strings.TrimSpace(inputField(req.Input, "command")); cmd != "" {
+		return cmd
+	}
+	if cmd := strings.TrimSpace(inputField(req.Input, "CommandLine")); cmd != "" {
 		return cmd
 	}
 	return strings.TrimSpace(req.Summary)
