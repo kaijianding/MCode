@@ -225,7 +225,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				if !hasOpen {
 					open = defaultOpenAgent != "" && prov.ID == defaultOpenAgent
 				}
-				ui.Column(c.Key(p.KeyPrefix + "agent-group-wrap-" + prov.ID)).
+				ui.Column(c.Key(p.KeyPrefix+"agent-group-wrap-"+prov.ID)).
 					Gap(Space0).
 					Padding(Space2, 0, 0, 0).
 					FillWidth().
@@ -296,7 +296,7 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, prov ProviderInfo, 
 			Gap(Space2).
 			FillWidth().
 			Children(func() {
-				ui.Box(c.Key(key + "-icon-slot")).
+				ui.Box(c.Key(key+"-icon-slot")).
 					Size(IconSM, IconSM).
 					Center().
 					Shrink(0).
@@ -353,7 +353,7 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 		})
 	}
 	btn.Children(func() {
-		ui.Row(c.Key(p.KeyPrefix+"follow-lead-row-content")).
+		ui.Row(c.Key(p.KeyPrefix + "follow-lead-row-content")).
 			AlignItems(ui.Center).
 			Gap(Space2).
 			FillWidth().
@@ -509,7 +509,7 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 			Gap(Space2).
 			FillWidth().
 			Children(func() {
-				ui.Box(c.Key(rowKey + "-icon-slot")).
+				ui.Box(c.Key(rowKey+"-icon-slot")).
 					Size(IconSM, IconSM).
 					Center().
 					Shrink(0).
