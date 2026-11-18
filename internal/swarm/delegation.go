@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Roster 定义编排子代理的标准名字轮转表（共 25 位）。
@@ -224,6 +226,334 @@ func parseAcceptance(raw any) []string {
 		}
 	}
 	return commands
+}
+
+const (
+	acceptanceErrGrepQuiet = "不要用 grep -q，它会吞掉失败输出"
+	acceptanceErrTimeout   = "macOS 没有 timeout 命令，用工具自己的超时参数（如 go test -timeout）"
+	acceptanceErrGoTestRun = "go test 要用 -run 限定到本次改动的测试；整包检查由项目检查和主代理最后的完整检查负责"
+)
+
+// AcceptanceRejection 检查委派条目的验收命令是否合规；有问题时返回给主代理的拒绝提示，没问题返回空串。
+func AcceptanceRejection(d Delegation) string {
+	for _, cmd := range d.Acceptance {
+		if reason := acceptanceProblem(cmd); reason != "" {
+			return fmt.Sprintf("条目「%s」未启动：验收命令 `%s` %s，改正后重新派发", acceptanceEntryLabel(d), cmd, reason)
+		}
+	}
+	return ""
+}
+
+func acceptanceEntryLabel(d Delegation) string {
+	label := strings.TrimSpace(d.Task)
+	if label == "" {
+		return singleLinePrompt(d.Prompt, 30)
+	}
+	return singleLinePrompt(label, 30)
+}
+
+// acceptanceProblem 派发前检查单条验收命令：只查 grep -q/--quiet/--silent、命令段以 timeout/gtimeout 开头、
+// 以及 go test 缺少 -run 三类问题，没问题返回空串。
+func acceptanceProblem(command string) string {
+	return inspectAcceptanceCommand(command, 0)
+}
+
+func inspectAcceptanceCommand(command string, depth int) string {
+	if depth > 3 {
+		return ""
+	}
+	for _, seg := range splitShellSegments(command) {
+		trimmed := strings.TrimSpace(seg)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "timeout ") || strings.HasPrefix(trimmed, "gtimeout ") || trimmed == "timeout" || trimmed == "gtimeout" {
+			return acceptanceErrTimeout
+		}
+		words := splitShellWords(trimmed)
+		if len(words) == 0 {
+			continue
+		}
+		cmdIdx := shellCommandIndex(words)
+		if cmdIdx >= len(words) {
+			continue
+		}
+		base := path.Base(words[cmdIdx])
+		if base == "timeout" || base == "gtimeout" {
+			return acceptanceErrTimeout
+		}
+		if base == "grep" || base == "egrep" || base == "fgrep" {
+			if grepHasQuietFlag(words[cmdIdx+1:]) {
+				return acceptanceErrGrepQuiet
+			}
+		}
+		if base == "go" && cmdIdx+1 < len(words) && words[cmdIdx+1] == "test" {
+			if !goTestHasRunFlag(words[cmdIdx+2:]) {
+				return acceptanceErrGoTestRun
+			}
+		}
+		if base == "sh" || base == "bash" {
+			if script, ok := shellDashCScript(words[cmdIdx+1:]); ok {
+				if reason := inspectAcceptanceCommand(script, depth+1); reason != "" {
+					return reason
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// commandUsesGoTest 判断验收命令是否在任意命令段中调用了 go test。
+func commandUsesGoTest(command string) bool {
+	return inspectCommandUsesGoTest(command, 0)
+}
+
+func inspectCommandUsesGoTest(command string, depth int) bool {
+	if depth > 3 {
+		return false
+	}
+	for _, seg := range splitShellSegments(command) {
+		words := splitShellWords(seg)
+		if len(words) == 0 {
+			continue
+		}
+		cmdIdx := shellCommandIndex(words)
+		if cmdIdx >= len(words) {
+			continue
+		}
+		base := path.Base(words[cmdIdx])
+		if base == "go" && cmdIdx+1 < len(words) && words[cmdIdx+1] == "test" {
+			return true
+		}
+		if base == "sh" || base == "bash" {
+			if script, ok := shellDashCScript(words[cmdIdx+1:]); ok {
+				if inspectCommandUsesGoTest(script, depth+1) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func shellCommandIndex(words []string) int {
+	i := 0
+	for i < len(words) {
+		w := words[i]
+		if w == "!" || w == "{" || w == "(" || isShellEnvAssign(w) {
+			i++
+			continue
+		}
+		break
+	}
+	return i
+}
+
+func isShellEnvAssign(word string) bool {
+	eq := strings.IndexByte(word, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		c := word[i]
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+		isDigit := c >= '0' && c <= '9'
+		if !isLetter && !(i > 0 && isDigit) {
+			return false
+		}
+	}
+	return true
+}
+
+func grepHasQuietFlag(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return false
+		}
+		if arg == "--quiet" || arg == "--silent" {
+			return true
+		}
+		if arg == "-e" || arg == "-f" || arg == "-m" || arg == "-A" || arg == "-B" || arg == "-C" || arg == "--regexp" || arg == "--file" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && len(arg) > 1 {
+			if strings.ContainsRune(arg[1:], 'q') {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func goTestHasRunFlag(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return false
+		}
+		if arg == "-run" || arg == "--run" {
+			return i+1 < len(args) && strings.TrimSpace(args[i+1]) != ""
+		}
+		if strings.HasPrefix(arg, "-run=") || strings.HasPrefix(arg, "--run=") {
+			_, val, _ := strings.Cut(arg, "=")
+			return strings.TrimSpace(val) != ""
+		}
+	}
+	return false
+}
+
+func shellDashCScript(args []string) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return "", false
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.ContainsRune(arg[1:], 'c') {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// splitShellSegments 按未引用的 &&、||、;、| 与换行切分命令段。
+func splitShellSegments(command string) []string {
+	var segments []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if inSingle {
+			cur.WriteByte(c)
+			if c == '\'' {
+				inSingle = false
+			}
+			continue
+		}
+		if inDouble {
+			cur.WriteByte(c)
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			continue
+		}
+		switch c {
+		case '\\':
+			cur.WriteByte(c)
+			escaped = true
+		case '\'':
+			cur.WriteByte(c)
+			inSingle = true
+		case '"':
+			cur.WriteByte(c)
+			inDouble = true
+		case ';', '\n', '\r':
+			segments = append(segments, cur.String())
+			cur.Reset()
+		case '&':
+			if i+1 < len(command) && command[i+1] == '&' {
+				segments = append(segments, cur.String())
+				cur.Reset()
+				i++
+			} else {
+				cur.WriteByte(c)
+			}
+		case '|':
+			segments = append(segments, cur.String())
+			cur.Reset()
+			if i+1 < len(command) && command[i+1] == '|' {
+				i++
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	segments = append(segments, cur.String())
+	return segments
+}
+
+// splitShellWords 将单个命令段按空白与括号拆词，同时剥离外部引号并保留引号内字面内容。
+func splitShellWords(segment string) []string {
+	var words []string
+	var cur strings.Builder
+	inToken := false
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		if inToken {
+			words = append(words, cur.String())
+			cur.Reset()
+			inToken = false
+		}
+	}
+
+	for i := 0; i < len(segment); i++ {
+		c := segment[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			inToken = true
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			} else {
+				cur.WriteByte(c)
+			}
+			inToken = true
+			continue
+		}
+		if inDouble {
+			if c == '\\' && i+1 < len(segment) && (segment[i+1] == '"' || segment[i+1] == '\\' || segment[i+1] == '$' || segment[i+1] == '`') {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			} else {
+				cur.WriteByte(c)
+			}
+			inToken = true
+			continue
+		}
+		if unicode.IsSpace(rune(c)) {
+			flush()
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+			inToken = true
+		case '\'':
+			inSingle = true
+			inToken = true
+		case '"':
+			inDouble = true
+			inToken = true
+		case '(', ')', '{', '}':
+			flush()
+		default:
+			cur.WriteByte(c)
+			inToken = true
+		}
+	}
+	flush()
+	return words
 }
 
 // parseSkills 宽松解析条目里的 skills：接受字符串数组或单个逗号分隔字符串，

@@ -1798,9 +1798,10 @@ type SingleEntryRequest struct {
 
 // entryPlan 描述单个委派条目解析后的派发规格与需要告知 Lead 的提示。
 type entryPlan struct {
-	spec    BeeSpec
-	notices []string
-	seqIdx  int
+	spec     BeeSpec
+	notices  []string
+	seqIdx   int
+	rejected bool
 }
 
 // entryPlanState 读取 Lead 当前状态并填充默认项目与工作区，返回名字占用表与顺序分配游标。
@@ -1833,6 +1834,13 @@ func (m *Manager) entryPlanState(leadThreadID, projectID, leadWorkDir string) (s
 // planEntry 按现有派发规则为单个条目分配花名册名字与目标项目，供批量与流式派发共用。
 // host 非 nil 时覆盖档位解析出的 provider/model/effort 与写入白名单。
 func (m *Manager) planEntry(ctx context.Context, leadThreadID string, d Delegation, host *HostOverride, baseProjectID, baseWorkDir string, taken map[int]BeeStatus, seqIdx int) entryPlan {
+	if msg := AcceptanceRejection(d); msg != "" {
+		return entryPlan{
+			seqIdx:   seqIdx,
+			notices:  []string{msg},
+			rejected: true,
+		}
+	}
 	index, pinned := RosterIndex(d.Name)
 	if pinned {
 		for status, exists := taken[index]; exists && status != StatusRunning; status, exists = taken[index] {
@@ -2112,6 +2120,9 @@ func (m *Manager) DispatchSingleEntry(ctx context.Context, req SingleEntryReques
 
 	projectID, leadWorkDir, taken, seqIdx := m.entryPlanState(req.LeadThreadID, req.ProjectID, req.LeadWorkDir)
 	plan := m.planEntry(ctx, req.LeadThreadID, req.Entry, req.Host, projectID, leadWorkDir, taken, seqIdx)
+	if plan.rejected {
+		return Bee{}, plan.notices, errors.New(plan.notices[0])
+	}
 
 	createdBees, err := m.dispatch(ctx, DispatchRequest{
 		LeadThreadID: req.LeadThreadID,
@@ -2158,11 +2169,22 @@ func (m *Manager) DispatchFromReply(ctx context.Context, req ReplyDispatchReques
 	projectID, leadWorkDir, taken, seqIdx := m.entryPlanState(req.LeadThreadID, req.ProjectID, req.LeadWorkDir)
 
 	beeSpecs := make([]BeeSpec, 0, len(entries))
+	var rejectedNotices []string
 	for _, d := range entries {
 		plan := m.planEntry(ctx, req.LeadThreadID, d, nil, projectID, leadWorkDir, taken, seqIdx)
 		seqIdx = plan.seqIdx
 		notices = append(notices, plan.notices...)
+		if plan.rejected {
+			rejectedNotices = append(rejectedNotices, plan.notices...)
+			continue
+		}
 		beeSpecs = append(beeSpecs, plan.spec)
+	}
+	if len(beeSpecs) == 0 {
+		if len(rejectedNotices) > 0 {
+			return nil, notices, errors.New(strings.Join(rejectedNotices, "\n"))
+		}
+		return nil, notices, nil
 	}
 
 	createdBees, err := m.dispatch(ctx, DispatchRequest{
@@ -2675,7 +2697,7 @@ func (m *Manager) Tick(ctx context.Context) {
 				m.setEmptyNudge(tgt.bee.ThreadID, true)
 				var sentErr error
 				if messenger, ok := m.opts.Driver.(kanban.SessionMessenger); ok {
-					sentErr = messenger.SendFollowUp(ctx, tgt.bee.ThreadID, "请直接输出最终报告，总结你所完成的工作与改动。")
+					sentErr = messenger.SendFollowUp(ctx, tgt.bee.ThreadID, "上一轮没有输出最终报告就结束了。如果是命令被拒，改用读文件工具或 grep 继续，不要重试同类命令；任务未完成就接着做，完成后输出最终报告。")
 				} else {
 					sentErr = errors.New("driver does not support SessionMessenger")
 				}
@@ -3480,13 +3502,8 @@ func BuildReport(bees []Bee) string {
 			sb.WriteString(line + "\n")
 		}
 		if h.ReviewLayer != "" {
-			for i, c := range h.ReviewConcerns {
-				if i >= 10 {
-					break
-				}
-				if c = strings.TrimSpace(c); c != "" {
-					sb.WriteString(fmt.Sprintf("- 审查疑点：%s\n", c))
-				}
+			for _, c := range DisplayReviewConcerns(h.ReviewConcerns) {
+				sb.WriteString(fmt.Sprintf("- 审查疑点：%s\n", c))
 			}
 		}
 		// 审查结论紧跟落地状态：未通过的改动不在主工作区，要说清补丁在哪、可以返工。
@@ -3634,6 +3651,25 @@ func joinOrNone(paths []string) string {
 		return "无"
 	}
 	return strings.Join(paths, "、")
+}
+
+// acceptancePassedConcernPrefix 标记验收通过的内部合并闸门记录，仅用于流转判断，展示时过滤。
+const acceptancePassedConcernPrefix = "验收命令通过："
+
+// DisplayReviewConcerns 过滤掉内部合并闸门标记与空白条目，返回向主代理或用户展示的审查疑点列表（最多 10 条）。
+func DisplayReviewConcerns(concerns []string) []string {
+	var out []string
+	for _, c := range concerns {
+		c = strings.TrimSpace(c)
+		if c == "" || strings.HasPrefix(c, acceptancePassedConcernPrefix) {
+			continue
+		}
+		out = append(out, c)
+		if len(out) >= 10 {
+			break
+		}
+	}
+	return out
 }
 
 // reviewReportLine 生成汇报里的审查结论行：human 档写人工裁决，ai 档写审查层、

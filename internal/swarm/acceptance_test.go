@@ -706,3 +706,172 @@ func TestStopBeeCancelsAcceptance(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceptanceProblem(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{name: "grep_short_q", command: "grep -q foo a.go", want: acceptanceErrGrepQuiet},
+		{name: "grep_merged_qE", command: "grep -qE 'a|b' a.go", want: acceptanceErrGrepQuiet},
+		{name: "grep_merged_Eq", command: "grep -Eq 'a|b' a.go", want: acceptanceErrGrepQuiet},
+		{name: "grep_quiet", command: "grep --quiet foo a.go", want: acceptanceErrGrepQuiet},
+		{name: "grep_silent", command: "grep --silent foo a.go", want: acceptanceErrGrepQuiet},
+		{name: "grep_in_sh_c", command: `sh -c '! grep -q "x" a.go'`, want: acceptanceErrGrepQuiet},
+		{name: "timeout_leading", command: "timeout 10 go test -run Foo ./p/", want: acceptanceErrTimeout},
+		{name: "gtimeout_after_and", command: "cd sub && gtimeout 30 go test -run Foo ./p/", want: acceptanceErrTimeout},
+		{name: "timeout_after_pipe", command: "cat a.go | timeout 5 grep -n foo", want: acceptanceErrTimeout},
+		{name: "timeout_after_or", command: "false || timeout 5 true", want: acceptanceErrTimeout},
+		{name: "timeout_after_semi", command: "true; timeout 5 true", want: acceptanceErrTimeout},
+		{name: "go_test_no_run", command: "go test ./internal/ui/", want: acceptanceErrGoTestRun},
+		{name: "go_test_timeout_no_run", command: "go test -count=1 -timeout 300s ./internal/ui/", want: acceptanceErrGoTestRun},
+		{name: "go_test_empty_run", command: "go test -run= ./internal/ui/", want: acceptanceErrGoTestRun},
+		{name: "ok_go_test_run_single_quote", command: "go test -count=1 -timeout 300s -run 'Foo' ./internal/ui/", want: ""},
+		{name: "ok_go_test_run_or_pipe", command: "go test -count=1 -timeout 300s -run 'Foo|Bar' ./internal/ui/", want: ""},
+		{name: "ok_go_test_run_eq", command: "go test -run=Foo ./internal/ui/", want: ""},
+		{name: "ok_sh_grep_n", command: `sh -c '! grep -n "x" a.go'`, want: ""},
+		{name: "ok_go_vet", command: "go vet ./...", want: ""},
+		{name: "ok_cd_go_test_run", command: "cd /abs/path && go test -run X ./p/", want: ""},
+		{name: "ok_grep_pattern_quiet", command: `grep -n "quiet" a.go`, want: ""},
+		{name: "ok_grep_e_dash_q", command: `grep -e -q a.go`, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := acceptanceProblem(tc.command); got != tc.want {
+				t.Fatalf("acceptanceProblem(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAcceptanceLintRejectsEntryBeforeStart(t *testing.T) {
+	m, dir := newFunnelManager(t, &funnelFake{})
+	defer m.Stop()
+	settings := m.Settings()
+	settings.Enabled = true
+	settings.AutoDelegate = true
+	m.SetSettingsFunc(func() Settings { return settings })
+
+	ctx := context.Background()
+	badCmd := "go test ./internal/ui/"
+
+	// 1. DispatchFromReply：同批坏条目不启动、不占花名册名额，正常条目拿到第一个名字照常启动。
+	reply := "```swarm\n" +
+		`[{"task":"坏任务","prompt":"修复坏任务","acceptance":["` + badCmd + `"]},` +
+		`{"task":"好任务","prompt":"修复好任务","acceptance":["go test -run TestGood ./internal/swarm/"]}]` +
+		"\n```"
+	bees, notices, err := m.DispatchFromReply(ctx, ReplyDispatchRequest{
+		LeadThreadID: "lintbatch",
+		ProjectID:    "proj",
+		LeadWorkDir:  dir,
+		ReplyText:    reply,
+	})
+	if err != nil {
+		t.Fatalf("batch DispatchFromReply unexpected error: %v", err)
+	}
+	if len(bees) != 1 || bees[0].Name != RosterName(0) || bees[0].Task != "好任务" {
+		t.Fatalf("正常条目应拿到首个名字 %s 并启动，实际 bees=%+v", RosterName(0), bees)
+	}
+	if len(notices) == 0 || !strings.Contains(notices[0], "条目「坏任务」未启动") ||
+		!strings.Contains(notices[0], badCmd) || !strings.Contains(notices[0], acceptanceErrGoTestRun) ||
+		!strings.Contains(notices[0], "改正后重新派发") {
+		t.Fatalf("拒绝提示格式不符: %v", notices)
+	}
+	if state := m.State("lintbatch"); len(state.Bees) != 1 {
+		t.Fatalf("坏条目不应产生 bee 记录: %+v", state.Bees)
+	}
+
+	// 2. DispatchSingleEntry：仅坏条目时直接拒绝，不占名字、不建副本、不启动 bee。
+	bee, singleNotices, err := m.DispatchSingleEntry(ctx, SingleEntryRequest{
+		LeadThreadID: "lintsingle",
+		ProjectID:    "proj",
+		LeadWorkDir:  dir,
+		Entry: Delegation{
+			Prompt:     "只写了 prompt 没有 task 的条目用于检查三十字截断效果和后续说明",
+			Acceptance: []string{"grep -q foo a.go"},
+		},
+	})
+	if err == nil {
+		t.Fatal("DispatchSingleEntry 应拒绝不合规验收命令")
+	}
+	if bee.ThreadID != "" || bee.WorktreePath != "" {
+		t.Fatalf("被拒条目不应启动或建副本: %+v", bee)
+	}
+	if len(singleNotices) != 1 || !strings.Contains(singleNotices[0], "未启动") || !strings.Contains(singleNotices[0], acceptanceErrGrepQuiet) {
+		t.Fatalf("singleNotices=%v", singleNotices)
+	}
+	if state := m.State("lintsingle"); len(state.Bees) != 0 {
+		t.Fatalf("被拒条目不应写入 state.Bees: %+v", state.Bees)
+	}
+	// 改正后重新派发仍拿到首个花名册名字 Aspen。
+	fixed, _, err := m.DispatchSingleEntry(ctx, SingleEntryRequest{
+		LeadThreadID: "lintsingle",
+		ProjectID:    "proj",
+		LeadWorkDir:  dir,
+		Entry: Delegation{
+			Task:       "改正后的任务",
+			Prompt:     "只写了 prompt 没有 task 的条目",
+			Acceptance: []string{"go test -run TestFoo ./internal/swarm/"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("改正后派发失败: %v", err)
+	}
+	if fixed.Name != RosterName(0) {
+		t.Fatalf("被拒条目不应占用名字，改正后期望 %s，实际 %s", RosterName(0), fixed.Name)
+	}
+}
+
+func TestAcceptanceNoTestsRunFails(t *testing.T) {
+	m := NewManager(Options{})
+	dir := t.TempDir()
+
+	noTestsCmd := "printf 'ok  \\tmcode/x\\t0.1s [no tests to run]\\n' || go test -run TestMissing ./x"
+	passed, detail := m.runAcceptance(context.Background(), "lead", Bee{
+		WorktreePath: dir,
+		ChangedFiles: []string{"a.go"},
+		Acceptance:   []string{noTestsCmd},
+	})
+	if passed || !strings.Contains(detail, "没有执行任何测试") || !strings.Contains(detail, "[no tests to run]") {
+		t.Fatalf("只有 [no tests to run] 时应判失败并附输出: passed=%v detail=%q", passed, detail)
+	}
+
+	noFilesCmd := "printf '?   \\tmcode/x\\t[no test files]\\n' || go test -run TestMissing ./x"
+	passed, detail = m.runAcceptance(context.Background(), "lead", Bee{
+		WorktreePath: dir,
+		ChangedFiles: []string{"a.go"},
+		Acceptance:   []string{noFilesCmd},
+	})
+	if passed || !strings.Contains(detail, "没有执行任何测试") {
+		t.Fatalf("只有 [no test files] 时应判失败: passed=%v detail=%q", passed, detail)
+	}
+
+	mixedPassCmd := "printf 'ok  \\tmcode/x\\t0.1s [no tests to run]\\nok  \\tmcode/y\\t0.2s\\n' || go test -run TestReal ./..."
+	passed, detail = m.runAcceptance(context.Background(), "lead", Bee{
+		WorktreePath: dir,
+		ChangedFiles: []string{"a.go"},
+		Acceptance:   []string{mixedPassCmd},
+	})
+	if !passed || detail != "" {
+		t.Fatalf("至少有一个包真正跑了测试时应判通过: passed=%v detail=%q", passed, detail)
+	}
+}
+
+func TestAcceptancePassedMarkerHiddenFromReport(t *testing.T) {
+	report := BuildReport([]Bee{{
+		Name:           "Aspen",
+		Task:           "改代码",
+		Status:         StatusCompleted,
+		Merged:         true,
+		ReviewState:    ReviewApproved,
+		ReviewLayer:    "l2",
+		ReviewConcerns: []string{"验收命令通过：2 条", "internal/a.go:12 缺少错误处理"},
+	}})
+	if strings.Contains(report, "验收命令通过") {
+		t.Fatalf("BuildReport 不应把验收通过闸门标记输出为疑点:\n%s", report)
+	}
+	if !strings.Contains(report, "审查疑点：internal/a.go:12 缺少错误处理") {
+		t.Fatalf("BuildReport 应保留普通审查疑点:\n%s", report)
+	}
+}

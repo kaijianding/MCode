@@ -283,3 +283,44 @@ func TestSwarmPlanStreamRetryRead(t *testing.T) {
 		t.Fatalf("下一回合改派只读档异常: %+v", h)
 	}
 }
+
+func TestSubmitAndBlockRejectBadAcceptance(t *testing.T) {
+	// 1. swarm_delegate 工具路径（submit）：坏条目被拒且工具结果带回原因，好条目照常启动，不占去重和轮次。
+	sh := newSubmitHarness(t, 1)
+	d := sh.dispatcher
+	d.reset("lead")
+	got := d.submit("lead", "project", []swarm.Delegation{
+		{Task: "坏条目", Prompt: "bad prompt", Acceptance: []string{"go test ./internal/ui/"}},
+		{Task: "好条目", Prompt: "good prompt", Acceptance: []string{"go test -run TestGood ./internal/ui/"}},
+	})
+	if !strings.HasPrefix(got, "Started 1 bee(s).") ||
+		!strings.Contains(got, "条目「坏条目」未启动") ||
+		!strings.Contains(got, "go test ./internal/ui/") ||
+		!strings.Contains(got, "改正后重新派发") {
+		t.Fatalf("submit 拒绝提示异常: %q", got)
+	}
+	waitSwarm(t, func() bool { return len(sh.dispatched()) == 1 })
+	if sh.dispatched()[0] != "good prompt" {
+		t.Fatalf("正常条目未启动: %v", sh.dispatched())
+	}
+
+	// 2. ```swarm 块路径（feed + settleTurn）：通过 reportBlockProblem 回送主代理，改正后可重派同 prompt。
+	bh, bd := newRoundLimitHarness(t, 1)
+	bd.reset("lead")
+	badBlock := "```swarm\n[{\"task\":\"块坏条目\",\"prompt\":\"same prompt\",\"acceptance\":[\"timeout 10 go test -run X ./p\"]}]\n```"
+	bd.feed("lead", "project", badBlock)
+	bd.settleTurn("lead", "project", badBlock)
+	if bh.dispatched != 0 || bh.rounds != 0 {
+		t.Fatalf("被拒块条目不应消耗轮次或派发: %+v", bh)
+	}
+	if len(bh.notices) != 1 || !strings.Contains(bh.notices[0], "条目「块坏条目」未启动") || !strings.Contains(bh.notices[0], "macOS 没有 timeout 命令") {
+		t.Fatalf("块拒绝回送异常: %+v", bh.notices)
+	}
+	bd.reset("lead")
+	fixedBlock := "```swarm\n[{\"task\":\"块坏条目\",\"prompt\":\"same prompt\",\"acceptance\":[\"go test -run X ./p\"]}]\n```"
+	bd.feed("lead", "project", fixedBlock)
+	bd.settleTurn("lead", "project", fixedBlock)
+	if bh.dispatched != 1 || bh.rounds != 1 {
+		t.Fatalf("改正验收命令后应正常派发: %+v", bh)
+	}
+}

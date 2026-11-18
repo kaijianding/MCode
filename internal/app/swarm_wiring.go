@@ -327,10 +327,12 @@ type swarmStreamState struct {
 	suppressed      bool            // 本轮已达委派轮次上限，后续条目全部丢弃
 	limitHit        int             // 触发抑制的轮次上限，供回合末回送主代理时说明原因
 	counted         bool            // 本轮是否已计入委派轮次
-	overCap         int             // 本回合因超过单块条目上限而未派发的条目数
-	planRefused     int             // 本回合因 Plan 模式限制而未派发的条目数
-	planRefusedKeys map[string]bool // 本回合因 Plan 模式被拒的 prompt（TrimSpace 后），仅用于避免重复计数
-	settled         int             // 本回合由 settleRemaining 补派的条目数（不计入 streamed，只用于回送时统计已启动数）
+	overCap                int             // 本回合因超过单块条目上限而未派发的条目数
+	planRefused            int             // 本回合因 Plan 模式限制而未派发的条目数
+	planRefusedKeys        map[string]bool // 本回合因 Plan 模式被拒的 prompt（TrimSpace 后），仅用于避免重复计数
+	acceptanceRejected     []string        // 本回合因验收命令不合规而未启动的条目提示
+	acceptanceRejectedKeys map[string]bool // 本回合因验收命令被拒的去重键，避免流式与回合末重复汇报
+	settled                int             // 本回合由 settleRemaining 补派的条目数（不计入 streamed，只用于回送时统计已启动数）
 	dispatched      map[string]bool // 本轮已派发条目的 prompt（TrimSpace 后），用于回合末按整段回复补派
 
 	// 跨回合去重与本回合回送所需的记录：本回合启动过哪些条目、因去重跳过了哪些。
@@ -711,6 +713,27 @@ func (d *swarmStreamDispatcher) gateEntry(threadID string, st *swarmStreamState,
 	return gated, ok
 }
 
+// checkAcceptanceLocked 派发前校验条目的验收命令是否合规；不合规时不占名额、不入队。
+// record 为 true 时去重记录到本回合的被拒列表，供回合末通过 reportBlockProblem 回送主代理。
+// 调用方需持有 d.mu。
+func (d *swarmStreamDispatcher) checkAcceptanceLocked(st *swarmStreamState, entry swarm.Delegation, record bool) (string, bool) {
+	msg := swarm.AcceptanceRejection(entry)
+	if msg == "" {
+		return "", true
+	}
+	if record {
+		key := strings.TrimSpace(entry.Prompt) + "\x00" + msg
+		if !st.acceptanceRejectedKeys[key] {
+			if st.acceptanceRejectedKeys == nil {
+				st.acceptanceRejectedKeys = make(map[string]bool)
+			}
+			st.acceptanceRejectedKeys[key] = true
+			st.acceptanceRejected = append(st.acceptanceRejected, msg)
+		}
+	}
+	return msg, false
+}
+
 // feed 追加一段助手正文增量，条目在闭合大括号到达时立即入队派发。
 // 本轮首个条目先校验委派轮次上限；超限后置抑制标记并丢弃本轮全部条目，
 // 原因在回合末由 settleTurn 回送主代理，feed 里只记录，不阻塞流回调。
@@ -726,6 +749,9 @@ func (d *swarmStreamDispatcher) feed(threadID, projectID, delta string) {
 		var allowed bool
 		entry, allowed = d.gateEntry(threadID, st, entry, true)
 		if !allowed {
+			continue
+		}
+		if _, ok := d.checkAcceptanceLocked(st, entry, true); !ok {
 			continue
 		}
 		// 跨回合去重先于轮次与条目上限：跳过的条目既不占名额，也不消耗派发轮次。
@@ -775,12 +801,17 @@ func (d *swarmStreamDispatcher) submit(threadID, projectID string, entries []swa
 	}
 	var queued []swarmPendingEntry
 	var skippedEntries []*swarmStartedEntry
+	var acceptanceRejected []string
 	var duplicates, overCap, refused, skipped, planRefused int
 	for _, entry := range entries {
 		var allowed bool
 		entry, allowed = d.gateEntry(threadID, st, entry, false)
 		if !allowed {
 			planRefused++
+			continue
+		}
+		if msg, ok := d.checkAcceptanceLocked(st, entry, false); !ok {
+			acceptanceRejected = append(acceptanceRejected, msg)
 			continue
 		}
 		key := strings.TrimSpace(entry.Prompt)
@@ -817,6 +848,9 @@ func (d *swarmStreamDispatcher) submit(threadID, projectID string, entries []swa
 	d.enqueue(threadID, projectID, queued)
 
 	parts := []string{fmt.Sprintf("Started %d bee(s).", len(queued))}
+	if len(acceptanceRejected) > 0 {
+		parts = append(parts, acceptanceRejected...)
+	}
 	if planRefused > 0 {
 		parts = append(parts, fmt.Sprintf("%d entry(ies) not started: plan mode allows only read-only tier bees.", planRefused))
 	}
@@ -870,7 +904,16 @@ func (d *swarmStreamDispatcher) settleTurn(threadID, projectID, fullText string)
 	d.reportPlanRefused(threadID, st)
 	d.reportSkipped(threadID, st)
 	d.drain(threadID, swarmDrainTimeout)
+	d.reportAcceptanceRejected(threadID, st)
 	return st.streamed, st.suppressed
+}
+
+// reportAcceptanceRejected 汇总本回合因验收命令不合规而未启动的条目，通过 reportBlockProblem 回送主代理。
+func (d *swarmStreamDispatcher) reportAcceptanceRejected(threadID string, st *swarmStreamState) {
+	if len(st.acceptanceRejected) == 0 {
+		return
+	}
+	d.reportBlockProblem(threadID, strings.Join(st.acceptanceRejected, "\n"))
 }
 
 // reportOverCap 在单个 swarm 块的条目数超过并发上限时回送主代理：告知已启动几个、
@@ -920,9 +963,13 @@ func (d *swarmStreamDispatcher) settleRemaining(threadID, projectID, fullText st
 		allowed := entries[:0]
 		for _, entry := range entries {
 			entry, ok := d.gateEntry(threadID, st, entry, true)
-			if ok {
-				allowed = append(allowed, entry)
+			if !ok {
+				continue
 			}
+			if _, ok := d.checkAcceptanceLocked(st, entry, true); !ok {
+				continue
+			}
+			allowed = append(allowed, entry)
 		}
 		entries = allowed
 		d.mu.Unlock()

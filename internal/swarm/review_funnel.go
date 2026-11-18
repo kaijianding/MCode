@@ -1052,14 +1052,21 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 		if ctx.Err() != nil {
 			return false, fmt.Sprintf("%s（已取消）", command)
 		}
-		if result.OK {
-			continue
-		}
 		status := "执行失败"
 		output := result.Output
-		if i := strings.LastIndex(output, marker); i >= 0 {
-			status = "退出码 " + strings.TrimSpace(output[i+len(marker):])
-			output = output[:i]
+		if idx := strings.LastIndex(output, marker); idx >= 0 {
+			status = "退出码 " + strings.TrimSpace(output[idx+len(marker):])
+			output = output[:idx]
+		}
+		if result.OK {
+			if commandUsesGoTest(command) && !goTestRanAnyTest(output) {
+				detail := fmt.Sprintf("%s（%s）", command, "验收命令没有执行任何测试（检查 -run 名字和包路径）")
+				if tail := strings.TrimSpace(reviewcheck.Tail(output, 30, 4096)); tail != "" {
+					detail += "\n" + tail
+				}
+				return false, detail
+			}
+			continue
 		}
 		if result.TimedOut {
 			status = "超时"
@@ -1071,6 +1078,18 @@ func (m *Manager) runAcceptance(ctx context.Context, leadThreadID string, h Bee)
 		return false, detail
 	}
 	return true, ""
+}
+
+// goTestRanAnyTest 判断 go test 输出中是否至少有一个包真正执行了测试
+// （存在以 ok 开头且不含 [no tests to run] 的行）。
+func goTestRanAnyTest(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if (strings.HasPrefix(line, "ok ") || strings.HasPrefix(line, "ok\t")) && !strings.Contains(line, "[no tests to run]") {
+			return true
+		}
+	}
+	return false
 }
 
 func rewriteWorkDir(command, target, worktree string) string {

@@ -1212,6 +1212,58 @@ func TestSwarmReview_HidesFunnelInfoWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestSwarmReview_HidesAcceptancePassedMarker 测试 UI 审查面板过滤掉「验收命令通过：」闸门标记。
+func TestSwarmReview_HidesAcceptancePassedMarker(t *testing.T) {
+	fake := NewFakeClient()
+	s, st := prepareSwarmReviewState(fake, SwarmBee{
+		ThreadID:       "bee-1",
+		Name:           "Bee1",
+		Status:         "completed",
+		Merged:         true,
+		ReviewState:    "approved",
+		ReviewLayer:    "l2",
+		ReviewConcerns: []string{"验收命令通过：2 条"},
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		s.init(c)
+		renderSwarmMergeReview(c, s, st)
+	}, 800, 600)
+
+	if !tt.HasText("L2 模型审查") {
+		t.Fatalf("应渲染 bee 审查详情，实际文本：%v", tt.Texts())
+	}
+	if tt.HasText("审查疑点") || tt.HasText("验收命令通过") {
+		t.Fatalf("仅含验收通过标记时不应显示审查疑点，实际文本：%v", tt.Texts())
+	}
+
+	fake2 := NewFakeClient()
+	s2, st2 := prepareSwarmReviewState(fake2, SwarmBee{
+		ThreadID:       "bee-2",
+		Name:           "Bee2",
+		Status:         "completed",
+		Merged:         true,
+		ReviewState:    "approved",
+		ReviewLayer:    "l2",
+		ReviewConcerns: []string{"验收命令通过：2 条", "foo.go:10 缺少错误处理"},
+	})
+
+	tt2 := ui.NewTester(func(c *ui.Context) {
+		s2.init(c)
+		renderSwarmMergeReview(c, s2, st2)
+	}, 800, 600)
+
+	if !tt2.HasText("L2 模型审查") {
+		t.Fatalf("应渲染 bee 审查详情，实际文本：%v", tt2.Texts())
+	}
+	if tt2.HasText("验收命令通过") {
+		t.Fatalf("审查面板不应展示验收通过闸门标记，实际文本：%v", tt2.Texts())
+	}
+	if !tt2.HasText("foo.go:10 缺少错误处理") {
+		t.Fatalf("审查面板应保留普通审查疑点，实际文本：%v", tt2.Texts())
+	}
+}
+
 func TestReviewLayerLabel(t *testing.T) {
 	cases := map[string]string{
 		"l0":    "L0 确定性检查",

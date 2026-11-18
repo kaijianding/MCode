@@ -176,8 +176,15 @@ func TestLeadPolicyScopedBees(t *testing.T) {
 	for _, plansOnly := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(plansOnly, mode, false)
-			if !strings.Contains(got, "Bees may run scoped checks") || !strings.Contains(got, "run the full checks yourself") {
-				t.Fatalf("plansOnly=%v mode=%s 的策略应说明 bee 只跑有范围的自测:\n%s", plansOnly, mode, got)
+			if !strings.Contains(got, "Bees may run scoped checks") ||
+				!strings.Contains(got, "run the full checks yourself once, after the last bee has merged") {
+				t.Fatalf("plansOnly=%v mode=%s 的策略应说明 bee 只跑有范围的自测且主代理在最后一只 bee 合并后跑一次完整检查:\n%s", plansOnly, mode, got)
+			}
+			if mode == "ai" && !strings.Contains(got, "run the build and tests yourself once, after the last bee has merged") {
+				t.Fatalf("plansOnly=%v ai 模式应包含合并后跑一次构建与测试:\n%s", plansOnly, got)
+			}
+			if plansOnly && !strings.Contains(got, "(run builds and checks once, after the last bee has merged)") {
+				t.Fatalf("plansOnly=%v mode=%s 只规划规则应包含合并后跑一次:\n%s", plansOnly, mode, got)
 			}
 			if strings.Contains(got, "They never build, test or commit") {
 				t.Fatalf("plansOnly=%v mode=%s 的策略不应保留旧说法:\n%s", plansOnly, mode, got)
@@ -454,7 +461,13 @@ func TestLeadPolicyAcceptance(t *testing.T) {
 	for _, tool := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(false, mode, tool)
-			for _, want := range []string{"acceptance", "attach acceptance shell commands that prove the change works, with timeout flags", "At least one must fail on the code before the change", "merges only if every command exits 0"} {
+			for _, want := range []string{
+				"acceptance",
+				"attach acceptance shell commands that prove the change works, with timeout flags",
+				"At least one must fail on the code before the change",
+				"merges only if every command exits 0",
+				"A go test acceptance command must use -run to target the tests for this change; entries whose acceptance uses grep -q, a leading timeout, or go test without -run are rejected before the bee starts. Do not repeat the acceptance commands as self-test steps in the prompt.",
+			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("tool=%v mode=%s missing %q", tool, mode, want)
 				}

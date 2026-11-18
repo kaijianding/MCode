@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 	"mcode/internal/config"
 	"mcode/internal/git"
+	"mcode/internal/swarm"
 )
 
 var (
@@ -1656,14 +1657,11 @@ func renderSwarmMergeReview(c *ui.Context, s *chatState, st SwarmState) {
 						}
 
 						// 审查疑点：最多展示 10 条，避免撑爆面板
-						if len(curBee.ReviewConcerns) > 0 {
+						if concerns := swarm.DisplayReviewConcerns(curBee.ReviewConcerns); len(concerns) > 0 {
 							ui.Text(c, "审查疑点").
 								FontSize(uiFont(TypeCaption)).
 								TextColor(ThemeSecondaryText(c))
-							for i, concern := range curBee.ReviewConcerns {
-								if i >= 10 {
-									break
-								}
+							for _, concern := range concerns {
 								ui.Text(c, "· "+concern).
 									FontSize(uiFont(TypeCaption)).
 									TextColor(ThemeSecondaryText(c))
