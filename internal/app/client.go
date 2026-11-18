@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcode/internal/agentconf"
@@ -116,6 +117,25 @@ type Client struct {
 	// foregroundMu 保护 foregroundThread：界面每帧上报当前前台会话，总管读取它判断该会话是否正被人看着。
 	foregroundMu     sync.Mutex
 	foregroundThread string
+
+	// chatsProjectID 缓存启动时确保的内置「对话」项目 ID（string），供 UI 每帧只读读取。
+	chatsProjectID atomic.Value
+}
+
+// ChatsProjectID 返回启动时缓存的内置「对话」项目 ID，未初始化时返回空串。
+func (c *Client) ChatsProjectID() string {
+	if c == nil {
+		return ""
+	}
+	id, _ := c.chatsProjectID.Load().(string)
+	return id
+}
+
+func (c *Client) setChatsProjectID(id string) {
+	if c == nil {
+		return
+	}
+	c.chatsProjectID.Store(id)
 }
 
 var _ mcodeui.Client = (*Client)(nil)

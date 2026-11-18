@@ -57,7 +57,7 @@ func (c *Client) OpenStewardThread(ctx context.Context) (string, error) {
 	if !ok || !cfg.Orchestration.Steward.Enabled {
 		return "", errors.New("总管未启用，请先在设置 → 总管中启用")
 	}
-	projectID, err := ensureFrontdeskProject(ctx, c.backend, cfg.Orchestration.Steward.ResolvedHomeDir(c.effectiveDataDir()))
+	projectID, err := ensureBuiltinProject(ctx, c.backend, cfg.Orchestration.Steward.ResolvedHomeDir(c.effectiveDataDir()), "总管")
 	if err != nil {
 		return "", err
 	}
@@ -70,7 +70,7 @@ func (c *Client) ResetStewardThread(ctx context.Context) (string, error) {
 	if !ok || !cfg.Orchestration.Steward.Enabled {
 		return "", errors.New("总管未启用，请先在设置 → 总管中启用")
 	}
-	projectID, err := ensureFrontdeskProject(ctx, c.backend, cfg.Orchestration.Steward.ResolvedHomeDir(c.effectiveDataDir()))
+	projectID, err := ensureBuiltinProject(ctx, c.backend, cfg.Orchestration.Steward.ResolvedHomeDir(c.effectiveDataDir()), "总管")
 	if err != nil {
 		return "", err
 	}

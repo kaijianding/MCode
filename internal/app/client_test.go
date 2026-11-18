@@ -314,12 +314,27 @@ func TestClient_AddProjectAndCreateThread(t *testing.T) {
 	defer app.Close()
 
 	client := app.Client()
+	chatsID := client.ChatsProjectID()
+	if chatsID == "" {
+		t.Fatalf("expected non-empty ChatsProjectID")
+	}
+	// Open 会自动确保内置「对话」项目存在，计数断言前先把它剔除。
+	excludeChats := func(projs []mcodeui.Project) []mcodeui.Project {
+		filtered := make([]mcodeui.Project, 0, len(projs))
+		for _, p := range projs {
+			if p.ID != chatsID {
+				filtered = append(filtered, p)
+			}
+		}
+		return filtered
+	}
 
 	// 初始已有种子项目
 	projs1, err := client.Projects(ctx)
 	if err != nil {
 		t.Fatalf("initial Projects: %v", err)
 	}
+	projs1 = excludeChats(projs1)
 	if len(projs1) != 1 {
 		t.Fatalf("expected 1 initial project, got %d", len(projs1))
 	}
@@ -338,6 +353,7 @@ func TestClient_AddProjectAndCreateThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Projects after add: %v", err)
 	}
+	projs2 = excludeChats(projs2)
 	if len(projs2) != 2 {
 		t.Fatalf("expected 2 projects, got %d", len(projs2))
 	}

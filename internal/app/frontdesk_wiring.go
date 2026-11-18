@@ -21,7 +21,7 @@ import (
 	"mcode/internal/textgen"
 )
 
-func ensureFrontdeskProject(ctx context.Context, backend *remote.MemoryBackend, dir string) (string, error) {
+func ensureBuiltinProject(ctx context.Context, backend *remote.MemoryBackend, dir, name string) (string, error) {
 	if backend == nil {
 		return "", errors.New("会话后端未接入")
 	}
@@ -46,11 +46,27 @@ func ensureFrontdeskProject(ctx context.Context, backend *remote.MemoryBackend, 
 	if err != nil {
 		return "", err
 	}
-	if p.Name != "总管" {
-		p.Name = "总管"
+	if name != "" && p.Name != name {
+		p.Name = name
 		backend.AddProject(p)
 	}
 	return p.ID, nil
+}
+
+// ensureChatsProject 在后端可用后确保内置「对话」项目存在，并将项目 ID 缓存在 Client 内存中；失败只记日志，不阻止启动。
+func ensureChatsProject(ctx context.Context, backend *remote.MemoryBackend, client *Client, dataDir string) string {
+	if backend == nil {
+		return ""
+	}
+	id, err := ensureBuiltinProject(ctx, backend, filepath.Join(dataDir, "chats"), "对话")
+	if err != nil {
+		log.Printf("内置对话项目初始化失败: %v", err)
+		return ""
+	}
+	if client != nil {
+		client.setChatsProjectID(id)
+	}
+	return id
 }
 
 type frontdeskClient struct{ dataDir string }
@@ -144,7 +160,7 @@ func wireFrontdesk(a *App, dataDir string) {
 	home := cfg.Orchestration.Steward.ResolvedHomeDir(dataDir)
 	var projectID string
 	if cfg.Orchestration.Steward.Enabled {
-		projectID, err = ensureFrontdeskProject(ctx, a.backend, home)
+		projectID, err = ensureBuiltinProject(ctx, a.backend, home, "总管")
 		if err != nil {
 			log.Printf("前台创建项目失败: %v", err)
 		}

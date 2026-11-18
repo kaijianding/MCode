@@ -1556,6 +1556,8 @@ func Open(opts Options) (*App, error) {
 	// 总管接线：待处理事件服务与 MCP 服务都已就绪，钩子直接引用 App 的通知方法，
 	// 所以放在 App 实例构造之后；总管自己的会话随后被排除在待处理事件之外。
 	wireFrontdesk(appInstance, opts.DataDir)
+	// 内置「对话」项目：无论总管是否启用都在后端可用后确保存在，供随手问答会话使用。
+	ensureChatsProject(context.Background(), backend, client, opts.DataDir)
 
 	// bee 消息保留：后台每天压缩一次已结束满 30 天的 bee 会话消息。
 	// 开关每次现读配置，读不到配置时跳过，不动数据。
