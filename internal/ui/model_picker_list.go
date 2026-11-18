@@ -17,16 +17,6 @@ func modelPickerSideFromTab(tab string) ModelPickerSide {
 	return ModelPickerSideLead
 }
 
-// providerByID 在供应商列表里按 ID 查找；找不到返回 false。
-func providerByID(providers []ProviderInfo, id string) (ProviderInfo, bool) {
-	for _, prov := range providers {
-		if prov.ID == id {
-			return prov, true
-		}
-	}
-	return ProviderInfo{}, false
-}
-
 // modelIndexByID 返回指定模型 ID 在目录中的下标；未找到返回 -1。
 func modelIndexByID(models []ModelInfo, id string) int {
 	for idx, m := range models {
