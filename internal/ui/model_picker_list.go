@@ -199,7 +199,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				renderModelPickerTiersSection(c, p, state)
 			}
 			if len(pinned) > 0 {
-				ui.Column(c.Key(p.KeyPrefix+"pinned-section")).
+				ui.Column(c.Key(p.KeyPrefix + "pinned-section")).
 					Gap(Space0).
 					MinWidth(0).
 					FillWidth().
@@ -256,7 +256,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 					if !open {
 						return
 					}
-					ui.Box(c.Key(p.KeyPrefix + "agent-group-divider-" + prov.ID)).
+					ui.Box(c.Key(p.KeyPrefix+"agent-group-divider-"+prov.ID)).
 						Height(Hairline).
 						Margin(0, Space3).
 						Background(modelPickerDivider).
