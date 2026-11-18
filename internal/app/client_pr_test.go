@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"mcode/internal/git"
+	"mcode/internal/remote"
 	"mcode/internal/remote/wire"
 )
 
@@ -200,6 +201,75 @@ func TestGitPRAIReviewParse(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPRReviewBlock(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		want  string
+		found bool
+	}{
+		{
+			name: "没有块",
+			text: "审查完成，没有发现问题。",
+		},
+		{
+			name:  "单个块",
+			text:  "```pr-review\n[{\"path\":\"a.go\",\"line\":2,\"body\":\"问题\"}]\n```",
+			want:  `[{"path":"a.go","line":2,"body":"问题"}]`,
+			found: true,
+		},
+		{
+			name:  "同一消息多个块取最后一个",
+			text:  "```pr-review\n[]\n```\n修订后：\n```pr-review\n[{\"path\":\"b.go\",\"line\":1,\"body\":\"最后一条\"}]\n```",
+			want:  `[{"path":"b.go","line":1,"body":"最后一条"}]`,
+			found: true,
+		},
+		{
+			name:  "块前后有说明文字",
+			text:  "我审查了这个 PR。\n\n```pr-review\n[]\n```\n\n以上是结果。",
+			want:  "[]",
+			found: true,
+		},
+		{
+			name: "未闭合块",
+			text: "```pr-review\n[{\"path\":\"a.go\",\"line\":2,\"body\":\"问题\"}]",
+		},
+		{
+			name: "只有其他语言的围栏",
+			text: "```json\n[]\n```",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := prReviewBlock(tc.text)
+			if ok != tc.found {
+				t.Fatalf("prReviewBlock() found = %v, want %v", ok, tc.found)
+			}
+			if got != tc.want {
+				t.Fatalf("prReviewBlock() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGitPRAIReviewWithoutResult 验证会话里没有 pr-review 块时直接报错。
+func TestGitPRAIReviewWithoutResult(t *testing.T) {
+	hub := remote.NewStreamHub(remote.StreamHubOptions{})
+	defer hub.Close()
+	backend := remote.NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.AddProject(wire.ProjectSummary{ID: "proj-pr-review", Name: "Proj", Path: "/mock"})
+	backend.AddThread(wire.ThreadSummary{ID: "thread-pr-review", ProjectID: "proj-pr-review", Provider: "memory", Title: "审查"}, []wire.ThreadMessage{
+		{ID: "m1", Role: "user", Text: "审查这个 PR"},
+		{ID: "m2", Role: "assistant", Text: "我没有输出审查块。"},
+	})
+
+	_, err := (&Client{backend: backend}).GitPRAIReview(context.Background(), "thread-pr-review", 1)
+	if err == nil || err.Error() != "当前会话没有 AI 审查结果" {
+		t.Fatalf("错误 = %v, 期望当前会话没有 AI 审查结果", err)
 	}
 }
 

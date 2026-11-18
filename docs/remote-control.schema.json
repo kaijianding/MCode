@@ -13308,7 +13308,7 @@
     },
     "RemoteGitPRAIReviewResult": {
       "type": "object",
-      "description": "git.pr.aiReview 的成功结果：AI 生成的行内评论草稿，由用户确认后再提交。",
+      "description": "git.pr.aiReview 的成功结果：从会话中 AI 审查结果解析出的行内评论草稿，由用户确认后再提交。",
       "properties": {
         "comments": {
           "type": "array",

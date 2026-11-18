@@ -12,12 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"mcode/internal/config"
 	"mcode/internal/git"
 	"mcode/internal/procattr"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/remote/wire"
-	"mcode/internal/textgen"
 )
 
 // GitPRList 列出会话所在仓库开放的 PR/MR，limit<=0 时由 git 层取默认条数。
@@ -155,11 +153,30 @@ func (c *Client) GitPRCheckoutWorktree(ctx context.Context, threadID string, num
 	return path, nil
 }
 
-// GitPRAIReview 用一次模型调用生成 PR/MR 的行内审查草稿，由用户确认后再提交。
+// GitPRAIReview 从当前会话里 agent 输出的最后一个 pr-review 代码围栏块取行内审查结果，
+// 按 PR diff 校验后返回草稿，由用户确认后再提交。
 // 这是用户主动发起的操作，不检查「生成提交信息」开关。
 func (c *Client) GitPRAIReview(ctx context.Context, threadID string, number int) ([]git.PRReviewComment, error) {
 	if number <= 0 {
 		return nil, fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	msgs, err := c.History(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	var block string
+	found := false
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "assistant" {
+			continue
+		}
+		if b, ok := prReviewBlock(msgs[i].Text); ok {
+			block, found = b, true
+			break
+		}
+	}
+	if !found {
+		return nil, errors.New("当前会话没有 AI 审查结果")
 	}
 	detail, err := c.GitPRDetail(ctx, threadID, number)
 	if err != nil {
@@ -197,19 +214,7 @@ func (c *Client) GitPRAIReview(ctx context.Context, threadID string, number int)
 	if patch == "" {
 		return []git.PRReviewComment{}, nil
 	}
-
-	cfg, ok := c.loadConfig()
-	if !ok {
-		cfg = config.Defaults()
-	}
-	provider, model, effort := textgenModelSelection(cfg)
-	genCtx := withThreadTextgenNotice(callCtx, c.backend, threadID)
-	genCtx = withTextgenGlobalSelection(genCtx, cfg)
-	out, err := generateText(genCtx, cfg, c.textgenSecrets(), provider, model, effort, textgen.PRReviewPrompt(detail.Title, detail.Body, patch))
-	if err != nil {
-		return nil, err
-	}
-	return parsePRAIReview(out, patch)
+	return parsePRAIReview(block, patch)
 }
 
 // gitPRDiff 在仓库根目录取 base 到 head 的补丁。
@@ -226,6 +231,27 @@ func gitPRDiff(ctx context.Context, root, base, head string) (string, error) {
 		return "", fmt.Errorf("读取 PR diff: %w", err)
 	}
 	return strings.TrimSpace(out.String()), nil
+}
+
+// prReviewBlock 返回 text 中最后一个 pr-review 代码围栏块的内容（不含围栏行），
+// 没有块或块未闭合时返回 false。
+func prReviewBlock(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	open := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "```pr-review" {
+			open = i
+		}
+	}
+	if open < 0 {
+		return "", false
+	}
+	for i := open + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			return strings.Join(lines[open+1:i], "\n"), true
+		}
+	}
+	return "", false
 }
 
 // prReviewResult 是模型输出的一条审查意见。

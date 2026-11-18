@@ -83,7 +83,7 @@
 - `git.pr.merge`：合入 PR/MR，参数 `threadID`、`number`、`method`（`squash` / `merge` / `rebase`），结果为 `{ "ok": true }`。
 - `git.pr.review`：提交审查，参数 `threadID`、`number`、`event`（`approve` / `request-changes` / `comment`）与可选 `body`；`request-changes` 或 `comment` 时 `body` 必填，结果为 `{ "ok": true }`。
 - `git.pr.submitReview`：一次提交审查与行内评论，参数 `threadID`、`number`、`event`、可选 `body`、可选 `comments`（每项 `path`、`line`、`side`、`body`）；`comment` 必须带 `body`，`request-changes` 必须带 `body` 或至少一条行内评论，结果为 `{ "ok": true }`。
-- `git.pr.aiReview`：一次性生成行内审查草稿，参数 `threadID`、`number`，结果为 `{ "comments" }`，每项 `path`、`line`、`side`（`RIGHT`）、`body`；没有意见时 `comments` 为空数组，不返回 null。生成走模型调用，耗时较长，草稿由用户确认后再提交。
+- `git.pr.aiReview`：读取该会话最近一条 agent 回复中的 pr-review 块，按 PR diff 校验后作为行内审查草稿，参数 `threadID`、`number`，结果为 `{ "comments" }`，每项 `path`、`line`、`side`（`RIGHT`）、`body`；没有意见时 `comments` 为空数组，不返回 null。会话里没有审查结果时返回错误，草稿由用户确认后再提交。
 - `git.pr.createUrl`：按会话所在仓库的远端地址与当前分支生成创建 PR/MR 的网页地址，参数 `threadID`，结果为 `{ "url", "title"?, "body"? }`。地址规则与桌面端「创建合并请求」一致：GitHub 等平台拼 `<repo>/compare/<branch>?expand=1`，GitLab 拼 `<repo>/-/merge_requests/new?merge_request[source_branch]=<branch>`；`title`、`body` 是宿主预填的表单字段，宿主没有预填内容时省略。没有远端、识别不到托管平台或处于游离 HEAD 时回 `InvalidParams`。
 - `git.commitSelected` 的参数新增可选 `pushAfter`：为 `true` 时提交成功后继续推送当前分支。推送失败不改变结果的 `ok`（仍表示已提交），失败原因放在 `pushError`（已脱敏），客户端据此提示「已提交，推送失败」。
 - `projects.add`：把宿主上一个已存在的目录登记为项目，参数 `path`，结果为 `{ "project" }`；路径不存在或不是目录回 `InvalidParams`（`-32602`）。成功后宿主广播 `projects.changed`。

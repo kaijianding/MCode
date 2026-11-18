@@ -284,24 +284,3 @@ func TestPRDescriptionPrompt(t *testing.T) {
 		t.Fatalf("截断错误，长度 %d", len(prompt))
 	}
 }
-
-func TestPRReviewPrompt(t *testing.T) {
-	prompt := PRReviewPrompt("fix: 登录崩溃", "登录时偶发崩溃", "diff --git a/a.go b/a.go\n+++ b/a.go\n@@ -1 +1 @@")
-	for _, want := range []string{"fix: 登录崩溃", "登录时偶发崩溃", "diff --git", "+++ b/", "JSON", "10", "[]"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("缺少 %q", want)
-		}
-	}
-	const truncNote = "diff 已截断，仅含前 12000 字节，只对可见部分给出评论"
-	if strings.Contains(prompt, truncNote) {
-		t.Errorf("未截断时不应包含截断提示")
-	}
-	long := strings.Repeat("界", 5000)
-	prompt = PRReviewPrompt(long, long, long)
-	if !utf8.ValidString(prompt) || len(prompt) > 24000 {
-		t.Fatalf("截断错误，长度 %d", len(prompt))
-	}
-	if !strings.Contains(prompt, truncNote) {
-		t.Errorf("截断时缺少提示 %q", truncNote)
-	}
-}

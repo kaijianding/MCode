@@ -121,27 +121,6 @@ func PRDescriptionPrompt(commits, diffStat, diffPatch, instructions string) stri
 	return sb.String()
 }
 
-// PRReviewPrompt 根据 PR 标题、正文与 diff 构造 AI 审查提示词，
-// 要求模型只输出落在 diff 新侧有效行号上的 JSON 评论数组。
-func PRReviewPrompt(title, body, patch string) string {
-	var sb strings.Builder
-	sb.WriteString("你是资深代码审查者。请审查下面这个 PR 的 diff。\n规则：\n")
-	sb.WriteString("- 只报告真实的缺陷、安全问题、数据丢失风险和明显的逻辑错误，不报风格问题\n")
-	sb.WriteString("- 只输出一个 JSON 数组，每项为 {\"path\":\"...\",\"line\":N,\"body\":\"...\"}，最多 10 条\n")
-	sb.WriteString("- 没有问题时输出 []，不要输出数组以外的解释\n")
-	sb.WriteString("- path 用 diff 里 +++ b/ 后面的路径，line 用新文件的行号，且必须落在该文件某个 hunk 的新侧范围内\n")
-	sb.WriteString("- body 用一两句话说清问题和后果，语言与 PR 标题和正文一致\n")
-	sb.WriteString("\nPR 标题：\n" + truncateUTF8(strings.TrimSpace(title), 2000))
-	sb.WriteString("\n\nPR 正文：\n" + truncateUTF8(strings.TrimSpace(body), 8000))
-	trimmedPatch := strings.TrimSpace(patch)
-	truncatedPatch := truncateUTF8(trimmedPatch, 12000)
-	sb.WriteString("\n\nDiff 详情：\n" + truncatedPatch)
-	if len(truncatedPatch) < len(trimmedPatch) {
-		sb.WriteString("\ndiff 已截断，仅含前 12000 字节，只对可见部分给出评论")
-	}
-	return sb.String()
-}
-
 // MemoryCondensePrompt 构造记忆精简提示词。
 // mergeWith 非空时是要合并进来的已有记忆全文，要求把两者合并为一条后精简。
 func MemoryCondensePrompt(title, content, mergeWith string) string {
