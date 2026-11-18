@@ -444,6 +444,10 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 		st.mu.Unlock()
 		s.closeGitPRDialog()
 		s.selectThread(newID)
+		// AI 审查会话建好后直接停在该 PR 的改动视图，用户不必再打开 PR 弹窗找「导入 AI 审查」。
+		if kind == "ai-review" && s.gitPRThreadID() == newID {
+			openReviewPR(s, number)
+		}
 	}()
 }
 

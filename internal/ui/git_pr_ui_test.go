@@ -329,6 +329,16 @@ func (f *gitPRDialogFake) GitPRMerge(context.Context, string, int, string) error
 
 func (f *gitPRDialogFake) GitPRReview(context.Context, string, int, string, string) error { return nil }
 
+// ReviewGetPR 让 AI 审查后的改动视图能读到 PR 数据，满足 reviewPRClient。
+func (f *gitPRDialogFake) ReviewGetPR(context.Context, string, int, string) (ReviewSnapshot, error) {
+	return ReviewSnapshot{Scope: "pr"}, nil
+}
+
+// GitPRSubmitReview 满足 reviewPRClient；本文件的测试不提交评论。
+func (f *gitPRDialogFake) GitPRSubmitReview(context.Context, string, int, string, string, []git.PRReviewComment) error {
+	return nil
+}
+
 func (f *gitPRDialogFake) GitPRCheckoutWorktree(_ context.Context, _ string, number int, head string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -687,6 +697,21 @@ func TestGitPRAIReviewThread(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	// 审查会话建好后改动面板应直接停在 PR 视图，顶部就是「导入 AI 审查」。
+	dp := getDiffPanelState(s)
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		diffPanelMu.Lock()
+		scope, number := dp.scope, dp.prNumber
+		diffPanelMu.Unlock()
+		if scope == "pr" && number == 42 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("改动面板 = scope %q PR #%d，期望 PR #42", scope, number)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // TestGitPRAIReviewCrossRepoDisabled 覆盖 fork 来的 PR 不能发起 AI 审查。
@@ -949,5 +974,13 @@ func TestGitPRCheckout(t *testing.T) {
 			t.Fatalf("选中会话 = %q，期望 %q", selected, newID)
 		}
 		time.Sleep(time.Millisecond)
+	}
+	// 普通检出只切会话，不改动面板范围。
+	dp := getDiffPanelState(s)
+	diffPanelMu.Lock()
+	scope, number := dp.scope, dp.prNumber
+	diffPanelMu.Unlock()
+	if scope == "pr" || number != 0 || inspectorPaneOpen(s, sidePaneDiffID) {
+		t.Fatalf("检出不应打开 PR 改动视图：open=%v scope=%q number=%d", inspectorPaneOpen(s, sidePaneDiffID), scope, number)
 	}
 }
