@@ -2996,3 +2996,99 @@ func TestProjectAllowOptions(t *testing.T) {
 		t.Fatal(options)
 	}
 }
+
+// TestApprovals_ReadOnlyHelperAllowsBuiltinReadOnlyMCP 覆盖：只读档 helper 会话调用 mcode 自带只读 MCP 工具时
+// 直接放行且不向前端分发审批；自带写 MCP 工具依然被拒绝。
+func TestApprovals_ReadOnlyHelperAllowsBuiltinReadOnlyMCP(t *testing.T) {
+	hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+
+	ctx := context.Background()
+	threadID := "00000000-0000-0000-0000-00000000008c"
+	backend.AddThread(wire.ThreadSummary{
+		ID:          threadID,
+		Title:       "Read-only Builtin MCP Thread",
+		RuntimeMode: "readonly",
+	}, nil)
+	backend.SetThreadRelation(threadID, "00000000-0000-0000-0000-000000000001", true)
+
+	var (
+		readResp  harness.ApprovalResponse
+		readErr   error
+		writeResp harness.ApprovalResponse
+		writeErr  error
+	)
+
+	doneCh := make(chan struct{})
+	mock := &mockHarness{
+		runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+			defer close(doneCh)
+			ia, ok := turn.Approver.(harness.Interactor)
+			if !ok {
+				t.Error("turn approver should implement harness.Interactor")
+				return nil
+			}
+			readResp, readErr = ia.Interact(ctx, harness.ApprovalRequest{
+				ToolName: "mcp_mcode_session_get",
+				Kind:     harness.RequestKindTool,
+				Input:    json.RawMessage(`{"session_id":"00000000-0000-0000-0000-000000000001"}`),
+			})
+			writeResp, writeErr = ia.Interact(ctx, harness.ApprovalRequest{
+				ToolName: "mcp__mcode__swarm_delegate",
+				Kind:     harness.RequestKindTool,
+				Input:    json.RawMessage(`{"tasks":[{"prompt":"do work"}]}`),
+			})
+			return nil
+		},
+	}
+	backend.SetHarness(mock, "/workspace", harness.ModeAgent)
+
+	conn := newMockStreamConn()
+	var requestNotified bool
+	conn.notifyFn = func(method string, params any) error {
+		if method == "requests.changed" {
+			requestNotified = true
+		}
+		return nil
+	}
+	if _, err := backend.Subscribe(ctx, conn, threadID); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+		ThreadID: threadID,
+		Text:     "读取会话",
+		ActionID: "00000000-0000-0000-0000-00000000008d",
+	}); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn execution timed out")
+	}
+
+	if readErr != nil {
+		t.Fatalf("只读 MCP 工具 Interact 不应返回错误: %v", readErr)
+	}
+	if readResp.Decision != harness.DecisionAllow {
+		t.Errorf("只读 MCP 工具应放行，得到 %v", readResp.Decision)
+	}
+
+	if writeErr != nil {
+		t.Fatalf("写 MCP 工具 Interact 不应返回错误: %v", writeErr)
+	}
+	if writeResp.Decision != harness.DecisionDeny {
+		t.Errorf("写 MCP 工具应被拒绝，得到 %v", writeResp.Decision)
+	}
+	if writeResp.Feedback != "只读档子代理不允许写操作" {
+		t.Errorf("写 MCP 工具应带只读档拒绝说明，得到 %q", writeResp.Feedback)
+	}
+
+	if requestNotified {
+		t.Error("只读档拦截/放行都不应向前端推送 requests.changed")
+	}
+}
