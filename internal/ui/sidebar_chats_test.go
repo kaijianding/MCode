@@ -338,3 +338,164 @@ func TestChatsSidebarSectionHiddenInActivityAndSearch(t *testing.T) {
 		t.Fatal("清空侧栏搜索词后应恢复渲染「对话」段")
 	}
 }
+
+// (i) 项目树视图搜索「对话」会话标题时渲染「对话」段且仅列命中会话，对话项目名不参与匹配。
+func TestChatsSidebarSearchTreeView(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "内置对话"},
+			{ID: "p1", Name: "普通项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {
+				{ID: "c1", ProjectID: "chats-builtin", Title: "闲聊一号", UpdatedAt: now},
+				{ID: "c2", ProjectID: "chats-builtin", Title: "休眠闲聊", Dormant: true, UpdatedAt: now.Add(-time.Hour)},
+				{ID: "c3", ProjectID: "chats-builtin", Title: "普通话题", UpdatedAt: now},
+			},
+			"p1": {
+				{ID: "t1", ProjectID: "p1", Title: "项目会话", UpdatedAt: now},
+			},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("闲聊一号") && tt.HasText("项目会话")
+	})
+
+	*getSearchQuery(state) = "闲聊"
+	state.invalidate()
+	tt.Frame()
+
+	for _, want := range []string{"新建对话", "打开会话 闲聊一号", "打开会话 休眠闲聊"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Fatalf("树视图搜索应显示 %q: %q", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"打开会话 普通话题", "打开会话 项目会话", "收起项目 普通项目", "展开项目 普通项目"} {
+		if _, ok := tt.Find(unwanted); ok {
+			t.Fatalf("树视图搜索不应显示未命中项 %q: %q", unwanted, tt.Texts())
+		}
+	}
+
+	// 对话项目名不参与匹配。
+	*getSearchQuery(state) = "内置对话"
+	state.invalidate()
+	tt.Frame()
+	if !tt.HasText("无结果") {
+		t.Fatalf("对话项目名不应参与匹配，期望显示无结果卡片: %q", tt.Texts())
+	}
+}
+
+// (j) 动态视图搜索能搜到「对话」项目里的活跃会话，并跳过休眠和子代理会话。
+func TestChatsSidebarSearchActivityView(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "内置对话"},
+			{ID: "p1", Name: "普通项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {
+				{ID: "c1", ProjectID: "chats-builtin", Title: "闲聊一号", UpdatedAt: now},
+				{ID: "c2", ProjectID: "chats-builtin", Title: "休眠闲聊", Dormant: true, UpdatedAt: now.Add(-time.Hour)},
+				{ID: "c3", ProjectID: "chats-builtin", Title: "闲聊子代理", IsHelper: true, ParentThreadID: "c1", UpdatedAt: now},
+				{ID: "c4", ProjectID: "chats-builtin", Title: "无关对话", UpdatedAt: now},
+			},
+			"p1": {
+				{ID: "t1", ProjectID: "p1", Title: "项目闲聊", UpdatedAt: now},
+				{ID: "t2", ProjectID: "p1", Title: "普通会话", UpdatedAt: now},
+			},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("闲聊一号") && tt.HasText("项目闲聊")
+	})
+
+	state.toggleActivityView()
+	*getSearchQuery(state) = "闲聊"
+	state.invalidate()
+	tt.Frame()
+
+	for _, want := range []string{"打开会话 闲聊一号", "打开会话 项目闲聊"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Fatalf("动态视图搜索应显示 %q: %q", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"新建对话", "打开会话 休眠闲聊", "打开会话 闲聊子代理", "打开会话 无关对话", "打开会话 普通会话"} {
+		if _, ok := tt.Find(unwanted); ok {
+			t.Fatalf("动态视图搜索不应显示 %q: %q", unwanted, tt.Texts())
+		}
+	}
+	if tt.HasText("无结果") {
+		t.Fatalf("动态视图搜索有命中时不应显示无结果卡片: %q", tt.Texts())
+	}
+}
+
+// (k) 只有「对话」会话命中时，不显示无结果卡片。
+func TestChatsSidebarSearchOnlyChatsNoEmptyCard(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "内置对话"},
+			{ID: "p1", Name: "普通项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {
+				{ID: "c1", ProjectID: "chats-builtin", Title: "专属闲聊", UpdatedAt: now},
+			},
+			"p1": {
+				{ID: "t1", ProjectID: "p1", Title: "项目会话", UpdatedAt: now},
+			},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("专属闲聊") && tt.HasText("项目会话")
+	})
+
+	*getSearchQuery(state) = "专属"
+	state.invalidate()
+	tt.Frame()
+
+	if _, ok := tt.Find("打开会话 专属闲聊"); !ok {
+		t.Fatalf("仅对话命中时应显示命中会话: %q", tt.Texts())
+	}
+	if tt.HasText("无结果") || tt.HasText("试试输入会话标题或项目名称") {
+		t.Fatalf("仅对话命中时不应显示无结果卡片: %q", tt.Texts())
+	}
+	if _, ok := tt.Find("打开会话 项目会话"); ok {
+		t.Fatalf("未命中的普通项目会话不应显示: %q", tt.Texts())
+	}
+
+	state.toggleActivityView()
+	tt.Frame()
+	if _, ok := tt.Find("打开会话 专属闲聊"); !ok {
+		t.Fatalf("动态视图下仅对话命中时应显示命中会话: %q", tt.Texts())
+	}
+	if tt.HasText("无结果") {
+		t.Fatalf("动态视图下仅对话命中时不应显示无结果卡片: %q", tt.Texts())
+	}
+}

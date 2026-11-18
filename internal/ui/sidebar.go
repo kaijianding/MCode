@@ -107,6 +107,29 @@ func isThreadDormantOrArchived(th Thread) bool {
 	return th.Dormant
 }
 
+// filterMatchingThreads 按搜索词过滤单个项目的会话，保持活跃在前、休眠按活跃时间倒序在后。
+func filterMatchingThreads(threads []Thread, lowerQuery string, projectMatches, activityView bool) []Thread {
+	var active, dormant []Thread
+	for _, th := range threads {
+		// 动态视图不显示子代理，这里同样跳过它们：否则方向键会落在看不见的行上。
+		// 休眠会话也不在动态视图中显示。
+		if activityView && (isActivityHiddenHelper(th) || th.Dormant) {
+			continue
+		}
+		if projectMatches || strings.Contains(strings.ToLower(th.Title), lowerQuery) {
+			if th.Dormant {
+				dormant = append(dormant, th)
+			} else {
+				active = append(active, th)
+			}
+		}
+	}
+	sort.SliceStable(dormant, func(i, j int) bool {
+		return threadActivityTime(dormant[i]).After(threadActivityTime(dormant[j]))
+	})
+	return append(active, dormant...)
+}
+
 // 侧边栏活跃会话分页参数：默认展示 sidebarThreadPageInit 条，每次「加载更多」追加 sidebarThreadPageStep 条。
 const (
 	sidebarThreadPageInit = 8  // 每个项目默认展示的活跃会话条数
@@ -346,7 +369,8 @@ func renderSidebar(c *ui.Context, s *chatState) {
 	if stewardThread != "" {
 		projects, threads, threadsByProj = withoutStewardThread(stewardThread, projects, threads, threadsByProj)
 	}
-	if chatsProjID := s.chatsProjectID(); chatsProjID != "" {
+	chatsProjID := s.chatsProjectID()
+	if chatsProjID != "" {
 		projects = withoutProjects(projects, chatsProjID)
 	}
 
@@ -369,31 +393,19 @@ func renderSidebar(c *ui.Context, s *chatState) {
 
 	activityView := s.activityViewEnabled()
 	matchesByProject := make(map[string][]Thread)
+	var chatsMatches []Thread
 	var matchingThreads []Thread
 	if lowerQuery != "" {
+		if chatsProjID != "" {
+			chatsMatches = filterMatchingThreads(threadsByProj[chatsProjID], lowerQuery, false, activityView)
+			matchingThreads = append(matchingThreads, chatsMatches...)
+		}
 		for _, p := range projects {
-			var active, dormant []Thread
 			projectMatches := strings.Contains(strings.ToLower(p.Name), lowerQuery)
-			for _, th := range threadsByProj[p.ID] {
-				// 动态视图不显示子代理，这里同样跳过它们：否则方向键会落在看不见的行上。
-				// 休眠会话也不在动态视图中显示。
-				if activityView && (isActivityHiddenHelper(th) || th.Dormant) {
-					continue
-				}
-				if projectMatches || strings.Contains(strings.ToLower(th.Title), lowerQuery) {
-					if th.Dormant {
-						dormant = append(dormant, th)
-					} else {
-						active = append(active, th)
-					}
-				}
-			}
-			sort.SliceStable(dormant, func(i, j int) bool {
-				return threadActivityTime(dormant[i]).After(threadActivityTime(dormant[j]))
-			})
-			if projectMatches || len(active)+len(dormant) > 0 {
-				matchesByProject[p.ID] = append(active, dormant...)
-				matchingThreads = append(matchingThreads, matchesByProject[p.ID]...)
+			matched := filterMatchingThreads(threadsByProj[p.ID], lowerQuery, projectMatches, activityView)
+			if projectMatches || len(matched) > 0 {
+				matchesByProject[p.ID] = matched
+				matchingThreads = append(matchingThreads, matched...)
 			}
 		}
 		if activityView {
@@ -514,7 +526,7 @@ func renderSidebar(c *ui.Context, s *chatState) {
 			projectGap := m.projectGap
 
 			// 搜索词非空且项目与会话全部未命中时，列表区居中显示「无结果」卡片。
-			if lowerQuery != "" && len(matchesByProject) == 0 {
+			if lowerQuery != "" && len(matchesByProject) == 0 && len(chatsMatches) == 0 {
 				renderSidebarNoResultsCard(c)
 				return
 			}
@@ -552,11 +564,15 @@ func renderSidebar(c *ui.Context, s *chatState) {
 			}
 
 			if lowerQuery == "" {
-				renderSidebarChatsSection(c, s)
+				renderSidebarChatsSection(c, s, nil)
+			} else if len(chatsMatches) > 0 {
+				renderSidebarChatsSection(c, s, chatsMatches)
 			}
 
 			if len(projects) == 0 {
-				EmptyState(c, EmptyStateProps{Title: "暂无项目", Compact: true}).Padding(Space5, Space5)
+				if lowerQuery == "" {
+					EmptyState(c, EmptyStateProps{Title: "暂无项目", Compact: true}).Padding(Space5, Space5)
+				}
 				return
 			}
 

@@ -21,8 +21,9 @@ func (s *chatState) chatsProjectID() string {
 }
 
 // renderSidebarChatsSection 渲染侧栏顶部的「对话」段：段标题与右侧「+」按钮，
-// 下方按最近活动平铺该项目的顶层会话；没有会话时仅显示段标题，chatsProjectID 为空时整段不渲染。
-func renderSidebarChatsSection(c *ui.Context, s *chatState) {
+// 下方按最近活动平铺该项目的顶层会话；threadsFilter 非 nil 时只列传入的会话（搜索态过滤结果），
+// 为 nil 时取全部对话会话；没有会话时仅显示段标题，chatsProjectID 为空时整段不渲染。
+func renderSidebarChatsSection(c *ui.Context, s *chatState, threadsFilter []Thread) {
 	chatsProjID := s.chatsProjectID()
 	if chatsProjID == "" {
 		return
@@ -30,7 +31,12 @@ func renderSidebarChatsSection(c *ui.Context, s *chatState) {
 
 	s.mu.Lock()
 	providers := append([]ProviderInfo(nil), s.providers...)
-	rawThreads := withoutProvisional(s.threadsByProj[chatsProjID])
+	var rawThreads []Thread
+	if threadsFilter != nil {
+		rawThreads = withoutProvisional(threadsFilter)
+	} else {
+		rawThreads = withoutProvisional(s.threadsByProj[chatsProjID])
+	}
 	selectedID := s.selectedThreadID
 	s.mu.Unlock()
 
