@@ -429,7 +429,12 @@ func startReviewPRAI(s *chatState, dp *diffPanelState, tid string) bool {
 		return false
 	}
 	number := dp.prNumber
-	head, base, turn := dp.snapshot.HeadRevision, dp.snapshot.BaseRevision, dp.turnID
+	// 快照可能还是上一个作用域的，只有同一个 PR 才能沿用它的 head；否则让后端取最新版本。
+	head := ""
+	if dp.snapshot.Scope == "pr" && dp.snapshot.Number == number {
+		head = dp.snapshot.HeadRevision
+	}
+	turn := ""
 	dp.prAIBusy = number
 	dp.prAIErr, dp.prAIErrNumber = "", 0
 	diffPanelMu.Unlock()
@@ -440,31 +445,32 @@ func startReviewPRAI(s *chatState, dp *diffPanelState, tid string) bool {
 		comments, err := pr.GitPRAIReview(ctx, tid, number)
 		var drafts []reviewCommentDraft
 		if err == nil {
-			contents := make(map[string]*ReviewFileContent)
+			// 逐文件返回的快照才是真实的 base/head，草稿 key 必须用它们。
+			snapshots := make(map[string]ReviewSnapshot)
 			missing := make(map[string]bool)
 			for _, comment := range comments {
 				path, body := strings.TrimSpace(comment.Path), strings.TrimSpace(comment.Body)
 				if path == "" || body == "" || comment.Line <= 0 {
 					continue
 				}
-				content, found := contents[path]
+				snapshot, found := snapshots[path]
 				if !found && !missing[path] {
-					snapshot, readErr := getReviewAt(ctx, reviewer, tid, "pr", turn, number, head, path)
-					if readErr != nil || snapshot.File == nil {
+					read, readErr := getReviewAt(ctx, reviewer, tid, "pr", turn, number, head, path)
+					if readErr != nil || read.File == nil {
 						missing[path] = true
 					} else {
-						content, contents[path] = snapshot.File, snapshot.File
+						snapshot, snapshots[path] = read, read
 					}
 				}
-				if content == nil {
+				if snapshot.File == nil {
 					continue
 				}
 				lines := editor.DiffLineRange{Side: editor.DiffNew, Start: comment.Line - 1, End: comment.Line - 1}
-				original, ok := reviewSelectedText(*content, lines)
+				original, ok := reviewSelectedText(*snapshot.File, lines)
 				if !ok {
 					continue
 				}
-				drafts = append(drafts, reviewCommentDraft{key: reviewDiffKey{workspace: workspace, threadID: tid, scope: "pr", turnID: turn, base: base, head: head, prNumber: number, path: path}, lines: lines, original: original, body: body})
+				drafts = append(drafts, reviewCommentDraft{key: reviewDiffKey{workspace: workspace, threadID: tid, scope: "pr", turnID: turn, base: snapshot.BaseRevision, head: snapshot.HeadRevision, prNumber: number, path: path}, lines: lines, original: original, body: body})
 			}
 		}
 		diffPanelMu.Lock()
@@ -494,6 +500,10 @@ func startReviewPRAI(s *chatState, dp *diffPanelState, tid string) bool {
 			}
 			dp.commentSerial++
 			dp.comments = append(dp.comments, &reviewComment{id: dp.commentSerial, key: draft.key, lines: draft.lines, original: draft.original, body: draft.body})
+		}
+		// 后端给了意见但一条都没落到 diff 上时不能静默，否则用户看不到任何反馈。
+		if len(comments) > 0 && len(drafts) == 0 {
+			dp.prAIErr, dp.prAIErrNumber = "AI 审查意见无法定位到 diff", number
 		}
 		diffPanelMu.Unlock()
 		if len(comments) == 0 {

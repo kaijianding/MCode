@@ -494,3 +494,63 @@ func TestReviewPRAIStalePR(t *testing.T) {
 		t.Fatalf("旧 PR 结果生成了 %d 条草稿", count)
 	}
 }
+
+// PR 快照尚未加载时 dp.snapshot 还是别的作用域，草稿必须用逐文件读取返回的版本。
+func TestReviewPRAIUsesPRSnapshotRevision(t *testing.T) {
+	s, f, dp := reviewPRSetup(t)
+	diffPanelMu.Lock()
+	dp.snapshot = ReviewSnapshot{Scope: "turn", TurnID: "turn-1", HeadRevision: "local", BaseRevision: "localbase"}
+	dp.scope, dp.prNumber = "pr", 7
+	diffPanelMu.Unlock()
+	f.ai = func(context.Context, string, int) ([]git.PRReviewComment, error) {
+		return []git.PRReviewComment{{Path: "a.go", Line: 2, Side: "RIGHT", Body: "改用常量"}}, nil
+	}
+	f.get = func(_ context.Context, _ string, number int, path string) (ReviewSnapshot, error) {
+		list, full := reviewFixture()
+		if path != "" {
+			list = full
+		}
+		list.Scope, list.Number, list.TurnID = "pr", number, ""
+		list.HeadRevision, list.BaseRevision = "prhead", "prbase"
+		return list, nil
+	}
+	if !startReviewPRAI(s, dp, "t1") {
+		t.Fatal("AI 审查没有启动")
+	}
+	waitReviewComments(t, func() bool {
+		diffPanelMu.Lock()
+		defer diffPanelMu.Unlock()
+		return dp.prAIBusy == 0 && len(dp.comments) == 1
+	})
+	diffPanelMu.Lock()
+	key := dp.comments[0].key
+	diffPanelMu.Unlock()
+	if key.head != "prhead" || key.base != "prbase" {
+		t.Fatalf("草稿用了错误的快照版本: head=%q base=%q", key.head, key.base)
+	}
+}
+
+// 后端返回了意见但没有任何文件能定位时，把错误显示出来，不能静默丢弃。
+func TestReviewPRAIUnlocatableSetsError(t *testing.T) {
+	s, f, dp := reviewPRSetup(t)
+	f.ai = func(context.Context, string, int) ([]git.PRReviewComment, error) {
+		return []git.PRReviewComment{{Path: "a.go", Line: 2, Side: "RIGHT", Body: "改用常量"}}, nil
+	}
+	f.get = func(context.Context, string, int, string) (ReviewSnapshot, error) {
+		return ReviewSnapshot{}, errors.New("读取失败")
+	}
+	if !startReviewPRAI(s, dp, "t1") {
+		t.Fatal("AI 审查没有启动")
+	}
+	waitReviewComments(t, func() bool {
+		diffPanelMu.Lock()
+		defer diffPanelMu.Unlock()
+		return dp.prAIBusy == 0 && dp.prAIErr != ""
+	})
+	diffPanelMu.Lock()
+	errText, errNumber := dp.prAIErr, dp.prAIErrNumber
+	diffPanelMu.Unlock()
+	if errText != "AI 审查意见无法定位到 diff" || errNumber != 7 {
+		t.Fatalf("错误 = %q/%d", errText, errNumber)
+	}
+}
