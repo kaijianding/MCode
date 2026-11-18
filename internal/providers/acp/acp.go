@@ -87,6 +87,7 @@ type Harness struct {
 	// 常驻表与后台任务状态由 residentMu 保护；持锁时不等待进程、不调用外部回调。
 	residentMu          sync.Mutex
 	residentStartMu     sync.Mutex
+	closed              bool
 	residents           map[string]*acpProcess
 	finishedTasks       map[string][]harness.Event
 	unsolicitedNotified map[string]bool

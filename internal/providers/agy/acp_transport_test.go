@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -572,6 +573,7 @@ func TestAgyThreadAffinityKey(t *testing.T) {
 
 func TestAgyHoldForwardsInterfaces(t *testing.T) {
 	h := New(Options{Binary: os.Args[0]})
+	var _ io.Closer = h
 	var _ harness.UnsolicitedTurnNotifier = h
 	var _ harness.ProcessExitNotifier = h
 	var _ harness.ThreadEvictor = h
@@ -586,6 +588,13 @@ func TestAgyHoldForwardsInterfaces(t *testing.T) {
 	defer cancel()
 	if err := h.Run(ctx, harness.Turn{ThreadID: "missing-thread", Attach: true}, func(harness.Event) { t.Error("空 Attach 不应产生事件") }); err != nil {
 		t.Fatal(err)
+	}
+	h.acpAccounts.Store("thread", "account")
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.acpAccounts.Load("thread"); ok {
+		t.Fatal("Close 未清除 ACP 常驻账号映射")
 	}
 }
 

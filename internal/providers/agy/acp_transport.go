@@ -210,3 +210,12 @@ func (h *Harness) EvictThread(threadID string) {
 		h.acpAccounts.Delete(threadID)
 	}
 }
+
+func (h *Harness) Close() error {
+	err := h.acp.Close()
+	h.acpAccounts.Range(func(key, _ any) bool {
+		h.acpAccounts.Delete(key)
+		return true
+	})
+	return err
+}

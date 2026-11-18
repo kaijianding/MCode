@@ -131,7 +131,7 @@ func (h *Harness) runHeld(ctx context.Context, turn harness.Turn, emit func(harn
 		p, err = h.startProcess(ctx, turn)
 		if err != nil {
 			h.residentMu.Lock()
-			if len(finished) > 0 {
+			if !h.closed && len(finished) > 0 {
 				h.finishedTasks[turn.ThreadID] = append(finished, h.finishedTasks[turn.ThreadID]...)
 				delete(h.unsolicitedNotified, turn.ThreadID)
 			}
@@ -155,7 +155,7 @@ func (h *Harness) runHeld(ctx context.Context, turn harness.Turn, emit func(harn
 
 	err := h.runRound(ctx, turn, emit, p)
 	h.residentMu.Lock()
-	keep := err == nil && ctx.Err() == nil && p.keep && !p.dead
+	keep := err == nil && ctx.Err() == nil && p.keep && !p.dead && !h.closed
 	if keep {
 		p.busy = false
 	} else {
@@ -226,6 +226,29 @@ func (h *Harness) EvictThread(threadID string) {
 	}
 }
 
+func (h *Harness) Close() error {
+	h.residentMu.Lock()
+	h.closed = true
+	var idle []*acpProcess
+	for threadID, p := range h.residents {
+		if p.busy {
+			continue
+		}
+		p.expectedExit = true
+		delete(h.residents, threadID)
+		idle = append(idle, p)
+	}
+	clear(h.finishedTasks)
+	clear(h.unsolicitedNotified)
+	h.residentMu.Unlock()
+	for _, p := range idle {
+		_ = p.conn.Close()
+		_ = killProcessGroup(p.cmd, syscall.SIGKILL)
+		<-p.done
+	}
+	return nil
+}
+
 // roundHandlers 的门闩先于工具锁、表锁；表锁内不会获取门闩。
 // 轮次结束后，已经被 Conn 取走的旧回调也不能再触碰旧 emit、Approver 或 ctx。
 func (h *Harness) roundHandlers(p *acpProcess) (func(RequestHandler), func(NotificationHandler), func()) {
@@ -293,6 +316,10 @@ func (h *Harness) backgroundTaskStarts(p *acpProcess, toolID string, outputs []s
 func (h *Harness) holdProcess(p *acpProcess, threadID string) bool {
 	h.residentMu.Lock()
 	defer h.residentMu.Unlock()
+	if h.closed {
+		p.keep = false
+		return false
+	}
 	p.keep = len(h.finishedTasks[threadID]) > 0
 	for _, status := range p.tasks {
 		if status == "" {
@@ -378,9 +405,9 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 		case <-ticker.C:
 		}
 		h.residentMu.Lock()
-		sid, dead := p.sessionID, p.dead
+		sid, stop := p.sessionID, p.dead || h.closed
 		h.residentMu.Unlock()
-		if dead {
+		if stop {
 			return
 		}
 		if candidate := agyTranscriptPath(p, sid); candidate != "" && candidate != path {
@@ -391,7 +418,7 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 			ended, offset = readBackgroundCompletions(path, offset)
 		}
 		h.residentMu.Lock()
-		if p.dead || h.residents[threadID] != p {
+		if h.closed || p.dead || h.residents[threadID] != p {
 			h.residentMu.Unlock()
 			return
 		}
@@ -414,7 +441,14 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 		}
 		h.residentMu.Unlock()
 		if notify {
-			go fn(threadID)
+			go func() {
+				h.residentMu.Lock()
+				closed := h.closed
+				h.residentMu.Unlock()
+				if !closed {
+					fn(threadID)
+				}
+			}()
 		}
 	}
 }

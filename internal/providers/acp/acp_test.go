@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2049,6 +2050,58 @@ func TestACPHoldCompletionReader(t *testing.T) {
 	}
 	if events, _ := readBackgroundCompletions(path, offset); len(events) != 1 {
 		t.Fatalf("日志截断后未从头读取: %v", events)
+	}
+}
+
+func TestACPHoldClose(t *testing.T) {
+	fixture := newACPHoldFixture(t, "feature_hold_content")
+	var _ io.Closer = fixture.h
+	fixture.run(t, fixture.turn)
+	threadID := fixture.turn.ThreadID
+	roots := fixture.h.ProcessRootPIDs(threadID)
+	if len(roots) != 1 || !fixture.h.HasResidentProcess(threadID) {
+		t.Fatal("没有保留空闲的 ACP 进程")
+	}
+	fixture.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return fixture.h.HasUnsolicitedOutput(threadID) })
+	if err := fixture.h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.h.ProcessRootPIDs(threadID)) != 0 || fixture.h.HasResidentProcess(threadID) || syscall.Kill(roots[0], 0) == nil {
+		t.Fatal("Close 返回时 ACP 进程尚未退出")
+	}
+	if fixture.h.HasUnsolicitedOutput(threadID) {
+		t.Fatal("Close 未清除待上报的后台任务结果")
+	}
+	if err := fixture.h.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestACPHoldCloseBusy(t *testing.T) {
+	fixture := newACPHoldFixture(t, "feature_hold_content")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	closed := false
+	if err := fixture.h.Run(ctx, fixture.turn, func(event harness.Event) {
+		if event.Type != harness.EventDone {
+			return
+		}
+		closed = true
+		if err := fixture.h.Close(); err != nil {
+			t.Error(err)
+		}
+		if !fixture.h.HasResidentProcess(fixture.turn.ThreadID) {
+			t.Error("Close 提前回收了忙碌的 ACP 进程")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !closed || len(fixture.h.ProcessRootPIDs(fixture.turn.ThreadID)) != 0 || fixture.h.HasResidentProcess(fixture.turn.ThreadID) {
+		t.Fatal("Close 后 ACP 轮次未在收尾时回收进程")
+	}
+	if len(featureParams(fixture.messages(t), "session/close")) != 1 {
+		t.Fatal("Close 后 ACP 轮次未正常关闭会话")
 	}
 }
 
