@@ -2,6 +2,8 @@ package mcodeui
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -692,5 +694,33 @@ func TestShortcutTitleWithKey(t *testing.T) {
 	}
 	if got, want := shortcutTitleWithKey("not-a-shortcut", "跳到最新"), "跳到最新"; got != want {
 		t.Fatalf("未知 id 应只返回标题，got %q want %q", got, want)
+	}
+}
+
+func TestShortcutDefaultsNoAlloc(t *testing.T) {
+	_ = shortcutDefaults()
+	allocs := testing.AllocsPerRun(100, func() {
+		if len(shortcutDefaults()) == 0 {
+			t.Fatal("shortcutDefaults 不应为空")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("shortcutDefaults 每次调用分配 %.1f 次，期望 0 次", allocs)
+	}
+}
+
+func TestAppShortcutsDoesNotMutateDefaults(t *testing.T) {
+	withShortcutGOOS(t, "darwin")
+	before := slices.Clone(shortcutDefaults())
+	setShortcutOverrides(map[string]string{
+		"new-thread": "⇧⌘N",
+	})
+	t.Cleanup(func() { setShortcutOverrides(nil) })
+
+	_ = appShortcuts()
+
+	after := shortcutDefaults()
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("appShortcuts 修改了 shortcutDefaults 返回的共享切片")
 	}
 }

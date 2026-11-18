@@ -3,6 +3,7 @@ package mcodeui
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -46,7 +47,12 @@ func archiveThreadMods() ui.Modifiers {
 }
 
 // shortcutDefaults 返回内置快捷键表（默认绑定，不含覆盖）。
+// 返回的是共享切片，调用方不得修改。
 func shortcutDefaults() []appShortcut {
+	return shortcutDefaultsOnce()
+}
+
+var shortcutDefaultsOnce = sync.OnceValue(func() []appShortcut {
 	return []appShortcut{
 		// 会话组
 		{id: "new-thread", title: "新建会话", group: "会话", keys: "⌘N", mods: ui.Cmd, key: ui.KeyN, bound: true, customizable: true, registered: true},
@@ -92,7 +98,7 @@ func shortcutDefaults() []appShortcut {
 		{id: "toggle-activity", title: "动态视图", group: "窗口", keys: "⌥⌘U", mods: ui.Cmd | ui.Alt, key: ui.KeyU, bound: true, customizable: true, registered: true},
 		{id: "add-project", title: "添加项目", group: "窗口", keys: "⇧⌘O", mods: ui.Cmd | ui.Shift, key: ui.KeyO, bound: true, customizable: true, registered: true},
 	}
-}
+})
 
 // fixedShortcutBindings 返回不在展示列表中的固定绑定（不受覆盖影响，保持既有行为）。
 func fixedShortcutBindings() []shortcutBinding {
@@ -217,7 +223,7 @@ func registeredShortcutsFrom(bindings []shortcutBinding) []registeredShortcut {
 // appShortcuts 返回当前应用快捷键列表，keys 展示当前有效绑定。
 func appShortcuts() []appShortcut {
 	overrides := shortcutOverridesSnapshot()
-	list := shortcutDefaults()
+	list := slices.Clone(shortcutDefaults())
 	for i := range list {
 		if !list[i].bound {
 			if mods, key, err := parseShortcutSpec(overrides[list[i].id]); list[i].customizable && err == nil {
