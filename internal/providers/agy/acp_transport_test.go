@@ -62,6 +62,7 @@ func runFakeAgyACP() {
 	var setup map[string]any
 	failure := os.Getenv("MCODE_TEST_ACP_FAILURE")
 	limited := failure != "" && (os.Getenv("MCODE_TEST_ROUTED_ACCOUNT") == "account-0" || failure == "always")
+	promptCount := 0
 	rateLimit := func(id any) {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": 429, "message": acpRateLimitError}})
 	}
@@ -85,6 +86,22 @@ func runFakeAgyACP() {
 			setup = params
 			result["sessionId"] = "new-session"
 		case "session/prompt":
+			promptCount++
+			if os.Getenv("MCODE_TEST_ACP_HOLD") != "" {
+				if promptCount > 1 {
+					rateLimit(msg["id"])
+					return
+				}
+				for _, update := range []map[string]any{
+					{"sessionUpdate": "tool_call", "toolCallId": "hold-tool", "name": "run_command"},
+					{"sessionUpdate": "tool_call_update", "toolCallId": "hold-tool", "status": "completed", "output": "Tool is running as a background task with task id: 12345678-1234-1234-1234-123456789abc/task-1"},
+				} {
+					_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
+				}
+				result["stopReason"] = "end_turn"
+				_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": result})
+				continue
+			}
 			if limited && failure != "after_text" {
 				if failure == "after_tool" {
 					_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tool-1", "name": "bash"}}})
@@ -111,9 +128,13 @@ type acpTestRouter struct {
 	mu         sync.Mutex
 	bound      map[string]string
 	uses, ends int
+	routes     int
 }
 
 func (r *acpTestRouter) Route(session, _ string, _ []string) (string, []string, []string, error) {
+	r.mu.Lock()
+	r.routes++
+	r.mu.Unlock()
 	return session, []string{fakeAgyEnv + "=acp_transport", "MCODE_TEST_ROUTED_ACCOUNT=" + session}, []string{"--gemini_dir", session}, nil
 }
 func (r *acpTestRouter) Bind(session, account string) {
@@ -546,5 +567,51 @@ func TestAgyThreadAffinityKey(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAgyHoldForwardsInterfaces(t *testing.T) {
+	h := New(Options{Binary: os.Args[0]})
+	var _ harness.UnsolicitedTurnNotifier = h
+	var _ harness.ProcessExitNotifier = h
+	var _ harness.ThreadEvictor = h
+	var _ interface{ HasUnsolicitedOutput(string) bool } = h
+	h.SetUnsolicitedTurnHandler(func(string) {})
+	h.SetProcessExitHandler(func(string, time.Time) {})
+	if h.HasUnsolicitedOutput("missing-thread") {
+		t.Fatal("空线程不应有待上报输出")
+	}
+	h.EvictThread("missing-thread")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := h.Run(ctx, harness.Turn{ThreadID: "missing-thread", Attach: true}, func(harness.Event) { t.Error("空 Attach 不应产生事件") }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunACPResidentDoesNotRetry(t *testing.T) {
+	// MarkLimited 会 panic；复用轮遇到限流时必须直接返回，不能进入换号路径。
+	router := &acpTestRouter{bound: map[string]string{}}
+	h := New(Options{Binary: os.Args[0], Router: router})
+	turn := harness.Turn{ThreadID: "resident-rate", SessionID: "bound-account", WorkDir: t.TempDir(), Env: []string{"MCODE_TEST_ACP_HOLD=1"}}
+	t.Cleanup(func() { h.EvictThread(turn.ThreadID) })
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := h.runACP(ctx, turn, func(harness.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.ProcessRootPIDs(turn.ThreadID)) != 1 {
+		t.Fatal("没有保留 ACP 进程")
+	}
+	if err := h.runACP(ctx, turn, func(harness.Event) {}); err == nil || !isRateLimited(err.Error()) {
+		t.Fatalf("复用轮限流错误 = %v", err)
+	}
+	if len(h.ProcessRootPIDs(turn.ThreadID)) != 0 {
+		t.Fatal("限流失败后未清理进程")
+	}
+	router.mu.Lock()
+	defer router.mu.Unlock()
+	if router.routes != 1 || router.uses != 2 || router.ends != 2 {
+		t.Fatalf("复用轮重新路由或遗漏额度统计: routes=%d, uses=%d, ends=%d", router.routes, router.uses, router.ends)
 	}
 }

@@ -85,6 +85,26 @@ func threadAffinityKey(turn harness.Turn) string {
 }
 
 func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+	if turn.Attach && !h.acp.HasUnsolicitedOutput(turn.ThreadID) {
+		return nil
+	}
+	reused, err := func() (bool, error) {
+		if accountID, ok := h.acpAccounts.Load(turn.ThreadID); ok {
+			if tracker, ok := h.opts.Router.(interface{ QuotaUse(string) func() }); ok {
+				if end := tracker.QuotaUse(accountID.(string)); end != nil {
+					defer end()
+				}
+			}
+		}
+		return h.acp.RunResident(ctx, turn, emit)
+	}()
+	if reused {
+		if !h.acp.HasResidentProcess(turn.ThreadID) {
+			h.acpAccounts.Delete(turn.ThreadID)
+		}
+		return err
+	}
+	h.acpAccounts.Delete(turn.ThreadID)
 	threadKey := threadAffinityKey(turn)
 	sessionID := turn.SessionID
 	var exclude []string
@@ -138,6 +158,9 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 				_ = harness.Emit(emit, event)
 			})
 		}()
+		if h.acp.HasResidentProcess(turn.ThreadID) {
+			h.acpAccounts.Store(turn.ThreadID, accountID)
+		}
 		if err == nil || h.opts.Router == nil || !isRateLimited(err.Error()) {
 			return err
 		}
@@ -159,5 +182,31 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 			return err
 		}
 		exclude = append(exclude, accountID)
+	}
+}
+
+func (h *Harness) SetUnsolicitedTurnHandler(fn func(string)) {
+	h.acp.SetUnsolicitedTurnHandler(fn)
+}
+
+func (h *Harness) SetProcessExitHandler(fn func(string, time.Time)) {
+	h.acp.SetProcessExitHandler(func(threadID string, before time.Time) {
+		if !h.acp.HasResidentProcess(threadID) {
+			h.acpAccounts.Delete(threadID)
+		}
+		if fn != nil {
+			fn(threadID, before)
+		}
+	})
+}
+
+func (h *Harness) HasUnsolicitedOutput(threadID string) bool {
+	return h.acp.HasUnsolicitedOutput(threadID)
+}
+
+func (h *Harness) EvictThread(threadID string) {
+	h.acp.EvictThread(threadID)
+	if !h.acp.HasResidentProcess(threadID) {
+		h.acpAccounts.Delete(threadID)
 	}
 }

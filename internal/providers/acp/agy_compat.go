@@ -50,7 +50,10 @@ func agyReadPath(title string, locations []struct {
 }
 
 func agyGeminiDir(args, env []string) string {
-	for _, arg := range args {
+	for i, arg := range args {
+		if arg == "--gemini_dir" && i+1 < len(args) && args[i+1] != "" {
+			return args[i+1]
+		}
 		if strings.HasPrefix(arg, "--gemini_dir=") {
 			if value := strings.TrimPrefix(arg, "--gemini_dir="); value != "" {
 				return value

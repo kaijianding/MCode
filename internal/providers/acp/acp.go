@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -33,13 +34,14 @@ var _ harness.HostToolsReporter = (*Harness)(nil)
 
 // Options 包含 ACP 适配器的配置选项。
 type Options struct {
-	Agent       Agent
-	Binary      string
-	ExtraArgs   []string
-	TurnArgs    func(turn harness.Turn) []string
-	Env         []string
-	DroidAuth   DroidAuthMode
-	DroidAPIKey func() string
+	HoldBackgroundTasks bool
+	Agent               Agent
+	Binary              string
+	ExtraArgs           []string
+	TurnArgs            func(turn harness.Turn) []string
+	Env                 []string
+	DroidAuth           DroidAuthMode
+	DroidAPIKey         func() string
 	// BuiltinMCP/ExternalMCP 决定 session/new 与 session/load 中注入的 MCP 服务，
 	// 内置服务按会话路由（BuiltinMCP.Endpoint(turn)）。
 	BuiltinMCP  harness.BuiltinMCP
@@ -82,6 +84,14 @@ func waitLaunchSlot(ctx context.Context) error {
 // Harness 实现了基于 ACP (Agent Communication Protocol) 的 harness.Harness 接口。
 type Harness struct {
 	opts Options
+	// 常驻表与后台任务状态由 residentMu 保护；持锁时不等待进程、不调用外部回调。
+	residentMu          sync.Mutex
+	residentStartMu     sync.Mutex
+	residents           map[string]*acpProcess
+	finishedTasks       map[string][]harness.Event
+	unsolicitedNotified map[string]bool
+	unsolicitedHandler  func(string)
+	processExitHandler  func(string, time.Time)
 	// roots 按会话记录本轮正在运行的 agent 进程 PID，供 ProcessRootPIDs 使用。
 	roots harness.ProcessRoots
 	// mcpHTTP 记录 initialize 应答里已确认支持 HTTP MCP；确认前按需要 npx 的退化路径判断。
@@ -382,8 +392,8 @@ func (h *Harness) mcpServers(turn harness.Turn, allowsHTTP bool) []any {
 	return servers
 }
 
-// Run 执行一轮 ACP 交互。
-func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+// startProcess 创建进程与连接；进程级资源一直保留到进程退出。
+func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProcess, error) {
 	bin := h.opts.Binary
 	if bin == "" {
 		bin = DefaultBinary(h.opts.Agent)
@@ -395,20 +405,35 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		allArgs = append(allArgs, h.opts.TurnArgs(turn)...)
 	}
 
+	processCtx := ctx
+	cancelProcess := func() {}
+	if h.opts.HoldBackgroundTasks {
+		processCtx, cancelProcess = context.WithCancel(context.Background())
+	}
+	started := false
+	defer func() {
+		if !started {
+			cancelProcess()
+		}
+	}()
 	var cmd *exec.Cmd
 	var cleanup func()
 	var err error
 
 	if turn.Sandbox != nil {
-		cmd, cleanup, err = turn.Sandbox.Command(ctx, turn.WorkDir, turn.Mode, bin, allArgs...)
+		cmd, cleanup, err = turn.Sandbox.Command(processCtx, turn.WorkDir, turn.Mode, bin, allArgs...)
 		if err != nil {
-			return fmt.Errorf("acp: sandbox command: %w", err)
+			return nil, fmt.Errorf("acp: sandbox command: %w", err)
 		}
 	} else {
-		cmd = procattr.HideWindow(exec.CommandContext(ctx, bin, allArgs...))
+		cmd = procattr.HideWindow(exec.CommandContext(processCtx, bin, allArgs...))
 	}
 	if cleanup != nil {
-		defer cleanup()
+		defer func() {
+			if !started {
+				cleanup()
+			}
+		}()
 	}
 
 	setProcessGroup(cmd)
@@ -423,39 +448,83 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("acp: stdin pipe: %w", err)
+		return nil, fmt.Errorf("acp: stdin pipe: %w", err)
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("acp: stdout pipe: %w", err)
+	var stdoutPipe io.ReadCloser
+	if h.opts.HoldBackgroundTasks {
+		// 常驻进程由独立协程 Wait；管道由 Conn 关闭，避免 Wait 抢先丢掉末尾响应。
+		reader, writer, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			return nil, fmt.Errorf("acp: stdout pipe: %w", pipeErr)
+		}
+		stdoutPipe, cmd.Stdout = reader, writer
+		defer writer.Close()
+		defer func() {
+			if !started {
+				_ = reader.Close()
+			}
+		}()
+	} else {
+		stdoutPipe, err = cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("acp: stdout pipe: %w", err)
+		}
 	}
 
 	if err := waitLaunchSlot(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
 		tail := strings.TrimSpace(stderrBuf.String())
 		if tail != "" {
-			return fmt.Errorf("acp start failed: %w (stderr: %s)", err, tail)
+			return nil, fmt.Errorf("acp start failed: %w (stderr: %s)", err, tail)
 		}
-		return fmt.Errorf("acp start failed: %w", err)
+		return nil, fmt.Errorf("acp start failed: %w", err)
 	}
 	// 按会话记录 agent 进程 PID，供「终止运行中的命令」定位命令子进程树。
 	agentPID := cmd.Process.Pid
 	h.roots.Set(turn.ThreadID, agentPID)
-	defer h.roots.Clear(turn.ThreadID, agentPID)
+	p := &acpProcess{
+		cmd: cmd, conn: NewConn(stdoutPipe, stdinPipe), stderr: stderrBuf,
+		args: allArgs, cancel: cancelProcess, cleanup: cleanup,
+		tasks: make(map[string]string), done: make(chan struct{}),
+		resident: h.opts.HoldBackgroundTasks,
+	}
+	started = true
+	return p, nil
+}
 
-	conn := NewConn(stdoutPipe, stdinPipe)
-	defer conn.Close()
-	waited := false
+// Run 执行一轮 ACP 交互。
+func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+	if h.opts.HoldBackgroundTasks {
+		_, err := h.runHeld(ctx, turn, emit, false)
+		return err
+	}
+	p, err := h.startProcess(ctx, turn)
+	if err != nil {
+		return err
+	}
+	defer p.cancel()
+	if p.cleanup != nil {
+		defer p.cleanup()
+	}
+	defer h.roots.Clear(turn.ThreadID, p.cmd.Process.Pid)
+	defer p.conn.Close()
 	defer func() {
-		if !waited {
-			_ = conn.Close()
-			_ = killProcessGroup(cmd, syscall.SIGKILL)
-			_ = cmd.Wait()
+		if !p.waited {
+			_ = p.conn.Close()
+			_ = killProcessGroup(p.cmd, syscall.SIGKILL)
+			_ = p.wait()
 		}
 	}()
+	return h.runRound(ctx, turn, emit, p)
+}
+
+// runRound 每轮重绑处理器；只有新进程执行 initialize 和会话建立。
+func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(harness.Event), p *acpProcess) error {
+	cmd, conn, stderrBuf, allArgs := p.cmd, p.conn, p.stderr, p.args
+	var err error
 
 	var sessionID string
 	var sessionMu sync.Mutex
@@ -477,13 +546,17 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		readPath string
 	}
 	pendingTools := make(map[string]pendingTool)
+	startedTools := make(map[string]bool)
 	pendingOrder := make([]string, 0)
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
 	toolsFinished := false
 
+	setRequestHandler, setNotificationHandler, detach := h.roundHandlers(p)
+	defer detach()
+
 	// 注册对端发来的请求处理器
-	conn.SetRequestHandler(func(method string, params json.RawMessage) (any, error) {
+	setRequestHandler(func(method string, params json.RawMessage) (any, error) {
 		switch method {
 		case "elicitation/create":
 			return handleElicitation(ctx, turn.Approver, params)
@@ -805,11 +878,11 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	})
 
 	// 注册通知分发处理器
-	conn.SetNotificationHandler(func(method string, params json.RawMessage) {
+	setNotificationHandler(func(method string, params json.RawMessage) {
 		if method != "session/update" {
 			return
 		}
-		var p struct {
+		var message struct {
 			Update struct {
 				SessionUpdate string          `json:"sessionUpdate"`
 				Content       json.RawMessage `json:"content"`
@@ -833,10 +906,10 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				Size   int64  `json:"size"`
 			} `json:"update"`
 		}
-		if err := json.Unmarshal(params, &p); err != nil {
+		if err := json.Unmarshal(params, &message); err != nil {
 			return
 		}
-		u := p.Update
+		u := message.Update
 		if u.SessionUpdate == "tool_call_update" {
 			toolsMu.Lock()
 			served := servedReads[u.ToolCallID]
@@ -893,6 +966,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 				readPath = agyReadPath(u.Title, u.Locations, input)
 			}
 			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath}
+			startedTools[u.ToolCallID] = true
 			if readPath != "" {
 				pendingOrder = append(pendingOrder, u.ToolCallID)
 			}
@@ -917,6 +991,14 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			toolsMu.Unlock()
 
 		case "tool_call_update":
+			if h.opts.HoldBackgroundTasks {
+				toolsMu.Lock()
+				owned := startedTools[u.ToolCallID] && !toolsFinished
+				toolsMu.Unlock()
+				if owned {
+					h.backgroundTaskStarts(p, u.ToolCallID, []string{string(u.Content), string(u.RawOutput), u.Output}, emit)
+				}
+			}
 			if u.Status == "pending" || u.Status == "in_progress" {
 				break
 			}
@@ -1003,9 +1085,16 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 
 	// 监听 ctx 取消，发送 session/cancel 并优雅杀灭进程组
 	shutdownCh := make(chan struct{})
-	defer close(shutdownCh)
+	cancelDone := make(chan struct{})
+	defer func() {
+		close(shutdownCh)
+		if h.opts.HoldBackgroundTasks {
+			<-cancelDone
+		}
+	}()
 
 	go func() {
+		defer close(cancelDone)
 		select {
 		case <-shutdownCh:
 			return
@@ -1029,22 +1118,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}()
 
 	// 步骤 1: initialize
-	var initResp struct {
-		AgentCapabilities struct {
-			LoadSession         bool `json:"loadSession"`
-			SessionCapabilities struct {
-				Resume *struct{} `json:"resume"`
-				Close  *struct{} `json:"close"`
-			} `json:"sessionCapabilities"`
-			// MCPCapabilities 声明 Agent 是否直接支持 HTTP MCP；不支持时退化为 mcp-remote。
-			MCPCapabilities struct {
-				HTTP bool `json:"http"`
-			} `json:"mcpCapabilities"`
-		} `json:"agentCapabilities"`
-		AuthMethods []struct {
-			ID string `json:"id"`
-		} `json:"authMethods"`
-	}
+	initResp := p.initResp
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{
@@ -1061,15 +1135,19 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			"version": "1.0.0",
 		},
 	}
-	if err := conn.Call(ctx, "initialize", initParams, &initResp); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	if !p.initialized {
+		if err := conn.Call(ctx, "initialize", initParams, &initResp); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			tail := strings.TrimSpace(stderrBuf.String())
+			if tail != "" {
+				return fmt.Errorf("acp initialize failed: %w (stderr: %s)", err, tail)
+			}
+			return fmt.Errorf("acp initialize failed: %w", err)
 		}
-		tail := strings.TrimSpace(stderrBuf.String())
-		if tail != "" {
-			return fmt.Errorf("acp initialize failed: %w (stderr: %s)", err, tail)
-		}
-		return fmt.Errorf("acp initialize failed: %w", err)
+		p.initResp = initResp
+		p.initialized = true
 	}
 
 	// Cline 没有推理强度的 ACP 配置项：开会话之前把强度写进它自己的 providers.json。
@@ -1136,7 +1214,11 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		return res.SessionID, nil
 	}
 
-	sid, err := createOrResume()
+	sid := p.sessionID
+	sessionOptions, sessionModes = p.sessionOptions, p.sessionModes
+	if sid == "" {
+		sid, err = createOrResume()
+	}
 	// 若需要且包含 auth 错误，且非 Droid，尝试执行 authenticate 后重试
 	if err != nil && len(authMethods) > 0 && h.opts.Agent != AgentDroid && strings.Contains(strings.ToLower(err.Error()), "auth") {
 		_ = conn.Call(ctx, "authenticate", map[string]any{"methodId": authMethods[0].ID}, nil)
@@ -1157,6 +1239,9 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 
 	setSessionID(sid)
+	h.residentMu.Lock()
+	p.sessionID, p.sessionOptions, p.sessionModes = sid, sessionOptions, sessionModes
+	h.residentMu.Unlock()
 
 	// 步骤 4: 发出 harness.EventSession
 	_ = harness.Emit(emit, harness.Event{
@@ -1167,8 +1252,13 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	// 步骤 5: 设置模型
 	// "default" 是模型目录的占位行，交给 Agent 自己的默认模型，不发 set_model。
 	if h.opts.Agent == AgentAgy {
-		if err := configureAgy(ctx, conn, sid, turn, sessionModes, sessionOptions); err != nil {
+		configuredModes, configuredOptions := sessionModes, sessionOptions
+		if err := configureAgy(ctx, conn, sid, turn, &configuredModes, &configuredOptions); err != nil {
 			return err
+		}
+		if h.opts.HoldBackgroundTasks {
+			sessionModes, sessionOptions = configuredModes, configuredOptions
+			p.sessionModes, p.sessionOptions = sessionModes, sessionOptions
 		}
 	} else if turn.Model != "" && turn.Model != "default" {
 		_ = conn.Call(ctx, "session/set_model", map[string]any{
@@ -1217,6 +1307,13 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			}, nil)
 			if err != nil && h.opts.Agent == AgentDroid {
 				return fmt.Errorf("acp set fast mode: %w", err)
+			}
+			if err == nil && h.opts.HoldBackgroundTasks {
+				for _, option := range sessionOptions {
+					if option["id"] == fastConfigID {
+						option["currentValue"] = wanted
+					}
+				}
 			}
 		}
 	}
@@ -1269,6 +1366,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		"sessionId": sid,
 		"prompt":    promptItems,
 	}, &promptResult)
+	detach()
 
 	toolsMu.Lock()
 	toolsFinished = true
@@ -1305,10 +1403,22 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		})
 	}
 
-	if promptErr == nil && ctx.Err() == nil && canClose {
+	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil && ctx.Err() == nil && h.holdProcess(p, turn.ThreadID) {
+		return nil
+	}
+	if h.opts.HoldBackgroundTasks {
+		h.residentMu.Lock()
+		p.expectedExit = true
+		h.residentMu.Unlock()
+	}
+	if promptErr == nil && ctx.Err() == nil && canClose && (!h.opts.HoldBackgroundTasks || agyErr == nil) {
 		closeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		_ = conn.Call(closeCtx, "session/close", map[string]any{"sessionId": sid}, nil)
 		cancel()
+	}
+	if h.opts.HoldBackgroundTasks && (promptErr != nil || agyErr != nil) {
+		_ = conn.Notify("session/cancel", map[string]any{"sessionId": sid})
+		_ = killProcessGroup(cmd, syscall.SIGKILL)
 	}
 	_ = conn.Close()
 
@@ -1316,8 +1426,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		_ = killProcessGroup(cmd, syscall.SIGKILL)
 	}
 
-	waitErr := cmd.Wait()
-	waited = true
+	waitErr := p.wait()
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -1341,6 +1450,23 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	}
 
 	return nil
+}
+
+type acpInitializeResult struct {
+	AgentCapabilities struct {
+		LoadSession         bool `json:"loadSession"`
+		SessionCapabilities struct {
+			Resume *struct{} `json:"resume"`
+			Close  *struct{} `json:"close"`
+		} `json:"sessionCapabilities"`
+		// MCPCapabilities 声明 Agent 是否直接支持 HTTP MCP；不支持时退化为 mcp-remote。
+		MCPCapabilities struct {
+			HTTP bool `json:"http"`
+		} `json:"mcpCapabilities"`
+	} `json:"agentCapabilities"`
+	AuthMethods []struct {
+		ID string `json:"id"`
+	} `json:"authMethods"`
 }
 
 // selectACPConfigOptions 从会话响应的 configOptions 里找出推理强度与快速模式配置项。
@@ -1542,7 +1668,7 @@ func handleElicitation(ctx context.Context, approver harness.Approver, params js
 	return acpApprovalResponse{payload: payload, onAck: func(err error) { harness.AckDelivery(approver, req, err) }}, nil
 }
 
-func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn, modes acpSessionModes, options []map[string]any) error {
+func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn, modes *acpSessionModes, options *[]map[string]any) error {
 	wanted := "default"
 	switch turn.Mode {
 	case harness.ModeAutoAcceptEdits:
@@ -1559,6 +1685,7 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 				if err := conn.Call(ctx, "session/set_mode", map[string]any{"sessionId": sid, "modeId": wanted}, nil); err != nil {
 					return fmt.Errorf("acp set mode: %w", err)
 				}
+				modes.CurrentModeID = wanted
 				break
 			}
 		}
@@ -1572,7 +1699,7 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 		}
 		for _, option := range result.ConfigOptions {
 			if option["id"] == id && option["currentValue"] == value {
-				options = result.ConfigOptions
+				*options = result.ConfigOptions
 				return nil
 			}
 		}
@@ -1580,7 +1707,7 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 	}
 	if turn.Model != "" && turn.Model != "default" {
 		modelID, current := "", ""
-		for _, option := range options {
+		for _, option := range *options {
 			if option["id"] == "model" || option["category"] == "model" {
 				modelID, _ = option["id"].(string)
 				current, _ = option["currentValue"].(string)
@@ -1597,7 +1724,7 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 		}
 	}
 	if turn.Effort != "" {
-		id, current, _, _ := selectACPConfigOptions(options)
+		id, current, _, _ := selectACPConfigOptions(*options)
 		if id == "" {
 			return fmt.Errorf("agy did not apply effort %s", turn.Effort)
 		}

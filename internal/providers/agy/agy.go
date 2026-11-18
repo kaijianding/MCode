@@ -109,11 +109,13 @@ type Options struct {
 }
 
 type Harness struct {
-	opts      Options
-	acp       *acp.Harness
-	acpArgs   sync.Map
-	versionMu sync.Mutex
-	versions  map[string]string
+	opts    Options
+	acp     *acp.Harness
+	acpArgs sync.Map
+	// 常驻进程的账号固定，续轮沿用它的额度统计，不再重新路由。
+	acpAccounts sync.Map
+	versionMu   sync.Mutex
+	versions    map[string]string
 	// roots 按会话记录本轮正在运行的 agent 进程 PID，供 ProcessRootPIDs 使用。
 	roots harness.ProcessRoots
 	// now 返回当前时间；nil 时用 time.Now，测试可注入假时钟。
@@ -126,7 +128,8 @@ func New(opts Options) *Harness {
 	}
 	h := &Harness{opts: opts}
 	h.acp = acp.New(acp.Options{
-		Agent: acp.AgentAgy, Binary: resolveBinary(opts.Binary), BuiltinMCP: opts.BuiltinMCP, ExternalMCP: opts.ExternalMCP,
+		HoldBackgroundTasks: true,
+		Agent:               acp.AgentAgy, Binary: resolveBinary(opts.Binary), BuiltinMCP: opts.BuiltinMCP, ExternalMCP: opts.ExternalMCP,
 		TurnArgs: func(turn harness.Turn) []string {
 			args, _ := h.acpArgs.Load(turn.ID)
 			if args == nil {
@@ -485,7 +488,7 @@ type resultPayload struct {
 }
 
 func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
-	if h.channel(ctx) == ChannelACP {
+	if turn.Attach || h.acp.HasResidentProcess(turn.ThreadID) || h.channel(ctx) == ChannelACP {
 		return h.runACP(ctx, turn, emit)
 	}
 	bin := h.opts.Binary

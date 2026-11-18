@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unicode"
@@ -24,6 +25,7 @@ import (
 )
 
 const fakeACPEnv = "MCODE_TEST_FAKE_ACP"
+const fakeHoldSession = "12345678-1234-1234-1234-123456789abc"
 
 func TestMain(m *testing.M) {
 	if mode := os.Getenv(fakeACPEnv); mode != "" {
@@ -676,11 +678,23 @@ func runFakeACPFeatures(mode string) {
 		_ = json.Unmarshal(line, &msg)
 		return msg
 	}
-	write := func(v any) { _ = json.NewEncoder(os.Stdout).Encode(v) }
+	var writeMu sync.Mutex
+	write := func(v any) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = json.NewEncoder(os.Stdout).Encode(v)
+	}
+	if strings.HasPrefix(mode, "feature_hold") {
+		go runFakeACPBackground(mode, write)
+	}
+	promptCount := 0
 	_ = json.NewEncoder(trace).Encode(map[string]any{"args": os.Args[1:]})
 	options := []map[string]any{
 		{"id": "model", "category": "model", "currentValue": "old"},
 		{"id": "thought_level", "category": "model_config", "currentValue": "low", "options": []any{map[string]any{"value": "low"}, map[string]any{"value": "high"}}},
+	}
+	if strings.HasPrefix(mode, "feature_hold") {
+		options = append(options, map[string]any{"id": "fast", "category": "model_config", "currentValue": "false"})
 	}
 	for {
 		msg := read()
@@ -704,6 +718,9 @@ func runFakeACPFeatures(mode string) {
 				continue
 			}
 			result["sessionId"] = "feature-session"
+			if strings.HasPrefix(mode, "feature_hold") {
+				result["sessionId"] = fakeHoldSession
+			}
 			result["configOptions"] = options
 			current := "default"
 			if mode == "feature_agy_current_auto" {
@@ -722,6 +739,43 @@ func runFakeACPFeatures(mode string) {
 			}
 			result["configOptions"] = options
 		case "session/prompt":
+			promptCount++
+			if strings.HasPrefix(mode, "feature_hold") {
+				items, _ := params["prompt"].([]any)
+				item, _ := items[0].(map[string]any)
+				if promptCount == 1 && item["text"] != "后台任务已结束，请根据结果继续。" {
+					notify := func(update map[string]any) {
+						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
+					}
+					for i := 1; i <= 2; i++ {
+						toolID := fmt.Sprintf("hold-tool-%d", i)
+						output := fmt.Sprintf("Tool is running as a background task with task id: %s/task-%d", fakeHoldSession, i)
+						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command"})
+						update := map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": toolID, "status": "completed"}
+						switch mode {
+						case "feature_hold_raw":
+							update["rawOutput"] = map[string]any{"output": output}
+						case "feature_hold_output":
+							update["output"] = output
+						default:
+							update["content"] = []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": output}}}
+						}
+						notify(update)
+						// 同一任务的重发不能产生第二个开始事件。
+						notify(update)
+					}
+				}
+				if promptCount > 1 && mode == "feature_hold_error" {
+					write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": 429, "message": "RESOURCE_EXHAUSTED"}})
+					continue
+				}
+				if promptCount > 1 && mode == "feature_hold_cancel" {
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "cancel"}}}})
+					for read() != nil {
+					}
+					return
+				}
+			}
 			if strings.HasPrefix(mode, "feature_agy_outcome_") {
 				dbPath := agySessionDB(agyGeminiDir(os.Args[1:], os.Environ()), "feature-session")
 				if mode == "feature_agy_outcome_skip" {
@@ -1582,5 +1636,414 @@ func TestResumeMissingSessionReportsLostSession(t *testing.T) {
 	}
 	if len(featureParams(messages, "session/new")) != 0 {
 		t.Fatalf("should not fall back to session/new: %v", messages)
+	}
+}
+
+// 测试通过控制文件追加完成行，假进程再把它们写入真实的 transcript 路径。
+func runFakeACPBackground(mode string, write func(any)) {
+	control := os.Getenv("MCODE_TEST_ACP_COMPLETE")
+	if control == "" {
+		return
+	}
+	dir := "antigravity-cli"
+	if mode == "feature_hold_legacy" {
+		dir = "antigravity-acp"
+	}
+	path := filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), dir, "brain", fakeHoldSession, ".system_generated", "logs", "transcript.jsonl")
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	var offset int
+	for range ticker.C {
+		data, err := os.ReadFile(control)
+		if err != nil || len(data) <= offset {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			panic(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			panic(err)
+		}
+		_, err = file.Write(data[offset:])
+		_ = file.Close()
+		if err != nil {
+			panic(err)
+		}
+		offset = len(data)
+		if mode == "feature_hold_idle" {
+			// prompt 已返回后的输出不能落入旧轮，并且会延后自动续轮。
+			for i := 0; i < 15; i++ {
+				write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "idle"}}}})
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}
+}
+
+type acpHoldFixture struct {
+	h       *Harness
+	turn    harness.Turn
+	trace   string
+	control string
+}
+
+func newACPHoldFixture(t *testing.T, mode string) acpHoldFixture {
+	t.Helper()
+	dir := t.TempDir()
+	f := acpHoldFixture{
+		turn:  harness.Turn{ThreadID: "hold-thread", WorkDir: dir, Prompt: "start"},
+		trace: filepath.Join(dir, "trace.jsonl"), control: filepath.Join(dir, "complete.jsonl"),
+	}
+	f.h = New(Options{
+		Agent: AgentAgy, Binary: os.Args[0], HoldBackgroundTasks: true,
+		Env:       []string{fakeACPEnv + "=" + mode, "MCODE_TEST_ACP_TRACE=" + f.trace, "MCODE_TEST_ACP_COMPLETE=" + f.control},
+		ExtraArgs: []string{"--gemini_dir", dir},
+	})
+	if mode == "feature_hold_legacy" {
+		f.h.opts.ExtraArgs = nil
+		f.h.opts.Env = append(f.h.opts.Env, "ANTIGRAVITY_GEMINI_DIR="+dir)
+	}
+	t.Cleanup(func() { f.h.EvictThread(f.turn.ThreadID) })
+	return f
+}
+
+func (f acpHoldFixture) run(t *testing.T, turn harness.Turn) []harness.Event {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var events []harness.Event
+	var mu sync.Mutex
+	if err := f.h.Run(ctx, turn, func(e harness.Event) { mu.Lock(); events = append(events, e); mu.Unlock() }); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]harness.Event(nil), events...)
+}
+
+func (f acpHoldFixture) complete(t *testing.T, task int, status string) {
+	t.Helper()
+	file, err := os.OpenFile(f.control, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := json.NewEncoder(file).Encode(map[string]any{"content": fmt.Sprintf("Task id %q %s with result:\noutput", fmt.Sprintf("%s/task-%d", fakeHoldSession, task), status)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f acpHoldFixture) messages(t *testing.T) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(f.trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var message map[string]any
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func waitACPHold(t *testing.T, ready func() bool) {
+	t.Helper()
+	deadline := time.NewTimer(12 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for !ready() {
+		select {
+		case <-deadline.C:
+			t.Fatal("等待 ACP 后台任务状态超时")
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestACPHoldBackgroundTasks(t *testing.T) {
+	for _, mode := range []string{"feature_hold_content", "feature_hold_raw", "feature_hold_output", "feature_hold_legacy"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newACPHoldFixture(t, mode)
+			calls := make(chan string, 10)
+			f.h.SetUnsolicitedTurnHandler(func(threadID string) {
+				// 回调必须在表锁外运行。
+				if !f.h.HasUnsolicitedOutput(threadID) {
+					t.Error("通知没有待上报任务")
+				}
+				calls <- threadID
+			})
+			events := f.run(t, f.turn)
+			var starts []harness.Event
+			for _, event := range events {
+				if event.Type == harness.EventBackgroundTaskStart {
+					starts = append(starts, event)
+				}
+			}
+			if len(starts) != 2 {
+				t.Fatalf("background starts = %v", starts)
+			}
+			for i, event := range starts {
+				if event.ToolID != fmt.Sprintf("hold-tool-%d", i+1) || event.TaskID != fmt.Sprintf("%s/task-%d", fakeHoldSession, i+1) {
+					t.Fatalf("background start = %+v", event)
+				}
+			}
+			roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+			if len(roots) != 1 || syscall.Kill(roots[0], 0) != nil {
+				t.Fatalf("常驻进程已退出: %v", roots)
+			}
+			if got := len(featureParams(f.messages(t), "session/close")); got != 0 {
+				t.Fatalf("premature close count = %d", got)
+			}
+			f.complete(t, 1, "finished")
+			waitACPHold(t, func() bool { return len(calls) > 0 })
+			if threadID := <-calls; threadID != f.turn.ThreadID {
+				t.Fatalf("notified thread = %s", threadID)
+			}
+			// 再等一次轮询，尚未取走的同一批任务不能重复通知。
+			timer := time.NewTimer(2200 * time.Millisecond)
+			select {
+			case <-calls:
+				t.Error("同一批后台任务重复通知")
+			case <-timer.C:
+			}
+			timer.Stop()
+			f.h.EvictThread(f.turn.ThreadID)
+			if syscall.Kill(roots[0], 0) == nil || len(f.h.ProcessRootPIDs(f.turn.ThreadID)) != 0 || f.h.HasUnsolicitedOutput(f.turn.ThreadID) {
+				t.Fatal("驱逐后进程或后台任务状态未清理")
+			}
+		})
+	}
+}
+
+func TestACPHoldAttachContinues(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_content")
+	calls := make(chan string, 10)
+	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
+	f.run(t, f.turn)
+	roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	if events := f.run(t, attach); len(events) != 0 {
+		t.Fatalf("任务未结束的 Attach 产生了事件: %v", events)
+	}
+	// 日志中的顺序必须保留，且取消状态要转为 canceled。
+	f.complete(t, 2, "was canceled")
+	f.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return len(calls) > 0 })
+	events := f.run(t, attach)
+	if len(events) < 3 || events[0].Type != harness.EventBackgroundTaskEnd || events[0].TaskID != fakeHoldSession+"/task-2" || events[0].TaskStatus != "canceled" || events[1].Type != harness.EventBackgroundTaskEnd || events[1].TaskID != fakeHoldSession+"/task-1" || events[1].TaskStatus != "completed" || events[2].Type != harness.EventSession {
+		t.Fatalf("Attach 事件顺序错误: %v", events)
+	}
+	messages := f.messages(t)
+	if len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "session/new")) != 1 || len(featureParams(messages, "session/prompt")) != 2 || len(featureParams(messages, "session/close")) != 1 {
+		t.Fatalf("会话或进程未复用: %v", messages)
+	}
+	prompts := featureParams(messages, "session/prompt")
+	if prompts[0]["sessionId"] != prompts[1]["sessionId"] || prompts[1]["prompt"].([]any)[0].(map[string]any)["text"] != "后台任务已结束，请根据结果继续。" {
+		t.Fatalf("Attach prompt = %v", prompts[1])
+	}
+	if syscall.Kill(roots[0], 0) == nil || f.h.HasUnsolicitedOutput(f.turn.ThreadID) {
+		t.Fatal("所有任务完成后进程或待上报状态未清理")
+	}
+	if events := f.run(t, attach); len(events) != 0 {
+		t.Fatalf("没有任务的 Attach 产生了事件: %v", events)
+	}
+	if got := len(featureParams(f.messages(t), "initialize")); got != 1 {
+		t.Fatalf("空 Attach 启动了新进程: %d", got)
+	}
+}
+
+func TestACPHoldNormalReuseAndFailure(t *testing.T) {
+	for _, mode := range []string{"feature_hold_error", "feature_hold_cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newACPHoldFixture(t, mode)
+			f.run(t, f.turn)
+			roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := f.h.Run(ctx, f.turn, func(e harness.Event) {
+				if mode == "feature_hold_cancel" && e.Type == harness.EventText {
+					// 忙时驱逐不影响当前轮；随后取消必须杀掉进程。
+					f.h.EvictThread(f.turn.ThreadID)
+					cancel()
+				}
+			})
+			if err == nil || mode == "feature_hold_cancel" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("unexpected error = %v", err)
+			}
+			messages := f.messages(t)
+			if len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "session/prompt")) != 2 || syscall.Kill(roots[0], 0) == nil {
+				t.Fatalf("复用或失败回收错误: %v", messages)
+			}
+		})
+	}
+}
+
+func TestACPHoldProcessExitAndAttachRecovery(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_content")
+	exits := make(chan string, 10)
+	f.h.SetProcessExitHandler(func(threadID string, before time.Time) {
+		if !before.IsZero() || f.h.HasResidentProcess(threadID) {
+			t.Error("退出通知仍有常驻进程")
+		}
+		exits <- threadID
+	})
+	f.run(t, f.turn)
+	f.complete(t, 1, "finished")
+	f.complete(t, 2, "finished")
+	waitACPHold(t, func() bool { return f.h.HasUnsolicitedOutput(f.turn.ThreadID) })
+	roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+	if err := syscall.Kill(roots[0], syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	waitACPHold(t, func() bool { return len(exits) > 0 })
+	if threadID := <-exits; threadID != f.turn.ThreadID {
+		t.Fatalf("exited thread = %s", threadID)
+	}
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	events := f.run(t, attach)
+	if len(events) < 2 || events[0].Type != harness.EventBackgroundTaskEnd || events[1].Type != harness.EventBackgroundTaskEnd {
+		t.Fatalf("恢复未补报任务结束: %v", events)
+	}
+	messages := f.messages(t)
+	if len(featureParams(messages, "initialize")) != 2 || len(featureParams(messages, "session/resume")) != 1 || len(featureParams(messages, "session/close")) != 1 {
+		t.Fatalf("恢复未启动新进程并恢复会话: %v", messages)
+	}
+}
+
+func TestACPHoldIdleUpdates(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_idle")
+	calls := make(chan time.Time, 10)
+	f.h.SetUnsolicitedTurnHandler(func(string) { calls <- time.Now() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	var mu sync.Mutex
+	eventCount := 0
+	if err := f.h.Run(ctx, f.turn, func(harness.Event) { mu.Lock(); eventCount++; mu.Unlock() }); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	cancel()
+	mu.Lock()
+	count := eventCount
+	mu.Unlock()
+	start := time.Now()
+	f.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return len(calls) > 0 })
+	if elapsed := (<-calls).Sub(start); elapsed < 4400*time.Millisecond {
+		t.Fatalf("空闲更新后未等待 3 秒: %v", elapsed)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if count != eventCount {
+		t.Fatalf("空闲通知进入旧轮: %d -> %d", count, eventCount)
+	}
+}
+
+func TestACPHoldCompletionReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	first, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q finished with result:", fakeHoldSession+"/task-1")})
+	second, _ := json.Marshal(map[string]any{"content": fmt.Sprintf("Task id %q was canceled with result:", fakeHoldSession+"/task-2")})
+	data := append(append(append([]byte{}, first...), '\n'), second[:len(second)/2]...)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	events, offset := readBackgroundCompletions(path, 0)
+	if len(events) != 1 || events[0].TaskStatus != "completed" || offset != int64(len(first)+1) {
+		t.Fatalf("首次增量读取 = %v, %d", events, offset)
+	}
+	data = append(append(append([]byte{}, first...), '\n'), append(second, '\n')...)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	events, offset = readBackgroundCompletions(path, offset)
+	if len(events) != 1 || events[0].TaskStatus != "canceled" || offset != int64(len(data)) {
+		t.Fatalf("续读半行 = %v, %d", events, offset)
+	}
+	if events, _ := readBackgroundCompletions(path, offset); len(events) != 0 {
+		t.Fatalf("重复读取了已消费行: %v", events)
+	}
+	if err := os.WriteFile(path, append(first, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if events, _ := readBackgroundCompletions(path, offset); len(events) != 1 {
+		t.Fatalf("日志截断后未从头读取: %v", events)
+	}
+}
+
+func TestACPHoldDisabled(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_content")
+	f.h.opts.HoldBackgroundTasks = false
+	for _, event := range f.run(t, f.turn) {
+		if event.Type == harness.EventBackgroundTaskStart {
+			t.Fatal("关闭开关后仍产生后台任务事件")
+		}
+	}
+	if len(featureParams(f.messages(t), "session/close")) != 1 || len(f.h.ProcessRootPIDs(f.turn.ThreadID)) != 0 {
+		t.Fatal("关闭开关后未保持单轮进程行为")
+	}
+}
+
+func TestACPHoldAttachBatches(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_content")
+	calls := make(chan string, 10)
+	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
+	f.run(t, f.turn)
+	roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	for task := 1; task <= 2; task++ {
+		f.complete(t, task, "finished")
+		waitACPHold(t, func() bool { return len(calls) > 0 })
+		<-calls
+		events := f.run(t, attach)
+		if len(events) == 0 || events[0].Type != harness.EventBackgroundTaskEnd || events[0].TaskID != fmt.Sprintf("%s/task-%d", fakeHoldSession, task) {
+			t.Fatalf("第 %d 批结束事件 = %v", task, events)
+		}
+		if task == 1 {
+			if got := f.h.ProcessRootPIDs(f.turn.ThreadID); !reflect.DeepEqual(got, roots) {
+				t.Fatalf("第二个任务未完成时进程已退出或更换: %v", got)
+			}
+			if len(featureParams(f.messages(t), "session/close")) != 0 {
+				t.Fatal("仍有任务时提前关闭会话")
+			}
+		}
+	}
+	messages := f.messages(t)
+	if len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "session/prompt")) != 3 || len(featureParams(messages, "session/close")) != 1 {
+		t.Fatalf("分批续轮的生命周期错误: %v", messages)
+	}
+}
+
+func TestACPHoldConfigureEachRound(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_content")
+	turn := f.turn
+	turn.Mode, turn.Model, turn.Effort, turn.FastMode = harness.ModeAuto, "requested", "high", true
+	f.run(t, turn)
+	turn.Mode, turn.Model, turn.Effort, turn.FastMode = harness.ModeSupervised, "old", "low", false
+	f.run(t, turn)
+	messages := f.messages(t)
+	modes := featureParams(messages, "session/set_mode")
+	if len(modes) != 2 || modes[0]["modeId"] != "auto" || modes[1]["modeId"] != "default" {
+		t.Fatalf("复用后未切回权限模式: %v", modes)
+	}
+	options := featureParams(messages, "session/set_config_option")
+	want := []struct{ id, value string }{{"model", "requested"}, {"thought_level", "high"}, {"fast", "true"}, {"model", "old"}, {"thought_level", "low"}, {"fast", "false"}}
+	if len(options) != len(want) {
+		t.Fatalf("复用后配置次数错误: %v", options)
+	}
+	for i, option := range options {
+		if option["configId"] != want[i].id || option["value"] != want[i].value {
+			t.Fatalf("配置 %d = %v, want %v", i, option, want[i])
+		}
+	}
+	if len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "session/new")) != 1 || len(featureParams(messages, "session/prompt")) != 2 {
+		t.Fatal("切换配置没有复用同一进程与会话")
 	}
 }
