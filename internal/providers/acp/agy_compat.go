@@ -80,11 +80,20 @@ func agyGeminiDir(args, env []string) string {
 	return filepath.Join(home, ".gemini")
 }
 
+// agySessionDB 返回 agy 会话库路径。agy 1.5.x 起写入 antigravity-cli，
+// 旧版本写在 antigravity-acp，优先返回实际存在的那个。
 func agySessionDB(geminiDir, sid string) string {
 	if !agySessionIDPattern.MatchString(sid) {
 		return ""
 	}
-	return filepath.Join(geminiDir, "antigravity-acp", "conversations", sid+".db")
+	cliDB := filepath.Join(geminiDir, "antigravity-cli", "conversations", sid+".db")
+	acpDB := filepath.Join(geminiDir, "antigravity-acp", "conversations", sid+".db")
+	for _, dbPath := range []string{cliDB, acpDB} {
+		if _, err := os.Stat(dbPath); err == nil {
+			return dbPath
+		}
+	}
+	return cliDB
 }
 
 func agyOpenSteps(dbPath string) (*sql.DB, error) {
