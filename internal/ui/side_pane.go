@@ -194,19 +194,23 @@ type sidePaneHandleEntry struct {
 
 // sidePaneHandleState 按 splitKey 保存每个手柄的悬停进入时刻与拖动状态。
 // mygo 只给元素暴露「此刻是否悬停/按下」，而 150ms 悬停延迟、松手收起都需要跨帧记忆，
-// 所以与 sidebarHover 一样放包级表；表按窗口 Context 隔离，换窗口整表清零。
+// 所以与 sidebarHover 一样放包级表；表按窗口 ui.Services 隔离，换窗口整表清零。
 type sidePaneHandleState struct {
 	mu    sync.Mutex
-	ctx   *ui.Context
+	win   ui.Services
 	items map[string]*sidePaneHandleEntry
 }
 
 var sidePaneHandles = sidePaneHandleState{items: make(map[string]*sidePaneHandleEntry)}
 
 // entryLocked 取该窗口该手柄的状态；切换窗口时先清空整表。调用方须持锁。
-func (st *sidePaneHandleState) entryLocked(ctx *ui.Context, key string) *sidePaneHandleEntry {
-	if st.ctx != ctx {
-		st.ctx = ctx
+func (st *sidePaneHandleState) entryLocked(c *ui.Context, key string) *sidePaneHandleEntry {
+	var win ui.Services
+	if c != nil {
+		win = c.Services()
+	}
+	if st.win != win {
+		st.win = win
 		st.items = make(map[string]*sidePaneHandleEntry)
 	}
 	e := st.items[key]
@@ -219,10 +223,10 @@ func (st *sidePaneHandleState) entryLocked(ctx *ui.Context, key string) *sidePan
 
 // observe 推进悬停状态机：返回指针已停在该手柄上的时长，以及还需等多久高亮才会亮起。
 // 调用方拿 wait 调 c.After：悬停未满 motionHoverDelay 时不会有帧，靠它把到点那一帧请出来。
-func (st *sidePaneHandleState) observe(ctx *ui.Context, key string, now time.Time, hovered bool) (elapsed, wait time.Duration) {
+func (st *sidePaneHandleState) observe(c *ui.Context, key string, now time.Time, hovered bool) (elapsed, wait time.Duration) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	e := st.entryLocked(ctx, key)
+	e := st.entryLocked(c, key)
 	if !hovered {
 		e.enteredAt = time.Time{}
 		return 0, 0
@@ -237,23 +241,23 @@ func (st *sidePaneHandleState) observe(ctx *ui.Context, key string, now time.Tim
 }
 
 // dragging 报告上一帧该手柄是否在拖动。
-func (st *sidePaneHandleState) dragging(ctx *ui.Context, key string) bool {
+func (st *sidePaneHandleState) dragging(c *ui.Context, key string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.entryLocked(ctx, key).dragging
+	return st.entryLocked(c, key).dragging
 }
 
 // setDragging 记录该手柄这一帧是否在拖动。
-func (st *sidePaneHandleState) setDragging(ctx *ui.Context, key string, dragging bool) {
+func (st *sidePaneHandleState) setDragging(c *ui.Context, key string, dragging bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	st.entryLocked(ctx, key).dragging = dragging
+	st.entryLocked(c, key).dragging = dragging
 }
 
 // resetSidePaneHandlesForTest 清空手柄状态，避免测试之间串味。
 func resetSidePaneHandlesForTest() {
 	sidePaneHandles.mu.Lock()
-	sidePaneHandles.ctx = nil
+	sidePaneHandles.win = ui.Services{}
 	sidePaneHandles.items = make(map[string]*sidePaneHandleEntry)
 	sidePaneHandles.mu.Unlock()
 }

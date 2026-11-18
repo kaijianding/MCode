@@ -36,10 +36,10 @@ const (
 )
 
 // sidebarHoverState 记录当前悬停的会话行与进入/离开时刻。
-// ctx 用来把状态绑定到某个窗口：Context 是窗口级稳定对象，换窗口时整份状态清零。
+// win 用来把状态绑定到某个窗口：ui.Services 是窗口级持久值，换窗口时整份状态清零。
 type sidebarHoverState struct {
 	mu        sync.Mutex
-	ctx       *ui.Context
+	win       ui.Services
 	threadID  string
 	projectID string
 	enteredAt time.Time
@@ -49,7 +49,7 @@ type sidebarHoverState struct {
 var sidebarHover sidebarHoverState
 
 type sidebarMarqueeKey struct {
-	ctx *ui.Context
+	win ui.Services
 	key string
 }
 
@@ -59,8 +59,8 @@ var (
 )
 
 // resetSidebarHoverStateLocked 清空状态，调用方需持有 mu。
-func (st *sidebarHoverState) resetLocked(ctx *ui.Context) {
-	st.ctx = ctx
+func (st *sidebarHoverState) resetLocked(win ui.Services) {
+	st.win = win
 	st.threadID = ""
 	st.projectID = ""
 	st.enteredAt = time.Time{}
@@ -70,7 +70,7 @@ func (st *sidebarHoverState) resetLocked(ctx *ui.Context) {
 // resetSidebarHoverCardForTest 清空悬停卡和跑马灯的包级状态，避免测试之间串味。
 func resetSidebarHoverCardForTest() {
 	sidebarHover.mu.Lock()
-	sidebarHover.resetLocked(nil)
+	sidebarHover.resetLocked(ui.Services{})
 	sidebarHover.mu.Unlock()
 	sidebarMarqueeMu.Lock()
 	clear(sidebarMarqueeStart)
@@ -79,15 +79,19 @@ func resetSidebarHoverCardForTest() {
 
 // observe 推进悬停状态机：返回本帧是否应显示卡片，以及需要等多久再请求下一帧。
 // 返回的等待时长用于 c.After：预热结束时出卡、宽限期结束时收卡，两处都要下一帧。
-// 状态挂在窗口级的 c 上（和 c.Key 同一层隔离），换窗口不会继承上一个窗口的悬停。
-func (st *sidebarHoverState) observe(ctx *ui.Context, now time.Time, threadID, projectID string, hovered bool) (bool, time.Duration) {
+// 状态按窗口级的 ui.Services 隔离，换窗口不会继承上一个窗口的悬停。
+func (st *sidebarHoverState) observe(c *ui.Context, now time.Time, threadID, projectID string, hovered bool) (bool, time.Duration) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
 	// 状态按窗口隔离：上一个窗口刚离开的会话行与时刻不能带进新窗口，
 	// 否则新窗口第一帧就会落进 180ms 宽限期，在从未悬停的情况下把卡片显示出来。
-	if st.ctx != ctx {
-		st.resetLocked(ctx)
+	var win ui.Services
+	if c != nil {
+		win = c.Services()
+	}
+	if st.win != win {
+		st.resetLocked(win)
 	}
 
 	if hovered {
@@ -296,8 +300,12 @@ func sidebarMarqueePhase(elapsed, dur time.Duration) float32 {
 	return float32(period-pos) / float32(dur)
 }
 
-func sidebarMarqueeEnsureStart(ctx *ui.Context, key string, now time.Time) time.Time {
-	mk := sidebarMarqueeKey{ctx: ctx, key: key}
+func sidebarMarqueeEnsureStart(c *ui.Context, key string, now time.Time) time.Time {
+	var win ui.Services
+	if c != nil {
+		win = c.Services()
+	}
+	mk := sidebarMarqueeKey{win: win, key: key}
 	sidebarMarqueeMu.Lock()
 	defer sidebarMarqueeMu.Unlock()
 	if start, ok := sidebarMarqueeStart[mk]; ok {
@@ -307,8 +315,12 @@ func sidebarMarqueeEnsureStart(ctx *ui.Context, key string, now time.Time) time.
 	return now
 }
 
-func sidebarMarqueeClear(ctx *ui.Context, key string) {
-	mk := sidebarMarqueeKey{ctx: ctx, key: key}
+func sidebarMarqueeClear(c *ui.Context, key string) {
+	var win ui.Services
+	if c != nil {
+		win = c.Services()
+	}
+	mk := sidebarMarqueeKey{win: win, key: key}
 	sidebarMarqueeMu.Lock()
 	delete(sidebarMarqueeStart, mk)
 	sidebarMarqueeMu.Unlock()
