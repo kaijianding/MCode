@@ -138,24 +138,6 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%d B", bytes)
 }
 
-// truncateMiddle 截断过长文件名并在中间展示省略号。
-func truncateMiddle(name string, maxLen int) string {
-	runes := []rune(name)
-	if len(runes) <= maxLen {
-		return name
-	}
-	ext := filepath.Ext(name)
-	extRunes := []rune(ext)
-	if len(extRunes) >= maxLen-3 {
-		return string(runes[:maxLen-3]) + "…"
-	}
-	baseLen := maxLen - 3 - len(extRunes)
-	if baseLen <= 0 {
-		return string(runes[:maxLen-3]) + "…"
-	}
-	return string(runes[:baseLen]) + "…" + ext
-}
-
 var pickFilesDialog func() ([]string, bool, error) = defaultPickFiles
 
 func defaultPickFiles() ([]string, bool, error) {
@@ -270,16 +252,21 @@ func renderDownloadsPanel(c *ui.Context, s *chatState, onDone func()) {
 								Children(func() {
 									ui.Icon(c, IconFile()).
 										Size(IconMD, IconMD).
-										TextColor(ThemeSecondaryText(c))
+										TextColor(ThemeSecondaryText(c)).
+										Shrink(0)
 
-									ui.Text(c, truncateMiddle(item.Name, 26)).
+									ui.Text(c, item.Name).
 										FontSize(uiFont(TypeBody)).
 										TextColor(ThemePrimaryText(c)).
-										Grow(1)
+										SingleLine().
+										TruncateMiddle().
+										Grow(1).
+										MinWidth(0)
 
 									ui.Text(c, formatFileSize(item.Size)).
 										FontSize(uiFont(TypeCaption)).
-										TextColor(ThemeSecondaryText(c))
+										TextColor(ThemeSecondaryText(c)).
+										Shrink(0)
 								})
 						})
 					}

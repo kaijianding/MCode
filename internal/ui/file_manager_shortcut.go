@@ -42,3 +42,54 @@ func fileManagerCloseActiveTab(s *chatState) bool {
 	s.closeFileManagerTab(path)
 	return true
 }
+
+// fileManagerQuickLookSelected 在 macOS 上对文件树当前选中的本地文件触发系统快速查看。
+func fileManagerQuickLookSelected(s *chatState) bool {
+	if fileManagerGOOS != "darwin" || s == nil || !isFileManagerOpen(s) {
+		return false
+	}
+	st := getFileManagerState(s)
+	if st == nil {
+		return false
+	}
+	fileManagerMu.Lock()
+	threadID := st.threadID
+	tree := st.tree
+	if tree == nil || st.query != "" {
+		fileManagerMu.Unlock()
+		return false
+	}
+	outline := fileTreeActiveOutlineLocked(tree)
+	selected := tree.selected
+	selection := &tree.selection
+	if tree.onlyChanged {
+		selected = tree.changedSelected
+		selection = &tree.changedSelection
+	}
+	var entry FileEntry
+	var found bool
+	if selected >= 0 && selected < outline.Rows() {
+		path := outline.Item(selected)
+		if selection.Has(path) {
+			entry, found = tree.entries[path]
+		}
+	}
+	if !found && selection.Len() == 1 {
+		for path := range selection.All() {
+			entry, found = tree.entries[path]
+			break
+		}
+	}
+	deleted := found && tree.onlyChanged && tree.git[entry.Path].Status == "D"
+	fileManagerMu.Unlock()
+
+	if !found || entry.IsDir || entry.Protected || deleted {
+		return false
+	}
+	abs := fileManagerWorkspacePath(s, threadID, entry.Path)
+	if !fileManagerLocalPath(abs) {
+		return false
+	}
+	_ = fileManagerPreviewItem(abs)
+	return true
+}

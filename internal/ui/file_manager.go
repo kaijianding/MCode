@@ -424,7 +424,7 @@ func renderFileManagerSearchResults(c *ui.Context, s *chatState, searching bool,
 				renderFileManagerRow(c, s, fileManagerRowProps{
 					key:      "file-manager-search-item-" + item.Path,
 					icon:     icon,
-					name:     truncateMiddle(item.Path, 44),
+					name:     item.Path,
 					isDir:    item.IsDir,
 					threadID: threadID,
 					entry:    FileEntry{Name: item.Name, Path: item.Path, IsDir: item.IsDir},
@@ -501,6 +501,7 @@ func renderFileManagerRow(c *ui.Context, s *chatState, props fileManagerRowProps
 			FontSize(uiFont(TypeFootnote)).
 			TextColor(nameColor).
 			SingleLine().
+			TruncateMiddle().
 			Grow(1).
 			MinWidth(0)
 

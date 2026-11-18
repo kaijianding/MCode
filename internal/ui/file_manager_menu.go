@@ -3,10 +3,16 @@ package mcodeui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+)
+
+var (
+	fileManagerGOOS        = runtime.GOOS
+	fileManagerPreviewItem = func(abs string) error { return mygo.Shell.PreviewItem(abs) }
 )
 
 // fileManagerEntryEditable 判断条目能否做写操作：受保护条目和服务端不支持文件操作时都不行。
@@ -136,6 +142,9 @@ func fileManagerEntryMenu(c *ui.Context, s *chatState, threadID string, entry Fi
 			if !entry.IsDir {
 				if m.Item("用默认应用打开").Chosen() {
 					_ = mygo.Shell.OpenPath(abs)
+				}
+				if fileManagerGOOS == "darwin" && m.Item("快速查看").Chosen() {
+					_ = fileManagerPreviewItem(abs)
 				}
 			}
 		}

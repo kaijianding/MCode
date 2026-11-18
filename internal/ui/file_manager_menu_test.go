@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -30,11 +31,15 @@ func TestFileManagerEntryMenuCopyRelativePath(t *testing.T) {
 	if err := tt.RightClick("a.txt"); err != nil {
 		t.Fatalf("right click file row failed: %v", err)
 	}
-	want := fmt.Sprint([]string{
+	wantItems := []string{
 		"打开", "在右侧分栏打开", "文件历史", "逐行追溯", "引用到输入框", "复制路径", "复制相对路径",
 		revealInFileManagerLabel(), "用默认应用打开",
-		"-", "重命名…", "复制一份", trashActionLabel() + "…",
-	})
+	}
+	if runtime.GOOS == "darwin" {
+		wantItems = append(wantItems, "快速查看")
+	}
+	wantItems = append(wantItems, "-", "重命名…", "复制一份", trashActionLabel()+"…")
+	want := fmt.Sprint(wantItems)
 	if got := fmt.Sprint(tt.Menu()); got != want {
 		t.Fatalf("文件菜单应等于 %s，得到 %s", want, got)
 	}
@@ -288,6 +293,65 @@ func TestFileManagerRevealLocalFile(t *testing.T) {
 		if !slices.Contains(got, want) {
 			t.Fatalf("本机文件菜单应包含「%s」，得到 %v", want, got)
 		}
+	}
+	tt.CloseMenu()
+}
+
+// 仅 macOS 的本机文件菜单显示「快速查看」，目录菜单和非 macOS 均不显示。
+func TestFileManagerEntryMenuQuickLook(t *testing.T) {
+	oldGOOS, oldPreview := fileManagerGOOS, fileManagerPreviewItem
+	t.Cleanup(func() {
+		fileManagerGOOS = oldGOOS
+		fileManagerPreviewItem = oldPreview
+	})
+
+	var previewed []string
+	fileManagerPreviewItem = func(abs string) error {
+		previewed = append(previewed, abs)
+		return nil
+	}
+
+	workDir := t.TempDir()
+	localFile := filepath.Join(workDir, "a.txt")
+	if err := os.WriteFile(localFile, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write temp file failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir temp dir failed: %v", err)
+	}
+
+	fake, _, tt := openFileManagerForTest(t)
+	fake.SetThreadWorkDir(workDir)
+	waitFor(t, tt, func() bool { return tt.HasText("a.txt") && tt.HasText("sub") })
+
+	fileManagerGOOS = "darwin"
+	if err := tt.RightClick("a.txt"); err != nil {
+		t.Fatalf("right click file row failed: %v", err)
+	}
+	if got := tt.Menu(); !slices.Contains(got, "快速查看") {
+		t.Fatalf("macOS 文件菜单应包含「快速查看」，得到 %v", got)
+	}
+	if err := tt.ChooseMenuItem("快速查看"); err != nil {
+		t.Fatalf("choose quick look failed: %v", err)
+	}
+	if !slices.Equal(previewed, []string{localFile}) {
+		t.Fatalf("快速查看参数 = %v，期望 [%s]", previewed, localFile)
+	}
+
+	if err := tt.RightClick("sub"); err != nil {
+		t.Fatalf("right click dir row failed: %v", err)
+	}
+	if got := tt.Menu(); slices.Contains(got, "快速查看") {
+		t.Fatalf("目录菜单不应包含「快速查看」，得到 %v", got)
+	}
+	tt.CloseMenu()
+
+	fileManagerGOOS = "linux"
+	if err := tt.RightClick("a.txt"); err != nil {
+		t.Fatalf("right click file row on linux failed: %v", err)
+	}
+	if got := tt.Menu(); slices.Contains(got, "快速查看") {
+		t.Fatalf("非 macOS 文件菜单不应包含「快速查看」，得到 %v", got)
 	}
 	tt.CloseMenu()
 }

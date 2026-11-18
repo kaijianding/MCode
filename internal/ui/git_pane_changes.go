@@ -61,19 +61,6 @@ type gitChangesGroup struct {
 	entries []git.StatusEntry
 }
 
-func gitChangesTruncateStart(text string, fits func(string) bool) string {
-	if fits(text) {
-		return text
-	}
-	runes := []rune(text)
-	for i := 1; i < len(runes); i++ {
-		if fits("…" + string(runes[i:])) {
-			return "…" + string(runes[i:])
-		}
-	}
-	return "…"
-}
-
 func gitChangesGroups(entries []git.StatusEntry) [3]gitChangesGroup {
 	groups := [3]gitChangesGroup{{name: "冲突"}, {name: "已暂存"}, {name: "更改"}}
 	for _, e := range entries {

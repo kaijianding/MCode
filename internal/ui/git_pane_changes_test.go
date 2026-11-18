@@ -28,13 +28,6 @@ type gitChangesFakeClient struct {
 	paths    []string
 }
 
-func TestGitChangesTruncateStart(t *testing.T) {
-	got := gitChangesTruncateStart("长目录/文件夹", func(s string) bool { return len([]rune(s)) <= 4 })
-	if got != "…文件夹" {
-		t.Fatalf("截断 = %q", got)
-	}
-}
-
 func TestGitChangesIgnoreEscapesPatterns(t *testing.T) {
 	root := t.TempDir()
 	if err := gitChangesIgnore(root, "a[b]*.txt"); err != nil {

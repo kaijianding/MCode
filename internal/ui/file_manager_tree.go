@@ -871,7 +871,7 @@ func renderFileManagerTree(c *ui.Context, s *chatState, threadID string) {
 		ui.Box(c).Width(Space1).Shrink(0)
 	}
 
-	ui.Outline(c.Key("file-manager-tree"), outline, roots, children, func(path string) {
+	treeEl := ui.Outline(c.Key("file-manager-tree"), outline, roots, children, func(path string) {
 		fileManagerMu.Lock()
 		entry, ok := tree.entries[path]
 		if onlyChanged {
@@ -887,7 +887,7 @@ func renderFileManagerTree(c *ui.Context, s *chatState, threadID string) {
 		props := fileManagerRowProps{
 			key:       "file-tree-row-" + path,
 			icon:      fileManagerEntryIcon(entry),
-			name:      truncateMiddle(entry.Name, 40),
+			name:      entry.Name,
 			size:      fileManagerEntrySize(entry),
 			ignored:   entry.Ignored || deleted,
 			protected: entry.Protected,
@@ -923,6 +923,10 @@ func renderFileManagerTree(c *ui.Context, s *chatState, threadID string) {
 			}
 		})
 	}).Grow(1).FillWidth().Padding(Space2, Space2).ContextMenu(fileManagerDirMenu(c, s))
+
+	if fileManagerGOOS == "darwin" && treeEl.Focused() && treeEl.Shortcut(0, ui.KeySpace) {
+		fileManagerQuickLookSelected(s)
+	}
 
 	if onlyChanged {
 		return

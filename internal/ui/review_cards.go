@@ -216,14 +216,7 @@ func renderReviewCardHead(c *ui.Context, s *chatState, dp *diffPanelState, tid s
 			}
 			ui.Text(c, name).FontSize(uiFont(TypeFootnote)).TextColor(nameColor).SingleLine().Shrink(1).MinWidth(0)
 			if dir := path.Dir(file.Path); dir != "." {
-				nameWidth, _ := c.MeasureText(0, ui.Span{Text: name, Size: uiFont(TypeFootnote)})
-				if available := label.Bounds().W - nameWidth - IconSM - Space3 - Space2*3 - Space1*2; available > 0 {
-					dir = gitChangesTruncateStart(dir, func(value string) bool {
-						w, _ := c.MeasureText(0, ui.Span{Text: value, Size: uiFont(TypeCaption)})
-						return w <= available
-					})
-				}
-				ui.Text(c, dir).FontSize(uiFont(TypeCaption)).TextColor(ThemeTertiaryText(c)).SingleLine().Shrink(1).MinWidth(0)
+				ui.Text(c, dir).FontSize(uiFont(TypeCaption)).TextColor(ThemeTertiaryText(c)).SingleLine().TruncateStart().Shrink(1).MinWidth(0)
 			}
 		})
 		if file.Additions > 0 {
