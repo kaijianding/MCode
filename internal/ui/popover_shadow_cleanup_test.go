@@ -2,29 +2,14 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
 
 func TestPopoverCardHasNoExtraShadow(t *testing.T) {
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+	for _, pf := range uiProdFiles(t) {
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(node ast.Node) bool {
 			outer, ok := node.(*ast.CallExpr)
 			if !ok || len(outer.Args) != 1 {

@@ -5,7 +5,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,28 +18,16 @@ type settingsGuardFile struct {
 	file *ast.File
 }
 
-// parseSettingsGuardFiles 解析 internal/ui 下所有以 settings 开头的非测试源码文件。
+// parseSettingsGuardFiles 从进程级 AST 缓存获取 internal/ui 下所有以 settings 开头的非测试源码文件。
 func parseSettingsGuardFiles(t *testing.T) []settingsGuardFile {
 	t.Helper()
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("读取 internal/ui 目录失败: %v", err)
-	}
-
-	fset := token.NewFileSet()
 	var files []settingsGuardFile
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "settings") ||
-			!strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+	for _, pf := range uiProdFiles(t) {
+		if !strings.HasPrefix(pf.Name, "settings") {
 			continue
 		}
-		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s 失败: %v", name, err)
-		}
-		files = append(files, settingsGuardFile{name: name, file: file})
+		files = append(files, settingsGuardFile{name: pf.Name, file: pf.File})
 	}
 	return files
 }

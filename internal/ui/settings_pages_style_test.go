@@ -2,8 +2,6 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 )
 
@@ -21,12 +19,9 @@ func TestSettingsPagesNoRawColor(t *testing.T) {
 		"settings_remote.go",
 		"settings_swarm_tiers.go",
 	}
-	fset := token.NewFileSet()
 	for _, name := range files {
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s: %v", name, err)
-		}
+		pf := uiProdFileByName(t, name)
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {

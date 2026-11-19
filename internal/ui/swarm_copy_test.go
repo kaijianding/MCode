@@ -2,7 +2,6 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"regexp"
 	"strings"
@@ -22,11 +21,8 @@ func swarmUITextLiteral(v string) bool {
 
 // TestSwarmCopyUsesSubagent 扫描 swarm.go 的字符串字面量，界面文案不得出现小写 bee。
 func TestSwarmCopyUsesSubagent(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "swarm.go", nil, 0)
-	if err != nil {
-		t.Fatalf("解析 swarm.go: %v", err)
-	}
+	pf := uiProdFileByName(t, "swarm.go")
+	fset, file := pf.Fset, pf.File
 	var offenders []string
 	ast.Inspect(file, func(node ast.Node) bool {
 		lit, ok := node.(*ast.BasicLit)

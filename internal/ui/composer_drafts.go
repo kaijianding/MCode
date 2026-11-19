@@ -20,7 +20,7 @@ import (
 const composerDraftsFileName = "composer-drafts.json"
 
 // composerDraftSaveDebounce 是草稿落盘防抖时长：连续输入只在停顿后写一次盘。
-const composerDraftSaveDebounce = time.Second
+var composerDraftSaveDebounce = time.Second
 
 // composerDraftsWriteMu 串行化草稿落盘：快照在锁内读取，保证后写入的一定是更新的内容，
 // 避免防抖定时器、切换会话与窗口关闭几路写盘乱序后用旧快照覆盖新快照。

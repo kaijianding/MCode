@@ -178,6 +178,9 @@ func TestComposerDraftNoteSkipsRetainForRegularThread(t *testing.T) {
 // TestComposerDraftNoteUpdatesMemoryAndSkipsWriteWhenDisabled 验证 noteComposerDraft 更新内存草稿
 // 并保留附件；未开启持久化时防抖结束后也不写文件。
 func TestComposerDraftNoteUpdatesMemoryAndSkipsWriteWhenDisabled(t *testing.T) {
+	origDebounce := composerDraftSaveDebounce
+	composerDraftSaveDebounce = 25 * time.Millisecond
+	t.Cleanup(func() { composerDraftSaveDebounce = origDebounce })
 	dataDir := settingsTestDir(t)
 	t.Setenv("MCODE_DATA", dataDir)
 	t.Cleanup(waitUIStateWrites)
@@ -201,7 +204,7 @@ func TestComposerDraftNoteUpdatesMemoryAndSkipsWriteWhenDisabled(t *testing.T) {
 	}
 
 	// 等防抖窗口过去，持久化关闭时不应写出文件
-	time.Sleep(composerDraftSaveDebounce + 200*time.Millisecond)
+	time.Sleep(composerDraftSaveDebounce + 30*time.Millisecond)
 	if _, err := os.Stat(filepath.Join(dataDir, composerDraftsFileName)); !os.IsNotExist(err) {
 		t.Fatalf("持久化关闭时不应写出草稿文件, stat err = %v", err)
 	}

@@ -702,6 +702,29 @@ func TestSettingsSaveDoesNotRaceWithEdits(t *testing.T) {
 func TestRememberUsedProviderRacesWithRenderReaders(t *testing.T) {
 	state := newChatState(NewFakeClient())
 	st := NewSettingsState(settingsTestDir(t), nil, state)
+	var memMu sync.Mutex
+	var memCfg config.Config
+	var realPersisted bool
+	st.saveConfigFn = func(dir string, fn func(*config.Config) error) error {
+		memMu.Lock()
+		defer memMu.Unlock()
+		if !realPersisted {
+			realPersisted = true
+			return config.Update(dir, func(latest *config.Config) error {
+				if err := fn(latest); err != nil {
+					return err
+				}
+				memCfg = cloneConfig(*latest)
+				return nil
+			})
+		}
+		next := cloneConfig(memCfg)
+		if err := fn(&next); err != nil {
+			return err
+		}
+		memCfg = next
+		return nil
+	}
 	setChatSettings(state, st)
 
 	var wg sync.WaitGroup
@@ -729,6 +752,14 @@ func TestRememberUsedProviderRacesWithRenderReaders(t *testing.T) {
 	st.cfgMu.Unlock()
 	if !selected || got != "codex" {
 		t.Fatalf("最后一次写入应生效，got provider=%q selected=%v", got, selected)
+	}
+
+	loaded, err := config.Load(st.dataDir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+	if !loaded.Models.ProviderSelected || loaded.Models.Provider != "claude" {
+		t.Fatalf("真实落盘未生效，got provider=%q selected=%v", loaded.Models.Provider, loaded.Models.ProviderSelected)
 	}
 }
 

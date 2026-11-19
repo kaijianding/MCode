@@ -41,6 +41,7 @@ type fileTreeWatchState struct {
 	cancel   context.CancelFunc
 	timer    *time.Timer
 	timerAt  time.Time
+	timerSeq uint64
 }
 
 var (
@@ -117,20 +118,20 @@ func fileTreeWatchDispose(st *fileManagerState) {
 // fileTreeWatchTick 由文件面板每帧调用：只在可见时按间隔检查工作区代次。
 func fileTreeWatchTick(s *chatState, st *fileManagerState, threadID string) {
 	w := fileTreeWatchFor(st)
-	fileTreeWatchTickState(s, st, threadID, w)
+	fileTreeWatchTickState(s, st, threadID, w, 0)
 }
 
 // fileTreeWatchTickExisting 只推进已经存在的监听状态；计时器回调使用，
 // 避免会话释放后又为旧指针重建计时器。
-func fileTreeWatchTickExisting(s *chatState, st *fileManagerState, threadID string) {
+func fileTreeWatchTickExisting(s *chatState, st *fileManagerState, threadID string, timerSeq uint64) {
 	w := fileTreeWatchLookup(st)
 	if w == nil {
 		return
 	}
-	fileTreeWatchTickState(s, st, threadID, w)
+	fileTreeWatchTickState(s, st, threadID, w, timerSeq)
 }
 
-func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string, w *fileTreeWatchState) {
+func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string, w *fileTreeWatchState, fromTimerSeq uint64) {
 	if s == nil || st == nil || threadID == "" || w == nil {
 		return
 	}
@@ -149,7 +150,7 @@ func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string,
 
 	now := time.Now()
 	w.mu.Lock()
-	if w.disposed {
+	if w.disposed || (fromTimerSeq != 0 && w.timerSeq != fromTimerSeq) {
 		w.mu.Unlock()
 		return
 	}
@@ -328,6 +329,7 @@ func (w *fileTreeWatchState) cancelLocked() {
 
 // stopTimerLocked 停止定时重绘；调用方持 w.mu。
 func (w *fileTreeWatchState) stopTimerLocked() {
+	w.timerSeq++
 	if w.timer != nil {
 		w.timer.Stop()
 		w.timer = nil
@@ -347,17 +349,18 @@ func (w *fileTreeWatchState) scheduleTimerLocked(s *chatState, st *fileManagerSt
 		return
 	}
 	w.stopTimerLocked()
+	seq := w.timerSeq
 	var timer *time.Timer
 	timer = time.AfterFunc(wait, func() {
 		w.mu.Lock()
-		if w.timer != timer || w.disposed || !w.visible {
+		if w.timer != timer || w.timerSeq != seq || w.disposed || !w.visible {
 			w.mu.Unlock()
 			return
 		}
 		w.timer = nil
 		w.timerAt = time.Time{}
 		w.mu.Unlock()
-		fileTreeWatchTickExisting(s, st, threadID)
+		fileTreeWatchTickExisting(s, st, threadID, seq)
 		s.invalidate()
 	})
 	w.timer = timer

@@ -262,6 +262,12 @@ func (v styleViolation) String() string {
 // eachProductionFile 依次解析 dir 下的生产代码文件（跳过 _test.go）。
 func eachProductionFile(t *testing.T, dir string, fn func(name string, file *ast.File, fset *token.FileSet)) {
 	t.Helper()
+	if dir == "." {
+		for _, pf := range uiProdFiles(t) {
+			fn(pf.Name, pf.File, pf.Fset)
+		}
+		return
+	}
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatalf("glob %s: %v", dir, err)

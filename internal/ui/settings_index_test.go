@@ -2,10 +2,7 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,26 +132,14 @@ func settingsRowRendererName(name string) bool {
 func collectSettingsRowCalls(t *testing.T) []settingsRowCall {
 	t.Helper()
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("读取 internal/ui 目录失败: %v", err)
-	}
-
-	fset := token.NewFileSet()
 	var calls []settingsRowCall
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
+	for _, pf := range uiProdFiles(t) {
+		name := pf.Name
 		if name == "settings_tree.go" || name == "settings_controls.go" {
 			// 通用渲染器：行 key 由页面树提供，由页面树测试覆盖。
 			continue
 		}
-		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s 失败: %v", name, err)
-		}
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			if lit, ok := n.(*ast.CompositeLit); ok {
 				for _, declLit := range settingsSettingLiterals(lit) {

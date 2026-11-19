@@ -400,8 +400,16 @@ func TestBrowserConsoleDrawerFiltersCopyAndAdd(t *testing.T) {
 	waitInspectorContext(t, s, func() bool { return len(s.attachments) == 1 && s.attachments[0].ID != "" })
 }
 
+func shortPreviewConsolePoll(t *testing.T) {
+	t.Helper()
+	orig := previewConsolePollInterval
+	previewConsolePollInterval = 25 * time.Millisecond
+	t.Cleanup(func() { previewConsolePollInterval = orig })
+}
+
 // 假页真实计时轮询；headless 时钟单独推进，确保 JS drain 不再驱动整窗帧。
 func TestBrowserVisibleIdleNoFrames(t *testing.T) {
+	shortPreviewConsolePoll(t)
 	s := &chatState{}
 	defer inspectorDisposeAllSessions(s)
 	tab := getPreviewState(s)
@@ -426,7 +434,7 @@ func TestBrowserVisibleIdleNoFrames(t *testing.T) {
 	for range 3 {
 		select {
 		case <-polled:
-		case <-time.After(2 * previewConsolePollInterval):
+		case <-time.After(500 * time.Millisecond):
 			t.Fatal("可见空闲页没有在后台轮询")
 		}
 		tester.Advance(2 * previewConsolePollInterval)
@@ -446,6 +454,7 @@ func TestBrowserVisibleIdleNoFrames(t *testing.T) {
 }
 
 func TestBrowserPollingNewRecordInvalidates(t *testing.T) {
+	shortPreviewConsolePoll(t)
 	s := &chatState{}
 	defer inspectorDisposeAllSessions(s)
 	tab := getPreviewState(s)
@@ -464,7 +473,7 @@ func TestBrowserPollingNewRecordInvalidates(t *testing.T) {
 		renderPreviewPanel(c, s)
 	}, 800, 600)
 	tester.Advance(time.Second)
-	deadline := time.Now().Add(2 * previewConsolePollInterval)
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for !tester.FramePending() {
 		if time.Now().After(deadline) {
 			t.Fatal("新记录没有触发 invalidate")
@@ -483,6 +492,7 @@ func TestBrowserPollingNewRecordInvalidates(t *testing.T) {
 }
 
 func TestBrowserPollingStopsAndRestarts(t *testing.T) {
+	shortPreviewConsolePoll(t)
 	for _, action := range []string{"hidden", "close", "generation", "window"} {
 		t.Run(action, func(t *testing.T) {
 			s := &chatState{}
@@ -524,7 +534,7 @@ func TestBrowserPollingStopsAndRestarts(t *testing.T) {
 			}
 			select {
 			case <-done:
-			case <-time.After(2 * previewConsolePollInterval):
+			case <-time.After(500 * time.Millisecond):
 				t.Fatal("生命周期变化后旧轮询未退出")
 			}
 			if action == "hidden" {
@@ -532,7 +542,7 @@ func TestBrowserPollingStopsAndRestarts(t *testing.T) {
 				browserStartPolling(s, tab)
 			}
 			if action == "hidden" || action == "generation" {
-				deadline := time.Now().Add(2 * previewConsolePollInterval)
+				deadline := time.Now().Add(500 * time.Millisecond)
 				for calls.Load() == 0 {
 					if time.Now().After(deadline) {
 						t.Fatal("重新可见或换代后没有恢复轮询")
@@ -558,6 +568,7 @@ func (p *browserBlockedPollingPage) EvalContext(ctx context.Context, _ string) (
 }
 
 func TestBrowserPollingUnresponsivePageExits(t *testing.T) {
+	shortPreviewConsolePoll(t)
 	for _, action := range []string{"hidden", "released"} {
 		t.Run(action, func(t *testing.T) {
 			s := &chatState{}
@@ -573,7 +584,7 @@ func TestBrowserPollingUnresponsivePageExits(t *testing.T) {
 			previewMu.Unlock()
 			select {
 			case <-page.started:
-			case <-time.After(2 * previewConsolePollInterval):
+			case <-time.After(500 * time.Millisecond):
 				t.Fatal("没有通过 EvalContext 轮询")
 			}
 			if action == "hidden" {
@@ -583,7 +594,7 @@ func TestBrowserPollingUnresponsivePageExits(t *testing.T) {
 			}
 			select {
 			case <-done:
-			case <-time.After(2 * previewConsolePollInterval):
+			case <-time.After(500 * time.Millisecond):
 				t.Fatal("无响应页面使后台轮询泄漏")
 			}
 		})

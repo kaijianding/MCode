@@ -2,11 +2,7 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"mcode/internal/config"
@@ -41,19 +37,8 @@ func TestSettingsModelPickerCatalogFallback(t *testing.T) {
 }
 
 func TestModelPickerUsesCatalog(t *testing.T) {
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s: %v", path, err)
-		}
+	for _, pf := range uiProdFiles(t) {
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) != 2 {

@@ -2,8 +2,6 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 )
 
@@ -35,11 +33,8 @@ func TestSwarmRosterUsesIdentityPalette(t *testing.T) {
 
 // TestSwarmBeeFloatsHasNoInlineHex 断言浮动卡源码不再内联十六进制颜色，人设色统一走 identityPalette。
 func TestSwarmBeeFloatsHasNoInlineHex(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "swarm_bee_floats.go", nil, 0)
-	if err != nil {
-		t.Fatalf("解析 swarm_bee_floats.go 失败: %v", err)
-	}
+	pf := uiProdFileByName(t, "swarm_bee_floats.go")
+	fset, file := pf.Fset, pf.File
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {

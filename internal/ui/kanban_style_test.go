@@ -2,9 +2,6 @@ package mcodeui
 
 import (
 	"bytes"
-	"go/parser"
-	"go/token"
-	"os"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -44,13 +41,7 @@ func TestKanbanPriorityStyleTokens(t *testing.T) {
 func TestKanbanFilesUseDesignTokens(t *testing.T) {
 	banned := []string{"ui.Hex(", "ui.RGBA(0, 0, 0"}
 	for _, name := range []string{"kanban.go", "kanban_modal.go", "kanban_state.go", "kanban_data.go", "kanban_actions.go", "kanban_cards.go", "kanban_detail.go", "kanban_goals.go", "kanban_sheets.go"} {
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("读取 %s 失败: %v", name, err)
-		}
-		if _, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments); err != nil {
-			t.Fatalf("解析 %s 失败: %v", name, err)
-		}
+		src := uiProdFileByName(t, name).Src
 		for _, bannedText := range banned {
 			if bytes.Contains(src, []byte(bannedText)) {
 				t.Errorf("%s 仍含 %s，请改用 Theme*/Elev* 令牌", name, bannedText)

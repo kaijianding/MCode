@@ -352,6 +352,14 @@ func TestFileTreeWatcherDisposeCancels(t *testing.T) {
 		defer w.mu.Unlock()
 		return !w.inFlight && w.timer != nil
 	})
+	w.mu.Lock()
+	w.stopTimerLocked()
+	w.mu.Unlock()
+	waitFor(t, tt, func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return !w.inFlight
+	})
 
 	client.startBlocking()
 	client.setGeneration("t1", 2)

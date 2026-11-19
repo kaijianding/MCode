@@ -95,6 +95,10 @@ func previewStateForTokenLocked(s *chatState, token previewPageToken) *browserTa
 // previewAdvanceGenerationLocked 使旧页面结果失效，同时清理旧页的显示和轮询状态。
 func previewAdvanceGenerationLocked(st *browserTab) {
 	st.generation++
+	if st.pollCancel != nil {
+		st.pollCancel()
+		st.pollCancel = nil
+	}
 	st.consoleErrors = nil
 	st.consoleOpen = false
 	st.consolePolling = false

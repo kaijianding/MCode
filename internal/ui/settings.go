@@ -145,6 +145,8 @@ type SettingsState struct {
 	highlightStartedAt time.Time
 
 	cfg             config.Config
+	// saveConfigFn 仅供测试替换 config.Update 落盘逻辑（默认 nil 走 config.Update）。
+	saveConfigFn    func(dataDir string, fn func(*config.Config) error) error
 	stewardLabelMu  sync.Mutex
 	stewardLabelKey string
 	stewardLabel    string
@@ -640,8 +642,12 @@ func (s *SettingsState) saveSnapshot(cfg, base config.Config) bool {
 		return false
 	}
 	// merged 保存合并后的结果，落盘成功后用它刷新内存快照，界面上就能看到别处写入的最新值。
+	updateFn := config.Update
+	if s.saveConfigFn != nil {
+		updateFn = s.saveConfigFn
+	}
 	var merged config.Config
-	if err := config.Update(s.dataDir, func(latest *config.Config) error {
+	if err := updateFn(s.dataDir, func(latest *config.Config) error {
 		mergeConfigChanges(reflect.ValueOf(latest).Elem(), reflect.ValueOf(base), reflect.ValueOf(cfg))
 		if err := config.Validate(*latest); err != nil {
 			return err
@@ -694,10 +700,10 @@ func (s *SettingsState) noteErrorLocked(msg string) {
 
 // settingsTextSaveDebounce 是设置页文本输入的落盘防抖：输入期间只改内存，停手这么久之后
 // 才由界面线程写一次盘，避免每按一个键就在 UI 线程做一次「读文件 → 校验 → fsync → rename」（E-06）。
-const settingsTextSaveDebounce = 500 * time.Millisecond
+var settingsTextSaveDebounce = 500 * time.Millisecond
 
 // settingsTextSaveGrace 是重绘定时器相对防抖时间的余量，避免它恰好早于到期时间触发。
-const settingsTextSaveGrace = 100 * time.Millisecond
+var settingsTextSaveGrace = 100 * time.Millisecond
 
 // settingsItemHighlightDuration 是逐项搜索跳转后目标行的高亮时长：两轮 650ms 的描边脉冲。
 const settingsItemHighlightDuration = 1300 * time.Millisecond

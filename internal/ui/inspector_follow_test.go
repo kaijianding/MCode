@@ -25,6 +25,9 @@ func inspectorFollowUpdate(s *chatState, tid, id, tool, input, status string) {
 
 func inspectorFollowTestState(t *testing.T) (*FakeClient, *chatState, *ui.Tester) {
 	t.Helper()
+	origInterval := inspectorFollowInterval
+	inspectorFollowInterval = 30 * time.Millisecond
+	t.Cleanup(func() { inspectorFollowInterval = origInterval })
 	fake, s, tt := openFileManagerForTest(t)
 	t.Cleanup(s.close)
 	fake.SetFileContents(map[string]FileContent{

@@ -2,7 +2,6 @@ package mcodeui
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
@@ -14,21 +13,12 @@ const settingsFileBudgetLines = 2322
 // TestSettingsFileBudget 遍历 internal/ui 下的 settings_*.go（排除测试文件），
 // 任何文件超过预算就失败，并列出文件名与实际行数。
 func TestSettingsFileBudget(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("读取 internal/ui 目录失败: %v", err)
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "settings_") ||
-			!strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+	for _, pf := range uiProdFiles(t) {
+		name := pf.Name
+		if !strings.HasPrefix(name, "settings_") {
 			continue
 		}
-		data, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("读取 %s 失败: %v", name, err)
-		}
+		data := pf.Src
 		lines := bytes.Count(data, []byte("\n"))
 		if len(data) > 0 && data[len(data)-1] != '\n' {
 			lines++

@@ -2,22 +2,17 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"testing"
 
 	"mcode/internal/testenv"
 )
 
-// parseUIFile 解析 internal/ui 下的源文件，供样式断言逐个节点检查。
+// parseUIFile 从进程级 AST 缓存获取 internal/ui 下的源文件，供样式断言逐个节点检查。
 func parseUIFile(t *testing.T, name string) (*token.FileSet, *ast.File) {
 	t.Helper()
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, name, nil, 0)
-	if err != nil {
-		t.Fatalf("解析 %s 失败: %v", name, err)
-	}
-	return fset, f
+	pf := uiProdFileByName(t, name)
+	return pf.Fset, pf.File
 }
 
 // uiSelector 判断节点是否是 pkg.name 形式的包级调用目标。

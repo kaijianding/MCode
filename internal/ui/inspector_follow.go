@@ -10,7 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const inspectorFollowInterval = 300 * time.Millisecond
+var inspectorFollowInterval = 300 * time.Millisecond
 
 type inspectorFollowTarget struct {
 	path, messageID, workspace string

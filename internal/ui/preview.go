@@ -22,10 +22,10 @@ const (
 	// PreviewTabletWidth / PreviewMobileWidth 是平板与手机视口的宽度。
 	PreviewTabletWidth float32 = 820
 	PreviewMobileWidth float32 = 390
-
-	// previewConsolePollInterval 是 drain 页面控制台与拾取队列的最小间隔。
-	previewConsolePollInterval = 700 * time.Millisecond
 )
+
+// previewConsolePollInterval 是 drain 页面控制台与拾取队列的最小间隔。
+var previewConsolePollInterval = 700 * time.Millisecond
 
 // previewViewportMode 是 Web 预览的视口模式。
 type previewViewportMode string

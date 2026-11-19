@@ -13,7 +13,7 @@ import (
 
 // settingsShortcutSaveDebounce 是快捷键输入框的落盘防抖：输入期间只改本地草稿，
 // 停手这么久或输入框失焦之后才统一写一次配置，免得每敲一个键就在 UI 线程 fsync 一次。
-const settingsShortcutSaveDebounce = 500 * time.Millisecond
+var settingsShortcutSaveDebounce = 500 * time.Millisecond
 
 // 包级可替换扫描函数指针（便于单元测试中注入假实现）
 var scanSkills = agentconf.ScanSkills

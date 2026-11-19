@@ -169,6 +169,13 @@ func TestFormatThemeColor(t *testing.T) {
 }
 
 func TestThemesSheet_DebouncedSave(t *testing.T) {
+	origDebounce, origGrace := settingsTextSaveDebounce, settingsTextSaveGrace
+	settingsTextSaveDebounce = 30 * time.Millisecond
+	settingsTextSaveGrace = 15 * time.Millisecond
+	t.Cleanup(func() {
+		settingsTextSaveDebounce = origDebounce
+		settingsTextSaveGrace = origGrace
+	})
 	st := NewSettingsState(settingsTestDir(t), nil, nil)
 	var saves atomic.Int64
 	settingsSaveHook = func() { saves.Add(1) }

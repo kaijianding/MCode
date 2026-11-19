@@ -2,7 +2,6 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"strconv"
 	"testing"
@@ -12,12 +11,9 @@ import (
 // 颜色一律走 Theme*，白色文字走 ThemeOnAccent。
 func TestApprovalAutomationInboxNoRawColor(t *testing.T) {
 	files := []string{"approval.go", "automation.go", "automation_editor.go", "automation_schedule_ui.go", "automation_run_history.go", "attention_inbox.go"}
-	fset := token.NewFileSet()
 	for _, name := range files {
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s: %v", name, err)
-		}
+		pf := uiProdFileByName(t, name)
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -53,10 +49,7 @@ func TestAutomationRenderBoundariesAndKeys(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.function, func(t *testing.T) {
-			file, err := parser.ParseFile(token.NewFileSet(), tt.file, nil, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
+			file := uiProdFileByName(t, tt.file).File
 			var fn *ast.FuncDecl
 			for _, decl := range file.Decls {
 				if d, ok := decl.(*ast.FuncDecl); ok && d.Name.Name == tt.function {

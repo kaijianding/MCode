@@ -562,6 +562,13 @@ func TestSettingsState_AgentConfWriteOptionsFollowScanDir(t *testing.T) {
 // TestSettingsExtra_ShortcutDraftDebouncedSave 覆盖快捷键输入的落盘节流：连续输入只改草稿、
 // 合并成一次落盘；失焦不等防抖窗口，立即落盘。
 func TestSettingsExtra_ShortcutDraftDebouncedSave(t *testing.T) {
+	origDebounce, origGrace := settingsShortcutSaveDebounce, settingsTextSaveGrace
+	settingsShortcutSaveDebounce = 60 * time.Millisecond
+	settingsTextSaveGrace = 20 * time.Millisecond
+	t.Cleanup(func() {
+		settingsShortcutSaveDebounce = origDebounce
+		settingsTextSaveGrace = origGrace
+	})
 	dataDir := settingsTestDir(t)
 	st := NewSettingsState(dataDir, nil, nil)
 

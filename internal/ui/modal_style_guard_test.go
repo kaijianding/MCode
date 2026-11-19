@@ -2,28 +2,13 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
 // 禁止在 internal/ui 的生产代码中调用 ui.Modal / ui.Popover（它们自带背景、内边距和阴影，会让自绘卡片外多一圈黑边）。
 func TestNoStyledModalOrPopover(t *testing.T) {
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob *.go: %v", err)
-	}
-	fset := token.NewFileSet()
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
+	for _, pf := range uiProdFiles(t) {
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {

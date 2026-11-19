@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -121,116 +122,137 @@ func scanDesignTokens(t *testing.T, dir string, baseline tokenBaseline) (tokenBa
 	t.Helper()
 	result := tokenBaseline{Version: 1, Files: make(map[string]tokenCounts)}
 	var violations []styleViolation
-	eachProductionFile(t, dir, func(name string, file *ast.File, fset *token.FileSet) {
-		if tokenDefinitionFile(name) {
-			return
+	if dir == "." {
+		for _, pf := range uiProdFiles(t) {
+			if tokenDefinitionFile(pf.Name) {
+				continue
+			}
+			scanDesignTokensFile(pf.Name, pf.Src, pf.File, pf.Fset, baseline, &result, &violations)
 		}
-		path := filepath.Join(dir, name)
+		return result, violations
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		t.Fatalf("glob %s: %v", dir, err)
+	}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		name := filepath.Base(path)
+		if tokenDefinitionFile(name) {
+			continue
+		}
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("读取 %s: %v", path, err)
 		}
-		comments, err := parser.ParseFile(token.NewFileSet(), path, src, parser.ParseComments)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 		if err != nil {
-			t.Fatalf("解析注释 %s: %v", path, err)
+			t.Fatalf("解析 %s: %v", path, err)
 		}
-		lines := strings.Split(string(src), "\n")
-		exempt := make(map[int]bool)
-		for _, group := range comments.Comments {
-			for _, comment := range group.List {
-				if !strings.HasPrefix(comment.Text, "// token-exempt:") {
-					continue
-				}
-				// 两次解析使用相同源文件，注释偏移可直接映射到行号。
-				offset := int(comment.Slash) - 1
-				line := strings.Count(string(src[:offset]), "\n") + 1
-				column := offset - strings.LastIndex(string(src[:offset]), "\n") - 1
-				reason := strings.TrimSpace(strings.TrimPrefix(comment.Text, "// token-exempt:"))
-				if reason == "" || strings.TrimSpace(lines[line-1][:column]) == "" {
-					violations = append(violations, styleViolation{name, line, "token-exempt 必须位于代码行尾且原因非空"})
-					continue
-				}
-				exempt[line] = true
-				result.ExemptTotal++
-			}
-		}
-		counts := tokenCounts{}
-		_, existing := baseline.Files[tokenFileKey(name)]
-		controls := strings.HasPrefix(name, "controls_")
-		if controls {
-			existing = false
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			line := fset.Position(call.Pos()).Line
-			kind, color := tokenCallName(call)
-			if color {
-				hex, hexLiteral := uiHexLiteral(call)
-				white := hexLiteral && (hex == "#ffffff" || hex == "#fff")
-				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && ((sel.Sel.Name == "RGB" && len(call.Args) == 3) || (sel.Sel.Name == "RGBA" && len(call.Args) == 4)) {
-					white = true
-					for _, arg := range call.Args[:3] {
-						lit, ok := tokenLiteral(arg)
-						if !ok || lit.Value != "255" {
-							white = false
-						}
-					}
-				}
-				if white {
-					counts.RawWhite++
-					if !existing {
-						violations = append(violations, styleViolation{name, line, "禁止原始白色"})
-					}
-				}
-			}
-			hasLiteral := false
-			for _, arg := range call.Args {
-				if _, ok := nonzeroTokenLiteral(arg); ok || tokenArithmeticArg(arg) {
-					hasLiteral = true
-				}
-			}
-			if len(call.Args) > 0 && !existing && (kind == "FontSize" || kind == "Radius") {
-				if lit, ok := nonzeroTokenLiteral(call.Args[0]); ok {
-					value, err := strconv.ParseFloat(lit.Value, 64)
-					if err == nil && kind == "FontSize" && value < 10 {
-						violations = append(violations, styleViolation{name, line, "字号小于 10"})
-					}
-					if err == nil && kind == "Radius" && value != 4 && value != 6 && value != 8 && value != 12 && value != 14 && value != 999 {
-						violations = append(violations, styleViolation{name, line, "圆角不在允许值中"})
-					}
-				}
-			}
-			if exempt[line] {
-				return true
-			}
-			counted := true
-			switch {
-			case color:
-				counts.Colors++
-			case kind == "FontSize" && hasLiteral:
-				counts.FontSizes++
-			case kind == "Radius" && hasLiteral:
-				counts.Radii++
-			case kind == "Padding" && hasLiteral:
-				counts.Paddings++
-			case kind == "Height" && hasLiteral:
-				counts.Heights++
-			default:
-				counted = false
-			}
-			if counted && !existing {
-				violations = append(violations, styleViolation{name, line, "新文件禁止设计字面量"})
-			}
-			return true
-		})
-		if !controls {
-			result.Files[tokenFileKey(name)] = counts
-		}
-	})
+		scanDesignTokensFile(name, src, file, fset, baseline, &result, &violations)
+	}
 	return result, violations
+}
+
+func scanDesignTokensFile(name string, src []byte, file *ast.File, fset *token.FileSet, baseline tokenBaseline, result *tokenBaseline, violations *[]styleViolation) {
+	lines := strings.Split(string(src), "\n")
+	exempt := make(map[int]bool)
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			if !strings.HasPrefix(comment.Text, "// token-exempt:") {
+				continue
+			}
+			// 独立 FileSet 解析同一源文件，注释偏移可直接映射到行号。
+			offset := int(comment.Slash) - 1
+			line := strings.Count(string(src[:offset]), "\n") + 1
+			column := offset - strings.LastIndex(string(src[:offset]), "\n") - 1
+			reason := strings.TrimSpace(strings.TrimPrefix(comment.Text, "// token-exempt:"))
+			if reason == "" || strings.TrimSpace(lines[line-1][:column]) == "" {
+				*violations = append(*violations, styleViolation{name, line, "token-exempt 必须位于代码行尾且原因非空"})
+				continue
+			}
+			exempt[line] = true
+			result.ExemptTotal++
+		}
+	}
+	counts := tokenCounts{}
+	_, existing := baseline.Files[tokenFileKey(name)]
+	controls := strings.HasPrefix(name, "controls_")
+	if controls {
+		existing = false
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		line := fset.Position(call.Pos()).Line
+		kind, color := tokenCallName(call)
+		if color {
+			hex, hexLiteral := uiHexLiteral(call)
+			white := hexLiteral && (hex == "#ffffff" || hex == "#fff")
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && ((sel.Sel.Name == "RGB" && len(call.Args) == 3) || (sel.Sel.Name == "RGBA" && len(call.Args) == 4)) {
+				white = true
+				for _, arg := range call.Args[:3] {
+					lit, ok := tokenLiteral(arg)
+					if !ok || lit.Value != "255" {
+						white = false
+					}
+				}
+			}
+			if white {
+				counts.RawWhite++
+				if !existing {
+					*violations = append(*violations, styleViolation{name, line, "禁止原始白色"})
+				}
+			}
+		}
+		hasLiteral := false
+		for _, arg := range call.Args {
+			if _, ok := nonzeroTokenLiteral(arg); ok || tokenArithmeticArg(arg) {
+				hasLiteral = true
+			}
+		}
+		if len(call.Args) > 0 && !existing && (kind == "FontSize" || kind == "Radius") {
+			if lit, ok := nonzeroTokenLiteral(call.Args[0]); ok {
+				value, err := strconv.ParseFloat(lit.Value, 64)
+				if err == nil && kind == "FontSize" && value < 10 {
+					*violations = append(*violations, styleViolation{name, line, "字号小于 10"})
+				}
+				if err == nil && kind == "Radius" && value != 4 && value != 6 && value != 8 && value != 12 && value != 14 && value != 999 {
+					*violations = append(*violations, styleViolation{name, line, "圆角不在允许值中"})
+				}
+			}
+		}
+		if exempt[line] {
+			return true
+		}
+		counted := true
+		switch {
+		case color:
+			counts.Colors++
+		case kind == "FontSize" && hasLiteral:
+			counts.FontSizes++
+		case kind == "Radius" && hasLiteral:
+			counts.Radii++
+		case kind == "Padding" && hasLiteral:
+			counts.Paddings++
+		case kind == "Height" && hasLiteral:
+			counts.Heights++
+		default:
+			counted = false
+		}
+		if counted && !existing {
+			*violations = append(*violations, styleViolation{name, line, "新文件禁止设计字面量"})
+		}
+		return true
+	})
+	if !controls {
+		result.Files[tokenFileKey(name)] = counts
+	}
 }
 
 func loadTokenBaseline(t *testing.T, dir string) tokenBaseline {
@@ -278,6 +300,22 @@ func compareTokenBaseline(current, baseline tokenBaseline) []styleViolation {
 	return violations
 }
 
+var (
+	designTokenDefaultOnce       sync.Once
+	designTokenDefaultBaseline   tokenBaseline
+	designTokenDefaultCurrent    tokenBaseline
+	designTokenDefaultViolations []styleViolation
+)
+
+func cachedDesignTokenScan(t *testing.T) (tokenBaseline, tokenBaseline, []styleViolation) {
+	t.Helper()
+	designTokenDefaultOnce.Do(func() {
+		designTokenDefaultBaseline = loadTokenBaseline(t, ".")
+		designTokenDefaultCurrent, designTokenDefaultViolations = scanDesignTokens(t, ".", designTokenDefaultBaseline)
+	})
+	return designTokenDefaultBaseline, designTokenDefaultCurrent, designTokenDefaultViolations
+}
+
 func TestDesignTokenRatchet(t *testing.T) {
 	if os.Getenv("UPDATE_DESIGN_TOKEN") == "1" {
 		current, _ := scanDesignTokens(t, ".", tokenBaseline{})
@@ -293,16 +331,17 @@ func TestDesignTokenRatchet(t *testing.T) {
 		}
 		return
 	}
-	baseline := loadTokenBaseline(t, ".")
-	current, violations := scanDesignTokens(t, ".", baseline)
-	for _, v := range append(violations, compareTokenBaseline(current, baseline)...) {
+	baseline, current, violations := cachedDesignTokenScan(t)
+	for _, v := range violations {
+		t.Error(v)
+	}
+	for _, v := range compareTokenBaseline(current, baseline) {
 		t.Error(v)
 	}
 }
 
 func TestNoTinyFontSizes(t *testing.T) {
-	baseline := loadTokenBaseline(t, ".")
-	_, violations := scanDesignTokens(t, ".", baseline)
+	_, _, violations := cachedDesignTokenScan(t)
 	for _, v := range violations {
 		if strings.Contains(v.msg, "字号小于 10") {
 			t.Error(v)
@@ -311,7 +350,7 @@ func TestNoTinyFontSizes(t *testing.T) {
 }
 
 func TestNoRawWhite(t *testing.T) {
-	_, violations := scanDesignTokens(t, ".", loadTokenBaseline(t, "."))
+	_, _, violations := cachedDesignTokenScan(t)
 	for _, v := range violations {
 		if strings.Contains(v.msg, "禁止原始白色") {
 			t.Error(v)
@@ -327,11 +366,7 @@ func TestTokenValuesMatchSpec(t *testing.T) {
 		"TypeCaption": 11, "TypeFootnote": 12, "TypeBody": 13, "TypeProse": 14, "TypeHeading": 13, "TypeTitle": 15, "TypePageTitle": 17, "TypeCode": 12,
 		"DurFast": 90, "DurSnap": 140, "DurBase": 200, "DurSheet": 280, "DurSlow": 420,
 	}
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "tokens.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	file := uiProdFileByName(t, "tokens.go").File
 	seen := make(map[string]bool)
 	for _, decl := range file.Decls {
 		group, ok := decl.(*ast.GenDecl)

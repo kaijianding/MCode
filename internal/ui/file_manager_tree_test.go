@@ -132,7 +132,12 @@ func openFileTreeForTest(t *testing.T, client Client) (*chatState, *ui.Tester) {
 	testenv.TempHome(t)
 	s, root := buildRoot(client)
 	tt := ui.NewTester(root, 1400, 800)
-	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
+	waitFor(t, tt, func() bool {
+		s.mu.Lock()
+		tid := s.selectedThreadID
+		s.mu.Unlock()
+		return tid != "" && tt.HasText("测试会话1")
+	})
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyF)
 	waitFor(t, tt, func() bool { return isFileManagerOpen(s) })
 	tt.Advance(DurSheet + 50*time.Millisecond)

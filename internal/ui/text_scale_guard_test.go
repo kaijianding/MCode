@@ -2,10 +2,7 @@ package mcodeui
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -34,21 +31,8 @@ var sidebarScaleFiles = map[string]bool{
 
 // TestTextScaleOnlyChatAndSidebar 限制文字缩放的适用范围。
 func TestTextScaleOnlyChatAndSidebar(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Errorf("parse %s: %v", name, err)
-			continue
-		}
+	for _, pf := range uiProdFiles(t) {
+		name, fset, file := pf.Name, pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -83,24 +67,11 @@ func TestTextScaleOnlyChatAndSidebar(t *testing.T) {
 // 每一处 FontSize 都必须来自 scaledFont（或按字号算出的变量），不能写死数字常量，
 // 否则调大「文字大小」后同一条消息里会一半大一半小。
 func TestChatBodyFontSizeUsesScale(t *testing.T) {
-	paths, err := filepath.Glob("timeline_rows*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var targets []string
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
+	for _, pf := range uiProdFiles(t) {
+		if !strings.HasPrefix(pf.Name, "timeline_rows") && pf.Name != "swarm_mentions.go" {
 			continue
 		}
-		targets = append(targets, path)
-	}
-	targets = append(targets, "swarm_mentions.go")
-	for _, path := range targets {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {

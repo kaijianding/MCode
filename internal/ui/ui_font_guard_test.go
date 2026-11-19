@@ -3,10 +3,7 @@ package mcodeui
 import (
 	"go/ast"
 	"go/parser"
-	"go/token"
-	"os"
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -33,21 +30,12 @@ func unscaledUIFont(expr ast.Expr) bool {
 
 func TestUIFontGuard(t *testing.T) {
 	skip := map[string]bool{"text_scale.go": true, "theme.go": true, "tokens.go": true, "web_tokens.go": true, "elevation.go": true}
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || skip[name] || chatScaleFiles[name] || sidebarScaleFiles[name] {
+	for _, pf := range uiProdFiles(t) {
+		name := pf.Name
+		if skip[name] || chatScaleFiles[name] || sidebarScaleFiles[name] {
 			continue
 		}
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Errorf("parse %s: %v", name, err)
-			continue
-		}
+		fset, file := pf.Fset, pf.File
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) != 1 {
