@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseDroidModels(t *testing.T) {
+	t.Parallel()
 	out := []byte(`{"type":"event","id":"other"}
 {"jsonrpc":"2.0","type":"response","id":"models","result":{"models":[{"id":"auto","displayName":"Auto Model","modelProvider":"factory","supportedReasoningEfforts":["none"],"defaultReasoningEffort":"none"},{"id":"claude-x","displayName":"Claude X","modelProvider":"anthropic","supportedReasoningEfforts":["high","low","max","medium"],"defaultReasoningEffort":"medium"},{"id":"old","displayName":"Old","deprecated":true},{"id":"off","displayName":"Off","disabled":true}]}}`)
 	models := parseDroidModels(out)

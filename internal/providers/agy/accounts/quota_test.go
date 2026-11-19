@@ -20,6 +20,7 @@ func init() {
 	quotaBatchWaitMin = 0
 	quotaBatchWaitMax = 0
 	quotaDebounceDuration = 15 * time.Second
+	_ = quota.SetBackoffBaseIntervalForTest(1 * time.Millisecond)
 }
 
 func TestStartQuotaPollerDoneAfterCancel(t *testing.T) {

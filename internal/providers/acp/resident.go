@@ -217,7 +217,7 @@ func (h *Harness) stopAgyProcess(p *acpProcess) {
 			close(done)
 		}()
 	}
-	timer := time.NewTimer(3 * time.Second)
+	timer := time.NewTimer(h.stopKillGrace())
 	defer timer.Stop()
 	select {
 	case <-done:
@@ -530,7 +530,7 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 }
 
 func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(h.backgroundPollInterval())
 	defer ticker.Stop()
 	seen := make(map[string]bool)
 	for {

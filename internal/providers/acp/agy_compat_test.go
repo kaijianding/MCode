@@ -10,6 +10,7 @@ import (
 )
 
 func TestAgyCommandResult(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		raw     string
@@ -34,6 +35,7 @@ func TestAgyCommandResult(t *testing.T) {
 }
 
 func TestAgyWithExitCode(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		output string
 		exit   int
@@ -50,6 +52,7 @@ func TestAgyWithExitCode(t *testing.T) {
 }
 
 func TestAgyEditPatchFromRawInput(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "app.ts")
 	for _, test := range []struct {
@@ -100,6 +103,7 @@ func TestAgyEditPatchFromRawInput(t *testing.T) {
 }
 
 func TestAgySessionDBPrefersCLI(t *testing.T) {
+	t.Parallel()
 	const sid = "3f2b8c1e-9a4d-4f6e-8b2c-1d5e7a9c0b3f"
 	geminiDir := t.TempDir()
 	cliDB := filepath.Join(geminiDir, "antigravity-cli", "conversations", sid+".db")
@@ -146,6 +150,7 @@ func TestAgySessionDBPrefersCLI(t *testing.T) {
 }
 
 func TestAgyStepUsage(t *testing.T) {
+	t.Parallel()
 	const metadataHex = "0A0C088C81F9D70610E09F84C8011802320C088E81F9D70610D8C8DF82023A0C089081F9D7061088F5DCA303420C089081F9D7061088F5DCA3034A7A08F50B10F81218BB0528CA8B0530183A28626F742D30613835656136632D313565332D343763352D393666642D62616662653464653764623142210A0973657373696F6E494412142D333735303736333033343336323839353537394830508B055A176A55442D6176544343762D3376723050704B5F6169416B58F50B622461346337363939302D396333622D346137322D623866312D363437303837383364356664A201500A2463336165636463662D346635342D343263642D383764362D386334323831636536343562103E1816222430376165323134362D393733302D343137392D623961302D343530303631306136663466D201240A100808120C088E81F9D70610A8C9E482020A100803120C089081F9D70610E8CFDEA30382020C089081F9D7061088F5DCA3039A02203466666339373835376136373432323361396631646534316131343933643938"
 	want := acpPromptUsage{InputTokens: 2424, OutputTokens: 699, CachedReadTokens: 83402, ThoughtTokens: 48}
 	for _, test := range []struct {

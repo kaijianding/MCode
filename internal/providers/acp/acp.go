@@ -47,7 +47,19 @@ type Options struct {
 	// 内置服务按会话路由（BuiltinMCP.Endpoint(turn)）。
 	BuiltinMCP  harness.BuiltinMCP
 	ExternalMCP func(workDir, threadID string) []harness.MCPEndpoint
+	// 以下字段用于测试覆盖内部等待时长，零值保持生产默认值。
+	DisableLaunchSpacing   bool
+	BackgroundPollInterval time.Duration
+	AttachIdleTimeout      time.Duration
+	StopKillGrace          time.Duration
 }
+
+const (
+	defaultBackgroundPollInterval = 2 * time.Second
+	defaultAttachIdleTimeout      = 3 * time.Second
+	defaultAttachPollInterval     = 200 * time.Millisecond
+	defaultStopKillGrace          = 3 * time.Second
+)
 
 // launchSpacing 是相邻两次 ACP 进程启动的最小间隔（1.5 秒）：
 // 同一瞬间批量启动多个 ACP agent（例如 Swarm 的多个 bee）会在 Agent 自身的本地存储
@@ -82,6 +94,46 @@ func waitLaunchSlot(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (h *Harness) waitLaunchSlot(ctx context.Context) error {
+	if h.opts.DisableLaunchSpacing {
+		return nil
+	}
+	return waitLaunchSlot(ctx)
+}
+
+func (h *Harness) backgroundPollInterval() time.Duration {
+	if h.opts.BackgroundPollInterval > 0 {
+		return h.opts.BackgroundPollInterval
+	}
+	return defaultBackgroundPollInterval
+}
+
+func (h *Harness) attachIdleTimeout() time.Duration {
+	if h.opts.AttachIdleTimeout > 0 {
+		return h.opts.AttachIdleTimeout
+	}
+	return defaultAttachIdleTimeout
+}
+
+func (h *Harness) attachPollInterval() time.Duration {
+	idle := h.attachIdleTimeout()
+	interval := idle / 4
+	if interval > defaultAttachPollInterval {
+		interval = defaultAttachPollInterval
+	}
+	if interval < 5*time.Millisecond {
+		interval = 5 * time.Millisecond
+	}
+	return interval
+}
+
+func (h *Harness) stopKillGrace() time.Duration {
+	if h.opts.StopKillGrace > 0 {
+		return h.opts.StopKillGrace
+	}
+	return defaultStopKillGrace
 }
 
 // Harness 实现了基于 ACP (Agent Communication Protocol) 的 harness.Harness 接口。
@@ -484,7 +536,7 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProc
 		}
 	}
 
-	if err := waitLaunchSlot(ctx); err != nil {
+	if err := h.waitLaunchSlot(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1607,7 +1659,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	var promptErr error
 	if attach {
 		setNotificationHandler(onNotification, true)
-		ticker := time.NewTicker(200 * time.Millisecond)
+		attachIdle := h.attachIdleTimeout()
+		ticker := time.NewTicker(h.attachPollInterval())
 		scannedPath, scannedOffset := transcriptPath, transcriptOffset
 		taskPath, taskSize, taskFallback := transcriptPath, transcriptOffset, ""
 		seenFinalStep := false
@@ -1636,7 +1689,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			idleFor := time.Since(lastUpdate)
 			h.residentMu.Unlock()
 			ready := false
-			if seenFinalStep || idleFor >= 3*time.Second {
+			if seenFinalStep || idleFor >= attachIdle {
 				toolsMu.Lock()
 				if toolID := lastPendingTool(); toolID != "" {
 					if path != taskPath || size != taskSize || toolID != taskFallback {
@@ -1648,7 +1701,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					if receivedText {
 						ready = seenFinalStep || idleFor >= 30*time.Second
 					} else {
-						ready = idleFor >= 3*time.Second
+						ready = idleFor >= attachIdle
 					}
 				}
 				toolsMu.Unlock()

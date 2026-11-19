@@ -11,6 +11,7 @@ import (
 )
 
 func TestMCPSettingsEntries(t *testing.T) {
+	t.Parallel()
 	workDir := t.TempDir()
 
 	// 共享端点：URL/Token 加 X-Mcode-Workdir 头
@@ -71,6 +72,7 @@ func TestMCPSettingsEntries(t *testing.T) {
 }
 
 func TestPrepareMCPGeminiDir(t *testing.T) {
+	t.Parallel()
 	sourceDir := t.TempDir()
 	// 源目录里放上登录态、目录条目与用户自己的 MCP 配置
 	if err := os.MkdirAll(filepath.Join(sourceDir, "antigravity", "conversations"), 0o700); err != nil {

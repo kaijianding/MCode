@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"mcode/internal/harness"
+	"mcode/internal/providers/acp"
 	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/providers/loginenv"
 	"mcode/internal/testenv"
@@ -72,6 +73,12 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv(fakeAgyEnv); mode != "" {
 		runFakeAgy(mode)
 		return
+	}
+	testACPOptions = func(opts *acp.Options) {
+		opts.DisableLaunchSpacing = true
+		opts.BackgroundPollInterval = 20 * time.Millisecond
+		opts.AttachIdleTimeout = 50 * time.Millisecond
+		opts.StopKillGrace = 50 * time.Millisecond
 	}
 	os.Exit(m.Run())
 }
@@ -1167,6 +1174,7 @@ func TestAgy_ClosesStdinAfterResult(t *testing.T) {
 // (f) 权限模式到 agy 命令行参数的映射：supervised 不加参数（保持默认审查并软拒绝未批准动作）；
 // readonly 映射为 plan 并附加 --dangerously-skip-permissions；其余模式统一 accept-edits + 跳过权限。
 func TestModeArguments(t *testing.T) {
+	t.Parallel()
 	skip := []string{"--mode", "accept-edits", "--dangerously-skip-permissions"}
 	planSkip := []string{"--mode", "plan", "--dangerously-skip-permissions"}
 
@@ -1528,6 +1536,7 @@ func TestAgy_InjectsVisibleOutputGuard(t *testing.T) {
 // (g) buildEnv 的去重与注入语义：剔除 PWD、同名后出现者覆盖（route > turn > base）、
 // 强制注入 AGY_CLI_DISABLE_AUTO_UPDATE=true。
 func TestBuildEnvDedupAndAutoUpdate(t *testing.T) {
+	t.Parallel()
 	base := []string{
 		"PATH=/usr/bin",
 		"PWD=/stale",
@@ -1572,6 +1581,7 @@ func TestBuildEnvDedupAndAutoUpdate(t *testing.T) {
 
 // 7a: isTransientInvalidArgument 表驱动测试
 func TestAgy_IsTransientInvalidArgument(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -1790,6 +1800,7 @@ func TestAgy_TransientInvalidArgumentRetryAlwaysFails(t *testing.T) {
 
 // 7d: isTransientNetworkError 表驱动测试
 func TestAgy_IsTransientNetworkError(t *testing.T) {
+	t.Parallel()
 	const realEOF = `agy error: API error (attempt 1): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": EOF`
 
 	tests := []struct {
@@ -2218,4 +2229,73 @@ func TestAgyIsolatedHomeHint(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestAgyNoLaunchSpacingFast(t *testing.T) {
+	h := New(Options{Binary: os.Args[0], BuiltinMCP: harness.BuiltinMCP{}})
+	workDir := t.TempDir()
+	start := time.Now()
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("fast-launch-%d", i)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			errs[i] = h.runACP(ctx, harness.Turn{
+				SessionID: id,
+				ThreadID:  id,
+				Prompt:    "ping",
+				WorkDir:   workDir,
+				Env:       []string{fakeAgyEnv + "=acp_transport"},
+			}, nil)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("launch %d failed: %v", i, err)
+		}
+	}
+	// 3 次并发启动若受 1500ms 节流串行化至少需 3000ms；关闭节流后应远低于 2*launchSpacing。
+	if elapsed := time.Since(start); elapsed >= 2800*time.Millisecond {
+		t.Fatalf("3 concurrent test ACP launches took %v, expected no 1500ms launch spacing", elapsed)
+	}
+
+	var zero acp.Options
+	if zero.DisableLaunchSpacing || zero.BackgroundPollInterval != 0 || zero.AttachIdleTimeout != 0 || zero.StopKillGrace != 0 {
+		t.Fatalf("unexpected non-zero acp.Options defaults: %+v", zero)
+	}
+
+	prev := testACPOptions
+	testACPOptions = nil
+	t.Cleanup(func() { testACPOptions = prev })
+
+	prodH := New(Options{Binary: os.Args[0], BuiltinMCP: harness.BuiltinMCP{}})
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel1()
+	if err := prodH.runACP(ctx1, harness.Turn{
+		SessionID: "prod-launch-1",
+		ThreadID:  "prod-launch-1",
+		Prompt:    "ping",
+		WorkDir:   workDir,
+		Env:       []string{fakeAgyEnv + "=acp_transport"},
+	}, nil); err != nil {
+		t.Fatalf("first production launch failed: %v", err)
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel2()
+	err := prodH.runACP(ctx2, harness.Turn{
+		SessionID: "prod-launch-2",
+		ThreadID:  "prod-launch-2",
+		Prompt:    "ping",
+		WorkDir:   workDir,
+		Env:       []string{fakeAgyEnv + "=acp_transport"},
+	}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected second production launch to block on launchSpacing and hit DeadlineExceeded, got %v", err)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,9 +61,30 @@ var DefaultHosts = []string{
 
 // 可在单元测试中调小的重试间隔变量
 var (
+	backoffMu           sync.RWMutex
 	backoffBaseInterval = 1 * time.Second
 	tokenRetryInterval  = 500 * time.Millisecond
 )
+
+func getBackoffBaseInterval() time.Duration {
+	backoffMu.RLock()
+	d := backoffBaseInterval
+	backoffMu.RUnlock()
+	return d
+}
+
+// SetBackoffBaseIntervalForTest 仅供单元测试覆盖 429/5xx 重试退避基准间隔，返回恢复闭包。
+func SetBackoffBaseIntervalForTest(d time.Duration) func() {
+	backoffMu.Lock()
+	prev := backoffBaseInterval
+	backoffBaseInterval = d
+	backoffMu.Unlock()
+	return func() {
+		backoffMu.Lock()
+		backoffBaseInterval = prev
+		backoffMu.Unlock()
+	}
+}
 
 // Client 负责与 Google Code Assist 额度服务端点交互。
 type Client struct {
@@ -305,7 +327,7 @@ func (c *Client) postWithHostFallback(ctx context.Context, path string, token st
 
 		for attempt := 0; attempt <= maxRetries; attempt++ {
 			if attempt > 0 {
-				backoff := backoffBaseInterval * time.Duration(1<<(attempt-1))
+				backoff := getBackoffBaseInterval() * time.Duration(1<<(attempt-1))
 				select {
 				case <-ctx.Done():
 					return nil, nil, ctx.Err()

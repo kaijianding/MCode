@@ -1905,6 +1905,7 @@ func TestAgyCancelKillsAfterTimeout(t *testing.T) {
 	for _, mode := range []string{"feature_agy_cancel_timeout", "feature_agy_cancel_exit"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newACPHoldFixture(t, mode)
+			f.h.opts.StopKillGrace = 50 * time.Millisecond
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			var pid int
@@ -2504,6 +2505,7 @@ func TestACPHoldBackgroundTasks(t *testing.T) {
 	for _, mode := range []string{"feature_hold_content", "feature_hold_raw", "feature_hold_output", "feature_hold_legacy"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newACPHoldFixture(t, mode)
+			f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
 			calls := make(chan string, 10)
 			f.h.SetUnsolicitedTurnHandler(func(threadID string) {
 				// 回调必须在表锁外运行。
@@ -2540,7 +2542,7 @@ func TestACPHoldBackgroundTasks(t *testing.T) {
 				t.Fatalf("notified thread = %s", threadID)
 			}
 			// 再等一次轮询，尚未取走的同一批任务不能重复通知。
-			timer := time.NewTimer(2200 * time.Millisecond)
+			timer := time.NewTimer(80 * time.Millisecond)
 			select {
 			case <-calls:
 				t.Error("同一批后台任务重复通知")
@@ -2591,6 +2593,7 @@ func TestACPHoldIgnoresMarkerInNonCommandTool(t *testing.T) {
 
 func TestACPHoldInRoundCompletion(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_inround")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
 	calls := make(chan string, 10)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	events := f.run(t, f.turn)
@@ -2617,7 +2620,7 @@ func TestACPHoldInRoundCompletion(t *testing.T) {
 		t.Fatal("本轮内完成的任务仍保留了进程")
 	}
 	// 超过一个 watcher 周期后也不能再触发续轮。
-	time.Sleep(5 * time.Second)
+	time.Sleep(80 * time.Millisecond)
 	if len(calls) != 0 || f.h.HasUnsolicitedOutput(f.turn.ThreadID) {
 		t.Fatalf("本轮内完成的任务再次触发了续轮: %d", len(calls))
 	}
@@ -2645,6 +2648,8 @@ func TestACPHoldReconcileDrainsQueued(t *testing.T) {
 
 func TestACPHoldAttachContinues(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_content")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 50 * time.Millisecond
 	calls := make(chan string, 10)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	f.run(t, f.turn)
@@ -2712,6 +2717,8 @@ func TestACPHoldNormalReuseAndFailure(t *testing.T) {
 
 func TestACPHoldProcessExitAndAttachRecovery(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_content")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 50 * time.Millisecond
 	exits := make(chan string, 10)
 	f.h.SetProcessExitHandler(func(threadID string, before time.Time) {
 		if !before.IsZero() || f.h.HasResidentProcess(threadID) {
@@ -2776,6 +2783,8 @@ func TestACPHoldIdleUpdates(t *testing.T) {
 
 func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_spontaneous")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 60 * time.Millisecond
 	calls := make(chan string, 2)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	for _, event := range f.run(t, f.turn) {
@@ -2834,7 +2843,7 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	waitACPHold(t, func() bool {
 		f.h.residentMu.Lock()
 		defer f.h.residentMu.Unlock()
-		return time.Since(process.lastUpdate) >= 3400*time.Millisecond
+		return time.Since(process.lastUpdate) >= 120*time.Millisecond
 	})
 	select {
 	case err := <-result:
@@ -2915,6 +2924,8 @@ func TestACPHoldAgyTaskDescriptionMatch(t *testing.T) {
 
 func TestACPHoldAgySpontaneousWaitsForFinalStep(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_final_step")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 60 * time.Millisecond
 	f.run(t, f.turn)
 	f.complete(t, 1, "finished")
 	waitACPHold(t, func() bool { return f.h.HasUnsolicitedOutput(f.turn.ThreadID) })
@@ -2950,7 +2961,7 @@ func TestACPHoldAgySpontaneousWaitsForFinalStep(t *testing.T) {
 		}
 	}
 	expectText("第一段")
-	pause := time.NewTimer(3400 * time.Millisecond)
+	pause := time.NewTimer(120 * time.Millisecond)
 	defer pause.Stop()
 	select {
 	case err := <-result:
@@ -2980,6 +2991,8 @@ func TestACPHoldAgySpontaneousWaitsForFinalStep(t *testing.T) {
 
 func TestACPHoldAgyLateSpontaneousReply(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_late_spontaneous")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 150 * time.Millisecond
 	calls := make(chan string, 2)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	f.run(t, f.turn)
@@ -2998,7 +3011,7 @@ func TestACPHoldAgyLateSpontaneousReply(t *testing.T) {
 	waitACPHold(t, func() bool {
 		f.h.residentMu.Lock()
 		defer f.h.residentMu.Unlock()
-		return time.Since(process.lastUpdate) >= 3400*time.Millisecond
+		return time.Since(process.lastUpdate) >= 180*time.Millisecond
 	})
 	attach := f.turn
 	attach.Attach, attach.SessionID = true, fakeHoldSession
@@ -3014,8 +3027,8 @@ func TestACPHoldAgyLateSpontaneousReply(t *testing.T) {
 			mu.Unlock()
 		})
 	}()
-	// Attach 轮开始约 1 秒后 agy 才推送自发回答。
-	time.Sleep(time.Second)
+	// Attach 轮开始约 35ms 后 agy 才推送自发回答。
+	time.Sleep(35 * time.Millisecond)
 	if err := os.WriteFile(f.control+".late", nil, 0600); err != nil {
 		cancel()
 		<-result
@@ -3042,6 +3055,8 @@ func TestACPHoldAgyLateSpontaneousReply(t *testing.T) {
 
 func TestACPHoldAgyNoSpontaneousReply(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_agy_records")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 50 * time.Millisecond
 	calls := make(chan string, 2)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	f.run(t, f.turn)
@@ -3065,6 +3080,8 @@ func TestACPHoldAgyNoSpontaneousReply(t *testing.T) {
 
 func TestACPHoldAgyRecords(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_agy_records")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 50 * time.Millisecond
 	calls := make(chan string, 2)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	events := f.run(t, f.turn)
@@ -3203,6 +3220,8 @@ func TestACPHoldDisabled(t *testing.T) {
 
 func TestACPHoldAttachBatches(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_content")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
+	f.h.opts.AttachIdleTimeout = 50 * time.Millisecond
 	calls := make(chan string, 10)
 	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
 	f.run(t, f.turn)
@@ -3256,5 +3275,85 @@ func TestACPHoldConfigureEachRound(t *testing.T) {
 	}
 	if len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "session/new")) != 1 || len(featureParams(messages, "session/prompt")) != 2 {
 		t.Fatal("切换配置没有复用同一进程与会话")
+	}
+}
+
+func TestACPOptionsTimingOverrides(t *testing.T) {
+	def := New(Options{})
+	if got := def.backgroundPollInterval(); got != 2*time.Second {
+		t.Fatalf("default backgroundPollInterval = %v, want 2s", got)
+	}
+	if got := def.attachIdleTimeout(); got != 3*time.Second {
+		t.Fatalf("default attachIdleTimeout = %v, want 3s", got)
+	}
+	if got := def.attachPollInterval(); got != 200*time.Millisecond {
+		t.Fatalf("default attachPollInterval = %v, want 200ms", got)
+	}
+	if got := def.stopKillGrace(); got != 3*time.Second {
+		t.Fatalf("default stopKillGrace = %v, want 3s", got)
+	}
+
+	custom := New(Options{
+		DisableLaunchSpacing:   true,
+		BackgroundPollInterval: 25 * time.Millisecond,
+		AttachIdleTimeout:      80 * time.Millisecond,
+		StopKillGrace:          50 * time.Millisecond,
+	})
+	if got := custom.backgroundPollInterval(); got != 25*time.Millisecond {
+		t.Fatalf("override backgroundPollInterval = %v, want 25ms", got)
+	}
+	if got := custom.attachIdleTimeout(); got != 80*time.Millisecond {
+		t.Fatalf("override attachIdleTimeout = %v, want 80ms", got)
+	}
+	if got := custom.attachPollInterval(); got != 20*time.Millisecond {
+		t.Fatalf("override attachPollInterval = %v, want 20ms", got)
+	}
+	if got := custom.stopKillGrace(); got != 50*time.Millisecond {
+		t.Fatalf("override stopKillGrace = %v, want 50ms", got)
+	}
+	tiny := New(Options{AttachIdleTimeout: 4 * time.Millisecond})
+	if got := tiny.attachPollInterval(); got != 5*time.Millisecond {
+		t.Fatalf("min attachPollInterval = %v, want 5ms", got)
+	}
+	large := New(Options{AttachIdleTimeout: 2 * time.Second})
+	if got := large.attachPollInterval(); got != 200*time.Millisecond {
+		t.Fatalf("capped attachPollInterval = %v, want 200ms", got)
+	}
+
+	// DisableLaunchSpacing 为 true 时既不等待 launchSpacing，也不修改全局 launchGate。
+	oldSpacing := launchSpacing
+	launchSpacing = 200 * time.Millisecond
+	t.Cleanup(func() { launchSpacing = oldSpacing })
+
+	future := time.Now().Add(time.Hour)
+	launchGate.mu.Lock()
+	prevNext := launchGate.next
+	launchGate.next = future
+	launchGate.mu.Unlock()
+	t.Cleanup(func() {
+		launchGate.mu.Lock()
+		launchGate.next = prevNext
+		launchGate.mu.Unlock()
+	})
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if err := custom.waitLaunchSlot(canceledCtx); err != nil {
+		t.Fatalf("DisableLaunchSpacing waitLaunchSlot = %v, want nil", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 50*time.Millisecond {
+		t.Fatalf("DisableLaunchSpacing waitLaunchSlot took %v", elapsed)
+	}
+	launchGate.mu.Lock()
+	gotNext := launchGate.next
+	launchGate.mu.Unlock()
+	if !gotNext.Equal(future) {
+		t.Fatalf("DisableLaunchSpacing mutated launchGate.next: got %v, want %v", gotNext, future)
+	}
+
+	// 零值 DisableLaunchSpacing 仍遵守全局 launchGate 与 ctx 取消。
+	if err := def.waitLaunchSlot(canceledCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("default waitLaunchSlot(canceled) = %v, want context.Canceled", err)
 	}
 }

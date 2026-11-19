@@ -38,6 +38,7 @@ func (cw *chunkedWriter) Write(p []byte) (int, error) {
 }
 
 func TestLineFramingRead(t *testing.T) {
+	t.Parallel()
 	r, w := io.Pipe()
 	conn := NewConn(r, io.Discard)
 	defer conn.Close()
@@ -65,6 +66,7 @@ func TestLineFramingRead(t *testing.T) {
 }
 
 func TestContentLengthFramingRead(t *testing.T) {
+	t.Parallel()
 	r, w := io.Pipe()
 	conn := NewConn(r, io.Discard)
 	defer conn.Close()
@@ -93,6 +95,7 @@ func TestContentLengthFramingRead(t *testing.T) {
 }
 
 func TestChunkedStreamRead(t *testing.T) {
+	t.Parallel()
 	r, w := io.Pipe()
 	cw := &chunkedWriter{w: w, chunkSize: 3}
 	conn := NewConn(r, io.Discard)
@@ -121,6 +124,7 @@ func TestChunkedStreamRead(t *testing.T) {
 }
 
 func TestConcurrentCallsMatchID(t *testing.T) {
+	t.Parallel()
 	clientR, serverW := io.Pipe()
 	serverR, clientW := io.Pipe()
 
@@ -168,6 +172,7 @@ func TestConcurrentCallsMatchID(t *testing.T) {
 }
 
 func TestPeerRequestCallbackAndReply(t *testing.T) {
+	t.Parallel()
 	clientR, serverW := io.Pipe()
 	serverR, clientW := io.Pipe()
 
@@ -208,6 +213,7 @@ func TestPeerRequestCallbackAndReply(t *testing.T) {
 }
 
 func TestCloseFailsPendingCalls(t *testing.T) {
+	t.Parallel()
 	r, w := io.Pipe()
 	buf := new(bytes.Buffer)
 	conn := NewConn(r, buf)
@@ -237,6 +243,7 @@ func TestCloseFailsPendingCalls(t *testing.T) {
 
 // TestCallKeepsResponseAtClose 验证对端回复后立即断开时，已到达的响应不会被关闭事件吞掉。
 func TestCallKeepsResponseAtClose(t *testing.T) {
+	t.Parallel()
 	clientR, serverW := io.Pipe()
 	conn := NewConn(clientR, io.Discard)
 	defer conn.Close()
@@ -259,6 +266,7 @@ func TestCallKeepsResponseAtClose(t *testing.T) {
 }
 
 func TestLineFrameTooLarge(t *testing.T) {
+	t.Parallel()
 	// 未结束的小行：返回部分数据与 EOF
 	small := bufio.NewReaderSize(strings.NewReader("no newline"), 64)
 	line, err := readLineFrame(small)
@@ -274,6 +282,7 @@ func TestLineFrameTooLarge(t *testing.T) {
 }
 
 func TestContentLengthTooLarge(t *testing.T) {
+	t.Parallel()
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", maxFrameSize+1)
 	_, err := readContentLengthPayload(bufio.NewReader(strings.NewReader(header)))
 	if !errors.Is(err, ErrFrameTooLarge) {
@@ -284,6 +293,7 @@ func TestContentLengthTooLarge(t *testing.T) {
 // Agent 常把上游失败的细节放在 JSON-RPC 的 error.data 里，只显示 message 会让
 // 用户看到没有信息量的 "Internal error"。
 func TestRPCErrorCarriesDetail(t *testing.T) {
+	t.Parallel()
 	err := &RPCError{
 		Code:    -32603,
 		Message: "Internal error",

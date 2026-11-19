@@ -122,12 +122,15 @@ type Harness struct {
 	now func() time.Time
 }
 
+// testACPOptions 仅供单元测试覆盖内部 acp.Options 等待参数，生产环境保持 nil。
+var testACPOptions func(*acp.Options)
+
 func New(opts Options) *Harness {
 	if opts.Binary == "" {
 		opts.Binary = DefaultBinary
 	}
 	h := &Harness{opts: opts}
-	h.acp = acp.New(acp.Options{
+	acpOpts := acp.Options{
 		HoldBackgroundTasks: true,
 		Agent:               acp.AgentAgy, Binary: resolveBinary(opts.Binary), BuiltinMCP: opts.BuiltinMCP, ExternalMCP: opts.ExternalMCP,
 		TurnArgs: func(turn harness.Turn) []string {
@@ -137,7 +140,11 @@ func New(opts Options) *Harness {
 			}
 			return args.([]string)
 		},
-	})
+	}
+	if testACPOptions != nil {
+		testACPOptions(&acpOpts)
+	}
+	h.acp = acp.New(acpOpts)
 	modelCatalogMu.Lock()
 	modelHarness = h
 	modelCatalogMu.Unlock()

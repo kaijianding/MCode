@@ -25,6 +25,7 @@ func mcpEntryByName(t *testing.T, servers []any, name string) map[string]any {
 }
 
 func TestMCPServers_HTTP(t *testing.T) {
+	t.Parallel()
 	h := New(Options{
 		Agent:      AgentOpenCode,
 		BuiltinMCP: harness.BuiltinMCP{ThreadBase: "http://127.0.0.1:9000/mcp/", ThreadToken: "thread-token"},
@@ -65,6 +66,7 @@ func TestMCPServers_HTTP(t *testing.T) {
 }
 
 func TestMCPServers_StdioFallback(t *testing.T) {
+	t.Parallel()
 	h := New(Options{
 		Agent:      AgentOpenCode,
 		BuiltinMCP: harness.BuiltinMCP{URL: "http://shared/mcp", Token: "shared-token"},
@@ -106,6 +108,7 @@ func TestMCPServers_StdioFallback(t *testing.T) {
 }
 
 func TestMCPServers_Empty(t *testing.T) {
+	t.Parallel()
 	h := New(Options{Agent: AgentOpenCode})
 	if servers := h.mcpServers(harness.Turn{WorkDir: "/repo/a"}, true); len(servers) != 0 {
 		t.Fatalf("未配置 MCP 时应返回空列表，实际: %v", servers)

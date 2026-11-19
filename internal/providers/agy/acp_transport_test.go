@@ -21,6 +21,7 @@ import (
 )
 
 func TestAgyChannelSelect(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ setting, version, want string }{
 		{ChannelAuto, "1.5.7", ChannelPrintMode}, {ChannelAuto, "1.5.8", ChannelACP}, {ChannelAuto, "1.6.0", ChannelACP},
 		{ChannelAuto, "", ChannelPrintMode}, {ChannelAuto, "unknown", ChannelPrintMode},
@@ -37,6 +38,7 @@ func TestAgyChannelSelect(t *testing.T) {
 }
 
 func TestAgyACPLaunchArgs(t *testing.T) {
+	t.Parallel()
 	want := []string{"acp"}
 	for _, mode := range []harness.PermissionMode{harness.ModeFullAccess, harness.ModeAuto, harness.ModeAutoAcceptEdits, harness.ModeSupervised, harness.ModeReadOnly} {
 		if got := acp.LaunchArgs(acp.AgentAgy, mode); !reflect.DeepEqual(got, want) {
@@ -528,12 +530,14 @@ func TestRunACPRateLimitNoAccountCleanup(t *testing.T) {
 }
 
 func TestAgyThreadAffinityKey(t *testing.T) {
+	t.Parallel()
 	for _, channels := range [][2]string{
 		{ChannelACP, ChannelACP}, {ChannelPrintMode, ChannelPrintMode},
 		{ChannelACP, ChannelPrintMode}, {ChannelPrintMode, ChannelACP},
 	} {
 		for _, session := range []string{"", "legacy-session"} {
 			t.Run(channels[0]+"/"+channels[1]+"/"+session, func(t *testing.T) {
+				t.Parallel()
 				h, router := newACPRetryHarness(t, multiaccount.AffinityStrict)
 				turn := acpRetryTurn(t, "")
 				turn.SessionID = session

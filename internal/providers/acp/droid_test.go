@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseDroidAuthMode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in   string
 		want DroidAuthMode
@@ -29,6 +30,7 @@ func TestParseDroidAuthMode(t *testing.T) {
 }
 
 func TestDroidAuthEnv(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		base   []string
@@ -110,6 +112,7 @@ func TestDroidAuthEnv(t *testing.T) {
 }
 
 func TestHarnessDroidAuthEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		agent Agent
@@ -140,6 +143,7 @@ func TestHarnessDroidAuthEnv(t *testing.T) {
 }
 
 func TestDroidRequestedMode(t *testing.T) {
+	t.Parallel()
 	allModes := []string{"normal", "spec", "auto-low", "auto-medium", "auto-high"}
 
 	tests := []struct {
@@ -176,6 +180,7 @@ func TestDroidRequestedMode(t *testing.T) {
 }
 
 func TestDroidPlanExitApprovalID(t *testing.T) {
+	t.Parallel()
 	allOptions := []string{"proceed_auto_run_high", "proceed_auto_run_medium", "proceed_auto_run_low", "proceed_once", "cancel"}
 
 	tests := []struct {
@@ -206,6 +211,7 @@ func TestDroidPlanExitApprovalID(t *testing.T) {
 }
 
 func TestDroidIsPlanExit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		title       string
@@ -239,6 +245,7 @@ func TestDroidIsPlanExit(t *testing.T) {
 }
 
 func TestDroidPlanMarkdown(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		rawInput string

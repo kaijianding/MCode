@@ -8,6 +8,7 @@ import (
 )
 
 func TestAgentsMetadata(t *testing.T) {
+	t.Parallel()
 	agents := Agents()
 	if len(agents) != 6 {
 		t.Fatalf("expected 6 agents, got %d", len(agents))
@@ -45,6 +46,7 @@ func TestAgentsMetadata(t *testing.T) {
 }
 
 func TestLaunchArgsMatrix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agent    Agent
 		mode     harness.PermissionMode
@@ -108,6 +110,7 @@ func TestLaunchArgsMatrix(t *testing.T) {
 }
 
 func TestAgentCapabilities(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agent Agent
 		want  Capabilities
@@ -128,6 +131,7 @@ func TestAgentCapabilities(t *testing.T) {
 }
 
 func TestAgyPlanTurnLaunchArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		agent    Agent

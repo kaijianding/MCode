@@ -82,6 +82,7 @@ func singleQuestionBody(questionJSON string) string {
 }
 
 func TestHandleQuestion_SingleSingleSelect(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{
 		resp: harness.ApprovalResponse{
 			Decision: harness.DecisionAllow,
@@ -150,6 +151,7 @@ func TestHandleQuestion_SingleSingleSelect(t *testing.T) {
 }
 
 func TestHandleQuestion_MultipleQuestions(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{
 		resp: harness.ApprovalResponse{
 			Decision: harness.DecisionAllow,
@@ -181,6 +183,7 @@ func TestHandleQuestion_MultipleQuestions(t *testing.T) {
 }
 
 func TestHandleQuestion_MultiSelect(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{
 		resp: harness.ApprovalResponse{
 			Decision: harness.DecisionAllow,
@@ -206,6 +209,7 @@ func TestHandleQuestion_MultiSelect(t *testing.T) {
 }
 
 func TestHandleQuestion_MultiSelectCamelKey(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{resp: harness.ApprovalResponse{Decision: harness.DecisionAllow}}
 	bridge := newTestBridge(fake)
 
@@ -218,6 +222,7 @@ func TestHandleQuestion_MultiSelectCamelKey(t *testing.T) {
 }
 
 func TestHandleQuestion_ApproverDenyWithFeedback(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{
 		resp: harness.ApprovalResponse{
 			Decision: harness.DecisionDeny,
@@ -243,6 +248,7 @@ func TestHandleQuestion_ApproverDenyWithFeedback(t *testing.T) {
 }
 
 func TestHandleQuestion_Skipped(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{
 		resp: harness.ApprovalResponse{
 			Decision: harness.DecisionDeny,
@@ -262,6 +268,7 @@ func TestHandleQuestion_Skipped(t *testing.T) {
 }
 
 func TestHandleQuestion_ApproverError(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{err: errors.New("boom")}
 	bridge := newTestBridge(fake)
 
@@ -282,6 +289,7 @@ func TestHandleQuestion_ApproverError(t *testing.T) {
 }
 
 func TestHandleQuestion_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{resp: harness.ApprovalResponse{Decision: harness.DecisionAllow}}
 	bridge := newTestBridge(fake)
 
@@ -302,6 +310,7 @@ func TestHandleQuestion_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleQuestion_NoQuestions(t *testing.T) {
+	t.Parallel()
 	fake := &fakeQuestionApprover{resp: harness.ApprovalResponse{Decision: harness.DecisionAllow}}
 	bridge := newTestBridge(fake)
 
@@ -319,6 +328,7 @@ func TestHandleQuestion_NoQuestions(t *testing.T) {
 }
 
 func TestHandleQuestion_NonInteractorApprover(t *testing.T) {
+	t.Parallel()
 	fake := &approveOnlyApprover{}
 	bridge := newTestBridge(fake)
 
@@ -339,6 +349,7 @@ func (approveOnlyApprover) Approve(context.Context, harness.ApprovalRequest) (ha
 }
 
 func TestExtractRawQuestions(t *testing.T) {
+	t.Parallel()
 	nested := `{"toolCall":{"name":"ask_question","args":{"questions":[{"question":"nested"}]}}}`
 	stringified := `{"arguments":"{\"questions\":[{\"question\":\"stringified\"}]}"}`
 	topLevel := `{"questions":[{"question":"top"}]}`
@@ -377,6 +388,7 @@ func TestExtractRawQuestions(t *testing.T) {
 }
 
 func TestParseQuestions(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   []map[string]any
@@ -464,6 +476,7 @@ func TestParseQuestions(t *testing.T) {
 }
 
 func TestParseQuestions_EmptyInput(t *testing.T) {
+	t.Parallel()
 	if got := parseQuestions(nil); len(got) != 0 {
 		t.Errorf("期望空结果，实际 %+v", got)
 	}

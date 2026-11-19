@@ -10,6 +10,7 @@ import (
 // TestBuildArgsAdditionalDirs 覆盖附加目录映射：工作目录之外的目录逐个生成 --add-dir，
 // 空串与工作目录自身跳过；附加目录为空时参数与原来一致。
 func TestBuildArgsAdditionalDirs(t *testing.T) {
+	t.Parallel()
 	base := []string{"--input-format", "stream-json", "--output-format", "stream-json", "--print-timeout", "30m"}
 
 	got := buildArgs("/work/main", "", "", "", harness.ModeSupervised, nil, []string{"/proj/a", "", "/work/main", "/proj/b"})

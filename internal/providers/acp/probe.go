@@ -31,13 +31,17 @@ func (h *Harness) ProbeModels(ctx context.Context) ([]ProbedModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ProbeModels(ctx, h.opts.Agent, bin)
+	return probeModels(ctx, h.opts.Agent, bin, h.opts.DisableLaunchSpacing)
 }
 
 // ProbeModels 启动一次 ACP 会话只为读取模型目录：
 // initialize、在临时目录 session/new，读出应答里的 models 后结束进程。
 // 后台读取目录不触发登录（不调用 authenticate）。
 func ProbeModels(ctx context.Context, agent Agent, binary string) ([]ProbedModel, error) {
+	return probeModels(ctx, agent, binary, false)
+}
+
+func probeModels(ctx context.Context, agent Agent, binary string, disableLaunchSpacing bool) ([]ProbedModel, error) {
 	if binary == "" {
 		binary = DefaultBinary(agent)
 	}
@@ -63,8 +67,10 @@ func ProbeModels(ctx context.Context, agent Agent, binary string) ([]ProbedModel
 	if err != nil {
 		return nil, err
 	}
-	if err := waitLaunchSlot(ctx); err != nil {
-		return nil, err
+	if !disableLaunchSpacing {
+		if err := waitLaunchSlot(ctx); err != nil {
+			return nil, err
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err

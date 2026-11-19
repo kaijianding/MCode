@@ -312,3 +312,45 @@ func TestDefaultHostsPreferDaily(t *testing.T) {
 		t.Errorf("expected last element of DefaultHosts to be https://cloudcode-pa.googleapis.com, got %s", last)
 	}
 }
+
+func TestQuotaBackoffOverride(t *testing.T) {
+	before := getBackoffBaseInterval()
+	restore := SetBackoffBaseIntervalForTest(25 * time.Millisecond)
+	if got := getBackoffBaseInterval(); got != 25*time.Millisecond {
+		restore()
+		t.Fatalf("overridden backoffBaseInterval = %v, want 25ms", got)
+	}
+
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			http.Error(w, "busy", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cloudaicompanionProject":"pid"}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTPClient: server.Client(), Hosts: []string{server.URL}}
+	start := time.Now()
+	resp, _, err := client.postWithHostFallback(context.Background(), "/v1internal:loadCodeAssist", "tok", []byte(`{}`))
+	elapsed := time.Since(start)
+	if err != nil {
+		restore()
+		t.Fatalf("postWithHostFallback failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		restore()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if elapsed < 25*time.Millisecond {
+		restore()
+		t.Fatalf("expected retry backoff >= 25ms, got %v", elapsed)
+	}
+
+	restore()
+	if got := getBackoffBaseInterval(); got != before {
+		t.Fatalf("restored backoffBaseInterval = %v, want %v", got, before)
+	}
+}

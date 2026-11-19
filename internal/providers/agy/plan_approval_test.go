@@ -188,6 +188,7 @@ func (s *planArtifactSandbox) Command(ctx context.Context, _ string, mode harnes
 }
 
 func TestAgyPlanArtifact(t *testing.T) {
+	t.Parallel()
 	const feedback = "Add rollback steps."
 	allow := harness.ApprovalResponse{Decision: harness.DecisionAllow}
 	deny := harness.ApprovalResponse{Decision: harness.DecisionDeny}
@@ -215,6 +216,7 @@ func TestAgyPlanArtifact(t *testing.T) {
 		{name: "cancel during approval", variant: "object", responses: []harness.ApprovalResponse{allow}, cancel: true, wantErr: context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			exe, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestParseModels(t *testing.T) {
+	t.Parallel()
 	out, err := os.ReadFile("testdata/models.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +44,7 @@ func TestParseModels(t *testing.T) {
 }
 
 func TestParseModelsOrdersEfforts(t *testing.T) {
+	t.Parallel()
 	out := "gemini-4-hydrogen-high\tGemini 4 Hydrogen (high)\n" +
 		"gemini-4-hydrogen-low\tGemini 4 Hydrogen (low)\n" +
 		"gemini-4-hydrogen-medium\tGemini 4 Hydrogen (medium)\n" +
