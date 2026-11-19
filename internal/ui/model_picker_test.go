@@ -1079,7 +1079,8 @@ func TestModelPickerLeadListRestoresPairs(t *testing.T) {
 	}
 }
 
-// 收藏行只显示模型名，不显示分组名和星标；分组内的行对收藏模型在模型名左侧显示星标。
+// 未开启 ShowGroupName 的调用方（如设置页直接复用本行）只显示模型名、不显示分组名和右端星标；
+// 模型列表页、收藏卡与搜索都会开启 ShowGroupName，见 TestModelPickerGroupedListShowsGroupName。
 func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 	providers := modelPickerTestProviders()
 	prov := providers[0]
@@ -2079,5 +2080,176 @@ func TestModelPickerOpenListCallsOnOpenList(t *testing.T) {
 	}
 	if !state.listOpen(props.ScopeKey, ModelPickerSideLead) {
 		t.Fatal("点击选择其他模型后应进入列表页")
+	}
+}
+
+// 跨 Agent 平铺的行（收藏、搜索）在右侧显示分组名：模型 ID 有斜杠取斜杠前，
+// 没有则用 Provider ID；Agent 分组卡片内的行（ShowGroupName 缺省）不显示，避免与卡片标题重复。
+func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
+	providers := modelPickerTestProviders()
+	prov := providers[0]
+	cases := []struct {
+		name      string
+		model     ModelInfo
+		showGroup bool
+		wantGroup string
+	}{
+		{name: "无前缀用 Provider", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: true, wantGroup: "claude"},
+		{name: "有前缀取斜杠前", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: true, wantGroup: "bulita_claude"},
+		{name: "分组卡片内不显示", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := ModelPickerProps{KeyPrefix: "row-group-", Pins: nil}
+			tt := ui.NewTester(func(c *ui.Context) {
+				ui.Column(c).Width(300).Background(modelPickerPanelBg).Children(func() {
+					renderModelPickerListRow(c, props, modelRowOptions{
+						KeyPrefix:     "lead-",
+						Provider:      prov,
+						Model:         tc.model,
+						ShowGroupName: tc.showGroup,
+					})
+				})
+			}, 320, 120)
+			tt.Frame()
+			if !tt.HasText(tc.model.Name) {
+				t.Fatalf("缺少模型名: %v", tt.Texts())
+			}
+			if tc.wantGroup == "" {
+				if tt.HasText("claude") || tt.HasText("bulita_claude") {
+					t.Fatalf("分组卡片内不应显示分组名: %v", tt.Texts())
+				}
+				return
+			}
+			if !tt.HasText(tc.wantGroup) {
+				t.Fatalf("缺少分组名 %q: %v", tc.wantGroup, tt.Texts())
+			}
+		})
+	}
+}
+
+// 搜索态跨 Agent 平铺命中模型，每行右侧带分组名。
+func TestModelPickerSearchShowsGroupName(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[0].Models = append(providers[0].Models, ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"})
+	providers[1].Models = append(providers[1].Models, ModelInfo{ID: "dewuopenai/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash"})
+	state := &ModelPickerState{MenuOpen: true, searchQuery: "claude"}
+	props := ModelPickerProps{Mode: ModelPickerSwarm, KeyPrefix: "search-group-", ScopeKey: "search-group-test", State: state,
+		Providers: providers, SwarmOn: true,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+		Bees:      ModelSelection{Provider: "codex", Model: "o3-mini"},
+	}
+	state.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
+	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerListPage(c, props, state, ModelPickerSideLead) }, 330, 640)
+	settleModelPickerPage(tt)
+	for _, want := range []string{"Claude 3.7 Sonnet", "Claude 3.5 Haiku", "Claude Opus 5.5", "claude", "bulita_claude"} {
+		if !tt.HasText(want) {
+			t.Fatalf("搜索态缺少 %q: %v", want, tt.Texts())
+		}
+	}
+	if tt.HasText("DeepSeek V4.1 Flash") || tt.HasText("dewuopenai") {
+		t.Fatalf("未命中的模型不应出现在搜索结果里: %v", tt.Texts())
+	}
+}
+
+// 列表页（非搜索态）的可折叠 Agent 卡片内，模型行右侧同样显示分组名。
+func TestModelPickerGroupedListShowsGroupName(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[0].Models = append(providers[0].Models, ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"})
+	providers[1].Models = append(providers[1].Models, ModelInfo{ID: "dewuopenai/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash"})
+	selection := ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"}
+	render := func(openCard string) *ui.Tester {
+		state := &ModelPickerState{MenuOpen: true, openCard: openCard, openCardSet: true}
+		props := ModelPickerProps{Mode: ModelPickerSimple, KeyPrefix: "grouped-name-", ScopeKey: "grouped-name-test", State: state,
+			Providers: providers, Selection: selection,
+		}
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Column(c).Width(320).Children(func() {
+				renderModelPickerGroupedList(c, props, state, ModelPickerSideLead, selection, providers, nil, "", nil)
+			})
+		}, 340, 640)
+		tt.Frame()
+		return tt
+	}
+
+	claudeCard := render("claude")
+	for _, want := range []string{"Claude 3.7 Sonnet", "Claude Opus 5.5", "claude", "bulita_claude"} {
+		if !claudeCard.HasText(want) {
+			t.Fatalf("Claude 卡内缺少 %q: %v", want, claudeCard.Texts())
+		}
+	}
+
+	codexCard := render("codex")
+	for _, want := range []string{"o3-mini", "DeepSeek V4.1 Flash", "codex", "dewuopenai"} {
+		if !codexCard.HasText(want) {
+			t.Fatalf("Codex 卡内缺少 %q: %v", want, codexCard.Texts())
+		}
+	}
+}
+
+// 搜索态复用列表页的分组卡片：保留命中的 Agent 标题行、强制展开，只列命中模型。
+func TestModelPickerSearchKeepsAgentHeaders(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[1].Models = append(providers[1].Models, ModelInfo{ID: "google-antigravity/claude-sonnet-4-6", Name: "Claude Sonnet 4.6"})
+	// 查询词要避开 Provider 名（命中 Provider 名会列出它的全部模型）。
+	state := &ModelPickerState{MenuOpen: true, searchQuery: "sonnet"}
+	props := ModelPickerProps{Mode: ModelPickerSimple, KeyPrefix: "search-header-", ScopeKey: "search-header-test", State: state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	state.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
+	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerListPage(c, props, state, ModelPickerSideLead) }, 330, 640)
+	settleModelPickerPage(tt)
+	// 两个 Agent 都有命中：标题行都要在，用来分辨模型属于哪个 Agent。
+	for _, want := range []string{"Claude", "Codex", "Claude 3.7 Sonnet", "Claude Sonnet 4.6"} {
+		if !tt.HasText(want) {
+			t.Fatalf("搜索态缺少 %q: %v", want, tt.Texts())
+		}
+	}
+	// 未命中的模型不出现（codex 的 o3-mini、claude 的 Haiku 名里没有 sonnet）。
+	if tt.HasText("o3-mini") || tt.HasText("Claude 3.5 Haiku") {
+		t.Fatalf("未命中的模型不应出现在搜索里: %v", tt.Texts())
+	}
+	// 卡片强制展开：命中行直接可见，不需要再点标题。
+	if !tt.HasText("google-antigravity") {
+		t.Fatalf("搜索命中行应直接展开并显示分组名: %v", tt.Texts())
+	}
+}
+
+// 搜索命中收藏里的模型时保留「收藏」分组，只列命中的收藏行；没命中则不显示收藏分组。
+func TestModelPickerSearchPinnedGroup(t *testing.T) {
+	providers := modelPickerTestProviders()
+	props := ModelPickerProps{Mode: ModelPickerSimple, KeyPrefix: "search-pinned-", ScopeKey: "search-pinned-test",
+		Providers: providers,
+		Pins:      []ModelPin{{Provider: "claude", ModelID: "claude-3-7-sonnet"}},
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	render := func(query string) *ui.Tester {
+		state := &ModelPickerState{MenuOpen: true, searchQuery: query}
+		props.State = state
+		state.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
+		tt := ui.NewTester(func(c *ui.Context) { renderModelPickerListPage(c, props, state, ModelPickerSideLead) }, 330, 640)
+		settleModelPickerPage(tt)
+		return tt
+	}
+
+	hit := render("claude")
+	if !hit.HasText("收藏") {
+		t.Fatalf("命中共收藏模型时应显示收藏分组: %v", hit.Texts())
+	}
+	// 每行渲染 Label 与正文两个文本节点：收藏卡片一行 + Claude 分组卡片一行。
+	pinnedRows := 0
+	for _, text := range hit.Texts() {
+		if text == "Claude 3.7 Sonnet" {
+			pinnedRows++
+		}
+	}
+	if pinnedRows != 4 {
+		t.Fatalf("收藏分组与 Agent 分组应各有一行, got %d: %v", pinnedRows, hit.Texts())
+	}
+
+	miss := render("o3-mini")
+	if miss.HasText("收藏") {
+		t.Fatalf("收藏未命中时不应显示收藏分组: %v", miss.Texts())
 	}
 }
