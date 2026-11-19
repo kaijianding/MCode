@@ -1124,6 +1124,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if len(input) == 0 {
 				input = u.RawInput
 			}
+			// 只有命令工具会转后台；读写文件的工具可能回显含后台任务标记的文件内容。
+			commandTool := toolName == "bash" || toolName == "shell_command" || toolName == "run_command" || agyCommand(input) != ""
 			editPath, editPatch := "", ""
 			if h.opts.Agent == AgentAgy {
 				rawInput := u.RawInput
@@ -1152,8 +1154,10 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				readPath = agyReadPath(u.Title, u.Locations, input)
 			}
 			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath, editPath: editPath, editPatch: editPatch}
-			startedTools[u.ToolCallID] = true
-			if h.opts.HoldBackgroundTasks {
+			if commandTool {
+				startedTools[u.ToolCallID] = true
+			}
+			if h.opts.HoldBackgroundTasks && commandTool {
 				var raw struct{ CommandLine string }
 				_ = json.Unmarshal(u.RawInput, &raw)
 				toolStartOrder = append(toolStartOrder, startedTool{id: u.ToolCallID, command: raw.CommandLine})

@@ -811,8 +811,15 @@ func runFakeACPFeatures(mode string) {
 						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
 					}
 					descriptionMatch := mode == "feature_hold_task_description"
+					editEcho := mode == "feature_hold_edit_echo"
 					records := descriptionMatch || mode == "feature_hold_agy_records" || mode == "feature_hold_spontaneous" || mode == "feature_hold_late_spontaneous" || mode == "feature_hold_final_step"
 					recordsDir := fakeACPHoldRecords("antigravity-cli")
+					if editEcho {
+						// 编辑工具回显的文件内容里出现后台任务标记，不能当成真实后台任务。
+						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "edit-echo", "name": "edit_file", "rawInput": map[string]any{"path": "echo.go"}})
+						echo := fmt.Sprintf("package acp\n\n// Tool is running as a background task with task id: %s/task-1\n", fakeHoldSession)
+						notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "edit-echo", "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": echo}}}})
+					}
 					if descriptionMatch {
 						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "edit", "name": "edit_file"})
 						for index, command := range []string{"go build ./... && go vet ./...", "go build ./..."} {
@@ -836,7 +843,7 @@ func runFakeACPFeatures(mode string) {
 					if mode == "feature_hold_inround" {
 						tasks = 1
 					}
-					if records {
+					if records || editEcho {
 						tasks = 0
 					}
 					for i := 1; i <= tasks; i++ {
@@ -2545,6 +2552,40 @@ func TestACPHoldBackgroundTasks(t *testing.T) {
 				t.Fatal("驱逐后进程或后台任务状态未清理")
 			}
 		})
+	}
+}
+
+func TestACPHoldIgnoresMarkerInNonCommandTool(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_edit_echo")
+	events := f.run(t, f.turn)
+	started, ended, done := false, false, false
+	for _, event := range events {
+		if event.Type == harness.EventBackgroundTaskStart {
+			t.Fatalf("非命令工具的文件回显被当成后台任务: %+v", event)
+		}
+		switch event.Type {
+		case harness.EventToolStart:
+			started = started || event.ToolID == "edit-echo"
+		case harness.EventToolEnd:
+			if event.ToolID != "edit-echo" {
+				continue
+			}
+			if event.IsError {
+				t.Fatalf("编辑工具结束事件为错误: %+v", event)
+			}
+			ended = true
+		case harness.EventDone:
+			done = done || event.StopReason == "end_turn"
+		}
+	}
+	if !started || !ended || !done {
+		t.Fatalf("工具或回合事件缺失: %v", events)
+	}
+	if got := len(featureParams(f.messages(t), "session/close")); got != 1 {
+		t.Fatalf("session/close 次数 = %d", got)
+	}
+	if len(f.h.ProcessRootPIDs(f.turn.ThreadID)) != 0 || f.h.HasResidentProcess(f.turn.ThreadID) {
+		t.Fatal("没有后台任务却保留了进程")
 	}
 }
 
