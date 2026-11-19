@@ -3014,8 +3014,8 @@ func TestACPHoldConfigureEachRound(t *testing.T) {
 	f.run(t, turn)
 	messages := f.messages(t)
 	modes := featureParams(messages, "session/set_mode")
-	if len(modes) != 2 || modes[0]["modeId"] != "auto" || modes[1]["modeId"] != "default" {
-		t.Fatalf("复用后未切回权限模式: %v", modes)
+	if len(modes) != 0 {
+		t.Fatalf("非 plan 回合不应切换会话模式: %v", modes)
 	}
 	options := featureParams(messages, "session/set_config_option")
 	want := []struct{ id, value string }{{"model", "requested"}, {"thought_level", "high"}, {"fast", "true"}, {"model", "old"}, {"thought_level", "low"}, {"fast", "false"}}
