@@ -75,6 +75,7 @@ func callKanbanEntry(t *testing.T, srv *Server, threadID string, args map[string
 }
 
 func TestKanbanEntryOrdinaryThreadListsOnlyEntry(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 
@@ -99,6 +100,7 @@ func TestKanbanEntryOrdinaryThreadListsOnlyEntry(t *testing.T) {
 }
 
 func TestKanbanEntryDisconnectedForOrdinaryThread(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCPWithOptions(t, func(o *Options) {
 		o.KanbanEntryOrdinary = func() bool { return false }
 	})
@@ -114,6 +116,7 @@ func TestKanbanEntryDisconnectedForOrdinaryThread(t *testing.T) {
 }
 
 func TestKanbanEntrySharedEndpointKeepsTypedTools(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -127,6 +130,7 @@ func TestKanbanEntrySharedEndpointKeepsTypedTools(t *testing.T) {
 }
 
 func TestKanbanEntryRoleToolSets(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	ctx := context.Background()
 	projectID := "proj-test-1"
@@ -188,6 +192,7 @@ func TestKanbanEntryRoleToolSets(t *testing.T) {
 }
 
 func TestKanbanEntryHelpAndForwarding(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	const threadID = "thread-ordinary"
 	registerThread(t, st, threadID, "proj-test-1")
@@ -229,6 +234,7 @@ func TestKanbanEntryHelpAndForwarding(t *testing.T) {
 }
 
 func TestKanbanEntryEnumMatchesRegisteredTools(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	tool, ok := srv.registry.Get(kanbanEntryToolName)
 	if !ok {

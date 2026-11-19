@@ -6,6 +6,7 @@ import (
 )
 
 func TestIdempotencyCacheEvictionKeepsInFlight(t *testing.T) {
+	t.Parallel()
 	cache := NewIdempotencyCache(2, time.Hour)
 	for _, key := range []string{"A", "B"} {
 		if status, _ := cache.Begin(key, "fingerprint"); status != BeginProceed {
@@ -25,6 +26,7 @@ func TestIdempotencyCacheEvictionKeepsInFlight(t *testing.T) {
 }
 
 func TestIdempotencyCacheEvictionAllowsInFlightOverflow(t *testing.T) {
+	t.Parallel()
 	cache := NewIdempotencyCache(2, time.Hour)
 	for _, key := range []string{"A", "B", "C"} {
 		if status, _ := cache.Begin(key, "fingerprint"); status != BeginProceed {

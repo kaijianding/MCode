@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 func TestKanbanWriteGuardsAtTransport(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	srv, _, workDir := setupTestMCP(t)
 	calls := 0
 	for _, tool := range srv.registry.ListTools() {
@@ -129,7 +127,7 @@ func TestKanbanWriteGuardsAtTransport(t *testing.T) {
 }
 
 func TestInitializeAssignsCallerSession(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	previous := ""
 	for i := 0; i < 2; i++ {

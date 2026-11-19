@@ -67,6 +67,7 @@ func setupMessengerService(t *testing.T, clock *fakeClock, driver *missingThread
 // TestDedicatedRunRebuildsDeletedThread 验证专属线程被删除后本轮改为新建会话：
 // 新线程写回 Spec、运行不记失败、旧线程的进度基线被清除。
 func TestDedicatedRunRebuildsDeletedThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := []struct {
 		name string
@@ -132,6 +133,7 @@ func TestDedicatedRunRebuildsDeletedThread(t *testing.T) {
 // TestDedicatedDeliveryErrorStillFails 验证除「线程不存在」以外的投递错误仍按原样返回并记失败，
 // 不会误触发重建（包括只含 not found 文案、与线程无关的错误）。
 func TestDedicatedDeliveryErrorStillFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, msg := range []string{"deliver failed: queue full", "agent binary not found in PATH"} {
 		t.Run(msg, func(t *testing.T) {

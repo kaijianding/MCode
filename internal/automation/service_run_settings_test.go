@@ -7,6 +7,7 @@ import (
 )
 
 func TestDecodeSpecLegacyRuntimeMode(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"autoAcceptEdits", "agent"} {
 		t.Run(mode, func(t *testing.T) {
 			spec := DecodeSpec(`{"runtimeMode":"` + mode + `"}`)
@@ -40,6 +41,7 @@ func assertRunSettings(t *testing.T, provider, model, effort, runtimeMode string
 
 // TestStandaloneRunUsesSpecRunSettings 验证 standalone 每次新建会话时带上自动化的模型与权限设置。
 func TestStandaloneRunUsesSpecRunSettings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -65,6 +67,7 @@ func TestStandaloneRunUsesSpecRunSettings(t *testing.T) {
 
 // TestDedicatedRunUsesSpecRunSettings 验证 dedicated 首次新建专属会话时同样带上这四项设置。
 func TestDedicatedRunUsesSpecRunSettings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -90,6 +93,7 @@ func TestDedicatedRunUsesSpecRunSettings(t *testing.T) {
 
 // TestHeartbeatRunIgnoresSpecRunSettings 验证 heartbeat 投递到已有会话，不会新建会话。
 func TestHeartbeatRunIgnoresSpecRunSettings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()

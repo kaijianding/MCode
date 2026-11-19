@@ -125,6 +125,7 @@ func createDueAutomation(t *testing.T, svc *Service, clock *fakeClock) Definitio
 
 // TestSchedulerLockENOLCKStaysPassive 验证 ENOLCK 只让本进程保持 passive，不触发任务。
 func TestSchedulerLockENOLCKStaysPassive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -151,6 +152,7 @@ func TestSchedulerLockENOLCKStaysPassive(t *testing.T) {
 
 // TestSchedulerLockErrUnsupportedStaysPassive 验证不支持跨进程锁的平台保持 passive_error。
 func TestSchedulerLockErrUnsupportedStaysPassive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -177,6 +179,7 @@ func TestSchedulerLockErrUnsupportedStaysPassive(t *testing.T) {
 
 // TestSchedulerLockOpenFailureStaysPassive 验证锁文件打不开时保持 passive_error 并带上错误详情。
 func TestSchedulerLockOpenFailureStaysPassive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -205,6 +208,7 @@ func TestSchedulerLockOpenFailureStaysPassive(t *testing.T) {
 
 // TestSchedulerLockLogsThrottled 验证同一错误文本 10 分钟内只记一条，文本变化立即记录。
 func TestSchedulerLockLogsThrottled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -242,6 +246,7 @@ func TestSchedulerLockLogsThrottled(t *testing.T) {
 
 // TestSchedulerLockRecoversAndTriggers 验证后续 Tick 能接管并触发任务。
 func TestSchedulerLockRecoversAndTriggers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -274,6 +279,7 @@ func TestSchedulerLockRecoversAndTriggers(t *testing.T) {
 
 // TestSchedulerLockEmptyDataDirStaysPassive 验证没有 DataDir 时不尝试加锁且无法触发。
 func TestSchedulerLockEmptyDataDirStaysPassive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
@@ -303,6 +309,7 @@ func TestSchedulerLockEmptyDataDirStaysPassive(t *testing.T) {
 
 // TestServiceSecondInstancePassive 验证第二个实例保持 passive_held，且不触发任务。
 func TestServiceSecondInstancePassive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	dataDir := t.TempDir()
@@ -346,6 +353,7 @@ func TestServiceSecondInstancePassive(t *testing.T) {
 
 // TestServicePassiveTakesOverAfterStop 验证持锁实例 Stop 后，另一个实例在下一次 Tick 接管。
 func TestServicePassiveTakesOverAfterStop(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	dataDir := t.TempDir()
@@ -378,6 +386,7 @@ func TestServicePassiveTakesOverAfterStop(t *testing.T) {
 
 // TestServicePassiveTakesOverAfterCrash 验证持锁进程崩溃（只关闭描述符、不更新状态）后也能接管。
 func TestServicePassiveTakesOverAfterCrash(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	dataDir := t.TempDir()
@@ -425,6 +434,7 @@ func TestServicePassiveTakesOverAfterCrash(t *testing.T) {
 
 // TestServicePassiveDoesNotRunNow 验证 passive 实例的手动触发被拒绝且不产生运行记录。
 func TestServicePassiveDoesNotRunNow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	dataDir := t.TempDir()
@@ -462,6 +472,7 @@ func TestServicePassiveDoesNotRunNow(t *testing.T) {
 
 // TestSchedulerLockPath 验证锁文件位于 <DataDir>/automation/scheduler.lock，且停止后仍然存在。
 func TestSchedulerLockPath(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	dataDir := t.TempDir()
 	svc, _ := newLockTestService(t, clock, newFakeDriver(), dataDir, nil, nil)

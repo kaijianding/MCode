@@ -133,6 +133,7 @@ func callerThread(run store.AutomationRun) string {
 }
 
 func TestServiceChangeNotifications(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	driver := newFakeDriver()
 	svc, db := setupTestService(t, clock, driver)
@@ -176,6 +177,7 @@ func TestServiceChangeNotifications(t *testing.T) {
 }
 
 func TestOnTimeTrigger(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -221,6 +223,7 @@ func TestOnTimeTrigger(t *testing.T) {
 }
 
 func TestScheduledCheck(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		check string
 		want  int
@@ -258,6 +261,7 @@ func TestScheduledCheck(t *testing.T) {
 }
 
 func TestCheckRejectsWriteCommands(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db := setupTestService(t, newFakeClock(time.Now()), newFakeDriver())
 	defer db.Close()
@@ -279,6 +283,7 @@ func TestCheckRejectsWriteCommands(t *testing.T) {
 }
 
 func TestMissedWindow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -320,6 +325,7 @@ func TestMissedWindow(t *testing.T) {
 }
 
 func TestMissedWindowTimezones(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		tz       string
@@ -376,6 +382,7 @@ func TestMissedWindowTimezones(t *testing.T) {
 }
 
 func TestNoReentry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -432,6 +439,7 @@ func TestNoReentry(t *testing.T) {
 }
 
 func TestSettlement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 
@@ -683,6 +691,7 @@ func TestSettlement(t *testing.T) {
 }
 
 func TestRunNowConcurrentWithTick(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -739,6 +748,7 @@ func TestRunNowConcurrentWithTick(t *testing.T) {
 }
 
 func TestReportRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -865,6 +875,7 @@ func TestReportRun(t *testing.T) {
 }
 
 func TestMaxRunsLegacyMaxIterationsFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -907,6 +918,7 @@ func TestMaxRunsLegacyMaxIterationsFallback(t *testing.T) {
 }
 
 func TestSettleDisablesAtMaxRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -969,6 +981,7 @@ func createThreadAutomation(t *testing.T, svc *Service, projectID, threadID stri
 
 // TestCreateEnforcesPerThreadLimit 验证同一会话建满 50 条后拒绝新建，停用一条可释放额度。
 func TestCreateEnforcesPerThreadLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	svc, db := setupTestService(t, clock, newFakeDriver())
@@ -1020,6 +1033,7 @@ func TestCreateEnforcesPerThreadLimit(t *testing.T) {
 
 // TestCreatePerThreadLimitIsolatedByThread 验证不同会话的上限互不影响。
 func TestCreatePerThreadLimitIsolatedByThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	svc, db := setupTestService(t, clock, newFakeDriver())
@@ -1046,6 +1060,7 @@ func TestCreatePerThreadLimitIsolatedByThread(t *testing.T) {
 
 // TestCreateWithoutCreatorThreadHasNoLimit 验证 UI 手动创建（不带来源会话）不设上限。
 func TestCreateWithoutCreatorThreadHasNoLimit(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	svc, db := setupTestService(t, clock, newFakeDriver())
 	defer db.Close()

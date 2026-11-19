@@ -152,6 +152,7 @@ func TestHubReapIdle_有在途请求时不回收(t *testing.T) {
 }
 
 func TestHubAcquireClient_使用期间不回收(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -183,6 +184,7 @@ func TestHubAcquireClient_使用期间不回收(t *testing.T) {
 
 // 非 stdio 客户端不参与回收。
 func TestHubReapIdle_非stdio客户端不回收(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -204,6 +206,7 @@ func TestHubReapIdle_非stdio客户端不回收(t *testing.T) {
 
 // 未超过阈值时不得回收。
 func TestHubReapIdle_未超阈值不回收(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -223,6 +226,7 @@ func TestHubReapIdle_未超阈值不回收(t *testing.T) {
 
 // inflight 计数在请求期间正确累加与归零。
 func TestHubAcquireRelease_计数归零(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -258,6 +262,7 @@ func TestHubAcquireRelease_计数归零(t *testing.T) {
 
 // SetUpstreams 移除客户端时同步清理使用统计。
 func TestHubSetUpstreams_清理使用统计(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -280,6 +285,7 @@ func TestHubSetUpstreams_清理使用统计(t *testing.T) {
 
 // 重复关闭 Hub 不应因重复关闭 done 通道而 panic。
 func TestHubClose_幂等关闭done(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	if err := hub.Close(); err != nil {
 		t.Fatalf("first Close failed: %v", err)
@@ -291,6 +297,7 @@ func TestHubClose_幂等关闭done(t *testing.T) {
 
 // 实现了 capabilityReporter 的客户端返回其 capabilities 原始 JSON。
 func TestHubUpstreamCapabilities_返回客户端能力(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -310,6 +317,7 @@ func TestHubUpstreamCapabilities_返回客户端能力(t *testing.T) {
 
 // 未实现 capabilityReporter 的客户端返回 nil, nil。
 func TestHubUpstreamCapabilities_不支持时返回nil(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -328,6 +336,7 @@ func TestHubUpstreamCapabilities_不支持时返回nil(t *testing.T) {
 
 // 未知上游返回错误而不是 panic。
 func TestHubUpstreamCapabilities_未知上游返回错误(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 
@@ -338,6 +347,7 @@ func TestHubUpstreamCapabilities_未知上游返回错误(t *testing.T) {
 
 // 真实 stdio 客户端应把 initialize 结果里的 capabilities 保存下来。
 func TestHubUpstreamCapabilities_stdio真实客户端(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	defer hub.Close()
 

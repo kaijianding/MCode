@@ -11,6 +11,7 @@ import (
 
 // 同名同作用域时按来源 agent 排序：custom > claude > codex > 其他。
 func TestMCPServerWins_来源优先级矩阵(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		candidate agentconf.MCPServer
@@ -77,6 +78,7 @@ func TestMCPServerWins_来源优先级矩阵(t *testing.T) {
 
 // 作用域不同时 agent 优先级不参与比较。
 func TestAgentPriority_排序符合预期(t *testing.T) {
+	t.Parallel()
 	if agentPriority("custom") <= agentPriority("claude") {
 		t.Fatal("custom 应高于 claude")
 	}
@@ -103,6 +105,7 @@ func newSessionRouterForTest(t *testing.T, home string) *SessionRouter {
 
 // 超过 specRetention 未再出现的端点连同上游配置一起清理。
 func TestSessionRouter_过期spec被清理(t *testing.T) {
+	t.Parallel()
 	home, projectDir := t.TempDir(), t.TempDir()
 	writeSessionConfig(t, filepath.Join(home, ".claude.json"),
 		`{"mcpServers":{"keep":{"command":"keep-command"}}}`)
@@ -148,6 +151,7 @@ func TestSessionRouter_过期spec被清理(t *testing.T) {
 
 // 未超期的端点不应被清理。
 func TestSessionRouter_未过期spec保留(t *testing.T) {
+	t.Parallel()
 	home, projectDir := t.TempDir(), t.TempDir()
 	router := newSessionRouterForTest(t, home)
 	router.Endpoints(projectDir, projectDir, nil)

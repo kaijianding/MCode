@@ -9,6 +9,7 @@ import (
 
 // 代理对外声明的能力只受上游是否声明 resources / prompts 影响，其余键一律丢弃。
 func TestProxyCapabilities_收敛上游能力(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		upstream string
@@ -53,6 +54,7 @@ func TestProxyCapabilities_收敛上游能力(t *testing.T) {
 
 // 上游声明 resources/prompts 时，代理 initialize 响应应透出这两个能力。
 func TestProxyInitialize_透传上游能力(t *testing.T) {
+	t.Parallel()
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ID     any             `json:"id"`
@@ -127,6 +129,7 @@ func TestProxyInitialize_透传上游能力(t *testing.T) {
 
 // 上游不可用时 initialize 仍成功，能力退回只含 tools。
 func TestProxyInitialize_上游不可用时退回tools(t *testing.T) {
+	t.Parallel()
 	// 已关闭的 HTTP 上游：连接失败，代理应把它当成“取不到能力”而不是初始化失败。
 	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	deadURL := deadServer.URL

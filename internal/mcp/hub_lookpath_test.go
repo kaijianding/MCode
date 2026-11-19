@@ -19,6 +19,7 @@ func writeFakeExec(t *testing.T, dir, name string, perm os.FileMode) string {
 
 // TestResolveCommandInEnv 验证按 env 里的 PATH 解析 stdio 命令路径。
 func TestResolveCommandInEnv(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 上不校验权限位，跳过")
 	}

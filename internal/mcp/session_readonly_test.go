@@ -75,6 +75,7 @@ func TestSessionRouter_ReadOnlySourcesNotInjected(t *testing.T) {
 // TestInjectionAllowed_Whitelist 覆盖：注入白名单失败关闭——只有 claude/codex/custom/mcode
 // 能进入会话，agy、pi、未知 Agent 以及任何 ReadOnly 条目一律不注入。
 func TestInjectionAllowed_Whitelist(t *testing.T) {
+	t.Parallel()
 	allowed := []agentconf.MCPServer{
 		{Agent: "claude", Name: "a"},
 		{Agent: "codex", Name: "b"},

@@ -34,6 +34,7 @@ func (d *followUpDriver) sentTargets() []string {
 // TestTickCatchUpRunsOnceAfterThreeMissedPeriods 验证休眠跨过 3 个周期后只补跑 1 次，
 // 运行记录标记 catch_up 与 missed_count=3，而不是按窗口重放。
 func TestTickCatchUpRunsOnceAfterThreeMissedPeriods(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -90,6 +91,7 @@ func TestTickCatchUpRunsOnceAfterThreeMissedPeriods(t *testing.T) {
 
 // TestCatchUpDisabledSkipsAndReschedules 验证关闭补跑后周期任务只跳过错过点并推进下一次触发。
 func TestCatchUpDisabledSkipsAndReschedules(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -139,6 +141,7 @@ func TestCatchUpDisabledSkipsAndReschedules(t *testing.T) {
 
 // TestHeartbeatCatchUpDefault 验证 heartbeat 未显式配置时默认补跑，仍投递回来源线程。
 func TestHeartbeatCatchUpDefault(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -177,6 +180,7 @@ func TestHeartbeatCatchUpDefault(t *testing.T) {
 // TestOnceMissedWithoutCatchUpRecordsSkippedAndDisables 验证错过 once 且关闭补跑时
 // 记一条 skipped 运行并停用任务，不增加运行次数。
 func TestOnceMissedWithoutCatchUpRecordsSkippedAndDisables(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -257,6 +261,7 @@ func TestOnceMissedWithoutCatchUpRecordsSkippedAndDisables(t *testing.T) {
 
 // TestOnceMissedWithCatchUpRuns 验证 once 错过但开启补跑（默认）时正常补跑一次。
 func TestOnceMissedWithCatchUpRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -312,6 +317,7 @@ func TestOnceMissedWithCatchUpRuns(t *testing.T) {
 
 // TestOnceWithinGraceIsScheduled 验证 once 到期后宽限期内仍按正常触发处理。
 func TestOnceWithinGraceIsScheduled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -348,6 +354,7 @@ func TestOnceWithinGraceIsScheduled(t *testing.T) {
 
 // TestTriggerRejectsAtMaxRuns 验证达到次数上限的任务即使被重新启用也不会再启动运行。
 func TestTriggerRejectsAtMaxRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -407,6 +414,7 @@ func TestTriggerRejectsAtMaxRuns(t *testing.T) {
 
 // TestRunNowRecordsManualTrigger 验证手动运行单独标记来源，不占用补跑计数。
 func TestRunNowRecordsManualTrigger(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)

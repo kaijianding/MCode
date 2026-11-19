@@ -8,6 +8,7 @@ import (
 
 // TestHasRunningRun 校验 inFlight 为空与非空时的判定。
 func TestHasRunningRun(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	svc, s := setupTestService(t, clock, newFakeDriver())
 	defer s.Close()
@@ -27,6 +28,7 @@ func TestHasRunningRun(t *testing.T) {
 
 // TestNextRunWithin 校验 5 分钟窗口内到期的判定：只有已启用且 NextRunAt 不晚于 now+d 才算命中。
 func TestNextRunWithin(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		seconds int

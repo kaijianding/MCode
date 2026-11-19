@@ -25,6 +25,7 @@ func callSwarmDelegate(t *testing.T, srv *Server, threadID string, args map[stri
 }
 
 func TestSwarmToolsAlwaysLoadMeta(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 	srv.SetSwarm(&SwarmHooks{
@@ -73,6 +74,7 @@ func TestSwarmToolsAlwaysLoadMeta(t *testing.T) {
 }
 
 func TestSwarmDelegateHiddenUntilAvailable(t *testing.T) {
+	t.Parallel()
 	srv, st, projDir := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 
@@ -110,6 +112,7 @@ func TestSwarmDelegateHiddenUntilAvailable(t *testing.T) {
 }
 
 func TestSwarmDelegateCallPassesEntriesToHook(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 
@@ -143,6 +146,7 @@ func TestSwarmDelegateCallPassesEntriesToHook(t *testing.T) {
 }
 
 func TestSwarmDelegateRejectsUnavailableAndEmpty(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 
@@ -174,6 +178,7 @@ func TestSwarmDelegateRejectsUnavailableAndEmpty(t *testing.T) {
 }
 
 func TestSwarmDelegateSchemaDeclaresReplaces(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 
 	tool, ok := srv.registry.Get(swarmDelegateToolName)
@@ -212,6 +217,7 @@ func TestSwarmDelegateSchemaDeclaresReplaces(t *testing.T) {
 }
 
 func TestSwarmDelegateRejectsEntriesWithoutPrompt(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 

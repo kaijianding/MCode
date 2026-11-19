@@ -10,6 +10,7 @@ import (
 )
 
 func TestKanbanSetGoal_ScopeAndTaskSemantics(t *testing.T) {
+	t.Parallel()
 	srv, st, dir := setupTestMCP(t)
 	ctx := context.Background()
 	projectID, otherID := "proj-test-1", "other-project"
@@ -65,6 +66,7 @@ func TestKanbanSetGoal_ScopeAndTaskSemantics(t *testing.T) {
 }
 
 func TestResolveProject_WorktreeOwnershipBeatsAncestor(t *testing.T) {
+	t.Parallel()
 	var worktreeRoot, callbackDir string
 	srv, st, dir := setupTestMCPWithOptions(t, func(opts *Options) {
 		// DataDir 可以位于另一个已注册项目的目录内。

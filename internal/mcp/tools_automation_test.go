@@ -8,6 +8,7 @@ import (
 
 // TestAutomationCreateRecordsCreatorThread 验证经工具路径创建的任务记录来源会话。
 func TestAutomationCreateRecordsCreatorThread(t *testing.T) {
+	t.Parallel()
 	srv, s, _ := setupTestMCP(t)
 	const threadID = "thread-creator-1"
 	registerThread(t, s, threadID, "proj-test-1")
@@ -48,6 +49,7 @@ func TestAutomationCreateRecordsCreatorThread(t *testing.T) {
 }
 
 func TestAutomationCheckParameter(t *testing.T) {
+	t.Parallel()
 	srv, s, _ := setupTestMCP(t)
 	const threadID = "thread-check"
 	registerThread(t, s, threadID, "proj-test-1")

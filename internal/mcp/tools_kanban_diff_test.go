@@ -94,6 +94,7 @@ func writeDiffFile(t *testing.T, repo, content string) {
 }
 
 func TestKanbanTaskDiffRequiresTaskID(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupDiffTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 
@@ -116,6 +117,7 @@ func TestKanbanTaskDiffRequiresTaskID(t *testing.T) {
 }
 
 func TestKanbanTaskDiffReturnsWorktreeChanges(t *testing.T) {
+	t.Parallel()
 	srv, st, worktreeDir := setupDiffTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 	createDiffTask(t, st, "task-1")
@@ -135,6 +137,7 @@ func TestKanbanTaskDiffReturnsWorktreeChanges(t *testing.T) {
 }
 
 func TestKanbanTaskDiffEmptyWhenNoChanges(t *testing.T) {
+	t.Parallel()
 	srv, st, worktreeDir := setupDiffTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 	// 1. 任务没有 worktree。
@@ -154,6 +157,7 @@ func TestKanbanTaskDiffEmptyWhenNoChanges(t *testing.T) {
 }
 
 func TestKanbanTaskDiffTruncatesLargeDiff(t *testing.T) {
+	t.Parallel()
 	srv, st, worktreeDir := setupDiffTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 	createDiffTask(t, st, "task-large")
@@ -182,6 +186,7 @@ func TestKanbanTaskDiffTruncatesLargeDiff(t *testing.T) {
 }
 
 func TestKanbanTaskDiffTextMarksServiceTruncation(t *testing.T) {
+	t.Parallel()
 	// 服务层已经截断（truncated 为真）但内容很短时，也要追加标记。
 	got := kanbanTaskDiffText("@@ -1 +1 @@\n-a\n+b\n", true)
 	if !strings.HasSuffix(got, "\n"+kanbanTaskDiffTruncatedMark) {
@@ -199,6 +204,7 @@ func TestKanbanTaskDiffTextMarksServiceTruncation(t *testing.T) {
 }
 
 func TestKanbanTaskDiffVisibleToRoles(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupDiffTestMCP(t)
 	const projectID = "proj-test-1"
 	projectIDCopy := projectID

@@ -26,6 +26,7 @@ type authCodeInfo struct {
 }
 
 func TestMCPOAuth(t *testing.T) {
+	t.Parallel()
 	var (
 		mu              sync.Mutex
 		authCodes       = make(map[string]authCodeInfo)
@@ -325,6 +326,7 @@ func TestMCPOAuth(t *testing.T) {
 // TestMCPOAuthRefreshInvalidGrant 验证刷新时上游判定 refresh token 失效按未登录处理，
 // 其余刷新失败仍是 ErrOAuthTokenFailed。
 func TestMCPOAuthRefreshInvalidGrant(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -382,6 +384,7 @@ func TestMCPOAuthRefreshInvalidGrant(t *testing.T) {
 
 // TestMCPOAuthSignInRequiresSecrets 验证未配置凭据存储时 SignIn 返回明确错误而非 panic。
 func TestMCPOAuthSignInRequiresSecrets(t *testing.T) {
+	t.Parallel()
 	mgr := NewOAuthManager(OAuthOptions{})
 	err := mgr.SignIn(context.Background(), "srv-no-secrets", "http://127.0.0.1:1/mcp")
 	if !errors.Is(err, ErrOAuthSecretsMissing) {
@@ -455,6 +458,7 @@ func newTestOAuthServers(t *testing.T, authorizeMode string) (rsURL string) {
 
 // TestMCPOAuthPendingAuthURL 验证登录会话表：进行中可以取出授权链接，结束后清空。
 func TestMCPOAuthPendingAuthURL(t *testing.T) {
+	t.Parallel()
 	rsURL := newTestOAuthServers(t, "hang")
 	secrets := config.NewMemorySecretStore()
 
@@ -500,6 +504,7 @@ func TestMCPOAuthPendingAuthURL(t *testing.T) {
 
 // TestMCPOAuthCancelSignIn 验证 CancelSignIn 能中止等待，取消后登记被清空；无会话时返回 false。
 func TestMCPOAuthCancelSignIn(t *testing.T) {
+	t.Parallel()
 	rsURL := newTestOAuthServers(t, "hang")
 	secrets := config.NewMemorySecretStore()
 
@@ -536,6 +541,7 @@ func TestMCPOAuthCancelSignIn(t *testing.T) {
 // TestMCPOAuthOpenBrowserFailureKeepsWaiting 验证打开浏览器失败只记日志，
 // 登录继续等待回调；用户手动打开 PendingAuthURL 给的链接就能完成登录。
 func TestMCPOAuthOpenBrowserFailureKeepsWaiting(t *testing.T) {
+	t.Parallel()
 	rsURL := newTestOAuthServers(t, "normal")
 	secrets := config.NewMemorySecretStore()
 
@@ -579,6 +585,7 @@ func TestMCPOAuthOpenBrowserFailureKeepsWaiting(t *testing.T) {
 
 // TestMCPOAuthSignInWithoutOpenBrowser 验证未配置打开浏览器时继续等待回调，而不是直接报错。
 func TestMCPOAuthSignInWithoutOpenBrowser(t *testing.T) {
+	t.Parallel()
 	rsURL := newTestOAuthServers(t, "normal")
 	secrets := config.NewMemorySecretStore()
 
@@ -630,6 +637,7 @@ func newMetadataOnlyAuthServer(t *testing.T, metadata func(asURL string) map[str
 }
 
 func TestChooseAuthFlow(t *testing.T) {
+	t.Parallel()
 	both := &authServerMetadata{
 		AuthorizationEndpoint:       "https://as.example/authorize",
 		DeviceAuthorizationEndpoint: "https://as.example/device",
@@ -662,6 +670,7 @@ func TestChooseAuthFlow(t *testing.T) {
 
 // TestOAuthDiscoverDeviceOnlyServer 验证只有设备端点的服务器能通过发现阶段。
 func TestOAuthDiscoverDeviceOnlyServer(t *testing.T) {
+	t.Parallel()
 	srv := newMetadataOnlyAuthServer(t, func(asURL string) map[string]any {
 		return map[string]any{
 			"token_endpoint":                        asURL + "/token",
@@ -693,6 +702,7 @@ func TestOAuthDiscoverDeviceOnlyServer(t *testing.T) {
 
 // TestOAuthDiscoverMissingBothEndpoints 验证两个授权端点都缺失时按发现失败处理。
 func TestOAuthDiscoverMissingBothEndpoints(t *testing.T) {
+	t.Parallel()
 	srv := newMetadataOnlyAuthServer(t, func(asURL string) map[string]any {
 		return map[string]any{"token_endpoint": asURL + "/token"}
 	})

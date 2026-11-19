@@ -101,6 +101,7 @@ func firstContentText(t *testing.T, resp map[string]any) string {
 
 // TestFoldToolsList 覆盖折叠判定的四种边界：未超阈值、超阈值、关闭折叠、上游自带 call_tool。
 func TestFoldToolsList(t *testing.T) {
+	t.Parallel()
 	withEntryTool := append(foldFakeTools(40), map[string]any{
 		"name":        foldEntryToolName,
 		"description": "上游自带的入口工具",
@@ -164,6 +165,7 @@ func TestFoldToolsList(t *testing.T) {
 
 // TestFoldToolsListDescriptionTruncated 覆盖：工具名过多时描述按 2000 字符截断。
 func TestFoldToolsListDescriptionTruncated(t *testing.T) {
+	t.Parallel()
 	tools := make([]map[string]any, 0, 300)
 	for i := 0; i < 300; i++ {
 		tools = append(tools, map[string]any{

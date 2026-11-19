@@ -23,6 +23,7 @@ func automationRunSettingsArgs() map[string]any {
 
 // TestAutomationCreateRunSettings 验证 automation_create 把模型与权限写进 spec。
 func TestAutomationCreateRunSettings(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -63,6 +64,7 @@ func TestAutomationCreateRunSettings(t *testing.T) {
 
 // TestAutomationCreateRejectsUnknownRuntimeMode 验证非法 runtime_mode 返回参数错误。
 func TestAutomationCreateRejectsUnknownRuntimeMode(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -92,6 +94,7 @@ func TestAutomationCreateRejectsUnknownRuntimeMode(t *testing.T) {
 
 // TestAutomationUpdateRunSettings 验证 automation_update 能改这四项，也能用空串清空。
 func TestAutomationUpdateRunSettings(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -208,6 +211,7 @@ func createAutomationForTest(t *testing.T, mcpURL, token, projDir, name string, 
 
 // TestAutomationCreateMaxRunsAndCatchUp 验证 automation_create 写入次数上限与补跑开关。
 func TestAutomationCreateMaxRunsAndCatchUp(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -235,6 +239,7 @@ func TestAutomationCreateMaxRunsAndCatchUp(t *testing.T) {
 // TestAutomationUpdateMaxRunsAndCatchUp 验证 automation_update 能改这两个字段，
 // 且与 stop_when、模型设置合并时互不覆盖。
 func TestAutomationUpdateMaxRunsAndCatchUp(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -297,6 +302,7 @@ func TestAutomationUpdateMaxRunsAndCatchUp(t *testing.T) {
 
 // TestAutomationListExposesCatchUpMetadata 验证列表输出 max_runs、catch_up 与运行来源信息。
 func TestAutomationListExposesCatchUpMetadata(t *testing.T) {
+	t.Parallel()
 	srv, st, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -352,6 +358,7 @@ func TestAutomationListExposesCatchUpMetadata(t *testing.T) {
 
 // TestAutomationCreateRejectsInvalidMaxRuns 验证 max_runs 超出 0..1000 时返回参数错误。
 func TestAutomationCreateRejectsInvalidMaxRuns(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

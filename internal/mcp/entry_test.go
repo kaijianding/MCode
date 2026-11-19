@@ -71,6 +71,7 @@ func entryActionEnum(t *testing.T, srv *Server, threadID, entry string) map[stri
 
 // TestAutomationEntryEnum 校验自动化入口覆盖全部自动化动作，且不含总管专属的 run_now。
 func TestAutomationEntryEnum(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 
@@ -94,6 +95,7 @@ func TestAutomationEntryEnum(t *testing.T) {
 
 // TestAutomationEntryForwardsAction 校验入口把 action 与 args 透传给类型化工具。
 func TestAutomationEntryForwardsAction(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 
@@ -109,6 +111,7 @@ func TestAutomationEntryForwardsAction(t *testing.T) {
 
 // TestAutomationEntryRejectsExcludedAction 校验总管专属动作不能经入口调用。
 func TestAutomationEntryRejectsExcludedAction(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "thread-ordinary", "proj-test-1")
 
@@ -121,6 +124,7 @@ func TestAutomationEntryRejectsExcludedAction(t *testing.T) {
 
 // TestMemoryEntryEnumShrinksToConfigured 校验记忆入口只列出已接入的操作，全未接入时整个入口消失。
 func TestMemoryEntryEnumShrinksToConfigured(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(context.Context, string, nmem.SearchQuery) ([]nmem.Memory, error) {
 			return nil, nil
@@ -162,6 +166,7 @@ func TestMemoryEntryEnumShrinksToConfigured(t *testing.T) {
 
 // TestMemoryEntryForwardsSearch 校验记忆入口把参数透传给 memory_search。
 func TestMemoryEntryForwardsSearch(t *testing.T) {
+	t.Parallel()
 	var gotQuery string
 	srv, st, _ := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(_ context.Context, _ string, q nmem.SearchQuery) ([]nmem.Memory, error) {
@@ -183,6 +188,7 @@ func TestMemoryEntryForwardsSearch(t *testing.T) {
 
 // TestEntryHiddenOnSharedEndpoint 校验无会话作用域的共享端点保留类型化工具、隐藏入口工具。
 func TestEntryHiddenOnSharedEndpoint(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	names := sharedToolNames(t, srv)
 	for _, entry := range []string{kanbanEntryToolName, automationFamily.entry, memoryFamily.entry} {

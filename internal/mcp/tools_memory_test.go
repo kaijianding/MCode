@@ -40,6 +40,7 @@ func memoryProposeEndpoint(t *testing.T, srv *Server) string {
 }
 
 func TestMemoryProposeStoresPendingProposal(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	ctx := context.Background()
 
@@ -115,6 +116,7 @@ func TestMemoryProposeStoresPendingProposal(t *testing.T) {
 }
 
 func TestMemoryProposeUsesThreadScope(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	registerThread(t, s, "mem-thread-1", "proj-test-1")
 
@@ -144,6 +146,7 @@ func TestMemoryProposeUsesThreadScope(t *testing.T) {
 }
 
 func TestMemoryProposeRejectsInvalidArguments(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 
 	cases := []struct {
@@ -189,6 +192,7 @@ func TestMemoryProposeRejectsInvalidArguments(t *testing.T) {
 
 // TestMemoryProposeRejectsOverlongFields 验证 title/content 的长度上限：上限值通过，超一个 rune 被拒。
 func TestMemoryProposeRejectsOverlongFields(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 
 	longTitle := strings.Repeat("长", memoryProposeTitleMaxRunes+1)
@@ -245,6 +249,7 @@ func callMemorySearch(t *testing.T, srv *Server, projDir string, args map[string
 }
 
 func TestMemorySearchWithoutClient(t *testing.T) {
+	t.Parallel()
 	srvWithStub, _, projDirWithStub := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
 			return nil, nil
@@ -266,6 +271,7 @@ func TestMemorySearchWithoutClient(t *testing.T) {
 }
 
 func TestMemorySearchFormatsAndTruncates(t *testing.T) {
+	t.Parallel()
 	longContent := strings.Repeat("很长的记忆内容", 100) // 700 个 rune，超过 400 的上限
 	var gotPath, gotQuery string
 	var gotLimit int
@@ -331,6 +337,7 @@ func TestMemorySearchFormatsAndTruncates(t *testing.T) {
 }
 
 func TestMemorySearchClampsLimit(t *testing.T) {
+	t.Parallel()
 	var gotLimit int
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
@@ -359,6 +366,7 @@ func TestMemorySearchClampsLimit(t *testing.T) {
 }
 
 func TestMemorySearchEmptyResults(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
 			return nil, nil
@@ -375,6 +383,7 @@ func TestMemorySearchEmptyResults(t *testing.T) {
 }
 
 func TestMemorySearchRejectsEmptyQuery(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
 			t.Error("空查询不应调用 MemorySearch")
@@ -412,6 +421,7 @@ func callMemoryTool(t *testing.T, srv *Server, projDir, name string, args map[st
 }
 
 func TestMemorySearchPassesFilters(t *testing.T) {
+	t.Parallel()
 	var got nmem.SearchQuery
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
@@ -440,6 +450,7 @@ func TestMemorySearchPassesFilters(t *testing.T) {
 }
 
 func TestMemoryGetAcceptsLinkAndMapsNotFound(t *testing.T) {
+	t.Parallel()
 	var gotID string
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryGet = func(ctx context.Context, projectPath, id string) (nmem.Memory, error) {
@@ -470,6 +481,7 @@ func TestMemoryGetAcceptsLinkAndMapsNotFound(t *testing.T) {
 }
 
 func TestThreadSearchAndFetch(t *testing.T) {
+	t.Parallel()
 	var gotOffset, gotLimit int
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.ThreadSearch = func(ctx context.Context, projectPath, query string, limit int) ([]nmem.ThreadHit, error) {
@@ -505,6 +517,7 @@ func TestThreadSearchAndFetch(t *testing.T) {
 }
 
 func TestMemoryProposeUserRequestedCommitsImmediately(t *testing.T) {
+	t.Parallel()
 	var committed string
 	srv, s, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryCommit = func(ctx context.Context, proposalID string) (store.MemoryProposal, string, error) {
@@ -548,6 +561,7 @@ func TestMemoryProposeUserRequestedCommitsImmediately(t *testing.T) {
 }
 
 func TestMemoryProposeTargetMustBeReadable(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryGet = func(ctx context.Context, projectPath, id string) (nmem.Memory, error) {
 			if id == "mem-ok" {
@@ -573,6 +587,7 @@ func TestMemoryProposeTargetMustBeReadable(t *testing.T) {
 
 // TestMemoryToolsListFilterUnconfigured 校验未配置四个检索回调时从 tools/list 隐藏，配置后全部可见。
 func TestMemoryToolsListFilterUnconfigured(t *testing.T) {
+	t.Parallel()
 	unconfiguredTools := []string{"memory_search", "memory_get", "memory_forget", "thread_search", "thread_fetch_messages"}
 
 	// 1. 未设置四个回调时，tools/list 包含 memory_propose，但不包含检索工具。
@@ -619,6 +634,7 @@ func TestMemoryToolsListFilterUnconfigured(t *testing.T) {
 }
 
 func TestMemoryForgetDeletesAndDropsPendingProposals(t *testing.T) {
+	t.Parallel()
 	var gotID string
 	srv, st, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryForget = func(ctx context.Context, projectPath, id string) (bool, error) {
@@ -666,6 +682,7 @@ func TestMemoryForgetDeletesAndDropsPendingProposals(t *testing.T) {
 }
 
 func TestMemoryForgetMarksDeprecatedWhenUnsupported(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryForget = func(ctx context.Context, projectPath, id string) (bool, error) {
 			return false, nil
@@ -684,6 +701,7 @@ func TestMemoryForgetMarksDeprecatedWhenUnsupported(t *testing.T) {
 }
 
 func TestMemoryForgetRejectsInvalidID(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemoryForget = func(ctx context.Context, projectPath, id string) (bool, error) {
@@ -717,6 +735,7 @@ func TestMemoryForgetRejectsInvalidID(t *testing.T) {
 }
 
 func TestMemorySearchDropsDeprecatedMemories(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.MemorySearch = func(ctx context.Context, projectPath string, q nmem.SearchQuery) ([]nmem.Memory, error) {
 			return []nmem.Memory{

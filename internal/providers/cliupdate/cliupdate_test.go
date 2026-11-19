@@ -23,8 +23,13 @@ func TestRunCommandTimeout(t *testing.T) {
 		t.Skip("测试使用 Unix shell")
 	}
 	previous := commandTimeout
+	previousWaitDelay := commandWaitDelay
 	commandTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { commandTimeout = previous })
+	commandWaitDelay = 100 * time.Millisecond
+	t.Cleanup(func() {
+		commandTimeout = previous
+		commandWaitDelay = previousWaitDelay
+	})
 
 	t.Run("命令超时", func(t *testing.T) {
 		start := time.Now()

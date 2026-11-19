@@ -191,6 +191,7 @@ func registerThread(t *testing.T, s *store.Store, threadID, projectID string) {
 }
 
 func TestUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -219,6 +220,7 @@ func TestUnauthorized(t *testing.T) {
 }
 
 func TestMCPFlow(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -463,6 +465,7 @@ func TestMCPFlow(t *testing.T) {
 }
 
 func TestServerLifecycle(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -514,6 +517,7 @@ func toolCallText(t *testing.T, res map[string]any) (string, bool) {
 }
 
 func TestKanbanCreateTaskDependencies(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -687,6 +691,7 @@ func TestKanbanCreateTaskDependencies(t *testing.T) {
 }
 
 func TestProjectIDMismatch(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -735,6 +740,7 @@ func TestProjectIDMismatch(t *testing.T) {
 }
 
 func TestWorktreeProjectResolution(t *testing.T) {
+	t.Parallel()
 	worktreeDir := t.TempDir()
 	srv, s, _ := setupTestMCPWithOptions(t, func(o *Options) { o.WorktreeDir = worktreeDir })
 	ts := httptest.NewServer(srv.Handler())
@@ -829,6 +835,7 @@ func TestWorktreeProjectResolution(t *testing.T) {
 }
 
 func TestAutomationReportResultTool(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -1038,6 +1045,7 @@ func TestAutomationReportResultTool(t *testing.T) {
 }
 
 func TestContextDocuments(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

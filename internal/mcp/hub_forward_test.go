@@ -15,6 +15,7 @@ import (
 // TestWithMethodTimeout 校验按方法放宽超时：tools/call 放宽到 toolCallTimeout，
 // 其他方法不加截止时间，调用方自带截止时间时保持原样。
 func TestWithMethodTimeout(t *testing.T) {
+	t.Parallel()
 	t.Run("tools/call 放宽到工具超时", func(t *testing.T) {
 		ctx, cancel := withMethodTimeout(context.Background(), "tools/call")
 		defer cancel()
@@ -91,6 +92,7 @@ func (b *lockedBuffer) String() string {
 // 会被回复，且不会被当成响应污染 pending 表。
 // 做法：直接喂 readLoop 一段 stdout，并检查它写回 stdin 的内容。
 func TestStdioClient_RepliesToServerInitiatedRequests(t *testing.T) {
+	t.Parallel()
 	client := newStdioClient(UpstreamSpec{ID: "stdio-server-req", Transport: "stdio"})
 	stdin := &lockedBuffer{}
 

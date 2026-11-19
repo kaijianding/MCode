@@ -36,6 +36,7 @@ func parseToolText(t *testing.T, res map[string]any) (string, bool, map[string]a
 }
 
 func TestMCP_KanbanUpdateCardProgress(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	task, err := srv.opts.Kanban.CreateTask(context.Background(), kanban.CreateTaskInput{
 		ProjectID: "proj-test-1",
@@ -80,6 +81,7 @@ func TestMCP_KanbanUpdateCardProgress(t *testing.T) {
 }
 
 func TestKanbanTaskIDDefaultsToSession(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	ctx := context.Background()
 	projectID, threadID := "proj-test-1", "executor-thread"
@@ -162,6 +164,7 @@ func TestKanbanTaskIDDefaultsToSession(t *testing.T) {
 }
 
 func TestMCP_KanbanEditTools_Flow(t *testing.T) {
+	t.Parallel()
 	srv, s, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -556,6 +559,7 @@ func TestMCP_KanbanEditTools_Flow(t *testing.T) {
 }
 
 func TestMCP_ResolveProject_MultiProject(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "multi_proj_test.db")
 	s, err := store.Open(dbPath)
 	if err != nil {
@@ -671,6 +675,7 @@ func TestMCP_ResolveProject_MultiProject(t *testing.T) {
 }
 
 func TestMCP_KanbanLifecycleErrors_MapInvalidTransition(t *testing.T) {
+	t.Parallel()
 	srv, st, projDir := setupTestMCP(t)
 	ctx := context.Background()
 	projectID := "proj-test-1"

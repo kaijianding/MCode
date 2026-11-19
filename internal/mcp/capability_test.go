@@ -43,6 +43,7 @@ func hasToolPrefix(names map[string]bool, prefix string) bool {
 
 // TestCapabilityNilCallbackListsAllTools 校验未配置回调时保持原有行为：三组工具全部可见且可调用。
 func TestCapabilityNilCallbackListsAllTools(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -73,6 +74,7 @@ func TestCapabilityNilCallbackListsAllTools(t *testing.T) {
 
 // TestCapabilityDisabledToolIsHiddenAndRejected 校验关闭某项能力后 tools/list 裁剪且 tools/call 被拒。
 func TestCapabilityDisabledToolIsHiddenAndRejected(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.CapabilityEnabled = func(project store.Project, capability string) bool {
 			return capability != CapAutomation
@@ -114,6 +116,7 @@ func TestCapabilityDisabledToolIsHiddenAndRejected(t *testing.T) {
 
 // TestCapabilityEmptyAlwaysVisible 校验未声明 Capability 的工具不受能力回调裁剪。
 func TestCapabilityEmptyAlwaysVisible(t *testing.T) {
+	t.Parallel()
 	srv, _, projDir := setupTestMCPWithOptions(t, func(o *Options) {
 		o.CapabilityEnabled = func(project store.Project, capability string) bool {
 			return false

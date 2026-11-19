@@ -159,6 +159,7 @@ func newDeviceTestManager(t *testing.T, opts OAuthOptions) *OAuthManager {
 }
 
 func TestDeviceFlowSuccess(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		token: func(call int, form url.Values) (int, map[string]any) {
 			if call == 0 {
@@ -227,6 +228,7 @@ func TestDeviceFlowSuccess(t *testing.T) {
 
 // TestDeviceFlowSlowDown 验证 slow_down 会累加轮询间隔。
 func TestDeviceFlowSlowDown(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		token: func(call int, form url.Values) (int, map[string]any) {
 			switch call {
@@ -262,6 +264,7 @@ func TestDeviceFlowSlowDown(t *testing.T) {
 
 // TestDeviceFlowExpiredToken 验证 expired_token 失败、清理会话，并且可以再次登录。
 func TestDeviceFlowExpiredToken(t *testing.T) {
+	t.Parallel()
 	var expired atomic.Bool
 	expired.Store(true)
 	f := newDeviceFixture(t, deviceFixtureOptions{
@@ -295,6 +298,7 @@ func TestDeviceFlowExpiredToken(t *testing.T) {
 }
 
 func TestDeviceFlowAccessDenied(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		token: func(call int, form url.Values) (int, map[string]any) {
 			return http.StatusBadRequest, map[string]any{"error": "access_denied", "error_description": "用户拒绝"}
@@ -313,6 +317,7 @@ func TestDeviceFlowAccessDenied(t *testing.T) {
 
 // TestDeviceFlowAuthorizationPendingUntilTimeout 验证设备码到期后不再轮询并返回过期错误。
 func TestDeviceFlowAuthorizationPendingUntilTimeout(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		device: func(asURL string) (int, map[string]any) {
 			return http.StatusOK, map[string]any{
@@ -347,6 +352,7 @@ func TestDeviceFlowAuthorizationPendingUntilTimeout(t *testing.T) {
 }
 
 func TestDeviceFlowCancelSignIn(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		token: func(call int, form url.Values) (int, map[string]any) {
 			return http.StatusBadRequest, map[string]any{"error": "authorization_pending"}
@@ -381,6 +387,7 @@ func TestDeviceFlowCancelSignIn(t *testing.T) {
 }
 
 func TestDeviceFlowOpenBrowserUsesCompleteURI(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		complete string
@@ -426,6 +433,7 @@ func TestDeviceFlowOpenBrowserUsesCompleteURI(t *testing.T) {
 }
 
 func TestDeviceFlowRejectsNonHTTPVerificationURI(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		device: func(asURL string) (int, map[string]any) {
 			return http.StatusOK, map[string]any{
@@ -450,6 +458,7 @@ func TestDeviceFlowRejectsNonHTTPVerificationURI(t *testing.T) {
 
 // TestDeviceFlowUsesDirectoryDeviceEndpoint 验证目录覆盖的设备端点优先于元数据缺失。
 func TestDeviceFlowUsesDirectoryDeviceEndpoint(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{
 		metadata: func(asURL string) map[string]any {
 			return map[string]any{
@@ -474,6 +483,7 @@ func TestDeviceFlowUsesDirectoryDeviceEndpoint(t *testing.T) {
 
 // TestDeviceFlowReusesTokenAccount 验证设备流令牌走既有存储路径，SignOut 能清理干净。
 func TestDeviceFlowReusesTokenAccount(t *testing.T) {
+	t.Parallel()
 	f := newDeviceFixture(t, deviceFixtureOptions{})
 	secrets := config.NewMemorySecretStore()
 	mgr := newDeviceTestManager(t, OAuthOptions{Secrets: secrets})

@@ -10,6 +10,7 @@ import (
 )
 
 func TestPreviewSchedule(t *testing.T) {
+	t.Parallel()
 	at := func(value string) time.Time {
 		t.Helper()
 		result, err := time.Parse(time.RFC3339, value)
@@ -101,6 +102,7 @@ func TestPreviewSchedule(t *testing.T) {
 }
 
 func TestPreviewScheduleValidation(t *testing.T) {
+	t.Parallel()
 	schedule := Schedule{Type: "interval", Seconds: 90}
 	for _, count := range []int{0, 1, 3, 5, 6} {
 		t.Run(strconv.Itoa(count), func(t *testing.T) {
@@ -123,6 +125,7 @@ func TestPreviewScheduleValidation(t *testing.T) {
 }
 
 func TestPreviewScheduleNonIncreasing(t *testing.T) {
+	t.Parallel()
 	if strconv.IntSize < 64 {
 		t.Skip("interval overflow requires 64-bit int")
 	}
@@ -134,6 +137,7 @@ func TestPreviewScheduleNonIncreasing(t *testing.T) {
 }
 
 func TestPreviewScheduleCanceled(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := PreviewSchedule(ctx, Schedule{Type: "interval", Seconds: 90}, time.Time{}, 3)

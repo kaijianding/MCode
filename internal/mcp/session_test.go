@@ -104,6 +104,7 @@ enabled = false
 }
 
 func TestSessionRouter_HTTPAuthAndProxyFlow(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var auth, custom string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

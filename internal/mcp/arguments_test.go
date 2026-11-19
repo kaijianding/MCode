@@ -8,6 +8,7 @@ import (
 )
 
 func TestValidateArgumentsUnknownFieldListsAllowed(t *testing.T) {
+	t.Parallel()
 	tool := ToolDefinition{InputSchema: map[string]any{"properties": map[string]any{"bee_id": map[string]any{"type": "string"}}}}
 	result := validateArguments(tool, map[string]any{"id": "x"})
 	if result == nil || toolErrorCode(*result) != CodeUnknownField || !strings.Contains(result.Text, "Allowed arguments: bee_id") {
@@ -16,6 +17,7 @@ func TestValidateArgumentsUnknownFieldListsAllowed(t *testing.T) {
 }
 
 func TestMCP_EditArgumentsRejectInvalidFieldsBeforeWriting(t *testing.T) {
+	t.Parallel()
 	srv, st, dir := setupTestMCP(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

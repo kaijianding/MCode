@@ -11,6 +11,7 @@ import (
 // TestRunReadStateLifecycle 覆盖运行记录的未读/已读/归档：
 // 运行结束后新记录未读，成功后仍是未读，失败记录同样保持未读直到用户查看。
 func TestRunReadStateLifecycle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)

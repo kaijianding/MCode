@@ -32,6 +32,7 @@ func (f *fakeHarness) Run(ctx context.Context, turn harness.Turn, emit func(harn
 }
 
 func TestHeuristic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		stopWhen   string
@@ -123,6 +124,7 @@ func TestHeuristic(t *testing.T) {
 }
 
 func TestParseEvaluation(t *testing.T) {
+	t.Parallel()
 	t.Run("fenced json", func(t *testing.T) {
 		text := "Here is the verdict:\n```json\n{\"satisfied\": true, \"confidence\": 0.95, \"reason\": \"all good\"}\n```\nHope it helps."
 		res, ok := ParseEvaluation(text)
@@ -158,6 +160,7 @@ func TestParseEvaluation(t *testing.T) {
 }
 
 func TestEvaluatorEvaluate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("harness json verdict respects threshold", func(t *testing.T) {

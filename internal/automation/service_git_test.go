@@ -10,13 +10,11 @@ import (
 	"time"
 
 	"mcode/internal/kanban"
-	"mcode/internal/testenv"
 )
 
 // initGitRepo 创建带一次初始提交的临时仓库。
 func initGitRepo(t *testing.T) string {
 	t.Helper()
-	testenv.TempHome(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git 不可用")
 	}
@@ -40,6 +38,7 @@ func initGitRepo(t *testing.T) string {
 }
 
 func TestGitDiffSummary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := initGitRepo(t)
 
@@ -77,6 +76,7 @@ func TestGitDiffSummary(t *testing.T) {
 }
 
 func TestSettleRunRecordsChangedFiles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := initGitRepo(t)
 	clock := newFakeClock(time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC))
@@ -118,7 +118,7 @@ func TestSettleRunRecordsChangedFiles(t *testing.T) {
 }
 
 func TestGitChangedFilesNonRepo(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	if got := gitChangedFiles(context.Background(), t.TempDir()); got != nil {
 		t.Errorf("非 git 目录应返回 nil，实际 %d", *got)
 	}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,17 @@ func TestMain(m *testing.M) {
 		_, _ = fmt.Fprintln(os.Stderr, "fatal: failed to initialize fake server")
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	tmpDir, err := os.MkdirTemp("", "mcode-mcp-test-*")
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "创建测试临时目录失败: %v\n", err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("HOME", tmpDir)
+	_ = os.Setenv("USERPROFILE", tmpDir)
+	_ = os.Setenv("MCODE_DATA", filepath.Join(tmpDir, "data"))
+	code := m.Run()
+	_ = os.RemoveAll(tmpDir)
+	os.Exit(code)
 }
 
 func runFakeMCPServer() {
@@ -130,6 +141,7 @@ func (m *mockTokenSource) AccessToken(ctx context.Context, serverID string) (str
 }
 
 func TestHub_Stdio(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -189,6 +201,7 @@ func TestHub_Stdio(t *testing.T) {
 }
 
 func TestHub_HTTP_JSON(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var receivedSessionID string
 	var receivedAuth string
@@ -309,6 +322,7 @@ func TestHub_HTTP_JSON(t *testing.T) {
 }
 
 func TestHub_HTTP_SSE(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 
@@ -386,6 +400,7 @@ func TestHub_HTTP_SSE(t *testing.T) {
 }
 
 func TestHub_HTTP_401(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"invalid token"}`))
@@ -414,6 +429,7 @@ func TestHub_HTTP_401(t *testing.T) {
 }
 
 func TestHub_SetUpstreams(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -458,6 +474,7 @@ func TestHub_SetUpstreams(t *testing.T) {
 }
 
 func TestProbe_Stdio(t *testing.T) {
+	t.Parallel()
 	spec := UpstreamSpec{
 		ID:        "probe-stdio",
 		Transport: "stdio",
@@ -483,6 +500,7 @@ func TestProbe_Stdio(t *testing.T) {
 }
 
 func TestProbe_StdioExitError(t *testing.T) {
+	t.Parallel()
 	spec := UpstreamSpec{
 		ID:        "probe-exit-stdio",
 		Transport: "stdio",
@@ -505,6 +523,7 @@ func TestProbe_StdioExitError(t *testing.T) {
 }
 
 func TestProbe_HTTP(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
@@ -574,6 +593,7 @@ func TestProbe_HTTP(t *testing.T) {
 }
 
 func TestProbe_HTTP_401(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -595,6 +615,7 @@ func TestProbe_HTTP_401(t *testing.T) {
 }
 
 func TestProbeTimeout(t *testing.T) {
+	t.Parallel()
 	if got := probeTimeout(UpstreamSpec{Args: []string{"-y", "mcp-remote", "https://example.com/mcp"}}); got != probeOAuthTimeout {
 		t.Errorf("expected mcp-remote probe timeout %s, got %s", probeOAuthTimeout, got)
 	}
@@ -604,6 +625,7 @@ func TestProbeTimeout(t *testing.T) {
 }
 
 func TestHub_HTTP_ReinitializesAfterUpstreamRestart(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	session := ""
 	initCount := 0

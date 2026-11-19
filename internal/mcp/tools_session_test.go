@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionGet(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "caller", "proj-test-1")
 	ctx := context.Background()

@@ -10,6 +10,7 @@ import (
 )
 
 func TestUpdateScheduleAndEnableSemantics(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock := newFakeClock(start)
@@ -84,6 +85,7 @@ func TestUpdateScheduleAndEnableSemantics(t *testing.T) {
 }
 
 func TestUpdateScheduleDateComparesTimePoints(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	clock := newFakeClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	svc, db := setupTestService(t, clock, newFakeDriver())

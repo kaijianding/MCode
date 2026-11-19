@@ -43,6 +43,7 @@ func postProxy(t *testing.T, handler http.Handler, path, token string, reqBody a
 }
 
 func TestProxy_StdioAndHTTP(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -203,6 +204,7 @@ func TestProxy_StdioAndHTTP(t *testing.T) {
 }
 
 func TestProxy_AuthFailure(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -236,6 +238,7 @@ func TestProxy_AuthFailure(t *testing.T) {
 }
 
 func TestProxy_UnknownID(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -253,6 +256,7 @@ func TestProxy_UnknownID(t *testing.T) {
 }
 
 func TestProxy_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -280,6 +284,7 @@ func TestProxy_MethodNotAllowed(t *testing.T) {
 }
 
 func TestProxy_UpstreamUnauthorized(t *testing.T) {
+	t.Parallel()
 	// 上游模拟 HTTP 401
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -329,6 +334,7 @@ func TestProxy_UpstreamUnauthorized(t *testing.T) {
 }
 
 func TestProxy_StartAndClose(t *testing.T) {
+	t.Parallel()
 	hub := NewHub(nil)
 	t.Cleanup(func() {
 		_ = hub.Close()
@@ -390,6 +396,7 @@ func TestProxy_StartAndClose(t *testing.T) {
 const testThreadID = "0b6f4e0a-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
 
 func TestProxy_BuiltinThreadRouting(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	ctx := context.Background()
 	// 两个项目：缺少会话作用域时无法靠单项目兜底确定项目。
@@ -472,6 +479,7 @@ func TestProxy_BuiltinThreadRouting(t *testing.T) {
 }
 
 func TestProxy_BuiltinNotConfigured(t *testing.T) {
+	t.Parallel()
 	proxy := NewProxy(NewHub(nil))
 	t.Cleanup(func() { _ = proxy.Close() })
 
@@ -482,6 +490,7 @@ func TestProxy_BuiltinNotConfigured(t *testing.T) {
 }
 
 func TestProxy_BuiltinDoesNotAffectUpstreamRoutes(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCP(t)
 	proxy := NewProxy(NewHub(nil))
 	t.Cleanup(func() { _ = proxy.Close() })

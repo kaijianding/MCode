@@ -95,6 +95,7 @@ func latestRun(t *testing.T, svc *Service, ctx context.Context, automationID str
 
 // TestRunPromptIncludesReceiptRequirement 三种运行模式发出的提示词都必须带 run_id 与回执工具说明。
 func TestRunPromptIncludesReceiptRequirement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 
@@ -187,6 +188,7 @@ func TestRunPromptIncludesReceiptRequirement(t *testing.T) {
 
 // TestReceiptReminderFlow 覆盖缺回执时的追问节奏与判失败。
 func TestReceiptReminderFlow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -254,6 +256,7 @@ func TestReceiptReminderFlow(t *testing.T) {
 
 // TestIdleRunWithoutMessengerSucceeds 不支持追问的驱动保持旧的「空闲即完成」行为。
 func TestIdleRunWithoutMessengerSucceeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -287,6 +290,7 @@ func TestIdleRunWithoutMessengerSucceeds(t *testing.T) {
 // TestIdleRunWithoutHostToolsSucceeds 会话的 provider 没有接入宿主工具时不追问：
 // 即使驱动支持 SendFollowUp 也直接按最后一条助手文本记成功。
 func TestIdleRunWithoutHostToolsSucceeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -326,6 +330,7 @@ func TestIdleRunWithoutHostToolsSucceeds(t *testing.T) {
 
 // TestReportRunStopsReminders Agent 主动提交回执后，Tick 不再追问。
 func TestReportRunStopsReminders(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -369,6 +374,7 @@ func TestReportRunStopsReminders(t *testing.T) {
 
 // TestHeartbeatProgressBaseline 投递后进度未变化视为排队未开跑，不结算；变化后进入正常流程。
 func TestHeartbeatProgressBaseline(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -424,6 +430,7 @@ func TestHeartbeatProgressBaseline(t *testing.T) {
 
 // TestInterruptedRunSettlesStopped 用户中断记 stopped，不影响连续失败计数。
 func TestInterruptedRunSettlesStopped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -467,6 +474,7 @@ func TestInterruptedRunSettlesStopped(t *testing.T) {
 // TestHeartbeatInterruptedWaitsForProgress heartbeat 来源会话残留 Interrupted 时，
 // 进度与基线一致说明本轮提示词还在排队，不能记 stopped；进度变化后才按中断结算。
 func TestHeartbeatInterruptedWaitsForProgress(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -516,6 +524,7 @@ func TestHeartbeatInterruptedWaitsForProgress(t *testing.T) {
 // TestTickReconcilesRunningRuns 首次持有调度锁的 Tick 对账 DB 中残留的 running 运行；
 // 被动实例拿不到锁，不得对账。
 func TestTickReconcilesRunningRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t0 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	clock := newFakeClock(t0)
@@ -608,6 +617,7 @@ func TestTickReconcilesRunningRuns(t *testing.T) {
 
 // TestHeuristicEmptyDiffNotClean 启发式评估不再把空 diff 当成工作区干净的证据。
 func TestHeuristicEmptyDiffNotClean(t *testing.T) {
+	t.Parallel()
 	empty := Heuristic("working tree is clean", "Ran checks", "")
 	if empty.Satisfied {
 		t.Errorf("expected empty diff not to satisfy clean condition, got %+v", empty)

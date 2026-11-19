@@ -3,6 +3,7 @@ package automation
 import "testing"
 
 func TestSpecEffectiveMaxRuns(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		spec Spec
@@ -22,6 +23,7 @@ func TestSpecEffectiveMaxRuns(t *testing.T) {
 }
 
 func TestSpecCatchUpEnabled(t *testing.T) {
+	t.Parallel()
 	enabled := true
 	disabled := false
 	tests := []struct {

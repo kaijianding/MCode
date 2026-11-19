@@ -10,6 +10,7 @@ import (
 
 // TestSessionRouterEndpoints_HonorsThreadDisabled 验证会话级禁用名单能在全局设置之上再筛掉指定服务。
 func TestSessionRouterEndpoints_HonorsThreadDisabled(t *testing.T) {
+	t.Parallel()
 	home, projectDir := t.TempDir(), t.TempDir()
 	writeSessionConfig(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"alpha":{"command":"alpha-command"},"beta":{"command":"beta-command"}}}`)
 

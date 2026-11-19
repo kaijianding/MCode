@@ -46,6 +46,9 @@ type Info struct {
 
 var commandTimeout = 15 * time.Second
 
+// commandWaitDelay 为子进程退出后等待管道关闭的宽限期；测试可替换。
+var commandWaitDelay = 2 * time.Second
+
 // runCommand 执行命令并返回合并后的 stdout 与 stderr；测试可替换。
 var runCommand = func(ctx context.Context, name string, args ...string) (string, error) {
 	// GUI 进程的 PATH 不带登录 Shell 的目录，先按登录环境解析绝对路径；
@@ -57,7 +60,7 @@ var runCommand = func(ctx context.Context, name string, args ...string) (string,
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	cmd := procattr.HideWindow(exec.CommandContext(ctx, bin, args...))
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = commandWaitDelay
 	// CLI 的版本输出可能受登录环境变量影响，统一用登录环境执行。
 	cmd.Env = loginenv.Environ()
 	output, err := cmd.CombinedOutput()

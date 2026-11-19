@@ -26,20 +26,20 @@ func TestWatcher_DebounceAndClose(t *testing.T) {
 	}()
 
 	w.mu.Lock()
-	w.debounce = 300 * time.Millisecond
+	w.debounce = 80 * time.Millisecond
 	w.mu.Unlock()
 
-	// 在 100ms 内连续写 docs 文件 5 次
+	// 在 50ms 内连续写 docs 文件 5 次
 	for i := 0; i < 5; i++ {
 		_, err := s.Write("test.md", fmt.Sprintf("content %d", i), "")
 		if err != nil {
 			t.Fatalf("write %d failed: %v", i, err)
 		}
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 
-	// 等待约 1 秒后断言 onChange 恰好被调用 1 次
-	deadline := time.Now().Add(1200 * time.Millisecond)
+	// 等待 400ms 后断言 onChange 恰好被调用 1 次
+	deadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -66,7 +66,7 @@ func TestWatcher_DebounceAndClose(t *testing.T) {
 		t.Fatalf("expected onChange count 2 after single write, got %d", count.Load())
 	}
 
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	if got := count.Load(); got != 2 {
 		t.Fatalf("expected count to remain 2, got %d", got)
 	}
@@ -81,7 +81,7 @@ func TestWatcher_DebounceAndClose(t *testing.T) {
 		t.Fatalf("write after close failed: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	if got := count.Load(); got != 2 {
 		t.Fatalf("expected count to stay 2 after Close(), got %d", got)
 	}

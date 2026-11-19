@@ -6,6 +6,7 @@ import (
 )
 
 func TestReadOnlyTool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		tool string

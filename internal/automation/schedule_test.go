@@ -6,6 +6,7 @@ import (
 )
 
 func TestScheduleValidate(t *testing.T) {
+	t.Parallel()
 	future := time.Now().Add(1 * time.Hour)
 
 	tests := []struct {
@@ -126,6 +127,7 @@ func TestScheduleValidate(t *testing.T) {
 }
 
 func TestScheduleNext(t *testing.T) {
+	t.Parallel()
 	baseline := time.Date(2026, 10, 16, 19, 0, 0, 0, time.UTC) // 2026-10-16 是星期五 (Friday)
 
 	t.Run("interval", func(t *testing.T) {
@@ -327,6 +329,7 @@ func TestScheduleNext(t *testing.T) {
 }
 
 func TestScheduleNextTimezones(t *testing.T) {
+	t.Parallel()
 	baseline := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
 
 	tests := []struct {
@@ -350,6 +353,7 @@ func TestScheduleNextTimezones(t *testing.T) {
 }
 
 func TestScheduleNextDST(t *testing.T) {
+	t.Parallel()
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skipf("tzdata 不可用: %v", err)
@@ -402,6 +406,7 @@ func TestScheduleNextDST(t *testing.T) {
 }
 
 func TestMissedOccurrences(t *testing.T) {
+	t.Parallel()
 	due := time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC)
 	onceDate := due
 	tests := []struct {
@@ -486,6 +491,7 @@ func TestMissedOccurrences(t *testing.T) {
 }
 
 func TestMissedForSpec(t *testing.T) {
+	t.Parallel()
 	due := time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC)
 	onceDate := due
 

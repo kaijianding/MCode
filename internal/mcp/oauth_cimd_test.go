@@ -216,6 +216,7 @@ func seedStoredClient(t *testing.T, secrets config.SecretStore, serverID string,
 }
 
 func TestClientRegistrationPrefersCIMD(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	port := freeTCPPort(t)
 	docURL := f.as.URL + "/client-metadata.json"
@@ -270,6 +271,7 @@ func TestClientRegistrationPrefersCIMD(t *testing.T) {
 }
 
 func TestClientRegistrationFallsBackToDCR(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{metadata: cimdMetadataNoSupport})
 	docURL := f.as.URL + "/client-metadata.json"
 	mgr := newCIMDManager(t, nil, docURL, 0)
@@ -297,6 +299,7 @@ func TestClientRegistrationFallsBackToDCR(t *testing.T) {
 }
 
 func TestClientRegistrationRequiresNoneAuthMethod(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		metadata: func(asURL string) map[string]any {
 			meta := defaultCIMDMetadata(asURL)
@@ -318,6 +321,7 @@ func TestClientRegistrationRequiresNoneAuthMethod(t *testing.T) {
 }
 
 func TestClientRegistrationReusesStoredClient(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	secrets := config.NewMemorySecretStore()
 	mgr := newCIMDManager(t, secrets, f.as.URL+"/client-metadata.json", 0)
@@ -347,6 +351,7 @@ func TestClientRegistrationReusesStoredClient(t *testing.T) {
 }
 
 func TestClientRegistrationDeviceFlowSkipsRedirectURI(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	secrets := config.NewMemorySecretStore()
 	mgr := newCIMDManager(t, secrets, f.as.URL+"/client-metadata.json", 0)
@@ -378,6 +383,7 @@ func TestClientRegistrationDeviceFlowSkipsRedirectURI(t *testing.T) {
 }
 
 func TestCIMDRegistrationStageRejectionDoesNotSetMarker(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		metadata: cimdMetadataNoSupport,
 		register: func(w http.ResponseWriter, body map[string]any, call int) {
@@ -406,6 +412,7 @@ func TestCIMDRegistrationStageRejectionDoesNotSetMarker(t *testing.T) {
 }
 
 func TestCIMDTokenStageInvalidClientFallsBackToDCR(t *testing.T) {
+	t.Parallel()
 	docURL := ""
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		token: func(w http.ResponseWriter, form url.Values, call int) {
@@ -463,6 +470,7 @@ func TestCIMDTokenStageInvalidClientFallsBackToDCR(t *testing.T) {
 }
 
 func TestCIMDTokenStageUnauthorizedClientRetriesOnce(t *testing.T) {
+	t.Parallel()
 	docURL := ""
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		token: func(w http.ResponseWriter, form url.Values, call int) {
@@ -506,6 +514,7 @@ func TestCIMDTokenStageUnauthorizedClientRetriesOnce(t *testing.T) {
 }
 
 func TestCIMDUnavailableMarkerSkipsCIMDOnNextSignIn(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	docURL := f.as.URL + "/client-metadata.json"
 	secrets := config.NewMemorySecretStore()
@@ -530,6 +539,7 @@ func TestCIMDUnavailableMarkerSkipsCIMDOnNextSignIn(t *testing.T) {
 }
 
 func TestCIMDMarkerIgnoredAfterDocumentURLChange(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	oldDocURL := "https://old.example/client-metadata.json"
 	newDocURL := f.as.URL + "/new-client-metadata.json"
@@ -562,6 +572,7 @@ func TestCIMDMarkerIgnoredAfterDocumentURLChange(t *testing.T) {
 }
 
 func TestRefreshInvalidClientClearsTokenAndClient(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		token: func(w http.ResponseWriter, form url.Values, call int) {
 			if form.Get("grant_type") == "refresh_token" {
@@ -659,6 +670,7 @@ func (s *countingSecretStore) deleteCount(account string) int {
 }
 
 func TestRefreshInvalidClientSingleflightCleansOnce(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{
 		token: func(w http.ResponseWriter, form url.Values, call int) {
 			time.Sleep(200 * time.Millisecond)
@@ -719,6 +731,7 @@ func TestRefreshInvalidClientSingleflightCleansOnce(t *testing.T) {
 }
 
 func TestSignOutKeepsCIMDMarker(t *testing.T) {
+	t.Parallel()
 	f := newCIMDFixture(t, cimdFixtureOptions{})
 	docURL := f.as.URL + "/client-metadata.json"
 	secrets := config.NewMemorySecretStore()

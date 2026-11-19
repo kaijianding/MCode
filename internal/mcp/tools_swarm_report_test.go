@@ -26,6 +26,7 @@ func callSwarmReportGet(t *testing.T, srv *Server, threadID string, args map[str
 }
 
 func TestSwarmReportGetReturnsFullSummaryForOwnLead(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 	registerThread(t, st, "lead-2", "proj-test-1")
@@ -62,6 +63,7 @@ func TestSwarmReportGetReturnsFullSummaryForOwnLead(t *testing.T) {
 }
 
 func TestSwarmReportGetContinuedSession(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-a", "proj-test-1")
 	registerThread(t, st, "lead-d", "proj-test-1")
@@ -107,6 +109,7 @@ func TestSwarmReportGetContinuedSession(t *testing.T) {
 }
 
 func TestSwarmReportGetFallsBackToBee(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCPWithOptions(t, func(o *Options) {
 		o.SwarmBees = func(leadThreadID string) []SwarmBeeSummary {
 			if leadThreadID != "lead-1" {
@@ -158,6 +161,7 @@ func TestSwarmReportGetFallsBackToBee(t *testing.T) {
 
 // TestSwarmReportGetListSorted bees 列表按 StartedAt 升序返回，字段齐全，未结束时不含 finished_at。
 func TestSwarmReportGetListSorted(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	finished := base.Add(30 * time.Minute)
 	srv, st, _ := setupTestMCPWithOptions(t, func(o *Options) {
@@ -214,6 +218,7 @@ func TestSwarmReportGetListSorted(t *testing.T) {
 
 // TestSwarmReportGetListUnavailable 未接入 bee 快照时，列表模式返回 internal 错误。
 func TestSwarmReportGetListUnavailable(t *testing.T) {
+	t.Parallel()
 	srv, st, _ := setupTestMCP(t)
 	registerThread(t, st, "lead-1", "proj-test-1")
 
@@ -225,6 +230,7 @@ func TestSwarmReportGetListUnavailable(t *testing.T) {
 
 // TestSwarmReportGetListNeedsSessionScope 没有会话作用域身份时，列表模式同样返回 forbidden。
 func TestSwarmReportGetListNeedsSessionScope(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := setupTestMCPWithOptions(t, func(o *Options) {
 		o.SwarmBees = func(string) []SwarmBeeSummary {
 			return []SwarmBeeSummary{{ID: "bee-1", Status: "running", StartedAt: time.Now()}}

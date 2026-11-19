@@ -15,6 +15,7 @@ import (
 // TestSSEClient_HandshakeAndResponses 校验经典 SSE 传输：GET 建立事件流、
 // 接收 endpoint 事件、POST 到该地址、响应经 event: message 回到本地。
 func TestSSEClient_HandshakeAndResponses(t *testing.T) {
+	t.Parallel()
 	outgoing := make(chan string, 16)
 	var mu sync.Mutex
 	var postPath, postQuery string
@@ -139,6 +140,7 @@ func TestSSEClient_HandshakeAndResponses(t *testing.T) {
 // TestSSEClient_FallbackToStreamableHTTP 校验兼容兜底：GET 返回 405 时说明服务
 // 其实是 streamable HTTP，客户端应改用 httpClient 完成全部调用。
 func TestSSEClient_FallbackToStreamableHTTP(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var getCount, postCount int
 

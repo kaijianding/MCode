@@ -24,6 +24,7 @@ func newReviewGuardServer(t *testing.T) (*Server, *store.Store) {
 // TestGoalReviewGuard 覆盖总管对自己目标下任务的审批护栏：
 // 第二次打回与接受含 [你验] 的任务必须先问用户，普通会话与请求复核不受影响。
 func TestGoalReviewGuard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv, st := newReviewGuardServer(t)
 
