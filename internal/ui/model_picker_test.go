@@ -344,11 +344,9 @@ func TestRenderModelRow_DefaultIdentity(t *testing.T) {
 	props := ModelPickerProps{KeyPrefix: "t-row-"}
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Column(c).Width(300).Children(func() {
-			renderModelRow(c, props, modelRowOptions{
-				Provider:     providers[0],
-				Model:        providers[0].Models[0],
-				ShowSubtitle: true,
-				SubtitleText: providers[0].Name,
+			renderModelPickerListRow(c, props, modelRowOptions{
+				Provider: providers[0],
+				Model:    providers[0].Models[0],
 			})
 		})
 	}, 320, 160)
@@ -630,50 +628,6 @@ func TestModelPickerListPageSkipsMissingPinnedModel(t *testing.T) {
 	}
 }
 
-// 二级列表默认只展示当前渠道的主模型，其余收进分组底部的“更多模型（N）”，点击后展开。
-func TestRenderModelListSecondaryModelsCollapsed(t *testing.T) {
-	testenv.TempHome(t)
-	t.Cleanup(func() {
-		setModelPanelProviderMoreOpen("t-secondary", "lead", "cline", false)
-	})
-
-	providers := []ProviderInfo{{
-		ID:        "cline",
-		Name:      "Cline",
-		Available: true,
-		Models: []ModelInfo{
-			{ID: "cline-pass/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", IsDefault: true},
-			{ID: "cline-pass/opus-5", Name: "Opus 5"},
-			{ID: "cline-free/glm-5.3", Name: "GLM-5.3", Secondary: true},
-			{ID: "cline-free/kimi-k3", Name: "Kimi K3", Secondary: true},
-		},
-	}}
-	props := ModelPickerProps{KeyPrefix: "t-secondary-", ScopeKey: "t-secondary"}
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(300).Children(func() {
-			renderModelList(c, props, "lead-more-", "lead", providers, "",
-				func(ProviderInfo, int, ModelInfo) bool { return false },
-				func(ProviderInfo) bool { return false },
-				nil)
-		})
-	}, 320, 640)
-	tt.Frame()
-
-	if !tt.HasText("DeepSeek V4.1 Flash") || !tt.HasText("Opus 5") {
-		t.Fatalf("主模型应默认展示: %v", tt.Texts())
-	}
-	if !tt.HasText("更多模型（2）") {
-		t.Fatalf("次要模型应收进“更多模型（2）”: %v", tt.Texts())
-	}
-	if tt.HasText("GLM-5.3") || tt.HasText("Kimi K3") {
-		t.Fatalf("折叠时不应展示次要模型: %v", tt.Texts())
-	}
-	if err := tt.Click("更多模型（2）"); err != nil {
-		t.Fatalf("点击更多模型行失败: %v", err)
-	}
-	waitFor(t, tt, func() bool { return tt.HasText("GLM-5.3") && tt.HasText("Kimi K3") })
-}
-
 // 列表页搜索词匹配：空查询全部命中；模型名大小写不敏感；provider 名与模型 ID 也能命中；不相关词不命中。
 func TestModelPickerQueryMatch(t *testing.T) {
 	prov := ProviderInfo{
@@ -788,75 +742,6 @@ func TestModelCapsuleTwoLine(t *testing.T) {
 	follow.Bees = ModelSelection{}
 	if tt := render(follow); tt.HasText("V4.1 Flash") {
 		t.Fatalf("子代理跟随主代理时不应显示子代理短名, got %v", tt.Texts())
-	}
-}
-
-// 可用但模型目录为空的供应商在选择器里给出原因和“重新探测”入口；
-// 没有原因文案的空目录仍不画分组，搜索态也不画说明块。
-func TestRenderModelList_ProviderCatalogNotice(t *testing.T) {
-	testenv.TempHome(t)
-	t.Cleanup(func() {
-		modelPickerStatesMu.Lock()
-		modelPickerStates = make(map[string]*ModelPickerState)
-		modelPickerStatesMu.Unlock()
-	})
-
-	providers := []ProviderInfo{
-		{ID: "claude", Name: "Claude", Available: true, UnavailableReason: "未安装 Claude Code CLI"},
-		{ID: "codex", Name: "Codex", Available: true},
-	}
-	render := func(props ModelPickerProps, query string) *ui.Tester {
-		tt := ui.NewTester(func(c *ui.Context) {
-			ui.Column(c).Width(320).Children(func() {
-				renderModelList(c, props, "lead-more-", "lead", providers, query,
-					func(ProviderInfo, int, ModelInfo) bool { return false },
-					func(ProviderInfo) bool { return false },
-					nil)
-			})
-		}, 340, 360)
-		tt.Frame()
-		return tt
-	}
-
-	refreshed := 0
-	props := ModelPickerProps{
-		Mode:      ModelPickerSimple,
-		KeyPrefix: "t-notice-",
-		ScopeKey:  "t-notice",
-		State:     &ModelPickerState{},
-		Providers: providers,
-		OnRefreshCatalog: func() {
-			refreshed++
-		},
-	}
-	tt := render(props, "")
-	if !tt.HasText("Claude · 未安装 Claude Code CLI") {
-		t.Fatalf("应展示供应商与目录原因: %v", tt.Texts())
-	}
-	if tt.HasText("Codex") {
-		t.Fatalf("没有原因文案的空目录不应画分组: %v", tt.Texts())
-	}
-	if err := tt.Click("重新探测"); err != nil {
-		t.Fatalf("点击重新探测失败: %v", err)
-	}
-	tt.Frame()
-	if refreshed != 1 {
-		t.Fatalf("重新探测回调应被调用一次，实际 %d", refreshed)
-	}
-
-	// 搜索态保持原样：不画说明块。
-	if search := render(props, "claude"); search.HasText("重新探测") {
-		t.Fatalf("搜索态不应画重新探测入口: %v", search.Texts())
-	}
-
-	// 没有传 OnRefreshCatalog 时说明仍在，但不画按钮。
-	props.OnRefreshCatalog = nil
-	noButton := render(props, "")
-	if !noButton.HasText("Claude · 未安装 Claude Code CLI") {
-		t.Fatalf("未传回调时仍应展示原因: %v", noButton.Texts())
-	}
-	if noButton.HasText("重新探测") {
-		t.Fatalf("未传 OnRefreshCatalog 时不应画重新探测按钮: %v", noButton.Texts())
 	}
 }
 
@@ -1013,20 +898,6 @@ func TestModelPickerCardUsesSelectedSide(t *testing.T) {
 	}
 }
 
-func TestModelPickerSelectedRowSubtitleFitsSingleLine(t *testing.T) {
-	provider := ProviderInfo{ID: "claude", Name: "A very long provider subtitle that must fit on one line"}
-	model := ModelInfo{ID: "long", Name: "A very long model name that must fit on one line", SupportsFast: true, Efforts: []string{"low", "high"}}
-	props := ModelPickerProps{KeyPrefix: "row-fit-", OnReset: func(ModelPickerSide) {}, OnToggleFast: func(ModelPickerSide) {}, OnEffort: func(ModelPickerSide, string) {}}
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(330).Children(func() {
-			renderModelRow(c, props, modelRowOptions{Provider: provider, Model: model, IsChecked: true, ShowSubtitle: true})
-		})
-	}, 330, 200)
-	if r, ok := tt.Find(provider.Name); !ok || r.H > 20 {
-		t.Fatalf("副标题应为单行: rect=%+v, found=%v", r, ok)
-	}
-}
-
 func TestModelPickerFollowLeadOnlyOnBeesList(t *testing.T) {
 	providers := modelPickerTestProviders()
 	for _, side := range []ModelPickerSide{ModelPickerSideLead, ModelPickerSideBees} {
@@ -1079,8 +950,8 @@ func TestModelPickerLeadListRestoresPairs(t *testing.T) {
 	}
 }
 
-// 未开启 ShowGroupName 的调用方（如设置页直接复用本行）只显示模型名、不显示分组名和右端星标；
-// 模型列表页、收藏卡与搜索都会开启 ShowGroupName，见 TestModelPickerGroupedListShowsGroupName。
+// ShowGroup 控制左侧图标槽：true 时显示 Provider 图标，false 时按需显示已收藏星标；
+// 未开启 ShowGroupName 时两类行均只显示模型名、不显示 5B 行内分组名。
 func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 	providers := modelPickerTestProviders()
 	prov := providers[0]
@@ -1103,10 +974,10 @@ func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 		t.Fatalf("ShowGroup=true 时应显示模型名: %v", pinnedTT.Texts())
 	}
 	if pinnedTT.HasText("claude") {
-		t.Fatalf("ShowGroup=true 时不应再显示右侧分组名: %v", pinnedTT.Texts())
+		t.Fatalf("未开启 ShowGroupName 时不应显示行内分组名: %v", pinnedTT.Texts())
 	}
 	if _, ok := pinnedTT.Find("已收藏"); ok {
-		t.Fatalf("ShowGroup=true 时不应再显示右端星标: %v", pinnedTT.AccessAll())
+		t.Fatalf("ShowGroup=true 时左侧图标槽画供应商图标，不应显示已收藏星标: %v", pinnedTT.AccessAll())
 	}
 
 	plainTT := render(plain, true)
@@ -1114,15 +985,15 @@ func TestModelPickerListRowPinnedAndGroupStar(t *testing.T) {
 		t.Fatalf("ShowGroup=true 时应显示模型名: %v", plainTT.Texts())
 	}
 	if plainTT.HasText("dewuopenai/deepseek-v4.1-flash") || plainTT.HasText("dewuopenai") {
-		t.Fatalf("ShowGroup=true 时不应再显示右侧分组名: %v", plainTT.Texts())
+		t.Fatalf("未开启 ShowGroupName 时不应显示行内分组名: %v", plainTT.Texts())
 	}
 	if _, ok := plainTT.Find("已收藏"); ok {
-		t.Fatalf("ShowGroup=true 时不应再显示右端星标")
+		t.Fatalf("ShowGroup=true 时不应显示已收藏星标")
 	}
 
 	noGroupTT := render(pinned, false)
 	if !noGroupTT.HasText("Claude 3.7 Sonnet") || noGroupTT.HasText("claude") {
-		t.Fatalf("ShowGroup=false 时应只显示模型名不显示分组名: %v", noGroupTT.Texts())
+		t.Fatalf("ShowGroup=false 且未开启 ShowGroupName 时应只显示模型名不显示分组名: %v", noGroupTT.Texts())
 	}
 	starRect, ok := noGroupTT.Find("已收藏")
 	if !ok {
@@ -1348,10 +1219,12 @@ func TestModelPickerGrouped_EmptyProviderCatalogNotice(t *testing.T) {
 	providers := []ProviderInfo{
 		{ID: "claude", Name: "Claude", Available: true, UnavailableReason: "未安装 Claude Code CLI"},
 		{ID: "codex", Name: "Codex", Available: true, Models: []ModelInfo{{ID: "o3-mini", Name: "o3-mini"}}},
+		{ID: "gemini", Name: "Gemini", Available: true},
 	}
 	state := &ModelPickerState{}
 	scope := "grouped-empty-notice"
 	state.setListOpen(scope, ModelPickerSideLead, true)
+	refreshed := 0
 	props := ModelPickerProps{
 		Mode:             ModelPickerSimple,
 		KeyPrefix:        "grouped-notice-",
@@ -1359,7 +1232,7 @@ func TestModelPickerGrouped_EmptyProviderCatalogNotice(t *testing.T) {
 		State:            state,
 		Providers:        providers,
 		Selection:        ModelSelection{Provider: "codex", Model: "o3-mini"},
-		OnRefreshCatalog: func() {},
+		OnRefreshCatalog: func() { refreshed++ },
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
 		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
@@ -1368,6 +1241,40 @@ func TestModelPickerGrouped_EmptyProviderCatalogNotice(t *testing.T) {
 
 	if !tt.HasText("Claude · 未安装 Claude Code CLI") || !tt.HasText("重新探测") {
 		t.Fatalf("空目录且有原因的可用 provider 应显示原因与重新探测: %v", tt.Texts())
+	}
+	if tt.HasText("Gemini") {
+		t.Fatalf("没有原因文案的空目录不应画分组: %v", tt.Texts())
+	}
+	if err := tt.Click("重新探测"); err != nil {
+		t.Fatalf("点击重新探测失败: %v", err)
+	}
+	tt.Frame()
+	if refreshed != 1 {
+		t.Fatalf("重新探测回调应被调用一次，实际 %d", refreshed)
+	}
+
+	// 搜索态不画目录说明块。
+	searchState := &ModelPickerState{searchQuery: "claude"}
+	searchState.setListOpen(scope, ModelPickerSideLead, true)
+	searchProps := props
+	searchProps.State = searchState
+	searchTT := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, searchProps, searchState, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(searchTT)
+	if searchTT.HasText("重新探测") {
+		t.Fatalf("搜索态不应画重新探测入口: %v", searchTT.Texts())
+	}
+
+	// 未传 OnRefreshCatalog 时保留原因说明但不画重新探测按钮。
+	noBtnProps := props
+	noBtnProps.OnRefreshCatalog = nil
+	noBtnTT := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, noBtnProps, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(noBtnTT)
+	if !noBtnTT.HasText("Claude · 未安装 Claude Code CLI") || noBtnTT.HasText("重新探测") {
+		t.Fatalf("未传 OnRefreshCatalog 时应展示原因但不画重新探测按钮: %v", noBtnTT.Texts())
 	}
 }
 
@@ -2083,20 +1990,22 @@ func TestModelPickerOpenListCallsOnOpenList(t *testing.T) {
 	}
 }
 
-// 跨 Agent 平铺的行（收藏、搜索）在右侧显示分组名：模型 ID 有斜杠取斜杠前，
-// 没有则用 Provider ID；Agent 分组卡片内的行（ShowGroupName 缺省）不显示，避免与卡片标题重复。
+// 5B 行内紧跟分组名：Agent 分组卡片（ShowGroup=false）仅带有效上游前缀的模型显示「· 分组」；
+// 跨 Agent 收藏卡片（ShowGroup=true）无前缀时回退展示「· <providerID>」；未开启 ShowGroupName 则不显示。
 func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
 	providers := modelPickerTestProviders()
 	prov := providers[0]
 	cases := []struct {
-		name      string
-		model     ModelInfo
-		showGroup bool
-		wantGroup string
+		name          string
+		model         ModelInfo
+		showGroup     bool
+		showGroupName bool
+		wantGroup     string
 	}{
-		{name: "无前缀用 Provider", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: true, wantGroup: "claude"},
-		{name: "有前缀取斜杠前", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: true, wantGroup: "bulita_claude"},
-		{name: "分组卡片内不显示", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: false},
+		{name: "Agent卡内无前缀不显示", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: false, showGroupName: true, wantGroup: ""},
+		{name: "收藏卡无前缀回退Provider", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: true, showGroupName: true, wantGroup: "· claude"},
+		{name: "Agent卡内有前缀展示", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: false, showGroupName: true, wantGroup: "· bulita_claude"},
+		{name: "关闭ShowGroupName不显示", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: true, showGroupName: false, wantGroup: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2107,7 +2016,8 @@ func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
 						KeyPrefix:     "lead-",
 						Provider:      prov,
 						Model:         tc.model,
-						ShowGroupName: tc.showGroup,
+						ShowGroup:     tc.showGroup,
+						ShowGroupName: tc.showGroupName,
 					})
 				})
 			}, 320, 120)
@@ -2116,19 +2026,19 @@ func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
 				t.Fatalf("缺少模型名: %v", tt.Texts())
 			}
 			if tc.wantGroup == "" {
-				if tt.HasText("claude") || tt.HasText("bulita_claude") {
-					t.Fatalf("分组卡片内不应显示分组名: %v", tt.Texts())
+				if slices.Contains(tt.Texts(), "· claude") || slices.Contains(tt.Texts(), "· bulita_claude") {
+					t.Fatalf("不应显示分组名: %v", tt.Texts())
 				}
 				return
 			}
-			if !tt.HasText(tc.wantGroup) {
+			if !slices.Contains(tt.Texts(), tc.wantGroup) {
 				t.Fatalf("缺少分组名 %q: %v", tc.wantGroup, tt.Texts())
 			}
 		})
 	}
 }
 
-// 搜索态跨 Agent 平铺命中模型，每行右侧带分组名。
+// 搜索态保留 Agent 分组卡片标题：带上游前缀的模型展示「· 分组」，普通直连模型不冗余重复 Agent ID。
 func TestModelPickerSearchShowsGroupName(t *testing.T) {
 	providers := modelPickerTestProviders()
 	providers[0].Models = append(providers[0].Models, ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"})
@@ -2142,30 +2052,34 @@ func TestModelPickerSearchShowsGroupName(t *testing.T) {
 	state.setListOpen(props.ScopeKey, ModelPickerSideLead, true)
 	tt := ui.NewTester(func(c *ui.Context) { renderModelPickerListPage(c, props, state, ModelPickerSideLead) }, 330, 640)
 	settleModelPickerPage(tt)
-	for _, want := range []string{"Claude 3.7 Sonnet", "Claude 3.5 Haiku", "Claude Opus 5.5", "claude", "bulita_claude"} {
-		if !tt.HasText(want) {
+	for _, want := range []string{"Claude 3.7 Sonnet", "Claude 3.5 Haiku", "Claude Opus 5.5", "· bulita_claude"} {
+		if !slices.Contains(tt.Texts(), want) {
 			t.Fatalf("搜索态缺少 %q: %v", want, tt.Texts())
 		}
+	}
+	if slices.Contains(tt.Texts(), "· claude") {
+		t.Fatalf("Agent 分组卡片内普通直连模型不应冗余显示「· claude」: %v", tt.Texts())
 	}
 	if tt.HasText("DeepSeek V4.1 Flash") || tt.HasText("dewuopenai") {
 		t.Fatalf("未命中的模型不应出现在搜索结果里: %v", tt.Texts())
 	}
 }
 
-// 列表页（非搜索态）的可折叠 Agent 卡片内，模型行右侧同样显示分组名。
+// 列表页分组卡片：Agent 卡内仅带前缀模型展示「· 分组」，普通模型不重复 Agent ID；跨 Agent 收藏卡无前缀也回退显示「· <provider>」。
 func TestModelPickerGroupedListShowsGroupName(t *testing.T) {
 	providers := modelPickerTestProviders()
 	providers[0].Models = append(providers[0].Models, ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"})
 	providers[1].Models = append(providers[1].Models, ModelInfo{ID: "dewuopenai/deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash"})
+	pins := []ModelPin{{Provider: "claude", ModelID: "claude-3-7-sonnet"}}
 	selection := ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"}
 	render := func(openCard string) *ui.Tester {
 		state := &ModelPickerState{MenuOpen: true, openCard: openCard, openCardSet: true}
 		props := ModelPickerProps{Mode: ModelPickerSimple, KeyPrefix: "grouped-name-", ScopeKey: "grouped-name-test", State: state,
-			Providers: providers, Selection: selection,
+			Providers: providers, Pins: pins, Selection: selection,
 		}
 		tt := ui.NewTester(func(c *ui.Context) {
 			ui.Column(c).Width(320).Children(func() {
-				renderModelPickerGroupedList(c, props, state, ModelPickerSideLead, selection, providers, nil, "", nil)
+				renderModelPickerGroupedList(c, props, state, ModelPickerSideLead, selection, providers, modelPickerPinnedEntries(pins, providers), "", nil)
 			})
 		}, 340, 640)
 		tt.Frame()
@@ -2173,16 +2087,29 @@ func TestModelPickerGroupedListShowsGroupName(t *testing.T) {
 	}
 
 	claudeCard := render("claude")
-	for _, want := range []string{"Claude 3.7 Sonnet", "Claude Opus 5.5", "claude", "bulita_claude"} {
-		if !claudeCard.HasText(want) {
+	for _, want := range []string{"Claude 3.7 Sonnet", "Claude Opus 5.5", "· bulita_claude"} {
+		if !slices.Contains(claudeCard.Texts(), want) {
 			t.Fatalf("Claude 卡内缺少 %q: %v", want, claudeCard.Texts())
 		}
 	}
+	if slices.Contains(claudeCard.Texts(), "· claude") {
+		t.Fatalf("Claude 卡内普通模型不应冗余显示「· claude」: %v", claudeCard.Texts())
+	}
 
 	codexCard := render("codex")
-	for _, want := range []string{"o3-mini", "DeepSeek V4.1 Flash", "codex", "dewuopenai"} {
-		if !codexCard.HasText(want) {
+	for _, want := range []string{"o3-mini", "DeepSeek V4.1 Flash", "· dewuopenai"} {
+		if !slices.Contains(codexCard.Texts(), want) {
 			t.Fatalf("Codex 卡内缺少 %q: %v", want, codexCard.Texts())
+		}
+	}
+	if slices.Contains(codexCard.Texts(), "· codex") {
+		t.Fatalf("Codex 卡内普通模型不应冗余显示「· codex」: %v", codexCard.Texts())
+	}
+
+	pinnedCard := render(modelPickerPinnedCardID)
+	for _, want := range []string{"Claude 3.7 Sonnet", "· claude"} {
+		if !slices.Contains(pinnedCard.Texts(), want) {
+			t.Fatalf("收藏卡内无前缀模型应回退显示 %q: %v", want, pinnedCard.Texts())
 		}
 	}
 }
@@ -2211,8 +2138,8 @@ func TestModelPickerSearchKeepsAgentHeaders(t *testing.T) {
 		t.Fatalf("未命中的模型不应出现在搜索里: %v", tt.Texts())
 	}
 	// 卡片强制展开：命中行直接可见，不需要再点标题。
-	if !tt.HasText("google-antigravity") {
-		t.Fatalf("搜索命中行应直接展开并显示分组名: %v", tt.Texts())
+	if !slices.Contains(tt.Texts(), "· google-antigravity") {
+		t.Fatalf("搜索命中行应直接展开并显示「· google-antigravity」: %v", tt.Texts())
 	}
 }
 
@@ -2235,21 +2162,273 @@ func TestModelPickerSearchPinnedGroup(t *testing.T) {
 
 	hit := render("claude")
 	if !hit.HasText("收藏") {
-		t.Fatalf("命中共收藏模型时应显示收藏分组: %v", hit.Texts())
+		t.Fatalf("命中收藏模型时应显示收藏分组: %v", hit.Texts())
 	}
-	// 每行渲染 Label 与正文两个文本节点：收藏卡片一行 + Claude 分组卡片一行。
-	pinnedRows := 0
-	for _, text := range hit.Texts() {
-		if text == "Claude 3.7 Sonnet" {
-			pinnedRows++
+	var sonnetRows []ui.AccessInfo
+	for _, acc := range hit.AccessAll() {
+		if acc.Role == ui.RoleButton && acc.Name == "Claude 3.7 Sonnet" {
+			sonnetRows = append(sonnetRows, acc)
 		}
 	}
-	if pinnedRows != 4 {
-		t.Fatalf("收藏分组与 Agent 分组应各有一行, got %d: %v", pinnedRows, hit.Texts())
+	if len(sonnetRows) != 2 {
+		t.Fatalf("收藏分组与 Agent 分组应各有一个可点击行, got %d (%+v)", len(sonnetRows), sonnetRows)
+	}
+	if !slices.Contains(hit.Texts(), "· claude") {
+		t.Fatalf("收藏卡片命中的跨 Agent 行应回退显示「· claude」: %v", hit.Texts())
+	}
+	if !hit.HasText("Claude 3.5 Haiku") {
+		t.Fatalf("Claude 分组卡片应同时命中 Claude 3.5 Haiku: %v", hit.Texts())
 	}
 
 	miss := render("o3-mini")
 	if miss.HasText("收藏") {
 		t.Fatalf("收藏未命中时不应显示收藏分组: %v", miss.Texts())
+	}
+}
+
+func TestModelPickerListRow5BInlineGroupLayout(t *testing.T) {
+	prov := ProviderInfo{ID: "claude", Name: "Claude", Available: true}
+	cases := []struct {
+		name      string
+		model     ModelInfo
+		isChecked bool
+		iconSize  float32
+	}{
+		{
+			name: "checked_long_model_and_group_fits_330px",
+			model: ModelInfo{
+				ID:   "bulita_claude/super-long-model-id",
+				Name: "bulita_claude/Super-Long-Model-Name-With-Many-Segments-For-5B-Inline-Layout-Check",
+			},
+			isChecked: true,
+			iconSize:  IconSM,
+		},
+		{
+			name: "fast_long_model_and_long_group_fits_330px",
+			model: ModelInfo{
+				ID:           "very_long_upstream_gateway_group/super-long-model-id",
+				Name:         "Super-Long-Model-Name-That-Must-Truncate-Before-Pushing-Zap-Out-Of-Row (auto)",
+				SupportsFast: true,
+			},
+			isChecked: false,
+			iconSize:  12,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := ModelPickerProps{KeyPrefix: "row-5b-"}
+			tt := ui.NewTester(func(c *ui.Context) {
+				ui.Column(c).Width(330).Background(modelPickerPanelBg).Children(func() {
+					renderModelPickerListRow(c, props, modelRowOptions{
+						KeyPrefix:     "lead-",
+						Provider:      prov,
+						Model:         tc.model,
+						IsChecked:     tc.isChecked,
+						ShowGroupName: true,
+					})
+				})
+			}, 330, 120)
+			tt.Frame()
+
+			btnInfo, ok := tt.Access(tc.model.Name)
+			if !ok {
+				t.Fatalf("未找到行按钮 %q: %v", tc.model.Name, tt.AccessAll())
+			}
+			if btnInfo.Bounds.X < 0 || btnInfo.Bounds.X+btnInfo.Bounds.W > 330.5 {
+				t.Fatalf("行容器超出 330px 边界: %+v", btnInfo.Bounds)
+			}
+
+			groupName := modelPickerRowGroup(prov, tc.model, false)
+			displayName := modelPickerStripGroupPrefix(modelPickerRowName(prov, tc.model.Name), groupName)
+			nameRect, ok := tt.Find(displayName)
+			if !ok {
+				t.Fatalf("未找到模型名文本 %q: %v", displayName, tt.Texts())
+			}
+			groupRect, ok := tt.Find("· " + groupName)
+			if !ok {
+				t.Fatalf("未找到分组名文本 %q: %v", "· "+groupName, tt.Texts())
+			}
+			if nameRect.H > 22 || groupRect.H > 22 {
+				t.Fatalf("模型名与分组名应保持单行: name=%+v group=%+v", nameRect, groupRect)
+			}
+			if groupRect.X+0.5 < nameRect.X+nameRect.W {
+				t.Fatalf("分组名应紧跟在模型名右侧，不应重叠: name=%+v group=%+v", nameRect, groupRect)
+			}
+			// 右侧状态图标在 -label-wrap 外侧且 Shrink(0)，检查其预留空间完全在按钮边界内。
+			if groupRect.X+groupRect.W+Space2+tc.iconSize+Space3 > btnInfo.Bounds.X+btnInfo.Bounds.W+0.5 {
+				t.Fatalf("右侧状态图标被挤出容器边界: group=%+v btn=%+v iconSize=%v", groupRect, btnInfo.Bounds, tc.iconSize)
+			}
+		})
+	}
+}
+
+func TestModelPickerGroupNameExtractionAndStripPrefix(t *testing.T) {
+	prov := ProviderInfo{ID: "claude", Name: "Claude", Available: true}
+	groupCases := []struct {
+		id       string
+		fallback bool
+		want     string
+	}{
+		{id: "bulita_claude/claude-opus-5.5", fallback: false, want: "bulita_claude"},
+		{id: "bulita_claude/claude-opus-5.5", fallback: true, want: "bulita_claude"},
+		{id: "bulita_grok/grok-4.6", fallback: false, want: "bulita_grok"},
+		{id: "foo/", fallback: false, want: ""},
+		{id: "foo/", fallback: true, want: "claude"},
+		{id: "/bar", fallback: false, want: ""},
+		{id: "/bar", fallback: true, want: "claude"},
+		{id: "auto/claude-sonnet", fallback: false, want: ""},
+		{id: "auto/claude-sonnet", fallback: true, want: "claude"},
+		{id: "GROUP/claude-sonnet", fallback: false, want: ""},
+		{id: "GROUP/claude-sonnet", fallback: true, want: "claude"},
+		{id: "claude-3-7-sonnet", fallback: false, want: ""},
+		{id: "claude-3-7-sonnet", fallback: true, want: "claude"},
+	}
+	for _, tc := range groupCases {
+		if got := modelPickerRowGroup(prov, ModelInfo{ID: tc.id}, tc.fallback); got != tc.want {
+			t.Fatalf("modelPickerRowGroup(%q, fallback=%v) = %q, want %q", tc.id, tc.fallback, got, tc.want)
+		}
+	}
+
+	stripCases := []struct {
+		display string
+		group   string
+		want    string
+	}{
+		{display: "bulita_grok/grok-4.6", group: "bulita_grok", want: "grok-4.6"},
+		{display: "bulita_grok/", group: "bulita_grok", want: "bulita_grok/"},
+		{display: "grok-4.6", group: "bulita_grok", want: "grok-4.6"},
+		{display: "bulita_grok/grok-4.6", group: "", want: "bulita_grok/grok-4.6"},
+	}
+	for _, tc := range stripCases {
+		if got := modelPickerStripGroupPrefix(tc.display, tc.group); got != tc.want {
+			t.Fatalf("modelPickerStripGroupPrefix(%q, %q) = %q, want %q", tc.display, tc.group, got, tc.want)
+		}
+	}
+
+	// Tooltip 使用 " · " 分隔符，且展示名已含前缀或与分组同名时不重复拼接。
+	tipCases := []struct {
+		name      string
+		model     ModelInfo
+		showGroup bool
+		wantTip   string
+	}{
+		{
+			name:      "distinct_group_uses_middots",
+			model:     ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"},
+			showGroup: false,
+			wantTip:   "Claude Opus 5.5 · bulita_claude",
+		},
+		{
+			name:      "prefixed_name_dedups_tooltip",
+			model:     ModelInfo{ID: "bulita_grok/grok-4.6", Name: "bulita_grok/grok-4.6"},
+			showGroup: false,
+			wantTip:   "bulita_grok/grok-4.6",
+		},
+		{
+			name:      "same_name_as_group_dedups_tooltip",
+			model:     ModelInfo{ID: "claude-default", Name: "claude"},
+			showGroup: true,
+			wantTip:   "claude",
+		},
+	}
+	for _, tc := range tipCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := ui.NewTester(func(c *ui.Context) {
+				ui.Column(c).Width(320).Children(func() {
+					renderModelPickerListRow(c, ModelPickerProps{KeyPrefix: "tip-"}, modelRowOptions{
+						Provider:      prov,
+						Model:         tc.model,
+						ShowGroup:     tc.showGroup,
+						ShowGroupName: true,
+					})
+				})
+			}, 340, 120)
+			tt.Frame()
+			acc, ok := tt.Access(tc.model.Name)
+			if !ok {
+				t.Fatalf("未找到行 %q: %v", tc.model.Name, tt.AccessAll())
+			}
+			if acc.Description != tc.wantTip {
+				t.Fatalf("Tooltip = %q, want %q", acc.Description, tc.wantTip)
+			}
+		})
+	}
+}
+
+func TestModelPickerSearchLockedPinnedNoEmptyText(t *testing.T) {
+	providers := modelPickerTestProviders()
+	state := &ModelPickerState{MenuOpen: true, searchQuery: "o3-mini"}
+	scope := "search-locked-pinned"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:        ModelPickerSimple,
+		KeyPrefix:   "search-locked-pinned-",
+		ScopeKey:    scope,
+		State:       state,
+		Providers:   providers,
+		HasMessages: true,
+		Pins:        []ModelPin{{Provider: "codex", ModelID: "o3-mini"}},
+		Selection:   ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("收藏") || !tt.HasText("o3-mini") {
+		t.Fatalf("锁定态搜索收藏的非当前 Agent 模型时应展示收藏卡片: %v", tt.Texts())
+	}
+	if tt.HasText("没有匹配的模型") || tt.HasText("没有可用的模型") {
+		t.Fatalf("已渲染收藏卡片时不应再出现空状态提示: %v", tt.Texts())
+	}
+}
+
+func TestModelPickerSearchHeaderNotClickableButton(t *testing.T) {
+	providers := modelPickerTestProviders()
+	providers[1].Models = append(providers[1].Models, ModelInfo{ID: "google-antigravity/claude-sonnet-4-6", Name: "Claude Sonnet 4.6"})
+	state := &ModelPickerState{MenuOpen: true, searchQuery: "sonnet"}
+	scope := "search-header-static"
+	state.setListOpen(scope, ModelPickerSideLead, true)
+	props := ModelPickerProps{
+		Mode:      ModelPickerSimple,
+		KeyPrefix: "search-hdr-static-",
+		ScopeKey:  scope,
+		State:     state,
+		Providers: providers,
+		Selection: ModelSelection{Provider: "claude", Model: "claude-3-7-sonnet"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderModelPickerListPage(c, props, state, ModelPickerSideLead)
+	}, 330, 640)
+	settleModelPickerPage(tt)
+
+	if !tt.HasText("Claude") || !tt.HasText("Codex") {
+		t.Fatalf("搜索态应保留命中分组标题: %v", tt.Texts())
+	}
+	for _, acc := range tt.AccessAll() {
+		if strings.HasPrefix(acc.Name, "折叠 ") || strings.HasPrefix(acc.Name, "展开 ") {
+			t.Fatalf("搜索态分组标题不应包含折叠/展开按钮标签: %+v", acc)
+		}
+		if (acc.Name == "Claude" || acc.Name == "Codex") && (acc.Role == ui.RoleButton || acc.Focusable) {
+			t.Fatalf("搜索态分组标题不应为可点击/可聚焦按钮: %+v", acc)
+		}
+	}
+
+	// 搜索无匹配时展示「没有匹配的模型」。
+	state.searchQuery = "nonexistent-model-xyz"
+	tt.Frame()
+	if !tt.HasText("没有匹配的模型") {
+		t.Fatalf("搜索无匹配时应展示「没有匹配的模型」: %v", tt.Texts())
+	}
+
+	// 清空搜索词后恢复原先展开状态与可折叠标题按钮。
+	state.searchQuery = ""
+	tt.Frame()
+	if !tt.HasText("Claude 3.7 Sonnet") || tt.HasText("o3-mini") {
+		t.Fatalf("清空搜索词后应恢复仅展开当前 Agent: %v", tt.Texts())
+	}
+	if _, ok := tt.Find("折叠 Claude"); !ok {
+		t.Fatalf("清空搜索词后分组标题应恢复为可折叠按钮: %v", tt.AccessAll())
 	}
 }

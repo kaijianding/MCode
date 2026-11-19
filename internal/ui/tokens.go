@@ -90,6 +90,7 @@ const gitCommitMoreHoverOpacity float32 = 0.85
 
 // 字号：一律经 scaledFont 使用。
 const (
+	TypeMicro     float32 = 10
 	TypeCaption   float32 = 11
 	TypeFootnote  float32 = 12
 	TypeBody      float32 = 13

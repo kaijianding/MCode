@@ -99,8 +99,9 @@ func renderModelPickerListPage(c *ui.Context, p ModelPickerProps, state *ModelPi
 			if tier.ID != editingTier {
 				continue
 			}
-			if prov, _, _, _ := effectiveTierModel(tier, p.PairTierOverrides, p.TierOverrides); prov != "" {
+			if prov, mod, _, _ := effectiveTierModel(tier, p.PairTierOverrides, p.TierOverrides); prov != "" {
 				selection.Provider = prov
+				selection.Model = mod
 			}
 			break
 		}
@@ -253,6 +254,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				modelPickerInvalidate(p)
 			}
 
+			renderedAny := false
 			// 搜索命中收藏里的模型时也保留收藏分组；只列命中的收藏行，并强制展开。
 			pinnedShown := pinned
 			if searching && len(pinned) > 0 {
@@ -264,6 +266,7 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 				}
 			}
 			if len(pinnedShown) > 0 {
+				renderedAny = true
 				open := openCard == modelPickerPinnedCardID
 				var onToggle func()
 				if searching {
@@ -300,7 +303,6 @@ func renderModelPickerGroupedList(c *ui.Context, p ModelPickerProps, state *Mode
 
 			currentAgent := selection.Provider
 			lockAgents := side == ModelPickerSideLead && p.HasMessages
-			renderedAny := false
 			for _, pv := range providers {
 				prov := pv
 				if lockAgents && prov.ID != currentAgent {
@@ -384,14 +386,58 @@ func renderModelPickerQuotaPercent(c *ui.Context, quotaUsed func(string) (float6
 		Shrink(0)
 }
 
-// renderModelPickerAgentHeader 渲染列表页可点击折叠的分组标题：带图标、加粗正文、可选右侧附加内容与折叠箭头。
+// renderModelPickerAgentHeader 渲染列表页分组标题：可折叠时为可点击按钮（带悬停底与折叠箭头），不可折叠时为静态容器。
 func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title string, collapsed bool, trailing func(), onToggle func()) {
-	label := title
-	if onToggle != nil {
-		label = "折叠 " + title
-		if collapsed {
-			label = "展开 " + title
+	renderContent := func() {
+		ui.Box(c.Key(key+"-icon-slot")).
+			Size(IconSM, IconSM).
+			Center().
+			Shrink(0).
+			Children(func() {
+				if icon != nil {
+					icon()
+				}
+			})
+		ui.Text(c, title).
+			FontSize(uiFont(TypeBody)).
+			FontWeight(600).
+			TextColor(modelPickerTextPrimary).
+			SingleLine().
+			Grow(1)
+		if trailing != nil {
+			trailing()
 		}
+		if onToggle != nil {
+			angle := float32(90)
+			if collapsed {
+				angle = 0
+			}
+			arrow := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
+				Size(10, 10).
+				TextColor(modelPickerTextSecondary)
+			if reduceMotion(c) {
+				arrow.Rotate(angle)
+			} else {
+				arrow.Rotate(arrow.AnimateTo(key+"-arrow", angle, ui.Animation{Duration: animateDuration(c, DurFast), Ease: ui.EaseOut}))
+			}
+		}
+	}
+
+	if onToggle == nil {
+		ui.Row(c.Key(key)).
+			Height(ControlMD).
+			Padding(Space0, Space3).
+			Radius(RadiusMD).
+			FillWidth().
+			AlignItems(ui.Center).
+			Gap(Space2).
+			Children(renderContent)
+		return
+	}
+
+	label := "折叠 " + title
+	if collapsed {
+		label = "展开 " + title
 	}
 	btn := ui.ButtonBase(c.Key(key)).
 		Label(label).
@@ -405,50 +451,13 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 	} else {
 		btn.Background(ui.Transparent)
 	}
-	btn.OnClick(func() {
-		if onToggle != nil {
-			onToggle()
-		}
-	})
+	btn.OnClick(onToggle)
 	btn.Children(func() {
 		ui.Row(c.Key(key + "-content")).
 			AlignItems(ui.Center).
 			Gap(Space2).
 			FillWidth().
-			Children(func() {
-				ui.Box(c.Key(key+"-icon-slot")).
-					Size(IconSM, IconSM).
-					Center().
-					Shrink(0).
-					Children(func() {
-						if icon != nil {
-							icon()
-						}
-					})
-				ui.Text(c, title).
-					FontSize(uiFont(TypeBody)).
-					FontWeight(600).
-					TextColor(modelPickerTextPrimary).
-					SingleLine().
-					Grow(1)
-				if trailing != nil {
-					trailing()
-				}
-				if onToggle != nil {
-					angle := float32(90)
-					if collapsed {
-						angle = 0
-					}
-					icon := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
-						Size(10, 10).
-						TextColor(modelPickerTextSecondary)
-					if reduceMotion(c) {
-						icon.Rotate(angle)
-					} else {
-						icon.Rotate(icon.AnimateTo(key+"-arrow", angle, ui.Animation{Duration: animateDuration(c, DurFast), Ease: ui.EaseOut}))
-					}
-				}
-			})
+			Children(renderContent)
 	})
 }
 
@@ -599,7 +608,33 @@ func modelPickerRowName(prov ProviderInfo, name string) string {
 	return base
 }
 
-// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽（供应商图标或已收藏星标）与模型名，右侧按需展示当前选中标记。
+// modelPickerRowGroup 返回列表行要展示的分组名。
+// 优先提取模型 ID 的有效上游前缀（跳过空段与网关路由段 auto/group）；
+// 无有效前缀时仅在允许 Provider 回退（跨 Agent 收藏卡）时返回 prov.ID。
+func modelPickerRowGroup(prov ProviderInfo, modelItem ModelInfo, allowProviderFallback bool) string {
+	id := strings.TrimSpace(modelItem.ID)
+	if head, rest, ok := strings.Cut(id, "/"); ok && head != "" && rest != "" {
+		if !strings.EqualFold(head, "auto") && !strings.EqualFold(head, "group") {
+			return head
+		}
+	}
+	if allowProviderFallback {
+		return strings.TrimSpace(prov.ID)
+	}
+	return ""
+}
+
+// modelPickerStripGroupPrefix 当展示名以 "<groupName>/" 开头且斜杠后非空时剥离重复前缀。
+func modelPickerStripGroupPrefix(displayName, groupName string) string {
+	if groupName != "" && strings.HasPrefix(displayName, groupName+"/") {
+		if rest := displayName[len(groupName)+1:]; rest != "" {
+			return rest
+		}
+	}
+	return displayName
+}
+
+// renderModelPickerListRow 渲染模型列表页的一行：左侧图标槽（供应商图标或已收藏星标）、模型名与 5B 行内分组名，右侧按需展示当前选中或快速标记。
 // 星标只反映模型是否在配置的精选列表里（见 ModelPickerProps.Pins），不可点击。
 func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOptions) {
 	prov := opt.Provider
@@ -616,18 +651,14 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 	if modelItem.IsDefault {
 		name = defaultModelRowDisplayName(prov, modelItem)
 	}
-	// 跨 Agent 平铺时在行右侧标出分组名：模型 ID 自带网关前缀（`bulita_claude/xxx`）就取斜杠前那段，
-	// 否则这个模型本来就属于该 Provider。
 	groupName := ""
 	if opt.ShowGroupName {
-		groupName = prov.ID
-		if i := strings.IndexByte(modelItem.ID, '/'); i > 0 {
-			groupName = modelItem.ID[:i]
-		}
+		groupName = modelPickerRowGroup(prov, modelItem, opt.ShowGroup)
 	}
+	displayName := modelPickerStripGroupPrefix(modelPickerRowName(prov, name), groupName)
 	tip := name
-	if groupName != "" {
-		tip = name + "  " + groupName
+	if groupName != "" && name != groupName && !strings.HasPrefix(name, groupName+"/") {
+		tip = name + " · " + groupName
 	}
 	btn := ui.ButtonBase(c.Key(rowKey)).
 		Label(name).
@@ -682,28 +713,39 @@ func renderModelPickerListRow(c *ui.Context, p ModelPickerProps, opt modelRowOpt
 							TextColor(modelPickerTextSecondary)
 					}
 				})
-				ui.Text(c, modelPickerRowName(prov, name)).
-					FontSize(uiFont(TypeBody)).
-					TextColor(modelPickerTextPrimary).
-					SingleLine().
-					Shrink(0)
-				ui.Row(c.Key(rowKey + "-name-gap")).Grow(1)
-				if groupName != "" {
-					ui.Text(c, groupName).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(modelPickerTextSecondary).
-						SingleLine().
-						Ellipsis("…").
-						Shrink(1)
-				}
+				ui.Row(c.Key(rowKey + "-label-wrap")).
+					AlignItems(ui.Center).
+					Gap(Space1).
+					Grow(1).
+					MinWidth(0).
+					Children(func() {
+						ui.Text(c, displayName).
+							FontSize(uiFont(TypeBody)).
+							TextColor(modelPickerTextPrimary).
+							SingleLine().
+							Ellipsis("…").
+							Shrink(1).
+							MinWidth(0)
+						if groupName != "" {
+							ui.Text(c, "· "+groupName).
+								FontSize(uiFont(TypeMicro)).
+								TextColor(modelPickerTextSecondary).
+								SingleLine().
+								Ellipsis("…").
+								Shrink(10).
+								MinWidth(0)
+						}
+					})
 				if opt.IsChecked {
 					ui.Icon(c, IconCheck()).
 						Size(IconSM, IconSM).
-						TextColor(modelPickerTextPrimary)
+						TextColor(modelPickerTextPrimary).
+						Shrink(0)
 				} else if modelItem.SupportsFast {
 					ui.Icon(c, IconByName("zap")).
 						Size(12, 12).
-						TextColor(modelPickerTextSecondary)
+						TextColor(modelPickerTextSecondary).
+						Shrink(0)
 				}
 			})
 	})
@@ -716,12 +758,10 @@ type modelRowOptions struct {
 	IsChecked    bool
 	IsLocked     bool
 	LockedReason string // 行被禁用时 Tooltip 显示的说明；为空时按锁定语义给默认文案
-	ShowSubtitle bool
-	SubtitleText string
-	ShowGroup    bool
-	// ShowGroupName 让行右侧显示分组名（模型 ID 里 `/` 之前的部分，缺省用 Provider ID）；
-	// 收藏与搜索这类跨 Agent 平铺的列表用它替代分组标题，Agent 分组卡片内的行不需要。
+	// ShowGroup 控制左侧图标槽：true 时显示 Provider 图标（收藏卡跨 Agent 场景），false 时按需显示已收藏星标。
+	ShowGroup bool
+	// ShowGroupName 控制 5B 行内紧跟的 10px 分组名（"· <group>"）：
+	// Agent 卡片内仅带上游前缀的模型展示；收藏卡片跨 Agent 时（ShowGroup=true）无前缀也回退显示 Provider ID。
 	ShowGroupName bool
-	ShowQuota     bool
 	OnPick        func(prov ProviderInfo, m ModelInfo)
 }
