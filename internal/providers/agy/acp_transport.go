@@ -84,6 +84,10 @@ func threadAffinityKey(turn harness.Turn) string {
 	return "thread:" + turn.ThreadID
 }
 
+func isUnknownModel(text string) bool {
+	return strings.Contains(text, "Unknown model ID")
+}
+
 func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
 	if turn.Attach && !h.acp.HasUnsolicitedOutput(turn.ThreadID) {
 		return nil
@@ -108,17 +112,26 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 	threadKey := threadAffinityKey(turn)
 	sessionID := turn.SessionID
 	var exclude []string
+	fresh := false
+	var unknownModelErr error
 	for retryCount := 0; ; retryCount++ {
-		routeKey := sessionID
-		if routeKey == "" {
-			routeKey = threadKey
+		routeKey := ""
+		if !fresh {
+			routeKey = sessionID
+			if routeKey == "" {
+				routeKey = threadKey
+			}
 		}
+		fresh = false
 		accountID := accounts.SystemAccountID
 		var args, env []string
 		if h.opts.Router != nil {
 			var err error
 			accountID, env, args, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
 			if err != nil {
+				if unknownModelErr != nil {
+					return unknownModelErr
+				}
 				return err
 			}
 			if threadKey != "" {
@@ -161,7 +174,7 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		if h.acp.HasResidentProcess(turn.ThreadID) {
 			h.acpAccounts.Store(turn.ThreadID, accountID)
 		}
-		if err == nil || h.opts.Router == nil || !isRateLimited(err.Error()) {
+		if err == nil || h.opts.Router == nil {
 			return err
 		}
 		eventMu.Lock()
@@ -170,6 +183,25 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		}
 		streamed := streamedText
 		eventMu.Unlock()
+		if isUnknownModel(err.Error()) {
+			if turn.SessionID == "" && !streamed && !turn.Attach && retryCount < maxRetries {
+				if unknownModelErr == nil {
+					unknownModelErr = err
+				}
+				if h.acp.HasResidentProcess(turn.ThreadID) {
+					h.acp.EvictThread(turn.ThreadID)
+					h.acpAccounts.Delete(turn.ThreadID)
+				}
+				exclude = append(exclude, accountID)
+				sessionID = ""
+				fresh = true
+				continue
+			}
+			return err
+		}
+		if !isRateLimited(err.Error()) {
+			return err
+		}
 		resetAt := parseResetTime(err.Error())
 		if !h.opts.Router.MarkLimited(routeKey, accountID, resetAt) {
 			resetInfo := ""
@@ -182,6 +214,7 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		if streamed || turn.Attach || retryCount >= maxRetries {
 			return err
 		}
+		unknownModelErr = nil
 		exclude = append(exclude, accountID)
 	}
 }

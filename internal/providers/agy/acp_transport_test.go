@@ -86,6 +86,11 @@ func runFakeAgyACP() {
 			}
 			setup = params
 			result["sessionId"] = "new-session"
+			if failure == "unknown_model" {
+				result["configOptions"] = []map[string]any{
+					{"id": "model", "category": "model", "currentValue": "default-model"},
+				}
+			}
 			if os.Getenv("MCODE_TEST_ACP_PLAN_FILE") != "" {
 				currentMode = "default"
 				result["modes"] = map[string]any{
@@ -96,6 +101,20 @@ func runFakeAgyACP() {
 		case "session/set_mode":
 			if modeID, _ := params["modeId"].(string); modeID != "" {
 				currentMode = modeID
+			}
+		case "session/set_config_option":
+			if limited && failure == "unknown_model" {
+				_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      msg["id"],
+					"error":   map[string]any{"code": -32602, "message": "Unknown model ID: x"},
+				})
+				return
+			}
+			if id, _ := params["configId"].(string); id != "" {
+				result["configOptions"] = []map[string]any{
+					{"id": id, "category": id, "currentValue": params["value"]},
+				}
 			}
 		case "session/prompt":
 			promptCount++
@@ -744,5 +763,84 @@ func TestRunACPAttachRateLimitReturnsError(t *testing.T) {
 	}
 	if h.HasUnsolicitedOutput(threadID) || len(h.ProcessRootPIDs(threadID)) != 0 {
 		t.Fatalf("Attach 失败后状态异常: unsolicited=%v roots=%v", h.HasUnsolicitedOutput(threadID), h.ProcessRootPIDs(threadID))
+	}
+}
+
+func TestRunACPUnknownModelSwitchesAccount(t *testing.T) {
+	h, router := newACPRetryHarness(t, multiaccount.AffinityStrict)
+	turn := acpRetryTurn(t, "unknown_model")
+	turn.Model = "x"
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var text strings.Builder
+	if err := h.runACP(ctx, turn, func(event harness.Event) {
+		if event.Type == harness.EventText {
+			text.WriteString(event.Text)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(router.routes, []string{"thread:thread-1", ""}) ||
+		!reflect.DeepEqual(router.excludes, [][]string{nil, {"account-0"}}) ||
+		!reflect.DeepEqual(router.uses, []string{"account-0", "account-1"}) {
+		t.Fatalf("routes %v, excludes %v, uses %v", router.routes, router.excludes, router.uses)
+	}
+	if len(router.limited) != 0 {
+		t.Fatalf("must not call MarkLimited: %v", router.limited)
+	}
+	var payload struct {
+		Env   string         `json:"env"`
+		Setup map[string]any `json:"setup"`
+	}
+	if err := json.Unmarshal([]byte(text.String()), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Env != "account-1" || payload.Setup["sessionId"] != nil {
+		t.Fatalf("retry payload = %+v", payload)
+	}
+	for _, key := range []string{"thread:thread-1", "new-session"} {
+		if id, _ := router.router.Bound(key); id != "account-1" {
+			t.Errorf("binding %s = %s, want account-1", key, id)
+		}
+	}
+	if h.acp.HasResidentProcess(turn.ThreadID) {
+		t.Fatal("unexpected resident process after retry")
+	}
+}
+
+func TestRunACPUnknownModelExistingSessionNoRetry(t *testing.T) {
+	h, router := newACPRetryHarness(t, multiaccount.AffinityStrict)
+	turn := acpRetryTurn(t, "unknown_model")
+	turn.SessionID = "existing-session"
+	turn.Model = "x"
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := h.runACP(ctx, turn, nil)
+	if err == nil || !strings.Contains(err.Error(), "Unknown model ID: x") {
+		t.Fatalf("existing session error = %v", err)
+	}
+	if !reflect.DeepEqual(router.routes, []string{"existing-session"}) ||
+		!reflect.DeepEqual(router.uses, []string{"account-0"}) ||
+		len(router.limited) != 0 {
+		t.Fatalf("routes %v, uses %v, limited %v", router.routes, router.uses, router.limited)
+	}
+}
+
+func TestRunACPUnknownModelNoAccountReturnsOriginalError(t *testing.T) {
+	h, router := newACPRetryHarness(t, multiaccount.AffinityStrict)
+	router.accounts = router.accounts[:1]
+	turn := acpRetryTurn(t, "unknown_model")
+	turn.Model = "x"
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := h.runACP(ctx, turn, nil)
+	if err == nil || !strings.Contains(err.Error(), "Unknown model ID: x") || errors.Is(err, multiaccount.ErrNoAccount) {
+		t.Fatalf("no-account fallback error = %v", err)
+	}
+	if !reflect.DeepEqual(router.routes, []string{"thread:thread-1", ""}) ||
+		!reflect.DeepEqual(router.excludes, [][]string{nil, {"account-0"}}) ||
+		!reflect.DeepEqual(router.uses, []string{"account-0"}) ||
+		len(router.limited) != 0 {
+		t.Fatalf("routes %v, excludes %v, uses %v, limited %v", router.routes, router.excludes, router.uses, router.limited)
 	}
 }
