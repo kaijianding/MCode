@@ -548,7 +548,21 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			onStarted = ackPending
 		}
 
-		err := h.runRound(ctx, turn, roundEmit, onStarted)
+		var nativePlanDecision *harness.Decision
+		roundCtx := ctx
+		if turn.InteractionMode == "plan" {
+			roundCtx = acp.WithAgyPlanApproval(ctx, func() string {
+				mu.Lock()
+				paths := append([]string(nil), planPaths...)
+				mu.Unlock()
+				return resolvePlanText(paths, turn.WorkDir, "")
+			}, func(decision harness.Decision) {
+				mu.Lock()
+				nativePlanDecision = &decision
+				mu.Unlock()
+			})
+		}
+		err := h.runRound(roundCtx, turn, roundEmit, onStarted)
 		ackPending(err)
 		if err != nil {
 			return err
@@ -563,6 +577,10 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}
 
 		mu.Lock()
+		if nativePlanDecision != nil {
+			mu.Unlock()
+			return nil
+		}
 		assistantText := textBuf.String()
 		paths := append([]string(nil), planPaths...)
 		resolvedSessionID := sessionID

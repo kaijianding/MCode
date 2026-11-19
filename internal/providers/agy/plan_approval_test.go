@@ -1,6 +1,7 @@
 package agy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,8 +24,12 @@ type fakePlanApprover struct {
 	onAck    func(harness.ApprovalRequest, error)
 }
 
-func (f *fakePlanApprover) Approve(context.Context, harness.ApprovalRequest) (harness.Decision, error) {
-	return harness.DecisionDeny, nil
+func (f *fakePlanApprover) Approve(ctx context.Context, req harness.ApprovalRequest) (harness.Decision, error) {
+	if req.Kind != harness.RequestKindPlan {
+		return harness.DecisionDeny, nil
+	}
+	resp, err := f.Interact(ctx, req)
+	return resp.Decision, err
 }
 
 func (f *fakePlanApprover) Interact(ctx context.Context, req harness.ApprovalRequest) (harness.ApprovalResponse, error) {
@@ -229,7 +234,7 @@ func runFakeAgyPlanApproval(firstLine []byte, writeMsg func(any)) {
 	}
 }
 
-func handleFakeAgyACPPlanPrompt(id any, promptCount int, currentMode string, params map[string]any) {
+func handleFakeAgyACPPlanPrompt(reader *bufio.Reader, id any, promptCount int, currentMode string, params map[string]any) {
 	planPath := os.Getenv("MCODE_TEST_AGY_PLAN_FILE")
 	planContent := os.Getenv("MCODE_TEST_AGY_PLAN_CONTENT")
 	recordFile := os.Getenv("MCODE_TEST_AGY_RECORD_FILE")
@@ -269,6 +274,41 @@ func handleFakeAgyACPPlanPrompt(id any, promptCount int, currentMode string, par
 				"method":  "session/update",
 				"params":  map[string]any{"update": update},
 			})
+		}
+		if wantOption := os.Getenv("MCODE_TEST_ACP_PLAN_OPTION"); wantOption != "" {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      9010,
+				"method":  "session/request_permission",
+				"params": map[string]any{
+					"toolCall": map[string]any{"toolCallId": "interaction_switch_mode", "kind": "switch_mode", "title": "Switch to execution"},
+					"options": []map[string]any{
+						{"optionId": "deny", "kind": "reject_once"},
+						{"optionId": "allow", "kind": "allow_once"},
+					},
+				},
+			})
+			var reply struct {
+				ID     int
+				Result struct {
+					Outcome struct {
+						Outcome  string
+						OptionID string
+					}
+				}
+			}
+			line, err := reader.ReadBytes('\n')
+			if err != nil || json.Unmarshal(line, &reply) != nil || reply.ID != 9010 ||
+				reply.Result.Outcome.Outcome != "selected" || reply.Result.Outcome.OptionID != wantOption {
+				os.Exit(22)
+			}
+			if wantOption == "allow" {
+				_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params":  map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "Implemented via native ACP."}}},
+				})
+			}
 		}
 	} else {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
@@ -630,6 +670,16 @@ func TestAgyPlanApproval_SkipsWhenNotEligible(t *testing.T) {
 }
 
 func TestAgyPlanApproval_ACP(t *testing.T) {
+	testAgyPlanApprovalACP(t, "")
+}
+
+func TestAgyPlanApproval_NativeSwitchModeSkipsSynthesized(t *testing.T) {
+	t.Run("allow", func(t *testing.T) { testAgyPlanApprovalACP(t, "allow") })
+	t.Run("deny with feedback", func(t *testing.T) { testAgyPlanApprovalACP(t, "deny") })
+}
+
+func testAgyPlanApprovalACP(t *testing.T, nativeOption string) {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
@@ -646,9 +696,19 @@ func TestAgyPlanApproval_ACP(t *testing.T) {
 	h.versions = map[string]string{exe: MinACPVersion}
 	t.Cleanup(func() { _ = h.Close() })
 
+	ackReceived := make(chan struct{}, 1)
 	approver := &fakePlanApprover{
 		interact: func(_ context.Context, _ harness.ApprovalRequest) (harness.ApprovalResponse, error) {
+			if nativeOption == "deny" {
+				return harness.ApprovalResponse{Decision: harness.DecisionDeny, Feedback: "Revise step one."}, nil
+			}
 			return harness.ApprovalResponse{Decision: harness.DecisionAllow}, nil
+		},
+		onAck: func(harness.ApprovalRequest, error) {
+			select {
+			case ackReceived <- struct{}{}:
+			default:
+			}
 		},
 	}
 
@@ -666,20 +726,30 @@ func TestAgyPlanApproval_ACP(t *testing.T) {
 			"MCODE_TEST_AGY_PLAN_FILE=" + planPath,
 			"MCODE_TEST_AGY_PLAN_CONTENT=" + wantPlan,
 			"MCODE_TEST_AGY_RECORD_FILE=" + recordFile,
+			"MCODE_TEST_ACP_PLAN_OPTION=" + nativeOption,
 		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var doneCount int
+	var nativeContinued bool
 	if err := h.Run(ctx, turn, func(ev harness.Event) {
 		if ev.Type == harness.EventDone {
 			doneCount++
+		}
+		if ev.Type == harness.EventText && ev.Text == "Implemented via native ACP." {
+			nativeContinued = true
 		}
 	}); err != nil {
 		t.Fatalf("Run ACP failed: %v", err)
 	}
 
+	select {
+	case <-ackReceived:
+	case <-ctx.Done():
+		t.Fatal("missing ACP delivery acknowledgement")
+	}
 	reqs, acks := approver.snapshot()
 	if len(reqs) != 1 || reqs[0].Kind != harness.RequestKindPlan || reqs[0].Plan != wantPlan {
 		t.Fatalf("unexpected ACP plan request: %+v", reqs)
@@ -687,10 +757,19 @@ func TestAgyPlanApproval_ACP(t *testing.T) {
 	if len(acks) != 1 || acks[0] != nil {
 		t.Fatalf("unexpected ACP acks: %v", acks)
 	}
+	records := readFakeInvocations(t, recordFile)
+	if nativeOption != "" {
+		if reqs[0].ToolID != "interaction_switch_mode" || doneCount != 1 || len(records) != 1 || records[0].Stdin != turn.Prompt {
+			t.Fatalf("unexpected native approval or extra prompt: request=%+v done=%d prompts=%+v", reqs[0], doneCount, records)
+		}
+		if nativeContinued != (nativeOption == "allow") {
+			t.Fatalf("native execution = %t, selected option = %q", nativeContinued, nativeOption)
+		}
+		return
+	}
 	if doneCount != 2 {
 		t.Fatalf("expected 2 EventDone in ACP plan approval, got %d", doneCount)
 	}
-	records := readFakeInvocations(t, recordFile)
 	if len(records) != 2 {
 		t.Fatalf("expected 2 ACP prompt invocations, got %d", len(records))
 	}

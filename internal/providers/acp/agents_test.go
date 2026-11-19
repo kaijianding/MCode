@@ -2,7 +2,6 @@ package acp
 
 import (
 	"reflect"
-	"slices"
 	"testing"
 
 	"mcode/internal/harness"
@@ -64,6 +63,12 @@ func TestLaunchArgsMatrix(t *testing.T) {
 		{AgentDroid, harness.ModeAutoAcceptEdits, []string{"exec", "--output-format", "acp"}},
 		{AgentDroid, harness.ModeAuto, []string{"exec", "--output-format", "acp"}},
 		{AgentDroid, harness.ModeFullAccess, []string{"exec", "--output-format", "acp"}},
+
+		{AgentAgy, harness.ModeReadOnly, []string{"acp", "--process-per-session"}},
+		{AgentAgy, harness.ModeSupervised, []string{"acp", "--process-per-session"}},
+		{AgentAgy, harness.ModeAutoAcceptEdits, []string{"acp", "--process-per-session"}},
+		{AgentAgy, harness.ModeAuto, []string{"acp", "--process-per-session"}},
+		{AgentAgy, harness.ModeFullAccess, []string{"acp", "--process-per-session", "--dangerously-skip-permissions"}},
 
 		// Cursor
 		{AgentCursor, harness.ModeReadOnly, []string{"acp"}},
@@ -127,7 +132,6 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 		name     string
 		agent    Agent
 		turn     harness.Turn
-		wantSkip bool
 		wantArgs []string
 	}{
 		{
@@ -137,7 +141,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 				Mode:         harness.ModeReadOnly,
 				PlanExitMode: harness.ModeFullAccess,
 			},
-			wantSkip: true,
+			wantArgs: []string{"acp", "--process-per-session", "--dangerously-skip-permissions"},
 		},
 		{
 			name:  "agy plan turn with auto exit mode",
@@ -146,7 +150,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 				Mode:         harness.ModeReadOnly,
 				PlanExitMode: harness.ModeAuto,
 			},
-			wantSkip: false,
+			wantArgs: []string{"acp", "--process-per-session"},
 		},
 		{
 			name:  "agy normal fullAccess turn",
@@ -154,7 +158,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 			turn: harness.Turn{
 				Mode: harness.ModeFullAccess,
 			},
-			wantSkip: true,
+			wantArgs: []string{"acp", "--process-per-session", "--dangerously-skip-permissions"},
 		},
 		{
 			name:  "devin plan turn keeps readonly launch args",
@@ -170,15 +174,8 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := LaunchArgs(tc.agent, launchMode(tc.agent, tc.turn))
-			if tc.wantArgs != nil {
-				if !reflect.DeepEqual(got, tc.wantArgs) {
-					t.Fatalf("LaunchArgs(%s, launchMode) = %v, want %v", tc.agent, got, tc.wantArgs)
-				}
-				return
-			}
-			hasSkip := slices.Contains(got, "--dangerously-skip-permissions")
-			if hasSkip != tc.wantSkip {
-				t.Fatalf("LaunchArgs(%s, launchMode) = %v, has --dangerously-skip-permissions = %v, want %v", tc.agent, got, hasSkip, tc.wantSkip)
+			if !reflect.DeepEqual(got, tc.wantArgs) {
+				t.Fatalf("LaunchArgs(%s, launchMode) = %v, want %v", tc.agent, got, tc.wantArgs)
 			}
 		})
 	}

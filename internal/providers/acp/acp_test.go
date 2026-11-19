@@ -966,10 +966,22 @@ func runFakeACPFeatures(mode string) {
 			}
 			if strings.HasPrefix(mode, "feature_permission") {
 				opts := []any{map[string]any{"optionId": "deny", "kind": "reject_once"}, map[string]any{"optionId": "session", "kind": "allow_session"}}
+				call := map[string]any{"toolCallId": "permission-test", "name": "read_file"}
 				if mode == "feature_permission_once" {
 					opts = append(opts, map[string]any{"optionId": "once", "kind": "allow_once"})
 				}
-				write(map[string]any{"jsonrpc": "2.0", "id": 9010, "method": "session/request_permission", "params": map[string]any{"toolCall": map[string]any{"toolCallId": "permission-test", "name": "read_file"}, "options": opts}})
+				if strings.HasPrefix(mode, "feature_permission_switch_mode") {
+					call = map[string]any{"toolCallId": "permission-test", "title": "Switch to execution", "kind": "switch_mode"}
+					if mode != "feature_permission_switch_mode_title" {
+						for _, text := range []string{"Draft ", "plan"} {
+							write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": text}}}})
+						}
+					}
+					if mode == "feature_permission_switch_mode_input" {
+						call["rawInput"] = map[string]any{"plan": "# Explicit plan"}
+					}
+				}
+				write(map[string]any{"jsonrpc": "2.0", "id": 9010, "method": "session/request_permission", "params": map[string]any{"toolCall": call, "options": opts}})
 				if read() == nil {
 					return
 				}
@@ -1636,6 +1648,51 @@ func permissionReply(t *testing.T, messages []map[string]any) map[string]any {
 	}
 	t.Fatal("missing permission reply")
 	return nil
+}
+
+func TestAgySwitchModePermissionIsPlanRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name, feature, interactionMode, wantPlan string
+		wantKind                                 harness.RequestKind
+	}{
+		{"raw input", "feature_permission_switch_mode_input", "plan", "# Explicit plan", harness.RequestKindPlan},
+		{"assistant text", "feature_permission_switch_mode", "plan", "Draft plan", harness.RequestKindPlan},
+		{"title", "feature_permission_switch_mode_title", "plan", "Switch to execution", harness.RequestKindPlan},
+		{"non-plan turn", "feature_permission_switch_mode", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			approver := &recordingApprover{}
+			messages, _, err := runACPFeature(t, tc.feature, AgentAgy, harness.Turn{
+				InteractionMode: tc.interactionMode,
+				Approver:        approver,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reply := permissionReply(t, messages); reply["outcome"] != "selected" || reply["optionId"] != "session" {
+				t.Fatalf("approval reply = %v", reply)
+			}
+			approver.mu.Lock()
+			defer approver.mu.Unlock()
+			if len(approver.reqs) != 1 || approver.reqs[0].Kind != tc.wantKind || approver.reqs[0].Plan != tc.wantPlan {
+				t.Fatalf("requests = %+v, want kind %q and plan %q", approver.reqs, tc.wantKind, tc.wantPlan)
+			}
+			if tc.wantKind == harness.RequestKindPlan && approver.reqs[0].Summary != "执行计划" {
+				t.Fatalf("plan summary = %q", approver.reqs[0].Summary)
+			}
+		})
+	}
+
+	messages, _, err := runACPFeature(t, "feature_permission_switch_mode", AgentAgy, harness.Turn{
+		InteractionMode: "plan",
+		Approver:        failingApprover{err: context.Canceled},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply := permissionReply(t, messages); reply["outcome"] != "cancelled" || reply["optionId"] != nil {
+		t.Fatalf("cancelled reply = %v", reply)
+	}
 }
 
 func TestACPPermissionCancelledOutcome(t *testing.T) {

@@ -580,6 +580,11 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	servedReads := make(map[string]bool)
 	toolsFinished := false
 	var receivedText bool
+	agyPlanTurn := h.opts.Agent == AgentAgy && turn.InteractionMode == "plan"
+	planApproval, _ := ctx.Value(agyPlanApprovalKey{}).(agyPlanApproval)
+	var planMu sync.Mutex
+	var planFileText string
+	var planAssistantText strings.Builder
 
 	setRequestHandler, setNotificationHandler, detach := h.roundHandlers(p)
 	defer detach()
@@ -650,6 +655,11 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if err := os.WriteFile(target, []byte(p.Content), 0644); err != nil {
 				return nil, err
 			}
+			if agyPlanTurn && filepath.Base(rel) == "implementation_plan.md" {
+				planMu.Lock()
+				planFileText = p.Content
+				planMu.Unlock()
+			}
 			_ = harness.Emit(emit, harness.Event{
 				Type: harness.EventFileChange,
 				Path: rel,
@@ -676,7 +686,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			if h.opts.Agent == AgentAgy && strings.HasPrefix(p.ToolCall.ToolCallID, "interaction_") && len(p.Options) > 0 {
+			agyPlanExit := agyPlanTurn && p.ToolCall.Kind == "switch_mode"
+			if !agyPlanExit && h.opts.Agent == AgentAgy && strings.HasPrefix(p.ToolCall.ToolCallID, "interaction_") && len(p.Options) > 0 {
 				interactor, ok := turn.Approver.(harness.Interactor)
 				if !ok {
 					return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
@@ -754,7 +765,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if planExitName == "" {
 				planExitName = p.ToolCall.ToolName
 			}
-			planExit := h.opts.Agent == AgentDroid && DroidIsPlanExit(p.ToolCall.Title, planExitName, optionNames, input)
+			droidPlanExit := h.opts.Agent == AgentDroid && DroidIsPlanExit(p.ToolCall.Title, planExitName, optionNames, input)
+			planExit := droidPlanExit || agyPlanExit
 
 			var decision harness.Decision
 			var approveReq harness.ApprovalRequest
@@ -774,6 +786,22 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					approveReq.Kind = harness.RequestKindPlan
 					approveReq.Summary = "执行计划"
 					approveReq.Plan = DroidPlanMarkdown(input)
+					if agyPlanExit && approveReq.Plan == "" {
+						if planApproval.planFile != nil {
+							approveReq.Plan = planApproval.planFile()
+						}
+						if strings.TrimSpace(approveReq.Plan) == "" {
+							planMu.Lock()
+							approveReq.Plan = planFileText
+							if strings.TrimSpace(approveReq.Plan) == "" {
+								approveReq.Plan = planAssistantText.String()
+							}
+							planMu.Unlock()
+						}
+						if strings.TrimSpace(approveReq.Plan) == "" {
+							approveReq.Plan = p.ToolCall.Title
+						}
+					}
 				}
 				if !isCommandCall && !planExit {
 					switch p.ToolCall.Kind {
@@ -821,7 +849,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			}
 
 			var selectedID string
-			if planExit {
+			if droidPlanExit {
 				// 批准时按用户所选档位选 Droid 的高档自动执行选项（Plan 回合的 Mode 是只读），驳回固定 cancel。
 				if decision == harness.DecisionAllow {
 					runMode := turn.Mode
@@ -844,13 +872,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 						break
 					}
 					if opt.Kind == "allow_once" || opt.Kind == "allow_always" || opt.Kind == "allow_session" ||
-						strings.Contains(strings.ToLower(opt.Name), "allow") ||
-						strings.Contains(strings.ToLower(opt.Name), "proceed") {
+						(!agyPlanExit && (strings.Contains(strings.ToLower(opt.Name), "allow") ||
+							strings.Contains(strings.ToLower(opt.Name), "proceed"))) {
 						selectedID = opt.OptionID
 						break
 					}
 				}
-				if selectedID == "" && len(p.Options) > 0 {
+				if selectedID == "" && !agyPlanExit && len(p.Options) > 0 {
 					selectedID = p.Options[0].OptionID
 				}
 			} else {
@@ -864,7 +892,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					if selectedID != "" {
 						break
 					}
-					if opt.Kind != "reject_always" && (strings.Contains(strings.ToLower(opt.Name), "reject") ||
+					if !agyPlanExit && opt.Kind != "reject_always" && (strings.Contains(strings.ToLower(opt.Name), "reject") ||
 						strings.Contains(strings.ToLower(opt.Name), "cancel") ||
 						strings.Contains(strings.ToLower(opt.Name), "deny")) {
 						selectedID = opt.OptionID
@@ -880,7 +908,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 						break
 					}
 				}
-				if selectedID == "" && len(p.Options) > 0 {
+				if selectedID == "" && !agyPlanExit && len(p.Options) > 0 {
 					selectedID = p.Options[len(p.Options)-1].OptionID
 				}
 			}
@@ -891,10 +919,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					"optionId": selectedID,
 				},
 			}
-			if approvalCancelled(ctx, approveErr) {
+			if approvalCancelled(ctx, approveErr) || (agyPlanExit && selectedID == "") {
 				payload = acpCancelledOutcome()
 			}
 			if turn.Approver != nil && approveErr == nil {
+				if agyPlanExit && planApproval.answered != nil {
+					planApproval.answered(decision)
+				}
 				return acpApprovalResponse{
 					payload: payload,
 					onAck: func(writeErr error) {
@@ -959,6 +990,11 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			_ = json.Unmarshal(u.Content, &content)
 			if content.Text != "" {
 				receivedText = true
+				if agyPlanTurn {
+					planMu.Lock()
+					planAssistantText.WriteString(content.Text)
+					planMu.Unlock()
+				}
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventText,
 					Text: content.Text,
@@ -1754,6 +1790,17 @@ func approvalCancelled(ctx context.Context, err error) bool {
 
 func acpCancelledOutcome() map[string]any {
 	return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+}
+
+type agyPlanApprovalKey struct{}
+
+type agyPlanApproval struct {
+	planFile func() string
+	answered func(harness.Decision)
+}
+
+func WithAgyPlanApproval(ctx context.Context, planFile func() string, answered func(harness.Decision)) context.Context {
+	return context.WithValue(ctx, agyPlanApprovalKey{}, agyPlanApproval{planFile: planFile, answered: answered})
 }
 
 type acpApprovalResponse struct {

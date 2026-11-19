@@ -38,7 +38,7 @@ func TestAgyChannelSelect(t *testing.T) {
 
 func TestAgyACPLaunchArgs(t *testing.T) {
 	for _, mode := range []harness.PermissionMode{harness.ModeFullAccess, harness.ModeAuto, harness.ModeAutoAcceptEdits, harness.ModeSupervised, harness.ModeReadOnly} {
-		want := []string{"acp"}
+		want := []string{"acp", "--process-per-session"}
 		if mode == harness.ModeFullAccess {
 			want = append(want, "--dangerously-skip-permissions")
 		}
@@ -101,7 +101,7 @@ func runFakeAgyACP() {
 		case "session/prompt":
 			promptCount++
 			if os.Getenv("MCODE_TEST_ACP_PLAN_FILE") != "" {
-				handleFakeAgyACPPlanPrompt(msg["id"], promptCount, currentMode, params)
+				handleFakeAgyACPPlanPrompt(reader, msg["id"], promptCount, currentMode, params)
 				continue
 			}
 			if os.Getenv("MCODE_TEST_ACP_HOLD") != "" {
