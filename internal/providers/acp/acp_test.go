@@ -1657,6 +1657,9 @@ func TestACPAgyFullAccessLeavesPlanMode(t *testing.T) {
 }
 
 func TestACPCancelDoesNotCloseSession(t *testing.T) {
+	previous := agyCancelWait
+	agyCancelWait = 200 * time.Millisecond
+	t.Cleanup(func() { agyCancelWait = previous })
 	trace := filepath.Join(t.TempDir(), "trace.jsonl")
 	h := New(Options{Agent: AgentAgy, Binary: os.Args[0], Env: []string{fakeACPEnv + "=feature_cancel", "MCODE_TEST_ACP_TRACE=" + trace}})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1923,6 +1926,108 @@ func TestAgyCancelKillsAfterTimeout(t *testing.T) {
 				t.Fatal("agent process was not reaped")
 			}
 		})
+	}
+}
+
+func TestAgyPromptResponseSkipsCancel(t *testing.T) {
+	previousWait := agyCancelWait
+	agyCancelWait = 200 * time.Millisecond
+	t.Cleanup(func() { agyCancelWait = previousWait })
+
+	clientR, serverW := io.Pipe()
+	serverR, clientW := io.Pipe()
+	conn := NewConn(clientR, clientW)
+	t.Cleanup(func() {
+		_ = conn.Close()
+		_ = serverW.Close()
+		_ = serverR.Close()
+	})
+
+	responseQueued := make(chan struct{})
+	conn.SetNotificationHandler(func(method string, _ json.RawMessage) {
+		if method == "test/barrier" {
+			close(responseQueued)
+		}
+	})
+
+	allowSelect := make(chan struct{})
+	previousHook := beforeAgyPromptSelect
+	beforeAgyPromptSelect = func() {
+		<-allowSelect
+	}
+	t.Cleanup(func() { beforeAgyPromptSelect = previousHook })
+
+	var receivedMu sync.Mutex
+	var received []map[string]any
+	peerDone := make(chan struct{})
+	go func() {
+		defer close(peerDone)
+		scanner := bufio.NewScanner(serverR)
+		for scanner.Scan() {
+			var msg map[string]any
+			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+				continue
+			}
+			receivedMu.Lock()
+			received = append(received, msg)
+			receivedMu.Unlock()
+			if msg["method"] == "session/prompt" {
+				resp, _ := json.Marshal(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      msg["id"],
+					"result":  map[string]any{"stopReason": "end_turn"},
+				})
+				_, _ = serverW.Write(append(resp, '\n'))
+				_, _ = serverW.Write([]byte(`{"jsonrpc":"2.0","method":"test/barrier"}` + "\n"))
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var result struct {
+		StopReason string `json:"stopReason"`
+	}
+	callErrCh := make(chan error, 1)
+	go func() {
+		callErrCh <- conn.callAgyPrompt(ctx, map[string]any{"sessionId": "s1"}, &result)
+	}()
+
+	select {
+	case <-responseQueued:
+	case <-time.After(5 * time.Second):
+		close(allowSelect)
+		t.Fatal("timed out waiting for prompt response to enter call.ch")
+	}
+
+	// 先让应答进入 call.ch，再取消 ctx，最后放行 select，确保两者同时就绪。
+	cancel()
+	close(allowSelect)
+
+	select {
+	case err := <-callErrCh:
+		if err != nil {
+			t.Fatalf("callAgyPrompt = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for callAgyPrompt")
+	}
+	if result.StopReason != "end_turn" {
+		t.Fatalf("StopReason = %q, want %q", result.StopReason, "end_turn")
+	}
+
+	// 关闭连接，确保所有已发出的写操作都被对端读完后再检查 session/cancel。
+	_ = conn.Close()
+	<-peerDone
+
+	receivedMu.Lock()
+	defer receivedMu.Unlock()
+	if cancels := featureParams(received, "session/cancel"); len(cancels) != 0 {
+		t.Fatalf("unexpected session/cancel: %v", cancels)
+	}
+	if prompts := featureParams(received, "session/prompt"); len(prompts) != 1 {
+		t.Fatalf("session/prompt count = %d, want 1", len(prompts))
 	}
 }
 
@@ -2536,6 +2641,9 @@ func TestACPHoldAttachContinues(t *testing.T) {
 }
 
 func TestACPHoldNormalReuseAndFailure(t *testing.T) {
+	previous := agyCancelWait
+	agyCancelWait = 200 * time.Millisecond
+	t.Cleanup(func() { agyCancelWait = previous })
 	for _, mode := range []string{"feature_hold_error", "feature_hold_cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newACPHoldFixture(t, mode)

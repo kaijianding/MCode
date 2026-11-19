@@ -54,6 +54,7 @@ type Options struct {
 // （如 OpenCode 的 SQLite）上撞锁，导致某轮对话开局即失败；单个启动不受影响。
 var launchSpacing = 1500 * time.Millisecond
 var agyCancelWait = 15 * time.Second
+var beforeAgyPromptSelect func()
 
 var launchGate struct {
 	mu   sync.Mutex
@@ -579,22 +580,29 @@ func (c *Conn) callAgyPrompt(ctx context.Context, params map[string]any, result 
 		written <- err
 	}()
 
-	var response *rpcResponse
+	if beforeAgyPromptSelect != nil {
+		beforeAgyPromptSelect()
+	}
+
 	select {
-	case response = <-call.ch:
-		if ctx.Err() == nil || response == nil {
-			return c.finishCall(response, result)
-		}
+	case response := <-call.ch:
+		return c.finishCall(response, result)
 	case err := <-written:
 		return err
 	case <-c.closed:
 		select {
-		case response = <-call.ch:
+		case response := <-call.ch:
 			return c.finishCall(response, result)
 		default:
 			return c.closedError()
 		}
 	case <-ctx.Done():
+		// 应答与取消同时就绪时，优先返回已到达的应答，不补发 session/cancel。
+		select {
+		case response := <-call.ch:
+			return c.finishCall(response, result)
+		default:
+		}
 	}
 
 	timer := time.NewTimer(agyCancelWait)
@@ -609,9 +617,6 @@ func (c *Conn) callAgyPrompt(ctx context.Context, params map[string]any, result 
 		return c.closedError()
 	case <-timer.C:
 		return context.DeadlineExceeded
-	}
-	if response != nil {
-		return c.finishCall(response, result)
 	}
 	select {
 	case response := <-call.ch:
