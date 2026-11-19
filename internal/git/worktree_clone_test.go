@@ -3,6 +3,7 @@ package git
 import "testing"
 
 func TestReferencesPath(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		text, rel string
 		want      bool
@@ -18,6 +19,7 @@ func TestReferencesPath(t *testing.T) {
 		{"docker.x docker/", "docker", true},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
+			t.Parallel()
 			if got := referencesPath(tt.text, tt.rel); got != tt.want {
 				t.Errorf("referencesPath(%q, %q) = %v, want %v", tt.text, tt.rel, got, tt.want)
 			}

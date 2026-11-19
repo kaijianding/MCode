@@ -12,6 +12,7 @@ func TestOpStateOperations(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []OpKind{OpMerge, OpRebase, OpCherryPick, OpRevert} {
 		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
 			r, dir := setupTestRepo(t)
 			ctx := context.Background()
 			write := func(s string) {
@@ -96,6 +97,7 @@ func TestResetModes(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"soft", "mixed", "hard"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			r, dir := setupTestRepo(t)
 			ctx := context.Background()
 			p := filepath.Join(dir, "README.md")

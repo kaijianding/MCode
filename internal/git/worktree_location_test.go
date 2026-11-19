@@ -12,6 +12,7 @@ import (
 )
 
 func TestWorktreeBase(t *testing.T) {
+	t.Parallel()
 	data, repo := t.TempDir(), t.TempDir()
 	for _, tc := range []struct{ location, want string }{
 		{config.WorktreeLocationCentral, filepath.Join(data, "worktrees")},
@@ -25,6 +26,7 @@ func TestWorktreeBase(t *testing.T) {
 }
 
 func TestIsManagedWorktreePathProject(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		path string
 		want bool
@@ -72,6 +74,7 @@ func TestProjectWorktreeExcludedAndPurgeable(t *testing.T) {
 }
 
 func TestEnsureGitExcludeConcurrent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	info := filepath.Join(root, ".git", "info")
 	if err := os.MkdirAll(info, 0o755); err != nil {

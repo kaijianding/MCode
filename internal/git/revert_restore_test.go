@@ -36,17 +36,11 @@ func runTestGit(t *testing.T, dir string, args ...string) string {
 // newRevertTestRepo 创建带首个提交的临时 git 仓库与 Runner。
 func newRevertTestRepo(t *testing.T) (*Runner, string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git 可执行文件不在 PATH 中，跳过测试")
-	}
+	tplDir := ensureRevertRepoTemplate(t)
 	dir := t.TempDir()
-	runTestGit(t, dir, "init", "-q")
-	runTestGit(t, dir, "config", "user.name", "mcode-test")
-	runTestGit(t, dir, "config", "user.email", "mcode-test@localhost")
-	runTestGit(t, dir, "config", "core.autocrlf", "false")
-	writeTestFile(t, dir, "seed.txt", "seed\n")
-	runTestGit(t, dir, "add", "-A")
-	runTestGit(t, dir, "commit", "-q", "-m", "init")
+	if err := copyDirContents(tplDir, dir); err != nil {
+		t.Fatalf("copy revert git template: %v", err)
+	}
 	return NewRunner("git", 2), dir
 }
 

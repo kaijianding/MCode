@@ -11,6 +11,7 @@ import (
 )
 
 func TestAdvanceHead(t *testing.T) {
+	t.Parallel()
 	r, root := newRevertTestRepo(t)
 	ctx := context.Background()
 	writeTestFile(t, root, "a.txt", "base a\n")
@@ -103,6 +104,7 @@ func TestAdvanceHeadClearsStaleIndexLock(t *testing.T) {
 }
 
 func TestAdvanceHeadIndexLocked(t *testing.T) {
+	t.Parallel()
 	r, root := newRevertTestRepo(t)
 	ctx := context.Background()
 	writeTestFile(t, root, "a.txt", "base\n")

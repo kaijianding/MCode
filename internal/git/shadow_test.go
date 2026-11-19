@@ -13,6 +13,7 @@ import (
 // 对非 git 目录调用 EnsureShadow 后，项目目录里没有 .git；
 // RepoRoot(项目目录) 返回项目目录；rev-parse HEAD 成功。
 func TestShadow_EnsureShadowAndRepoRoot(t *testing.T) {
+	t.Parallel()
 	shadowRoot := t.TempDir()
 	projectDir := t.TempDir()
 
@@ -80,6 +81,7 @@ func TestShadow_EnsureShadowAndRepoRoot(t *testing.T) {
 // 在项目目录上调用 Checkpoint 成功；WorktreeAdd 从该 commit 建 worktree 成功，
 // worktree 内的文件内容正确；在 worktree 目录里执行 git 命令走 worktree 自身的 .git，不注入影子环境。
 func TestShadow_CheckpointAndWorktree(t *testing.T) {
+	t.Parallel()
 	shadowRoot := t.TempDir()
 	projectDir := t.TempDir()
 
@@ -170,6 +172,7 @@ func TestShadow_CheckpointAndWorktree(t *testing.T) {
 // TestShadow_RealGitRepo 测试场景 (c)：
 // 对位于真实 git 仓库内的目录返回 ErrNotShadowCandidate，并且 shadowEnv 返回 nil。
 func TestShadow_RealGitRepo(t *testing.T) {
+	t.Parallel()
 	shadowRoot := t.TempDir()
 	realRepoDir := t.TempDir()
 
@@ -265,6 +268,7 @@ func TestShadow_TooLarge(t *testing.T) {
 // TestShadow_DefaultRunnerNoShadow 测试场景 (e)：
 // ShadowRoot 为空的 Runner 对非 git 目录执行 RepoRoot 仍返回 ErrNotRepo。
 func TestShadow_DefaultRunnerNoShadow(t *testing.T) {
+	t.Parallel()
 	nonGitDir := t.TempDir()
 	runner := NewRunner("", 4) // ShadowRoot 默认为空
 	ctx := context.Background()

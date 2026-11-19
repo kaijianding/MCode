@@ -215,6 +215,7 @@ func TestForgeClient_GitLabCreateErrorDoesNotReuseURL(t *testing.T) {
 }
 
 func TestForgeClient_SubmitPullRequestReview(t *testing.T) {
+	t.Parallel()
 	var payload map[string]any
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		if name != "gh" || len(args) != 6 || !reflect.DeepEqual(args[:5], []string{"api", "--method", "POST", "repos/{owner}/{repo}/pulls/9/reviews", "--input"}) {
@@ -241,6 +242,7 @@ func TestForgeClient_SubmitPullRequestReview(t *testing.T) {
 }
 
 func TestForgeClient_SubmitPullRequestReviewValidation(t *testing.T) {
+	t.Parallel()
 	client := NewForgeClient(func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil })
 	for _, c := range []PRReviewComment{{Path: "", Line: 1, Side: "RIGHT", Body: "x"}, {Path: "a", Line: 0, Side: "RIGHT", Body: "x"}, {Path: "a", Line: 1, Side: "RIGHT", Body: " "}} {
 		if err := client.SubmitPullRequestReview(context.Background(), "/work", ForgeGitHub, 2, "approve", "", []PRReviewComment{c}); err == nil {
@@ -253,9 +255,11 @@ func TestForgeClient_SubmitPullRequestReviewValidation(t *testing.T) {
 }
 
 func TestForgeClient_MergePullRequest(t *testing.T) {
+	t.Parallel()
 	for _, forge := range []Forge{ForgeGitHub, ForgeGitLab} {
 		for _, method := range []string{"squash", "merge", "rebase", "", "invalid"} {
 			t.Run(string(forge)+"/"+method, func(t *testing.T) {
+				t.Parallel()
 				exec := &fakeForgeExecutor{}
 				err := exec.client().MergePullRequest(context.Background(), "/work", forge, "42", method)
 				if method == "invalid" {
@@ -299,6 +303,7 @@ func TestForgeClient_MergePullRequest(t *testing.T) {
 }
 
 func TestForgeClient_ReviewPullRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		forge       Forge
@@ -326,6 +331,7 @@ func TestForgeClient_ReviewPullRequest(t *testing.T) {
 		{name: "blank changes", forge: ForgeGitLab, number: 42, event: "request-changes", body: "  ", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			exec := &fakeForgeExecutor{handler: func(_ string, args []string) ([]byte, error) {
 				if args[1] == tc.failCommand {
 					return []byte("审查失败"), errors.New("exit 1")

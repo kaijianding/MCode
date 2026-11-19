@@ -349,6 +349,7 @@ func TestParsePRDetailCrossRepo(t *testing.T) {
 }
 
 func TestParsePRDetailMergeable(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, input, want string
 		parse             func([]byte) (PRDetail, error)
@@ -366,6 +367,7 @@ func TestParsePRDetailMergeable(t *testing.T) {
 		{"glab absent", `{}`, "", parseGLabMRDetail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			detail, err := tc.parse([]byte(tc.input))
 			if err != nil || detail.Mergeable != tc.want {
 				t.Fatalf("Mergeable = %q, err = %v，期望 %q", detail.Mergeable, err, tc.want)

@@ -15,7 +15,9 @@ func TestMain(m *testing.M) {
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanupGitTestTemplates()
+	os.Exit(code)
 }
 
 func TestProgressParsing(t *testing.T) {

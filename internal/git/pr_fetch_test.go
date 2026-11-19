@@ -28,6 +28,7 @@ func setupPRConflict(t *testing.T) (*Runner, string, string) {
 }
 
 func TestPRResolveWorktreeReuseMergesNewBase(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := setupPRConflict(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pr-1")
@@ -58,6 +59,7 @@ func TestPRResolveWorktreeReuseMergesNewBase(t *testing.T) {
 }
 
 func TestPRWorktreeKeepReason(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, want string
 	}{
@@ -69,6 +71,7 @@ func TestPRWorktreeKeepReason(t *testing.T) {
 		{"抓取失败", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			runner, dir, bare := setupPRConflict(t)
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pr-1")
@@ -113,6 +116,7 @@ func TestPRWorktreeKeepReason(t *testing.T) {
 }
 
 func TestPRWorktreeKeepReasonBranchWithoutWorktree(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := setupPRConflict(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pr-1")
@@ -140,8 +144,10 @@ func TestPRWorktreeKeepReasonBranchWithoutWorktree(t *testing.T) {
 }
 
 func TestPRRemoveWorktree(t *testing.T) {
+	t.Parallel()
 	for _, branchOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(branchOnly), func(t *testing.T) {
+			t.Parallel()
 			runner, dir, _ := setupPRConflict(t)
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pr-1")
@@ -182,6 +188,7 @@ func TestPRRemoveWorktree(t *testing.T) {
 
 // TestPRConflicts 覆盖真实冲突与无冲突两种 PR head。
 func TestPRConflicts(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := setupPRConflict(t)
 	ctx := context.Background()
 
@@ -212,9 +219,11 @@ func TestPRConflicts(t *testing.T) {
 
 // TestPRResolveWorktree 覆盖新建分支、设置上游、冲突合并与重复调用。
 func TestPRResolveWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("新建 mcode 分支", func(t *testing.T) {
+		t.Parallel()
 		runner, dir, _ := setupPRConflict(t)
 		path := filepath.Join(t.TempDir(), "pr-1")
 
@@ -242,6 +251,7 @@ func TestPRResolveWorktree(t *testing.T) {
 	})
 
 	t.Run("复用已有本地分支", func(t *testing.T) {
+		t.Parallel()
 		runner, dir, _ := setupPRConflict(t)
 		if _, err := runner.FetchPRHead(ctx, dir, ForgeGitHub, 1); err != nil {
 			t.Fatalf("FetchPRHead 失败: %v", err)
@@ -268,6 +278,7 @@ func TestPRResolveWorktree(t *testing.T) {
 
 // TestPRCheckoutWorktree 覆盖只检出 PR head、不合并 base，以及 worktree 已存在时不动进行中的合并。
 func TestPRCheckoutWorktree(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := setupPRConflict(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pr-1")
@@ -316,6 +327,7 @@ func TestPRCheckoutWorktree(t *testing.T) {
 }
 
 func TestReviewPRBaseRejectsInvalidBranch(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := initSyncRemote(t)
 	ctx := context.Background()
 
@@ -346,6 +358,7 @@ func TestReviewPRBaseRejectsInvalidBranch(t *testing.T) {
 }
 
 func TestPRWorktreeCleanupPrunable(t *testing.T) {
+	t.Parallel()
 	runner, dir, _ := setupPRConflict(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pr-1")

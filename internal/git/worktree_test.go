@@ -20,24 +20,16 @@ func normalizePath(t *testing.T, path string) string {
 
 func setupTestRepo(t *testing.T) (*Runner, string) {
 	t.Helper()
-	runner, dir := initGitRepo(t)
-	ctx := context.Background()
-
-	readmePath := filepath.Join(dir, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# Worktree Test Repo\n"), 0644); err != nil {
-		t.Fatalf("write README.md: %v", err)
+	gitBin, tplDir := ensureReadmeRepoTemplate(t)
+	dir := t.TempDir()
+	if err := copyDirContents(tplDir, dir); err != nil {
+		t.Fatalf("copy readme git template: %v", err)
 	}
-	if _, err := runner.run(ctx, dir, nil, "add", "README.md"); err != nil {
-		t.Fatalf("git add README.md: %v", err)
-	}
-	if _, err := runner.run(ctx, dir, nil, "commit", "-m", "initial commit"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
-
-	return runner, dir
+	return NewRunner(gitBin, 4), dir
 }
 
 func TestWorktree_AddAndRemove(t *testing.T) {
+	t.Parallel()
 	runner, dir := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -110,6 +102,7 @@ func TestWorktree_AddAndRemove(t *testing.T) {
 }
 
 func TestWorktree_Detached(t *testing.T) {
+	t.Parallel()
 	runner, dir := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -148,6 +141,7 @@ func TestWorktree_Detached(t *testing.T) {
 }
 
 func TestParseWorktreeList_TableDriven(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -269,6 +263,7 @@ prunable
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			actual := ParseWorktreeList([]byte(tc.input))
 			if len(actual) != len(tc.expected) {
 				t.Fatalf("expected %d worktrees, got %d", len(tc.expected), len(actual))
@@ -283,6 +278,7 @@ prunable
 }
 
 func TestWorktreeSpecialPathAndBase(t *testing.T) {
+	t.Parallel()
 	runner, root := setupTestRepo(t)
 	ctx := context.Background()
 	base, err := runner.run(ctx, root, nil, "rev-parse", "HEAD")
@@ -322,6 +318,7 @@ func TestWorktreeSpecialPathAndBase(t *testing.T) {
 }
 
 func TestHasSubmodules(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// 1. 无 .gitmodules

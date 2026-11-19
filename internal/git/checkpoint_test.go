@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,37 +14,12 @@ import (
 
 func initGitRepo(t *testing.T) (*Runner, string) {
 	t.Helper()
-	gitBin, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git 可执行文件在 PATH 中未找到，跳过测试")
-	}
-
+	gitBin, tplDir := ensureEmptyRepoTemplate(t)
 	dir := t.TempDir()
-	runner := NewRunner(gitBin, 4)
-	ctx := context.Background()
-
-	// 初始化 git 仓库
-	_, err = runner.run(ctx, dir, nil, "init")
-	if err != nil {
-		t.Fatalf("git init failed: %v", err)
+	if err := copyDirContents(tplDir, dir); err != nil {
+		t.Fatalf("copy empty git template: %v", err)
 	}
-
-	// 统一配置测试仓库的隔离用户信息，避免依赖全局 git config
-	testEnv := []string{
-		"GIT_AUTHOR_NAME=test-user",
-		"GIT_AUTHOR_EMAIL=test@localhost",
-		"GIT_COMMITTER_NAME=test-user",
-		"GIT_COMMITTER_EMAIL=test@localhost",
-	}
-
-	// 防止初始主分支由于旧版本 git 默认分支名不一致问题
-	_, _ = runner.run(ctx, dir, testEnv, "config", "user.name", "test-user")
-	_, _ = runner.run(ctx, dir, testEnv, "config", "user.email", "test@localhost")
-	if _, err := runner.run(ctx, dir, nil, "config", "core.autocrlf", "false"); err != nil {
-		t.Fatalf("git config core.autocrlf: %v", err)
-	}
-
-	return runner, dir
+	return NewRunner(gitBin, 4), dir
 }
 
 func TestCheckpointNormalizedLineEndings(t *testing.T) {
@@ -273,35 +247,61 @@ func TestCheckpointAndDiffWorkflow(t *testing.T) {
 	}
 }
 
+func createCheckpointWithTime(t *testing.T, runner *Runner, dir, ref, message string, ts time.Time) string {
+	t.Helper()
+	ctx := context.Background()
+	tmpIndex := filepath.Join(t.TempDir(), "index")
+	date := ts.UTC().Format(time.RFC3339)
+	env := []string{
+		"GIT_INDEX_FILE=" + tmpIndex,
+		"GIT_AUTHOR_NAME=mcode",
+		"GIT_AUTHOR_EMAIL=mcode@localhost",
+		"GIT_COMMITTER_NAME=mcode",
+		"GIT_COMMITTER_EMAIL=mcode@localhost",
+		"GIT_AUTHOR_DATE=" + date,
+		"GIT_COMMITTER_DATE=" + date,
+	}
+	if _, err := runner.run(ctx, dir, env, checkpointArgs("add", "-A", "--", ".")...); err != nil {
+		t.Fatalf("checkpoint add: %v", err)
+	}
+	treeOut, err := runner.run(ctx, dir, env, checkpointArgs("write-tree")...)
+	if err != nil {
+		t.Fatalf("checkpoint write-tree: %v", err)
+	}
+	tree := strings.TrimSpace(string(treeOut))
+	commitOut, err := runner.run(ctx, dir, env, checkpointArgs("commit-tree", tree, "-m", message)...)
+	if err != nil {
+		t.Fatalf("checkpoint commit-tree: %v", err)
+	}
+	commit := strings.TrimSpace(string(commitOut))
+	if _, err := runner.runWithLockRetry(ctx, dir, env, checkpointArgs("update-ref", ref, commit)...); err != nil {
+		t.Fatalf("checkpoint update-ref: %v", err)
+	}
+	return commit
+}
+
 func TestPruneCheckpoints(t *testing.T) {
 	t.Parallel()
 	runner, dir := initGitRepo(t)
 	ctx := context.Background()
 
 	threadID := "thread-prune-test"
+	baseTime := time.Now().Add(-30 * time.Second)
 
-	// 依次创建 3 个检查点，通过间隔让 creatordate 严格递增
+	// 依次创建 3 个检查点，通过显式递增时间戳让 creatordate 严格递增
 	cp1Ref := CheckpointRef(threadID, "turn-1")
 	f1 := filepath.Join(dir, "f1.txt")
 	if err := os.WriteFile(f1, []byte("content 1\n"), 0644); err != nil {
 		t.Fatalf("write f1: %v", err)
 	}
-	if _, err := runner.Checkpoint(ctx, dir, cp1Ref, "checkpoint 1"); err != nil {
-		t.Fatalf("Checkpoint 1 failed: %v", err)
-	}
-
-	time.Sleep(1100 * time.Millisecond)
+	createCheckpointWithTime(t, runner, dir, cp1Ref, "checkpoint 1", baseTime)
 
 	cp2Ref := CheckpointRef(threadID, "turn-2")
 	f2 := filepath.Join(dir, "f2.txt")
 	if err := os.WriteFile(f2, []byte("content 2\n"), 0644); err != nil {
 		t.Fatalf("write f2: %v", err)
 	}
-	if _, err := runner.Checkpoint(ctx, dir, cp2Ref, "checkpoint 2"); err != nil {
-		t.Fatalf("Checkpoint 2 failed: %v", err)
-	}
-
-	time.Sleep(1100 * time.Millisecond)
+	createCheckpointWithTime(t, runner, dir, cp2Ref, "checkpoint 2", baseTime.Add(10*time.Second))
 
 	cp3Ref := CheckpointRef(threadID, "turn-3")
 	f3 := filepath.Join(dir, "f3.txt")

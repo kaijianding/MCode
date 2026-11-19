@@ -9,6 +9,7 @@ import (
 )
 
 func TestRepoLockSameDirSerializes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	unlock := lockRepo(dir)
@@ -42,6 +43,7 @@ func TestRepoLockSameDirSerializes(t *testing.T) {
 }
 
 func TestRepoLockDifferentDirsParallel(t *testing.T) {
+	t.Parallel()
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -67,6 +69,7 @@ func TestRepoLockDifferentDirsParallel(t *testing.T) {
 }
 
 func TestCanonicalRepoDirNormalizes(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	cleaned := canonicalRepoDir(filepath.Join(base, "repo", "..", "repo2"))
 	if want := filepath.Join(base, "repo2"); cleaned != want {
@@ -81,6 +84,7 @@ func TestCanonicalRepoDirNormalizes(t *testing.T) {
 }
 
 func TestRepoLockNormalizesAbsolutePath(t *testing.T) {
+	t.Parallel()
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -150,6 +154,7 @@ func makeWorktree(t *testing.T, repoDir, gitDir string) string {
 }
 
 func TestRepoLockKeyMainRepoAndSubdir(t *testing.T) {
+	t.Parallel()
 	repoDir, gitDir := makeRepo(t)
 	sub := filepath.Join(repoDir, "internal", "pkg")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -165,6 +170,7 @@ func TestRepoLockKeyMainRepoAndSubdir(t *testing.T) {
 }
 
 func TestRepoLockKeyWorktreeSharesMainRepo(t *testing.T) {
+	t.Parallel()
 	repoDir, gitDir := makeRepo(t)
 	wtDir := makeWorktree(t, repoDir, gitDir)
 
@@ -177,6 +183,7 @@ func TestRepoLockKeyWorktreeSharesMainRepo(t *testing.T) {
 }
 
 func TestRepoLockKeyDifferentRepos(t *testing.T) {
+	t.Parallel()
 	repoA, _ := makeRepo(t)
 	repoB, _ := makeRepo(t)
 
@@ -186,6 +193,7 @@ func TestRepoLockKeyDifferentRepos(t *testing.T) {
 }
 
 func TestRepoLockKeyWithoutGitFallsBack(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if got, want := repoLockKey(dir), canonicalRepoDir(dir); got != want {
 		t.Fatalf("没有 .git 的目录键 = %q, want 规范化路径 %q", got, want)
@@ -193,6 +201,7 @@ func TestRepoLockKeyWithoutGitFallsBack(t *testing.T) {
 }
 
 func TestRepoLockMainRepoAndWorktreeSerialize(t *testing.T) {
+	t.Parallel()
 	repoDir, gitDir := makeRepo(t)
 	wtDir := makeWorktree(t, repoDir, gitDir)
 
@@ -227,6 +236,7 @@ func TestRepoLockMainRepoAndWorktreeSerialize(t *testing.T) {
 }
 
 func TestIsRepoWriteCall(t *testing.T) {
+	t.Parallel()
 	tmpIndexEnv := []string{"GIT_INDEX_FILE=/tmp/mcode-index"}
 
 	cases := []struct {
@@ -249,6 +259,7 @@ func TestIsRepoWriteCall(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := isRepoWriteCall(tc.env, tc.args); got != tc.want {
 				t.Fatalf("isRepoWriteCall(%v, %v) = %v, want %v", tc.env, tc.args, got, tc.want)
 			}

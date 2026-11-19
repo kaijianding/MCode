@@ -99,6 +99,7 @@ func TestDefaultRemoteBranch(t *testing.T) {
 }
 
 func TestFetchPRHead(t *testing.T) {
+	t.Parallel()
 	runner, dir, bare := initSyncRemote(t)
 	commit := runTestGit(t, dir, "rev-parse", "HEAD")
 	runTestGit(t, bare, "update-ref", "refs/pull/1/head", commit)
@@ -116,6 +117,7 @@ func TestFetchPRHead(t *testing.T) {
 }
 
 func TestSaveReadPRBaseRef(t *testing.T) {
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 	commit := runTestGit(t, dir, "rev-parse", "HEAD")
