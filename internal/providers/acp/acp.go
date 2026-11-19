@@ -492,6 +492,11 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProc
 		tasks: make(map[string]string), done: make(chan struct{}),
 		resident: h.opts.HoldBackgroundTasks,
 	}
+	if p.resident {
+		p.conn.SetNotificationHandler(func(method string, params json.RawMessage) {
+			h.handleResidentNotification(p, method, params)
+		})
+	}
 	started = true
 	return p, nil
 }
@@ -525,6 +530,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 // runRound 每轮重绑处理器；只有新进程执行 initialize 和会话建立。
 func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(harness.Event), p *acpProcess) error {
 	cmd, conn, stderrBuf, allArgs := p.cmd, p.conn, p.stderr, p.args
+	attach := h.opts.HoldBackgroundTasks && turn.Attach
 	var err error
 
 	var sessionID string
@@ -544,7 +550,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 
 	var toolsMu sync.Mutex
 	type pendingTool struct {
-		readPath string
+		readPath   string
+		background bool
 	}
 	pendingTools := make(map[string]pendingTool)
 	startedTools := make(map[string]bool)
@@ -553,6 +560,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
 	toolsFinished := false
+	var receivedText bool
 
 	setRequestHandler, setNotificationHandler, detach := h.roundHandlers(p)
 	defer detach()
@@ -880,7 +888,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	})
 
 	// 注册通知分发处理器
-	setNotificationHandler(func(method string, params json.RawMessage) {
+	onNotification := func(method string, params json.RawMessage) {
 		if method != "session/update" {
 			return
 		}
@@ -928,6 +936,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			}
 			_ = json.Unmarshal(u.Content, &content)
 			if content.Text != "" {
+				receivedText = true
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventText,
 					Text: content.Text,
@@ -1000,8 +1009,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				toolsMu.Lock()
 				owned := startedTools[u.ToolCallID] && !toolsFinished
 				toolsMu.Unlock()
-				if owned {
-					h.backgroundTaskStarts(p, u.ToolCallID, []string{string(u.Content), string(u.RawOutput), u.Output}, emit)
+				if owned && h.backgroundTaskStarts(p, u.ToolCallID, []string{string(u.Content), string(u.RawOutput), u.Output}, emit) && attach {
+					toolsMu.Lock()
+					if pending, ok := pendingTools[u.ToolCallID]; ok {
+						pending.background = true
+						pendingTools[u.ToolCallID] = pending
+					}
+					toolsMu.Unlock()
 				}
 			}
 			if u.Status == "pending" || u.Status == "in_progress" {
@@ -1086,7 +1100,10 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				Patch: diffPatch,
 			})
 		}
-	})
+	}
+	if !attach {
+		setNotificationHandler(onNotification, false)
+	}
 
 	// 监听 ctx 取消，发送 session/cancel 并优雅杀灭进程组
 	shutdownCh := make(chan struct{})
@@ -1220,6 +1237,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 
 	sid := p.sessionID
+	reusedSession := sid != ""
 	sessionOptions, sessionModes = p.sessionOptions, p.sessionModes
 	if sid == "" {
 		sid, err = createOrResume()
@@ -1323,6 +1341,80 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		}
 	}
 
+	var transcriptPath string
+	var transcriptOffset int64
+	if attach && reusedSession {
+		transcriptPath, transcriptOffset = p.transcriptPath, p.transcriptSize
+	} else if h.opts.HoldBackgroundTasks {
+		transcriptPath, transcriptOffset = agyTranscriptPosition(p, sid)
+	}
+	scanTranscript := func(path, toolID string) bool {
+		offset := transcriptOffset
+		if path != transcriptPath {
+			offset = 0
+		}
+		return h.backgroundTaskTranscriptStarts(p, path, offset, toolID, emit)
+	}
+	lastPendingTool := func() string {
+		for index := len(toolStartOrder) - 1; index >= 0; index-- {
+			toolID := toolStartOrder[index]
+			if pending, ok := pendingTools[toolID]; toolID != "" && ok && !pending.background {
+				return toolID
+			}
+		}
+		return ""
+	}
+	var spontaneous bool
+	var promptErr error
+	if attach {
+		setNotificationHandler(onNotification, true)
+		ticker := time.NewTicker(200 * time.Millisecond)
+		scannedPath, scannedSize := transcriptPath, transcriptOffset
+	waitForReply:
+		for {
+			p.notificationMu.Lock()
+			h.residentMu.Lock()
+			quiet := time.Since(p.lastUpdate) >= 3*time.Second
+			h.residentMu.Unlock()
+			ready := false
+			if quiet {
+				toolsMu.Lock()
+				if toolID := lastPendingTool(); toolID != "" {
+					path, size := agyTranscriptPosition(p, sid)
+					if path != scannedPath || size != scannedSize {
+						scannedPath, scannedSize = path, size
+						if scanTranscript(path, toolID) {
+							pending := pendingTools[toolID]
+							pending.background = true
+							pendingTools[toolID] = pending
+						}
+					}
+				}
+				ready = lastPendingTool() == ""
+				toolsMu.Unlock()
+				if ready && receivedText {
+					spontaneous = true
+					p.notificationHandler = nil
+				}
+			}
+			p.notificationMu.Unlock()
+			if ready {
+				promptErr = ctx.Err()
+				break
+			}
+			select {
+			case <-ctx.Done():
+				promptErr = ctx.Err()
+				break waitForReply
+			case <-conn.closed:
+				promptErr = conn.closedError()
+				break waitForReply
+			case <-ticker.C:
+			}
+		}
+		ticker.Stop()
+	}
+
 	// 步骤 6: session/prompt
 	promptItems := []any{
 		map[string]any{
@@ -1349,7 +1441,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 	var agyDBPath string
 	agyStepStart := int64(-1)
-	if h.opts.Agent == AgentAgy {
+	if h.opts.Agent == AgentAgy && !spontaneous && promptErr == nil {
 		agyDBPath = agySessionDB(agyGeminiDir(allArgs, cmd.Env), sid)
 		if start, ok := agyStepIndex(agyDBPath); ok {
 			agyStepStart = start
@@ -1367,37 +1459,28 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			CachedReadTokens int64 `json:"cachedReadTokens"`
 		} `json:"usage"`
 	}
-	var transcriptPath string
-	var transcriptOffset int64
-	if h.opts.HoldBackgroundTasks {
-		transcriptPath = agyRecordPath(p, sid, "logs/transcript.jsonl")
-		if info, err := os.Stat(transcriptPath); err == nil {
-			transcriptOffset = info.Size()
-		}
+	if spontaneous {
+		promptResult.StopReason = "end_turn"
+	} else if promptErr == nil {
+		promptErr = conn.Call(ctx, "session/prompt", map[string]any{
+			"sessionId": sid,
+			"prompt":    promptItems,
+		}, &promptResult)
 	}
-	promptErr := conn.Call(ctx, "session/prompt", map[string]any{
-		"sessionId": sid,
-		"prompt":    promptItems,
-	}, &promptResult)
 	detach()
 
 	var agyErr error
 	if h.opts.HoldBackgroundTasks && promptErr == nil {
-		if h.opts.Agent == AgentAgy {
+		if h.opts.Agent == AgentAgy && !spontaneous {
 			agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
 		}
 		if agyErr == nil && ctx.Err() == nil {
-			for i := len(toolStartOrder) - 1; i >= 0; i-- {
-				toolID := toolStartOrder[i]
-				if _, pending := pendingTools[toolID]; toolID == "" || !pending {
-					continue
-				}
-				path := agyRecordPath(p, sid, "logs/transcript.jsonl")
-				if path != transcriptPath {
-					transcriptOffset = 0
-				}
-				h.backgroundTaskTranscriptStarts(p, path, transcriptOffset, toolID, emit)
-				break
+			toolID := lastPendingTool()
+			if toolID == "" && spontaneous && len(toolStartOrder) > 0 {
+				toolID = toolStartOrder[len(toolStartOrder)-1]
+			}
+			if toolID != "" {
+				scanTranscript(agyRecordPath(p, sid, "logs/transcript.jsonl"), toolID)
 			}
 		}
 	}
@@ -1440,6 +1523,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 
 	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil && ctx.Err() == nil && h.holdProcess(p, turn.ThreadID) {
+		p.transcriptPath, p.transcriptSize = agyTranscriptPosition(p, sid)
 		return nil
 	}
 	if h.opts.HoldBackgroundTasks {

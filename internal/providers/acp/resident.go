@@ -2,6 +2,7 @@ package acp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,9 @@ import (
 )
 
 var backgroundTaskPattern = regexp.MustCompile(`Tool is running as a background task with task id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/task-\d+)`)
-var backgroundTaskEndPattern = regexp.MustCompile(`Task id "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/task-\d+)" (finished|was canceled) with result:`)
+var backgroundTaskEndPattern = regexp.MustCompile(`Task id "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/(task-\d+))" (finished|was canceled) with result:`)
+
+const backgroundTaskLogMaxBytes = 64 * 1024
 
 type acpProcess struct {
 	cmd     *exec.Cmd
@@ -40,6 +43,11 @@ type acpProcess struct {
 	done           chan struct{}
 	resident       bool
 	watchOnce      sync.Once
+	transcriptPath string
+	transcriptSize int64
+
+	notificationMu      sync.Mutex
+	notificationHandler NotificationHandler
 
 	// 以下状态由 Harness.residentMu 保护；只有执行本轮的协程访问上面的会话配置。
 	busy         bool
@@ -48,6 +56,7 @@ type acpProcess struct {
 	dead         bool
 	tasks        map[string]string
 	lastUpdate   time.Time
+	idleUpdates  []json.RawMessage
 }
 
 func (p *acpProcess) wait() error {
@@ -251,20 +260,13 @@ func (h *Harness) Close() error {
 
 // roundHandlers 的门闩先于工具锁、表锁；表锁内不会获取门闩。
 // 轮次结束后，已经被 Conn 取走的旧回调也不能再触碰旧 emit、Approver 或 ctx。
-func (h *Harness) roundHandlers(p *acpProcess) (func(RequestHandler), func(NotificationHandler), func()) {
+func (h *Harness) roundHandlers(p *acpProcess) (func(RequestHandler), func(NotificationHandler, bool), func()) {
 	if !h.opts.HoldBackgroundTasks {
-		return p.conn.SetRequestHandler, p.conn.SetNotificationHandler, func() {}
+		return p.conn.SetRequestHandler, func(fn NotificationHandler, _ bool) { p.conn.SetNotificationHandler(fn) }, func() {}
 	}
 	var mu sync.RWMutex
 	var detachOnce sync.Once
 	active := true
-	touch := func(method string) {
-		if method == "session/update" {
-			h.residentMu.Lock()
-			p.lastUpdate = time.Now()
-			h.residentMu.Unlock()
-		}
-	}
 	request := func(fn RequestHandler) {
 		p.conn.SetRequestHandler(func(method string, params json.RawMessage) (any, error) {
 			mu.RLock()
@@ -275,28 +277,52 @@ func (h *Harness) roundHandlers(p *acpProcess) (func(RequestHandler), func(Notif
 			return fn(method, params)
 		})
 	}
-	notification := func(fn NotificationHandler) {
-		p.conn.SetNotificationHandler(func(method string, params json.RawMessage) {
-			touch(method)
-			mu.RLock()
-			defer mu.RUnlock()
-			if active {
-				fn(method, params)
+	notification := func(fn NotificationHandler, replay bool) {
+		p.notificationMu.Lock()
+		defer p.notificationMu.Unlock()
+		h.residentMu.Lock()
+		updates := p.idleUpdates
+		p.idleUpdates = nil
+		h.residentMu.Unlock()
+		p.notificationHandler = fn
+		if replay {
+			for _, params := range updates {
+				fn("session/update", params)
 			}
-		})
+		}
 	}
 	return request, notification, func() {
 		detachOnce.Do(func() {
+			p.notificationMu.Lock()
+			p.notificationHandler = nil
+			p.notificationMu.Unlock()
 			mu.Lock()
 			active = false
 			mu.Unlock()
 			p.conn.SetRequestHandler(nil)
-			p.conn.SetNotificationHandler(func(method string, _ json.RawMessage) { touch(method) })
 		})
 	}
 }
 
-func (h *Harness) backgroundTaskStarts(p *acpProcess, toolID string, outputs []string, emit func(harness.Event)) {
+func (h *Harness) handleResidentNotification(p *acpProcess, method string, params json.RawMessage) {
+	if method != "session/update" {
+		return
+	}
+	p.notificationMu.Lock()
+	defer p.notificationMu.Unlock()
+	h.residentMu.Lock()
+	p.lastUpdate = time.Now()
+	if p.notificationHandler == nil {
+		p.idleUpdates = append(p.idleUpdates, bytes.Clone(params))
+	}
+	h.residentMu.Unlock()
+	if p.notificationHandler != nil {
+		p.notificationHandler(method, params)
+	}
+}
+
+func (h *Harness) backgroundTaskStarts(p *acpProcess, toolID string, outputs []string, emit func(harness.Event)) bool {
+	started := false
 	for _, output := range outputs {
 		for _, match := range backgroundTaskPattern.FindAllStringSubmatch(output, -1) {
 			taskID := match[1]
@@ -307,10 +333,12 @@ func (h *Harness) backgroundTaskStarts(p *acpProcess, toolID string, outputs []s
 			}
 			h.residentMu.Unlock()
 			if !seen {
+				started = true
 				_ = harness.Emit(emit, harness.Event{Type: harness.EventBackgroundTaskStart, ToolID: toolID, TaskID: taskID})
 			}
 		}
 	}
+	return started
 }
 
 func (h *Harness) holdProcess(p *acpProcess, threadID string) bool {
@@ -343,29 +371,38 @@ func agyRecordPath(p *acpProcess, sid, record string) string {
 	return ""
 }
 
-func (h *Harness) backgroundTaskTranscriptStarts(p *acpProcess, path string, offset int64, toolID string, emit func(harness.Event)) {
+func agyTranscriptPosition(p *acpProcess, sid string) (string, int64) {
+	path := agyRecordPath(p, sid, "logs/transcript.jsonl")
+	if info, err := os.Stat(path); err == nil {
+		return path, info.Size()
+	}
+	return path, 0
+}
+
+func (h *Harness) backgroundTaskTranscriptStarts(p *acpProcess, path string, offset int64, toolID string, emit func(harness.Event)) bool {
 	if path == "" {
-		return
+		return false
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return
+		return false
 	}
 	defer file.Close()
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return
+		return false
 	}
 	reader := bufio.NewReader(file)
+	started := false
 	for {
 		line, err := reader.ReadBytes('\n')
 		var step struct {
 			Content string `json:"content"`
 		}
-		if json.Unmarshal(line, &step) == nil {
-			h.backgroundTaskStarts(p, toolID, []string{step.Content}, emit)
+		if json.Unmarshal(line, &step) == nil && h.backgroundTaskStarts(p, toolID, []string{step.Content}, emit) {
+			started = true
 		}
 		if err != nil {
-			return
+			return started
 		}
 	}
 }
@@ -376,10 +413,10 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 	h.residentMu.Lock()
 	sid := p.sessionID
 	h.residentMu.Unlock()
-	statuses := make(map[string]string)
+	completions := make(map[string]harness.Event)
 	for _, event := range readBackgroundCompletions(agyRecordPath(p, sid, "messages"), nil) {
-		if _, exists := statuses[event.TaskID]; !exists {
-			statuses[event.TaskID] = event.TaskStatus
+		if _, exists := completions[event.TaskID]; !exists {
+			completions[event.TaskID] = event
 		}
 	}
 	var ended []harness.Event
@@ -388,12 +425,12 @@ func (h *Harness) reconcileRoundTasks(p *acpProcess, threadID string, emit func(
 		if status != "" {
 			continue
 		}
-		finished, exists := statuses[taskID]
+		finished, exists := completions[taskID]
 		if !exists {
 			continue
 		}
-		p.tasks[taskID] = finished
-		ended = append(ended, harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: taskID, TaskStatus: finished})
+		p.tasks[taskID] = finished.TaskStatus
+		ended = append(ended, finished)
 	}
 	// 队列里的完成行已经由 agy 注入本轮对话，轮末一并交给本轮，避免多余的续轮。
 	done := make(map[string]bool, len(ended))
@@ -446,7 +483,7 @@ func (h *Harness) watchBackgroundTasks(threadID string, p *acpProcess) {
 			}
 		}
 		fn := h.unsolicitedHandler
-		notify := !p.dead && !p.busy && len(h.finishedTasks[threadID]) > 0 && !h.unsolicitedNotified[threadID] && time.Since(p.lastUpdate) >= 3*time.Second && fn != nil
+		notify := !p.dead && !p.busy && len(h.finishedTasks[threadID]) > 0 && !h.unsolicitedNotified[threadID] && fn != nil
 		if notify {
 			if h.unsolicitedNotified == nil {
 				h.unsolicitedNotified = make(map[string]bool)
@@ -507,12 +544,15 @@ func readBackgroundCompletions(dir string, seen map[string]bool) []harness.Event
 			continue
 		}
 		status := "completed"
-		if match[2] == "was canceled" {
+		if match[3] == "was canceled" {
 			status = "canceled"
 		}
 		timestamp, _ := time.Parse(time.RFC3339Nano, message.Timestamp)
 		completions = append(completions, completion{
-			event:     harness.Event{Type: harness.EventBackgroundTaskEnd, TaskID: match[1], TaskStatus: status},
+			event: harness.Event{
+				Type: harness.EventBackgroundTaskEnd, TaskID: match[1], TaskStatus: status,
+				Output: backgroundTaskLogTail(filepath.Join(filepath.Dir(dir), "tasks", match[2]+".log")),
+			},
 			timestamp: timestamp,
 		})
 	}
@@ -524,4 +564,39 @@ func readBackgroundCompletions(dir string, seen map[string]bool) []harness.Event
 		events = append(events, result.event)
 	}
 	return events
+}
+
+func backgroundTaskLogTail(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return ""
+	}
+	offset := max(opened.Size()-backgroundTaskLogMaxBytes, 0)
+	data, err := io.ReadAll(io.NewSectionReader(file, offset, backgroundTaskLogMaxBytes))
+	if err != nil {
+		return ""
+	}
+	if offset > 0 {
+		var previous [1]byte
+		if _, err := file.ReadAt(previous[:], offset-1); err != nil {
+			return ""
+		}
+		if previous[0] != '\n' {
+			newline := bytes.IndexByte(data, '\n')
+			if newline < 0 {
+				return ""
+			}
+			data = data[newline+1:]
+		}
+	}
+	return string(data)
 }
