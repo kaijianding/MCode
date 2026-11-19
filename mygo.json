@@ -1,7 +1,7 @@
 {
   "name": "MCode",
   "identifier": "com.miniers.mcode",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "icon": "resources/icon.png",
   "main": "./cmd/mcode",
   "updates": {
