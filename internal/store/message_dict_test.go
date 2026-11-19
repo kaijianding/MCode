@@ -20,7 +20,7 @@ func openMessageDictTestStore(t *testing.T, path string) *Store {
 	if path == "" {
 		path = filepath.Join(t.TempDir(), "message-dict.db")
 	}
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open(%s) 失败: %v", path, err)
 	}
@@ -104,6 +104,7 @@ func countMessageDictRows(t *testing.T, s *Store) int {
 
 // 样本足够时应训练出 1 个字典：字典编码能正确解码，且压缩总量比无字典更小。
 func TestMessageDictTrainingCompressesBetter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMessageDictTestStore(t, "")
 	defer s.Close()
@@ -166,6 +167,7 @@ func TestMessageDictTrainingCompressesBetter(t *testing.T) {
 
 // 样本不足时跳过训练，压缩流程仍照常可用。
 func TestMessageDictSkippedWithoutEnoughSamples(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMessageDictTestStore(t, "")
 	defer s.Close()
@@ -200,6 +202,7 @@ func TestMessageDictSkippedWithoutEnoughSamples(t *testing.T) {
 
 // 注册字典之后，早先无字典写入的 zstd 行仍必须能解码（帧头没带字典 ID）。
 func TestNoDictZstdDecodesAfterDictRegistered(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMessageDictTestStore(t, "")
 	defer s.Close()
@@ -232,6 +235,7 @@ func TestNoDictZstdDecodesAfterDictRegistered(t *testing.T) {
 
 // 字典确实来自数据库：清空内存注册表后重新 Open 同一库，带字典压缩的消息仍能读回原文。
 func TestMessageDictReloadsFromDatabase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "reload.db")
 	s := openMessageDictTestStore(t, path)
@@ -270,7 +274,7 @@ func TestMessageDictReloadsFromDatabase(t *testing.T) {
 		t.Fatal("清空注册表后不应能解码带字典的帧")
 	}
 
-	reopened, err := Open(path)
+	reopened, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("重新 Open 失败: %v", err)
 	}

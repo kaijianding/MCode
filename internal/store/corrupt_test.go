@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -11,10 +10,7 @@ import (
 func seedCorruptTestData(t *testing.T, threadIDs ...string) *Store {
 	t.Helper()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "corrupt_test.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
+	s := OpenForTest(t)
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("UpsertProject 失败: %v", err)
@@ -29,6 +25,7 @@ func seedCorruptTestData(t *testing.T, threadIDs ...string) *Store {
 
 // TestListThreadsTolerantSkipsCorruptThread 验证单行线程解码失败不影响其余线程，坏会话 ID 单独返回。
 func TestListThreadsTolerantSkipsCorruptThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t, "t-good", "t-bad")
 	defer s.Close()
@@ -56,6 +53,7 @@ func TestListThreadsTolerantSkipsCorruptThread(t *testing.T) {
 
 // TestScanThreadDormantAtDegrade 验证 settled_at 解析失败时降级为 nil 而不是报错。
 func TestScanThreadDormantAtDegrade(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t, "t1")
 	defer s.Close()
@@ -79,6 +77,7 @@ func TestScanThreadDormantAtDegrade(t *testing.T) {
 // TestListMessagesTolerantBadMediaAndCreatedAt 验证单条消息的 media / created_at 损坏时降级继续，
 // 其余消息、顺序与分页信息保持正常。
 func TestListMessagesTolerantBadMediaAndCreatedAt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t, "t1")
 	defer s.Close()
@@ -138,6 +137,7 @@ func TestListMessagesTolerantBadMediaAndCreatedAt(t *testing.T) {
 
 // TestQuarantineThreadUpsertAndList 验证隔离记录的 upsert 与列表读取。
 func TestQuarantineThreadUpsertAndList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t)
 	defer s.Close()

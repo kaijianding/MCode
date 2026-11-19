@@ -14,13 +14,7 @@ import (
 
 func TestAutomationCRUDAndJSON(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "automation_crud_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	projID := "proj-auto-1"
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -81,13 +75,7 @@ func TestAutomationCRUDAndJSON(t *testing.T) {
 
 func TestAutomationCAS(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "automation_cas_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	auto := Automation{
 		ID:       "auto-cas-1",
@@ -127,13 +115,7 @@ func TestAutomationCAS(t *testing.T) {
 
 func TestListDueAutomations(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "automation_due_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	past := now.Add(-10 * time.Minute)
@@ -191,13 +173,7 @@ func TestListDueAutomations(t *testing.T) {
 
 func TestAutomationRunsCRUDAndCascade(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "automation_runs_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	auto := Automation{
 		ID:       "auto-parent",
@@ -298,11 +274,7 @@ func TestAutomationRunsCRUDAndCascade(t *testing.T) {
 
 func TestAutomationRunChangedFiles(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "changed_files.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	auto := Automation{ID: "auto-cf", Name: "cf", Prompt: "p", Schedule: `{"type":"interval","seconds":60}`, Enabled: true}
 	if err := s.CreateAutomation(ctx, auto); err != nil {
@@ -339,11 +311,7 @@ func TestAutomationRunChangedFiles(t *testing.T) {
 
 func TestAutomationRunReadAndArchiveState(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "run_read_archive.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	projID := "proj-read"
 	auto := Automation{ID: "auto-read", ProjectID: &projID, Name: "已读归档", Prompt: "p", Schedule: `{"type":"interval","seconds":60}`, Enabled: true}
@@ -549,11 +517,7 @@ func TestAutomationRunReadBackfillForExistingRows(t *testing.T) {
 
 func TestAutomationRunTriggerColumns(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "automation_run_trigger_test.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	auto := Automation{
 		ID:       "auto-trigger",
@@ -635,7 +599,7 @@ func TestAutomationRunTriggerColumnsMigration(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "automation_run_trigger_migration_test.db")
 
-	s1, err := Open(dbPath)
+	s1, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("第一次 Open 失败: %v", err)
 	}
@@ -668,7 +632,7 @@ func TestAutomationRunTriggerColumnsMigration(t *testing.T) {
 	}
 
 	// 重复打开同一数据库不应重复执行迁移。
-	s2, err := Open(dbPath)
+	s2, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("第二次 Open 失败: %v", err)
 	}

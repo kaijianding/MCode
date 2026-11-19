@@ -3,19 +3,14 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
 // TestThreadBeeTiersRoundTrip 验证 BeeTiers 在 CreateThread、GetThread、ListThreads 与 SetThreadBeeTiers 下正确持久化与回读。
 func TestThreadBeeTiersRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "tiers_test.db")
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/tmp/p1"}); err != nil {
 		t.Fatalf("UpsertProject 失败: %v", err)
@@ -116,13 +111,9 @@ func TestThreadBeeTiersRoundTrip(t *testing.T) {
 
 // TestThreadSwarmPairIDRoundTrip 验证 SetThreadSwarmPairID 写穿 threads.hydra_pair_id，空串回读为空串，不存在时返回 ErrNotFound。
 func TestThreadSwarmPairIDRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "pair_id_test.db")
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/tmp/p1"}); err != nil {
 		t.Fatalf("UpsertProject 失败: %v", err)

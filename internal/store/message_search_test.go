@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,11 +12,7 @@ import (
 func newMessageSearchTestStore(t *testing.T, dbName string) (*Store, string) {
 	t.Helper()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), dbName))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -44,6 +39,7 @@ func appendSearchMessage(t *testing.T, s *Store, id, threadID, role, kind, text 
 
 // 测试命中：正文包含关键字的消息被搜到，标题、项目、角色、片段都带回。
 func TestSearchMessagesHit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_hit.db")
 	now := time.Now().UTC()
@@ -83,6 +79,7 @@ func TestSearchMessagesHit(t *testing.T) {
 
 // 测试大小写不敏感（ASCII）与片段里的换行处理。
 func TestSearchMessagesCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_case.db")
 	now := time.Now().UTC()
@@ -108,6 +105,7 @@ func TestSearchMessagesCaseInsensitive(t *testing.T) {
 
 // 测试通配符转义：查询里的 % 与 _ 按字面匹配，不能命中别的消息。
 func TestSearchMessagesEscapesWildcards(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_escape.db")
 	now := time.Now().UTC()
@@ -148,6 +146,7 @@ func TestSearchMessagesEscapesWildcards(t *testing.T) {
 
 // 测试排除工具输出与思考块，也排除非用户/助手角色的消息。
 func TestSearchMessagesExcludesToolAndReasoning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_kinds.db")
 	now := time.Now().UTC()
@@ -171,6 +170,7 @@ func TestSearchMessagesExcludesToolAndReasoning(t *testing.T) {
 
 // 测试已归档会话不参与搜索。
 func TestSearchMessagesExcludesArchivedThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_archived.db")
 	now := time.Now().UTC()
@@ -197,6 +197,7 @@ func TestSearchMessagesExcludesArchivedThread(t *testing.T) {
 
 // 测试 limit：缺省与夹取，以及按 created_at 倒序返回。
 func TestSearchMessagesLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, projectID := newMessageSearchTestStore(t, "message_search_limit.db")
 	now := time.Now().UTC()
@@ -245,6 +246,7 @@ func TestSearchMessagesLimit(t *testing.T) {
 
 // 测试片段截断：命中位置前后按 rune 截取，两端被截断时补省略号。
 func TestMessageSearchSnippet(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("前", 50) + "目标" + strings.Repeat("后", 100)
 	snippet := messageSearchSnippet(long, "目标")
 	if !strings.HasPrefix(snippet, "…") {

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,11 +14,7 @@ var coldArchiveTestNow = time.Date(2026, 12, 1, 12, 0, 0, 0, time.UTC)
 // caNewStore 打开一个临时库，建好一个项目。
 func caNewStore(t *testing.T) (*Store, string) {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "cold-archive.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	s := OpenForTest(t)
 	if err := s.UpsertProject(context.Background(), Project{
 		ID: "p1", Name: "P1", Path: "/p1", CreatedAt: coldArchiveTestNow, UpdatedAt: coldArchiveTestNow,
 	}); err != nil {
@@ -140,6 +135,7 @@ func caRunArchive(t *testing.T, s *Store) ColdArchiveReport {
 
 // TestColdArchiveRoundTrip 验证归档后读路径逐字段一致，包括已压缩的 tool 行和旧 gzip 行。
 func TestColdArchiveRoundTrip(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -213,6 +209,7 @@ func TestColdArchiveRoundTrip(t *testing.T) {
 
 // TestColdArchiveSkipsUnqualified 验证未归档、太新、有进行中轮次的会话都不会被归档。
 func TestColdArchiveSkipsUnqualified(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
 	caCreateThread(t, s, projectID, "not-archived", false, old)
@@ -246,6 +243,7 @@ func TestColdArchiveSkipsUnqualified(t *testing.T) {
 
 // TestColdArchiveAppendAfterArchive 验证冷会话追加消息时 seq 连续、无 UNIQUE 冲突。
 func TestColdArchiveAppendAfterArchive(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -272,6 +270,7 @@ func TestColdArchiveAppendAfterArchive(t *testing.T) {
 
 // TestColdArchiveUpdateOldMessage 验证冷会话可以更新旧消息并读回新内容。
 func TestColdArchiveUpdateOldMessage(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -300,6 +299,7 @@ func TestColdArchiveUpdateOldMessage(t *testing.T) {
 
 // TestColdArchiveRecall 验证 RecallTurn 与 RecallMessage 在冷会话上生效且不会复活消息。
 func TestColdArchiveRecall(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -357,6 +357,7 @@ func TestColdArchiveRecall(t *testing.T) {
 
 // TestColdArchiveUnarchiveHydrates 验证取消归档会在同事务内回填消息。
 func TestColdArchiveUnarchiveHydrates(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -377,6 +378,7 @@ func TestColdArchiveUnarchiveHydrates(t *testing.T) {
 
 // TestColdArchiveDeleteThread 验证删除会话后没有孤儿归档行。
 func TestColdArchiveDeleteThread(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
 	caCreateThread(t, s, projectID, "t1", true, old)
@@ -393,6 +395,7 @@ func TestColdArchiveDeleteThread(t *testing.T) {
 
 // TestColdArchiveIdempotent 验证 HydrateThread 与 RunColdArchive 重复执行都是幂等的。
 func TestColdArchiveIdempotent(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -425,6 +428,7 @@ func TestColdArchiveIdempotent(t *testing.T) {
 
 // TestColdArchiveThreadMessagesPage 验证 ThreadMessagesPage 在冷会话上的 total 与页内容不变。
 func TestColdArchiveThreadMessagesPage(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)
@@ -458,6 +462,7 @@ func TestColdArchiveThreadMessagesPage(t *testing.T) {
 
 // TestColdArchiveCorruptPayload 验证 payload 被篡改时读路径返回带会话 ID 的错误。
 func TestColdArchiveCorruptPayload(t *testing.T) {
+	t.Parallel()
 	s, projectID := caNewStore(t)
 	ctx := context.Background()
 	old := coldArchiveTestNow.Add(-8 * 24 * time.Hour)

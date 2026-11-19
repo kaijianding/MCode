@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -11,15 +10,11 @@ import (
 // openMemoryProposalStore 打开一个临时 Store；记忆提议不挂外键，无需预置项目与会话。
 func openMemoryProposalStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "memory_proposals.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	return OpenForTest(t)
 }
 
 func TestCreateMemoryProposalDefaults(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 
@@ -72,6 +67,7 @@ func TestCreateMemoryProposalDefaults(t *testing.T) {
 }
 
 func TestCreateMemoryProposalKeepsExplicitFields(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 
@@ -101,6 +97,7 @@ func TestCreateMemoryProposalKeepsExplicitFields(t *testing.T) {
 }
 
 func TestGetMemoryProposalNotFound(t *testing.T) {
+	t.Parallel()
 	s := openMemoryProposalStore(t)
 	if _, err := s.GetMemoryProposal(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("期望 ErrNotFound，实际为 %v", err)
@@ -108,6 +105,7 @@ func TestGetMemoryProposalNotFound(t *testing.T) {
 }
 
 func TestListMemoryProposalsFiltersAndOrder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 
@@ -181,6 +179,7 @@ func TestListMemoryProposalsFiltersAndOrder(t *testing.T) {
 }
 
 func TestUpdateMemoryProposalStatus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 
@@ -231,6 +230,7 @@ func TestUpdateMemoryProposalStatus(t *testing.T) {
 }
 
 func TestDeleteMemoryProposal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 
@@ -250,6 +250,7 @@ func TestDeleteMemoryProposal(t *testing.T) {
 }
 
 func TestCountPendingMemoryProposals(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openMemoryProposalStore(t)
 

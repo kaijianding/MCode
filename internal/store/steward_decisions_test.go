@@ -4,19 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestStewardDecisions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "decisions.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	first, err := s.CreateStewardDecision(ctx, StewardDecision{TaskID: "task"})
 	if err != nil || first.ID != "D-0001" {
 		t.Fatalf("首张决策卡: %+v, %v", first, err)
@@ -43,12 +39,9 @@ func TestStewardDecisions(t *testing.T) {
 }
 
 func TestStewardDecisionConcurrentIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "concurrent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	ids := make(chan string, 10)
 	errs := make(chan error, 10)
 	var wg sync.WaitGroup
@@ -85,12 +78,9 @@ func TestStewardDecisionConcurrentIDs(t *testing.T) {
 }
 
 func TestStewardDecisionIDBeyond9999(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "large.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	now := formatTime(time.Now())
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO steward_decisions (id, created_at, updated_at) VALUES ('D-9999', ?, ?)`, now, now); err != nil {
 		t.Fatal(err)

@@ -35,11 +35,7 @@ func retentionFailure(t *testing.T, format string, args ...any) {
 // newRetentionTestStore 打开一个临时库，建好一个项目。
 func newRetentionTestStore(t *testing.T, dbName string) (*Store, string) {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), dbName))
-	if err != nil {
-		retentionFailure(t, "Open 失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	s := OpenForTest(t)
 
 	if err := s.UpsertProject(context.Background(), Project{
 		ID: "p1", Name: "P1", Path: "/p1", CreatedAt: retentionTestNow, UpdatedAt: retentionTestNow,
@@ -165,6 +161,7 @@ func strPtr(s string) *string { return &s }
 
 // 主会话（is_helper = 0）的 tool 与 thinking 同样做无损压缩，assistant/user 正文一条都不能动。
 func TestRunBeeMessageRetentionCompressesMainThreads(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_main.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "main1", false)
@@ -223,6 +220,7 @@ func TestRunBeeMessageRetentionCompressesMainThreads(t *testing.T) {
 // 删除保留的是会话最后一条消息（任一类型），因为 append 会复用被删掉的 seq；
 // 所以这里把 thinking 放在最后追加，才等价于“保留最后一条思考”。
 func TestRunBeeMessageRetentionThinkingBoundary(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_boundary.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "t_fresh", true)
@@ -281,6 +279,7 @@ func TestRunBeeMessageRetentionThinkingBoundary(t *testing.T) {
 
 // 状态不确定一律跳过，只有 completed + 副本已回收 + 满 30 天才处理。
 func TestRunBeeMessageRetentionSkipsUncertainStates(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_states.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	finished := testFinishedAt(-31 * 24 * time.Hour)
@@ -351,6 +350,7 @@ func TestRunBeeMessageRetentionSkipsUncertainStates(t *testing.T) {
 
 // 压缩后经 ListMessages 读出的正文与原文逐字节一致；原本为空的 ToolInput 读回仍是 nil。
 func TestRunBeeMessageRetentionReadPathTransparent(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_read.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -405,6 +405,7 @@ func TestRunBeeMessageRetentionReadPathTransparent(t *testing.T) {
 
 // 超长可压缩工具输出必须真的变小（短消息的 zstd 包装开销可能大于原文，不去断言）。
 func TestRunBeeMessageRetentionShrinksLargeToolOutput(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_shrink.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -433,6 +434,7 @@ func TestRunBeeMessageRetentionShrinksLargeToolOutput(t *testing.T) {
 
 // 思考消息被删除，但保留会话最后一条（避免 seq 被复用）。
 func TestRunBeeMessageRetentionDeletesThinkingKeepsLast(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_thinking.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -498,6 +500,7 @@ func TestRunBeeMessageRetentionDeletesThinkingKeepsLast(t *testing.T) {
 
 // ctx 中途取消后重跑，最终库状态与一次跑完完全相同。
 func TestRunBeeMessageRetentionInterruptThenResume(t *testing.T) {
+	t.Parallel()
 	want := retentionFixtureDump(t, "retention_resume_full.db", false)
 	got := retentionFixtureDump(t, "retention_resume_cut.db", true)
 	if got != want {
@@ -588,6 +591,7 @@ func dumpMessagesTable(t *testing.T, s *Store) string {
 
 // 对已压缩行调用 UpdateMessage 不能复活明文，且新内容读出来是新内容。
 func TestUpdateMessageKeepsCompressedRowsCompressed(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_update.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -643,6 +647,7 @@ func TestUpdateMessageKeepsCompressedRowsCompressed(t *testing.T) {
 
 // 老 gzip 行经 UpdateMessage 重新写入时升级为 zstd，读出的仍是新内容。
 func TestUpdateMessageUpgradesLegacyGzipToZstd(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_gzip_upgrade.db")
 	ctx := context.Background()
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
@@ -687,6 +692,7 @@ func TestUpdateMessageUpgradesLegacyGzipToZstd(t *testing.T) {
 
 // 搜索命中与压缩前一致（工具输出与思考本来就不参与搜索）。
 func TestSearchMessagesUnaffectedByRetention(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_search.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -732,9 +738,10 @@ func TestSearchMessagesUnaffectedByRetention(t *testing.T) {
 
 // 旧库（没有三个新列）升级后能直接打开，未压缩数据读出与改动前一致。
 func TestMessageRetentionMigrationOnOldDatabase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "retention_old.db")
-	s, err := Open(dbPath)
+	s, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}
@@ -811,6 +818,7 @@ func TestMessageRetentionMigrationOnOldDatabase(t *testing.T) {
 
 // heads_json 是脏 JSON 时不能崩：解析失败的行当作没有 bee 记录，阶段二全部跳过，阶段一照常压缩。
 func TestRunBeeMessageRetentionToleratesDirtyHeadsJSON(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_dirty.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee1", true)
@@ -838,6 +846,7 @@ func TestRunBeeMessageRetentionToleratesDirtyHeadsJSON(t *testing.T) {
 
 // 一轮结束写入观测键，便于排障与「跑过没跑过」查询。
 func TestRunBeeMessageRetentionRecordsLastRun(t *testing.T) {
+	t.Parallel()
 	s, _ := newRetentionTestStore(t, "retention_setting.db")
 	if _, err := s.RunBeeMessageRetention(context.Background(), retentionCfg()); err != nil {
 		t.Fatalf("RunBeeMessageRetention 失败: %v", err)
@@ -860,6 +869,7 @@ func TestRunBeeMessageRetentionRecordsLastRun(t *testing.T) {
 
 // bee 记录里的 WorktreePath 可能指向早已删除的副本目录：目录不在了就不能一直按 worktree_present 跳过。
 func TestRunBeeMessageRetentionProcessesBeeWithDeletedWorktree(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_worktree_missing.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee_gone", true)
@@ -888,6 +898,7 @@ func TestRunBeeMessageRetentionProcessesBeeWithDeletedWorktree(t *testing.T) {
 
 // 副本目录仍存在时阶段二跳过，但阶段一的无损压缩照常进行。
 func TestRunBeeMessageRetentionSkipsBeeWithExistingWorktree(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_worktree_present.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "bee_alive", true)
@@ -918,6 +929,7 @@ func TestRunBeeMessageRetentionSkipsBeeWithExistingWorktree(t *testing.T) {
 
 // 有进行中轮次的会话不压缩：轮次可能还在写消息，等它收尾后再压。
 func TestRunBeeMessageRetentionSkipsThreadWithRunningTurn(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_running.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "running1", false)
@@ -942,6 +954,7 @@ func TestRunBeeMessageRetentionSkipsThreadWithRunningTurn(t *testing.T) {
 
 // 10 分钟静默期内的新行不压：行还可能被 UpdateMessage / 崩溃收尾改写。
 func TestRunBeeMessageRetentionSkipsFreshMessages(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_fresh_rows.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "main1", false)
@@ -969,6 +982,7 @@ func TestRunBeeMessageRetentionSkipsFreshMessages(t *testing.T) {
 
 // 正文加 tool_input 不足 256 字节的行保持明文，压缩只会更大。
 func TestRunBeeMessageRetentionLeavesShortRowsPlain(t *testing.T) {
+	t.Parallel()
 	s, projectID := newRetentionTestStore(t, "retention_short.db")
 	old := retentionTestNow.Add(-31 * 24 * time.Hour)
 	createRetentionThread(t, s, projectID, "main1", false)
@@ -991,6 +1005,7 @@ func TestRunBeeMessageRetentionLeavesShortRowsPlain(t *testing.T) {
 
 // 默认实现只对「确定不存在」返回 false；其余不确定的错误一律视为存在。
 func TestDefaultBeeWorktreeExists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if !defaultBeeWorktreeExists(dir) {
 		t.Fatalf("存在的目录 %s 应判定为存在", dir)
@@ -1006,6 +1021,7 @@ func TestDefaultBeeWorktreeExists(t *testing.T) {
 
 // 跳过判定：只有副本目录确实存在才按 worktree_present 跳过，其余跳过规则的顺序不受影响。
 func TestBeeRetentionSkipReasonWorktree(t *testing.T) {
+	t.Parallel()
 	cutoff := retentionTestNow.Add(-beeRetentionRetention)
 	finished := testFinishedAt(-31 * 24 * time.Hour)
 	existing := t.TempDir()

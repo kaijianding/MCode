@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationFromDivergedBranches(t *testing.T) {
+	t.Parallel()
 	const mcpFields = `
 		ALTER TABLE tasks ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0;
 		ALTER TABLE goals ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';

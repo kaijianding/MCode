@@ -7,6 +7,7 @@ import (
 
 // 逐字节一致：空串、中文、emoji、含 \x00 的二进制式文本、1MB 可压缩文本都要原样还原。
 func TestMessageContentRoundTrip(t *testing.T) {
+	t.Parallel()
 	longText := strings.Repeat("abc中文日志行 12345\n", 50000) // 约 1MB
 	cases := []struct {
 		name      string
@@ -51,6 +52,7 @@ func TestMessageContentRoundTrip(t *testing.T) {
 
 // 老库里的 gzip 数据必须仍然能解开：算法升级不能把历史消息变成乱码。
 func TestDecodeMessageContentLegacyGzip(t *testing.T) {
+	t.Parallel()
 	const text = "旧版本用 gzip 压缩的工具输出\n第二行"
 	const toolInput = `{"command":"git status --short"}`
 
@@ -74,6 +76,7 @@ func TestDecodeMessageContentLegacyGzip(t *testing.T) {
 
 // 1MB 可压缩文本必须真的变小，否则「压缩」只是把正文搬了个位置。
 func TestMessageContentCompressesLongText(t *testing.T) {
+	t.Parallel()
 	text := strings.Repeat("abc中文日志行 12345\n", 50000)
 	textZ, _, err := encodeMessageContent(text, "", 0)
 	if err != nil {
@@ -86,6 +89,7 @@ func TestMessageContentCompressesLongText(t *testing.T) {
 
 // 空编码表示未压缩，原样返回，不做任何解压。
 func TestDecodeMessageContentEmptyEncoding(t *testing.T) {
+	t.Parallel()
 	text, toolInput, err := decodeMessageContent("", nil, nil)
 	if err != nil {
 		t.Fatalf("空编码不应报错: %v", err)
@@ -97,6 +101,7 @@ func TestDecodeMessageContentEmptyEncoding(t *testing.T) {
 
 // 未知编码一律报错，读路径不会把二进制当明文交出去。
 func TestDecodeMessageContentUnknownEncoding(t *testing.T) {
+	t.Parallel()
 	if _, _, err := decodeMessageContent("snappy", nil, nil); err == nil {
 		t.Fatal("未知编码应报错")
 	}
@@ -104,6 +109,7 @@ func TestDecodeMessageContentUnknownEncoding(t *testing.T) {
 
 // 帧损坏（校验和或魔数被改）必须报错，不能静默返回半截正文。
 func TestDecodeMessageContentCorrupt(t *testing.T) {
+	t.Parallel()
 	textZ, _, err := encodeMessageContent("需要压缩的正文内容", "", 0)
 	if err != nil {
 		t.Fatalf("encodeMessageContent 失败: %v", err)
@@ -117,6 +123,7 @@ func TestDecodeMessageContentCorrupt(t *testing.T) {
 
 // bit 级往返：zstd 输出对同一输入是确定的，同一份数据编码两次必须完全相同（幂等的基础）。
 func TestEncodeMessageContentDeterministic(t *testing.T) {
+	t.Parallel()
 	first, firstInput, err := encodeMessageContent(`{"a":1}`, "工具输入", 0)
 	if err != nil {
 		t.Fatalf("首次编码失败: %v", err)

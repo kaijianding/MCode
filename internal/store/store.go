@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"mcode/internal/filelock"
@@ -724,9 +725,15 @@ func (s *Store) startBackgroundQuickCheck(skip bool) {
 	}()
 }
 
-// finalizeOpen 组装 Store：同步检查通过则清理标记文件，并启动后台完整性检查。
+// OpenOptions 控制打开数据库时的可选行为，零值保持默认生产行为。
+type OpenOptions struct {
+	SkipQuickCheck bool
+	FastSync       bool
+}
+
+// finalizeOpen 组装 Store：同步检查通过则清理标记文件，并按需启动后台完整性检查。
 // 组装完成前先加载 zstd 字典：缺字典会读不回历史压缩消息，此时 Open 必须失败。
-func finalizeOpen(ctx context.Context, db *sql.DB, filePath, recoveredPath string, syncChecked, memory, primary bool, hostLock *filelock.Lock) (*Store, error) {
+func finalizeOpen(ctx context.Context, db *sql.DB, filePath, recoveredPath string, syncChecked, memory, primary, skipQuickCheck bool, hostLock *filelock.Lock) (*Store, error) {
 	if syncChecked && !memory {
 		removeQuickCheckMarker(filePath)
 	}
@@ -743,7 +750,7 @@ func finalizeOpen(ctx context.Context, db *sql.DB, filePath, recoveredPath strin
 		_ = db.Close()
 		return nil, fmt.Errorf("load message zstd dicts: %w", err)
 	}
-	s.startBackgroundQuickCheck(memory)
+	s.startBackgroundQuickCheck(memory || skipQuickCheck)
 	return s, nil
 }
 
@@ -764,9 +771,21 @@ func quarantineCorruptFiles(basePath, timestamp string) {
 // 常规启动不做同步 quick_check，改为打开后由后台只读连接检查；
 // 若存在 .needs-check 标记（上次后台检查失败）则同步检查。
 // 若检测到数据库文件损坏且非内存数据库，将自动备份损坏文件并自愈重试一次。
-func Open(path string) (opened *Store, err error) {
+func Open(path string) (*Store, error) {
+	return OpenWithOptions(path, OpenOptions{})
+}
+
+// OpenWithOptions 按指定选项打开 SQLite 数据库。
+func OpenWithOptions(path string, opts OpenOptions) (opened *Store, err error) {
 	cleanPath := strings.TrimPrefix(path, "file:")
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", cleanPath)
+	sep := "?"
+	if strings.Contains(cleanPath, "?") {
+		sep = "&"
+	}
+	dsn := fmt.Sprintf("file:%s%s_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", cleanPath, sep)
+	if opts.FastSync {
+		dsn += "&_pragma=synchronous(OFF)"
+	}
 	filePath := physicalDBPath(cleanPath)
 	memory := isMemoryDB(path, dsn)
 	primary := true
@@ -786,13 +805,13 @@ func Open(path string) (opened *Store, err error) {
 			_ = hostLock.Close()
 		}
 	}()
-	// 内存库无法持久化标记文件，始终同步检查（库为空，开销可忽略）
-	syncCheck := memory || quickCheckMarkerExists(filePath)
+	// 内存库无法持久化标记文件，始终同步检查（库为空，开销可忽略）；SkipQuickCheck 为真时跳过。
+	syncCheck := !opts.SkipQuickCheck && (memory || quickCheckMarkerExists(filePath))
 
 	ctx := context.Background()
 	db, err := openAndMigrate(ctx, dsn, syncCheck)
 	if err == nil {
-		return finalizeOpen(ctx, db, filePath, "", syncCheck, memory, primary, hostLock)
+		return finalizeOpen(ctx, db, filePath, "", syncCheck, memory, primary, opts.SkipQuickCheck, hostLock)
 	}
 
 	// 内存数据库或非损坏类错误不做自愈处理
@@ -815,7 +834,22 @@ func Open(path string) (opened *Store, err error) {
 		return nil, fmt.Errorf("reopen sqlite db after corruption backup (%s): %w", backupPath, retryErr)
 	}
 
-	return finalizeOpen(ctx, retryDB, filePath, backupPath, syncCheck, memory, primary, hostLock)
+	return finalizeOpen(ctx, retryDB, filePath, backupPath, syncCheck, memory, primary, opts.SkipQuickCheck, hostLock)
+}
+
+// OpenForTest 在临时目录中以测试加速选项（跳过 quick_check 并关闭同步落盘）打开数据库，
+// 并自动注册测试结束时的 Close 清理。
+func OpenForTest(t testing.TB) *Store {
+	t.Helper()
+	s, err := OpenWithOptions(filepath.Join(t.TempDir(), "test.db"), OpenOptions{
+		SkipQuickCheck: true,
+		FastSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("OpenForTest: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
 }
 
 // IsPrimary 报告本 Store 是否负责启动清扫；非主宿主运行期间不会重新竞争锁。
@@ -861,14 +895,20 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("数据库版本高于当前程序版本: db v%d > program v%d", currentVersion, len(migrations))
 	}
 
-	for i, sqlScript := range migrations {
-		targetVersion := i + 1
-		if currentVersion >= targetVersion {
-			continue
+	if currentVersion == 0 && len(migrations) > 0 {
+		if err := s.applyMigrationsBatch(ctx, migrations, len(migrations)); err != nil {
+			return err
 		}
+	} else {
+		for i, sqlScript := range migrations {
+			targetVersion := i + 1
+			if currentVersion >= targetVersion {
+				continue
+			}
 
-		if err := s.applyMigration(ctx, sqlScript, targetVersion); err != nil {
-			return fmt.Errorf("apply migration v%d: %w", targetVersion, err)
+			if err := s.applyMigration(ctx, sqlScript, targetVersion); err != nil {
+				return fmt.Errorf("apply migration v%d: %w", targetVersion, err)
+			}
 		}
 	}
 	startuptrace.Mark("store migrations")
@@ -919,6 +959,29 @@ func (s *Store) ensureThreadColumns(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationsBatch 在单个事务中批量执行全新空库的全部迁移脚本，并将 user_version 推进到 targetVersion。
+func (s *Store) applyMigrationsBatch(ctx context.Context, scripts []string, targetVersion int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for i, sqlScript := range scripts {
+		if _, err := tx.ExecContext(ctx, sqlScript); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("apply migration v%d: %w", i+1, err)
+			}
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", targetVersion)); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // applyMigration 在单独的事务中执行一次迁移，并更新 user_version。

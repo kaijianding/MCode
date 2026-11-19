@@ -24,12 +24,9 @@ func setupFollowUpKindThread(t *testing.T, s *Store, threadID string) {
 
 // FollowUp.Kind 应随排队项一起落库并按原值读回，空值保持空字符串。
 func TestFollowUpKindRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "follow_up_kind.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	setupFollowUpKindThread(t, s, "t_kind")
 	now := time.Now().UTC()
@@ -58,10 +55,11 @@ func TestFollowUpKindRoundTrip(t *testing.T) {
 
 // 旧库没有 kind 列时，迁移应补上该列并让存量跟进项读到空 Kind。
 func TestFollowUpKindMigrationDefaultsEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "follow_up_kind_migration.db")
 
-	s, err := Open(dbPath)
+	s, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}

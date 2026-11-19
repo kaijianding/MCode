@@ -24,12 +24,9 @@ func setupFollowUpIntentThread(t *testing.T, s *Store, threadID string) {
 
 // FollowUp.Intent 应随排队项一起落库并按原值读回，空值保持空字符串。
 func TestFollowUpIntentRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "follow_up_intent.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	setupFollowUpIntentThread(t, s, "t_intent")
 	now := time.Now().UTC()
@@ -62,10 +59,11 @@ func TestFollowUpIntentRoundTrip(t *testing.T) {
 
 // 旧库没有 intent 列时，迁移应补上该列并让存量跟进项读到空 Intent。
 func TestFollowUpIntentMigrationDefaultsEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "follow_up_intent_migration.db")
 
-	s, err := Open(dbPath)
+	s, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}

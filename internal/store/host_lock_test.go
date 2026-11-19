@@ -14,6 +14,7 @@ import (
 )
 
 func TestHostLockPreservesLiveProvisionalThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mcode.db")
 	first, err := Open(path)
@@ -63,6 +64,7 @@ func TestHostLockPreservesLiveProvisionalThread(t *testing.T) {
 }
 
 func TestHostLockReleasedOnOpenFailure(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "mcode.db")
 	s, err := Open(path)
 	if err != nil {
@@ -88,6 +90,7 @@ func TestHostLockReleasedOnOpenFailure(t *testing.T) {
 }
 
 func TestHostLockCloseConcurrentAndRepeated(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "mcode.db")
 	s, err := Open(path)
 	if err != nil {
@@ -121,6 +124,7 @@ func TestHostLockCloseConcurrentAndRepeated(t *testing.T) {
 }
 
 func TestHostLockFallback(t *testing.T) {
+	t.Parallel()
 	t.Run("内存库", func(t *testing.T) {
 		s, err := Open(":memory:")
 		if err != nil {

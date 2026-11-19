@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -104,5 +107,120 @@ func TestBackgroundQuickCheckWritesMarker(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close 失败: %v", err)
+	}
+}
+
+// TestOpenOptionsFastTestMode 验证 OpenOptions 的快速测试选项跳过后台 quick_check 并关闭 synchronous，
+// 同时保持默认 Open 的后台 quick_check 与默认 synchronous 行为不变。
+func TestOpenOptionsFastTestMode(t *testing.T) {
+	ctx := context.Background()
+	origBg := backgroundQuickCheck
+	t.Cleanup(func() { backgroundQuickCheck = origBg })
+
+	var bgCalls atomic.Int32
+	var bgDoneOnce sync.Once
+	bgDone := make(chan struct{})
+	backgroundQuickCheck = func(ctx context.Context, filePath string) error {
+		bgCalls.Add(1)
+		defer bgDoneOnce.Do(func() { close(bgDone) })
+		return origBg(ctx, filePath)
+	}
+
+	fastPath := filepath.Join(t.TempDir(), "fast.db")
+	sFast, err := OpenWithOptions(fastPath, OpenOptions{
+		SkipQuickCheck: true,
+		FastSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("OpenWithOptions 失败: %v", err)
+	}
+	if sFast.bgCheckDone != nil {
+		_ = sFast.Close()
+		t.Fatalf("SkipQuickCheck=true 不应启动后台 quick_check")
+	}
+
+	var fastSync int
+	if err := sFast.db.QueryRowContext(ctx, "PRAGMA synchronous;").Scan(&fastSync); err != nil {
+		_ = sFast.Close()
+		t.Fatalf("读取 fast synchronous 失败: %v", err)
+	}
+	if fastSync != 0 {
+		_ = sFast.Close()
+		t.Fatalf("FastSync=true 期望 synchronous=0，实际为 %d", fastSync)
+	}
+
+	now := time.Now().UTC()
+	if err := sFast.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		_ = sFast.Close()
+		t.Fatalf("UpsertProject 失败: %v", err)
+	}
+	if err := sFast.CreateThread(ctx, Thread{ID: "t1", ProjectID: "p1", Title: "T1", Provider: "test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		_ = sFast.Close()
+		t.Fatalf("CreateThread 失败: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for g := range 4 {
+		wg.Go(func() {
+			for i := range 5 {
+				id := fmt.Sprintf("m-%d-%d", g, i)
+				if _, err := sFast.AppendMessage(ctx, Message{
+					ID: id, ThreadID: "t1", Role: "user", Kind: "text", Text: id, TurnIndex: i, CreatedAt: now,
+				}); err != nil {
+					t.Errorf("并发 AppendMessage %s 失败: %v", id, err)
+					return
+				}
+				if _, _, err := sFast.ListMessages(ctx, "t1", 0, 20); err != nil {
+					t.Errorf("并发 ListMessages 失败: %v", err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if err := sFast.Close(); err != nil {
+		t.Fatalf("关闭 sFast 失败: %v", err)
+	}
+	if got := bgCalls.Load(); got != 0 {
+		t.Fatalf("SkipQuickCheck=true 期望后台 quick_check 调用 0 次，实际 %d 次", got)
+	}
+
+	// 验证 OpenForTest 快捷封装同样应用了快速测试选项。
+	sHelper := OpenForTest(t)
+	var helperSync int
+	if err := sHelper.db.QueryRowContext(ctx, "PRAGMA synchronous;").Scan(&helperSync); err != nil {
+		t.Fatalf("读取 OpenForTest synchronous 失败: %v", err)
+	}
+	if helperSync != 0 || sHelper.bgCheckDone != nil {
+		t.Fatalf("OpenForTest 未应用快速选项: sync=%d bgCheckDone=%v", helperSync, sHelper.bgCheckDone != nil)
+	}
+
+	// 验证默认 Open 保持原后台 quick_check 与默认 synchronous 行为不变。
+	defaultPath := filepath.Join(t.TempDir(), "default.db")
+	sDefault, err := Open(defaultPath)
+	if err != nil {
+		t.Fatalf("默认 Open 失败: %v", err)
+	}
+	defer func() {
+		if err := sDefault.Close(); err != nil {
+			t.Errorf("关闭 sDefault 失败: %v", err)
+		}
+	}()
+
+	var defaultSync int
+	if err := sDefault.db.QueryRowContext(ctx, "PRAGMA synchronous;").Scan(&defaultSync); err != nil {
+		t.Fatalf("读取默认 synchronous 失败: %v", err)
+	}
+	if defaultSync == 0 {
+		t.Fatalf("默认 Open 不应关闭 synchronous，实际为 %d", defaultSync)
+	}
+
+	select {
+	case <-bgDone:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("默认 Open 未在超时前触发后台 quick_check")
+	}
+	if got := bgCalls.Load(); got != 1 {
+		t.Fatalf("默认 Open 期望后台 quick_check 调用 1 次，实际 %d 次", got)
 	}
 }

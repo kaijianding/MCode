@@ -8,6 +8,7 @@ import (
 )
 
 func TestRewritePathPrefix(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "paths.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -45,6 +46,7 @@ func TestRewritePathPrefix(t *testing.T) {
 }
 
 func TestRewritePathPrefixRollback(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "paths.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -76,6 +78,7 @@ func TestRewritePathPrefixRollback(t *testing.T) {
 }
 
 func TestRewritePathPrefixOldSchema(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {

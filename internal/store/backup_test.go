@@ -13,7 +13,7 @@ import (
 func backupTestOpen(t *testing.T, name string) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name+".db")
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +51,7 @@ func backupTestSeed(t *testing.T, s *Store) {
 }
 
 func TestBackupSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, path := backupTestOpen(t, "source")
 	backupTestExec(t, s.db, `PRAGMA wal_autocheckpoint=0`)
@@ -99,6 +100,7 @@ func TestBackupSnapshot(t *testing.T) {
 }
 
 func TestBackupPrepareSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, path := backupTestOpen(t, "versions")
 	backupTestExec(t, s.db, fmt.Sprintf("PRAGMA user_version=%d", len(migrations)+1))
@@ -122,6 +124,7 @@ func TestBackupPrepareSnapshot(t *testing.T) {
 }
 
 func TestBackupMerge(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, sourcePath := backupTestOpen(t, "source")
 	backupTestSeed(t, source)

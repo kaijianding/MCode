@@ -3,22 +3,18 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
 func TestDeleteTaskCascade(t *testing.T) {
+	t.Parallel()
 	for _, conflict := range []bool{false, true} {
 		name := "success"
 		if conflict {
 			name = "revision conflict"
 		}
 		t.Run(name, func(t *testing.T) {
-			st, err := Open(filepath.Join(t.TempDir(), "store.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer st.Close()
+			st := OpenForTest(t)
 			ctx := context.Background()
 			for _, task := range []Task{
 				{ID: "target"},
@@ -67,11 +63,8 @@ func TestDeleteTaskCascade(t *testing.T) {
 }
 
 func TestCreateGoalTask_AtomicCAS(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "store.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	t.Parallel()
+	st := OpenForTest(t)
 	ctx := context.Background()
 	projectID, goalID := "project", "goal"
 	if err := st.CreateGoal(ctx, Goal{ID: goalID, ProjectID: projectID, Status: "plan_review"}); err != nil {

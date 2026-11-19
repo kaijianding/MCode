@@ -11,6 +11,7 @@ import (
 )
 
 func TestGetMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t, "source")
 	defer s.Close()
@@ -49,6 +50,7 @@ func TestGetMessage(t *testing.T) {
 }
 
 func TestMigrationIdempotency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "migration_test.db")
 
@@ -86,14 +88,9 @@ func TestMigrationIdempotency(t *testing.T) {
 }
 
 func TestCascadeDelete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "cascade_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	proj := Project{
@@ -156,8 +153,7 @@ func TestCascadeDelete(t *testing.T) {
 	}
 
 	// 验证线程已被级联删除
-	_, err = s.GetThread(ctx, "t1")
-	if !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetThread(ctx, "t1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("期望线程被级联删除返回 ErrNotFound，实际为: %v", err)
 	}
 
@@ -181,14 +177,9 @@ func TestCascadeDelete(t *testing.T) {
 }
 
 func TestAppendMessageSeqIncrement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "seq_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -227,14 +218,9 @@ func TestAppendMessageSeqIncrement(t *testing.T) {
 }
 
 func TestUpdateMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "update_msg_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -290,14 +276,9 @@ func TestUpdateMessage(t *testing.T) {
 }
 
 func TestListMessagesPagination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "pagination_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -381,16 +362,11 @@ func TestListMessagesPagination(t *testing.T) {
 }
 
 func TestGetThreadNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "notfound_test.db")
+	s := OpenForTest(t)
 
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
-
-	_, err = s.GetThread(ctx, "non-existent-id")
+	_, err := s.GetThread(ctx, "non-existent-id")
 	if err == nil {
 		t.Fatalf("期望返回错误，实际为 nil")
 	}
@@ -400,6 +376,7 @@ func TestGetThreadNotFound(t *testing.T) {
 }
 
 func TestPersistenceAcrossCloseAndOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "persistence_test.db")
 
@@ -493,14 +470,9 @@ func TestPersistenceAcrossCloseAndOpen(t *testing.T) {
 }
 
 func TestStoreThreadMethods(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "thread_methods_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -563,6 +535,7 @@ func TestStoreThreadMethods(t *testing.T) {
 }
 
 func TestUpdateThreadWorktreePathPreservesSessionAndRequest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := seedCorruptTestData(t, "t1")
 	defer s.Close()
@@ -585,14 +558,9 @@ func TestUpdateThreadWorktreePathPreservesSessionAndRequest(t *testing.T) {
 }
 
 func TestTurnUsageUpsertAndList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "usage_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -663,14 +631,9 @@ func TestTurnUsageUpsertAndList(t *testing.T) {
 }
 
 func TestThreadSortOrderRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "sort_order_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	proj := Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}
@@ -718,14 +681,9 @@ func TestThreadSortOrderRoundTrip(t *testing.T) {
 }
 
 func TestFollowUpsRoundTripAndRevision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "follow_ups_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	proj := Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}
@@ -822,10 +780,11 @@ func TestFollowUpsRoundTripAndRevision(t *testing.T) {
 }
 
 func TestStoreMediaContinuationAndAttachmentMeta(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "media_continuation_meta_test.db")
 
-	s, err := Open(dbPath)
+	s, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}
@@ -1037,7 +996,7 @@ func TestStoreMediaContinuationAndAttachmentMeta(t *testing.T) {
 		t.Fatalf("Close 失败: %v", err)
 	}
 
-	s2, err := Open(dbPath)
+	s2, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("第二次 Open 失败: %v", err)
 	}
@@ -1087,14 +1046,9 @@ func TestStoreMediaContinuationAndAttachmentMeta(t *testing.T) {
 }
 
 func TestStoreThreadPinnedAndArchived(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "pin_archive_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	proj := Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}
@@ -1182,14 +1136,9 @@ func TestStoreThreadPinnedAndArchived(t *testing.T) {
 }
 
 func TestStoreDeleteThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "delete_thread_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	proj := Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}
@@ -1272,14 +1221,9 @@ func TestStoreDeleteThread(t *testing.T) {
 }
 
 func TestStoreDeleteProjectCascadesThreads(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "delete_project_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	for _, id := range []string{"p1", "p2"} {
@@ -1363,14 +1307,9 @@ func TestStoreDeleteProjectCascadesThreads(t *testing.T) {
 }
 
 func TestStoreThreadComposerPrefs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "thread_composer_prefs_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -1413,14 +1352,9 @@ func TestStoreThreadComposerPrefs(t *testing.T) {
 
 // TestStoreThreadPersonaRoundTrip 验证人设 id 能经 CreateThread / UpdateThreadComposerPrefs 写入并读回。
 func TestStoreThreadPersonaRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "thread_persona_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -1458,14 +1392,9 @@ func TestStoreThreadPersonaRoundTrip(t *testing.T) {
 }
 
 func TestStoreThreadFastMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "thread_fast_mode_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -1519,14 +1448,9 @@ func TestStoreThreadFastMode(t *testing.T) {
 }
 
 func TestMessageToolFields(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "message_tool_fields_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -1632,14 +1556,9 @@ func TestMessageToolFields(t *testing.T) {
 // TestMessageErrKindRoundTrip 验证错误消息的失败类别能随消息落库并在读回时还原：
 // 有类别时指针带回原值，普通消息读回 nil（界面据此回退到关键词识别）。
 func TestMessageErrKindRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "message_err_kind_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})
@@ -1691,14 +1610,9 @@ func TestMessageErrKindRoundTrip(t *testing.T) {
 }
 
 func TestUpdateThreadProject(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "update_thread_project_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	_ = s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: "/p1", CreatedAt: now, UpdatedAt: now})

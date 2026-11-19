@@ -10,6 +10,7 @@ import (
 
 // TestBackfillSwarmLeadHelpers 验证 hydra_leads.heads_json 中的 bee 线程回填 parent_thread_id 与 is_helper。
 func TestBackfillSwarmLeadHelpers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "backfill_test.db")
 
@@ -147,6 +148,7 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 }
 
 func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "backfill_duplicate.db")
 	s, err := Open(dbPath)
@@ -199,6 +201,7 @@ func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
 
 // TestBackfillSwarmLeadHelpersRunsOnce 验证新库不会在后续启动重复回填新写入的数据。
 func TestBackfillSwarmLeadHelpersRunsOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "backfill_once.db")
 	s, err := Open(dbPath)

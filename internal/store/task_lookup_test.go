@@ -3,17 +3,13 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
 func TestTaskByThreadID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "task_lookup_test.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	threadID := "thread-1"
 	otherThreadID := "thread-2"

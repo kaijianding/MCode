@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,12 +9,9 @@ import (
 )
 
 func TestStartupBulkLists(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "bulk.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "p", Path: "/p"}); err != nil {
 		t.Fatal(err)
 	}
@@ -64,11 +60,8 @@ func TestStartupBulkLists(t *testing.T) {
 }
 
 func TestStartupRecoveryIndexes(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "indexes.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	t.Parallel()
+	s := OpenForTest(t)
 	for _, tc := range []struct{ query, index string }{
 		{"SELECT " + messageSelectCols + " FROM messages WHERE role = 'tool' AND tool_status = 'background' ORDER BY thread_id, seq", "idx_messages_tool_background"},
 		{"SELECT " + messageSelectCols + " FROM messages WHERE role = 'tool' AND tool_status = 'running' ORDER BY thread_id, seq", "idx_messages_tool_running"},

@@ -16,11 +16,7 @@ import (
 func TestListAllActivityIntervals(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "activity.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	base := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
 	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "p", CreatedAt: base, UpdatedAt: base}); err != nil {
 		t.Fatal(err)
@@ -58,13 +54,7 @@ func TestListAllActivityIntervals(t *testing.T) {
 func TestTurnsAndThreads_NewDB(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "new_db.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	var userVersion int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version;").Scan(&userVersion); err != nil {
@@ -225,13 +215,7 @@ func TestMigrationIdempotency_OldDB(t *testing.T) {
 func TestThreadNewFieldsRoundTrip(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "thread_roundtrip.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -332,13 +316,7 @@ func TestThreadNewFieldsRoundTrip(t *testing.T) {
 func TestTurnsCRUDAndRecent(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "turns_crud.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -462,11 +440,7 @@ func TestTurnsCRUDAndRecent(t *testing.T) {
 func TestListAllTurnDurations(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "turn-durations.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -507,13 +481,7 @@ func TestListAllTurnDurations(t *testing.T) {
 func TestTurnsCascadeDelete(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "turns_cascade.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "Project 1", Path: "/path/p1", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -568,13 +536,7 @@ func TestTurnsCascadeDelete(t *testing.T) {
 // 写入后按原值读回，同一轮覆盖写入 0 时读回 0（provider 未上报，界面回退到模型目录且不显示费用）。
 func TestTurnUsageWindowCostRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "usage_window_cost.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -754,11 +716,7 @@ func newCrashRecoveryStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	testenv.TempHome(t)
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "crash_recovery.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}); err != nil {

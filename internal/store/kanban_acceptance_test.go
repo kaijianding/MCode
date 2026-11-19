@@ -10,12 +10,9 @@ import (
 
 // TestTaskAcceptanceFieldsRoundTrip 校验验收标准与打回计数在创建、查询、列表与更新中都能往返。
 func TestTaskAcceptanceFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "task_acceptance.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	projID := "proj-accept"
 	criteria := "- [命令] `go test ./internal/kanban/`\n- [审阅] 评审改动是否符合设计"
@@ -71,12 +68,9 @@ func TestTaskAcceptanceFieldsRoundTrip(t *testing.T) {
 
 // TestGoalOwnerRoundTrip 校验目标创建者标记在创建、查询、列表与更新中都能往返。
 func TestGoalOwnerRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "goal_owner.db"))
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	steward := Goal{ID: "goal-steward", ProjectID: "proj", Title: "总管建的", Prompt: "p", Status: "planning", Owner: "steward", Policy: map[string]any{}}
 	if err := s.CreateGoal(ctx, steward); err != nil {
@@ -128,6 +122,7 @@ func TestGoalOwnerRoundTrip(t *testing.T) {
 // TestKanbanAcceptanceMigrationFromOldDB 模拟旧库（只应用新列之前的所有迁移），
 // 校验升级后新列存在且可读写。
 func TestKanbanAcceptanceMigrationFromOldDB(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old_kanban.db")
 	db, err := sql.Open("sqlite", path)

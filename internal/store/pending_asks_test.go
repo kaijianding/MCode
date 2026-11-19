@@ -14,11 +14,7 @@ func newAskDeliveryTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	testenv.TempHome(t)
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "asks_deliveries.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	s := OpenForTest(t)
 
 	now := time.Now().UTC()
 	if err := s.UpsertProject(ctx, Project{ID: "p1", Name: "P1", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}); err != nil {

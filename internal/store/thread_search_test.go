@@ -9,6 +9,7 @@ import (
 )
 
 func TestThreadSearchAndPage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := newMessageSearchTestStore(t, "threads.db")
 	if err := s.UpsertProject(ctx, Project{ID: "p2", Name: "P2", Path: "/p2"}); err != nil {
@@ -63,6 +64,7 @@ func TestThreadSearchAndPage(t *testing.T) {
 // 测试命中编号与多路径检索：Offset 是正文消息（过滤后）的 0 基下标，可直接用于翻页；
 // 两条路径的线程应一次命中；空切片时检索返回 nil、翻页返回 ErrNotFound。
 func TestThreadSearchOffsetMultiPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := newMessageSearchTestStore(t, "thread_search_offset.db")
 	if err := s.UpsertProject(ctx, Project{ID: "p2", Name: "P2", Path: "/p2"}); err != nil {

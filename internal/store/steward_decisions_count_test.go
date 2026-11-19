@@ -2,17 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
 func TestCountStewardDecisions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	st, err := Open(filepath.Join(t.TempDir(), "decisions.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	st := OpenForTest(t)
 	for _, status := range []string{DecisionStatusOpen, DecisionStatusOpen, DecisionStatusOpen, DecisionStatusAnswered} {
 		if _, err := st.CreateStewardDecision(ctx, StewardDecision{Question: "问题", Status: status}); err != nil {
 			t.Fatal(err)

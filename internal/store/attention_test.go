@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -11,12 +10,7 @@ import (
 // openAttentionStore 打开一个临时 Store；待处理事件不挂外键，无需预置项目与会话。
 func openAttentionStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "attention_events.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	return OpenForTest(t)
 }
 
 // newAttentionEvent 构造一条测试用待处理事件。
@@ -36,6 +30,7 @@ func newAttentionEvent(dedupeKey string) AttentionEvent {
 }
 
 func TestInsertAttentionEventDefaults(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -77,6 +72,7 @@ func TestInsertAttentionEventDefaults(t *testing.T) {
 }
 
 func TestAttentionEventNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -89,6 +85,7 @@ func TestAttentionEventNotFound(t *testing.T) {
 }
 
 func TestInsertAttentionEventUniqueDedupeKey(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -110,6 +107,7 @@ func TestInsertAttentionEventUniqueDedupeKey(t *testing.T) {
 }
 
 func TestCountAttentionEventsSince(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -151,6 +149,7 @@ func TestCountAttentionEventsSince(t *testing.T) {
 }
 
 func TestResolveAttentionEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -196,6 +195,7 @@ func TestResolveAttentionEvent(t *testing.T) {
 }
 
 func TestResolveAttentionEventsBySubject(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -256,6 +256,7 @@ func TestResolveAttentionEventsBySubject(t *testing.T) {
 }
 
 func TestListAttentionEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -336,6 +337,7 @@ func insertAttentionKinds(t *testing.T, s *Store, kinds []string) []AttentionEve
 }
 
 func TestListAttentionEventsByKinds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 
@@ -375,6 +377,7 @@ func TestListAttentionEventsByKinds(t *testing.T) {
 }
 
 func TestCountUnresolvedAttentionEventsByKinds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openAttentionStore(t)
 

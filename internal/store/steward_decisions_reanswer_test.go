@@ -3,18 +3,14 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestReanswerStewardDecision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "reanswer.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	open, err := s.CreateStewardDecision(ctx, StewardDecision{})
 	if err != nil {

@@ -40,6 +40,7 @@ type smokeThreadSnapshot struct {
 
 // TestBeeRetentionSmokeOnRealDB 在真实库副本上验证 bee 消息保留任务。
 func TestBeeRetentionSmokeOnRealDB(t *testing.T) {
+	t.Parallel()
 	src := os.Getenv(smokeRetentionDBEnv)
 	if src == "" {
 		t.Skipf("未设置 %s，跳过真实库冒烟测试", smokeRetentionDBEnv)

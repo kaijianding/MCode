@@ -9,6 +9,7 @@ import (
 )
 
 func TestOpenRepairsMissingThreadBeeTiersAtLatestVersion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "missing_head_tiers.db")
 	s, err := Open(dbPath)
@@ -69,6 +70,7 @@ func TestOpenRepairsMissingThreadBeeTiersAtLatestVersion(t *testing.T) {
 // TestMigrateAddsMCPDisabledToLegacyThreads 验证旧库（无 mcp_disabled 列且带存量数据）迁移后不报错，
 // 老行 MCPDisabled 为 nil。
 func TestMigrateAddsMCPDisabledToLegacyThreads(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "legacy_mcp_disabled.db")
 	s, err := Open(dbPath)

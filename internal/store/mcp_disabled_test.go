@@ -12,7 +12,7 @@ func openMCPDisabledStore(t *testing.T, dbName string) (*Store, string) {
 	t.Helper()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), dbName)
-	s, err := Open(dbPath)
+	s, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}
@@ -37,6 +37,7 @@ func assertMCPDisabled(t *testing.T, got, want []string) {
 
 // TestCreateThreadMCPDisabledRoundTrip 验证 CreateThread 传入的名单能读回。
 func TestCreateThreadMCPDisabledRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := openMCPDisabledStore(t, "mcp_disabled_create.db")
 	defer s.Close()
@@ -61,6 +62,7 @@ func TestCreateThreadMCPDisabledRoundTrip(t *testing.T) {
 
 // TestSetThreadMCPDisabledRoundTrip 验证写入后读回一致，并且重开数据库后仍能读回。
 func TestSetThreadMCPDisabledRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, dbPath := openMCPDisabledStore(t, "mcp_disabled_set.db")
 
@@ -81,7 +83,7 @@ func TestSetThreadMCPDisabledRoundTrip(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("关闭库失败: %v", err)
 	}
-	reopened, err := Open(dbPath)
+	reopened, err := OpenWithOptions(dbPath, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("重新 Open 失败: %v", err)
 	}
@@ -95,6 +97,7 @@ func TestSetThreadMCPDisabledRoundTrip(t *testing.T) {
 
 // TestSetThreadMCPDisabledClears 验证空名单清空后读回 nil 或长度 0。
 func TestSetThreadMCPDisabledClears(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := openMCPDisabledStore(t, "mcp_disabled_clear.db")
 	defer s.Close()
@@ -123,6 +126,7 @@ func TestSetThreadMCPDisabledClears(t *testing.T) {
 
 // TestSetThreadMCPDisabledNotFound 验证不存在的会话返回 ErrNotFound。
 func TestSetThreadMCPDisabledNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := openMCPDisabledStore(t, "mcp_disabled_missing.db")
 	defer s.Close()

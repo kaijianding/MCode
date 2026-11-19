@@ -21,12 +21,7 @@ const (
 
 func openCompactTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "compact.db"))
-	if err != nil {
-		t.Fatalf("打开测试库失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	return OpenForTest(t)
 }
 
 func compactTestPragma(t *testing.T, s *Store, name string) int {
@@ -99,7 +94,7 @@ const compactTestMessageCount = 300
 func createCompactTestDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "compact.db")
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("打开测试库失败: %v", err)
 	}
@@ -265,7 +260,7 @@ func TestCompactForIncrementalVacuum(t *testing.T) {
 		}
 	}
 
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("重新打开预整理后的库失败: %v", err)
 	}
@@ -356,7 +351,7 @@ func TestCompactForIncrementalVacuumRewrite(t *testing.T) {
 				if err != nil || marker.Size() != 0 || marker.ModTime().Before(started.Add(-time.Second)) {
 					t.Fatalf("标记未生成或刷新: marker=%v err=%v", marker, err)
 				}
-				s, err := Open(path)
+				s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 				if err != nil {
 					t.Fatalf("打开重写后的库失败: %v", err)
 				}
@@ -483,7 +478,7 @@ func TestCompactForIncrementalVacuumKeepsOriginalOnFailure(t *testing.T) {
 		t.Fatalf("失败时不应清理他人在占位目录里的文件: %v", statErr)
 	}
 
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatalf("失败后原库应仍可打开: %v", err)
 	}

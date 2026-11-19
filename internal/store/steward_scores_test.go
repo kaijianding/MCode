@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,12 +14,7 @@ import (
 func newStewardScoreTestStore(t *testing.T) *Store {
 	t.Helper()
 	testenv.TempHome(t)
-	s, err := Open(filepath.Join(t.TempDir(), "steward_scores.db"))
-	if err != nil {
-		t.Fatalf("Open 失败: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	return OpenForTest(t)
 }
 
 // getStewardScore 按 request_id 读一行，读不到直接终止测试。

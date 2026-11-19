@@ -15,15 +15,11 @@ import (
 
 func openReviewStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "review.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	return OpenForTest(t)
 }
 
 func TestKanbanMigrationUpgrade(t *testing.T) {
+	t.Parallel()
 	for _, version := range []int{4, 5} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			ctx := context.Background()
@@ -66,6 +62,7 @@ func TestKanbanMigrationUpgrade(t *testing.T) {
 }
 
 func TestGoalTasksCASAndRollback(t *testing.T) {
+	t.Parallel()
 	s := openReviewStore(t)
 	ctx := context.Background()
 	if err := s.CreateGoal(ctx, Goal{ID: "g", ProjectID: "p"}); err != nil {
@@ -108,6 +105,7 @@ func TestGoalTasksCASAndRollback(t *testing.T) {
 }
 
 func TestGoalJSONErrorsPreserveData(t *testing.T) {
+	t.Parallel()
 	s := openReviewStore(t)
 	ctx := context.Background()
 	for _, field := range []string{"policy", "progress"} {
@@ -149,6 +147,7 @@ func TestGoalJSONErrorsPreserveData(t *testing.T) {
 }
 
 func TestCASConcurrentAndReturnedRecords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := openReviewStore(t)
 	if err := s.CreateTask(ctx, Task{ID: "t"}); err != nil {
@@ -211,6 +210,7 @@ func TestCASConcurrentAndReturnedRecords(t *testing.T) {
 }
 
 func TestAutomationSubsecondOrdering(t *testing.T) {
+	t.Parallel()
 	s := openReviewStore(t)
 	ctx := context.Background()
 	second := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)

@@ -2,21 +2,15 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 // 验证 queue_json 列的往返：空串落为 '[]'，非空按原样写回与读出。
 func TestSwarmLeadQueueJSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "swarm_queue_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	queueJSON := `[{"index":3,"projectId":"proj-1","leadWorkDir":"/work/q","spec":{"name":"Cedar","task":"排队中"}}]`
 	t1 := time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
@@ -83,14 +77,9 @@ func TestSwarmLeadQueueJSONRoundTrip(t *testing.T) {
 }
 
 func TestSwarmLeadStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "swarm_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	// 1. Initial list should be empty
 	leads, err := s.ListSwarmLeads(ctx)

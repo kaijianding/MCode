@@ -10,9 +10,10 @@ import (
 )
 
 func TestToolOutputBytesMigration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	s, err := Open(path)
+	s, err := OpenWithOptions(path, OpenOptions{SkipQuickCheck: true, FastSync: true})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"mcode/internal/testenv"
@@ -12,11 +11,7 @@ import (
 func TestRecallMessage_GuardsLatestMessageAndRollsBackOnFailure(t *testing.T) {
 	testenv.TempHome(t)
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "mcode.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 	if err := s.UpsertProject(ctx, Project{ID: "p", Name: "project"}); err != nil {
 		t.Fatal(err)
 	}

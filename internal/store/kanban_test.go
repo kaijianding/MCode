@@ -3,19 +3,13 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
 func TestKanbanMigrationTables(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "kanban_migration_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	var version int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version;").Scan(&version); err != nil {
@@ -36,14 +30,9 @@ func TestKanbanMigrationTables(t *testing.T) {
 }
 
 func TestTaskCRUDAndJSON(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "task_crud_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	projID := "proj-1"
 	threadID := "thread-1"
@@ -114,14 +103,9 @@ func TestTaskCRUDAndJSON(t *testing.T) {
 }
 
 func TestTaskCAS(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "task_cas_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	task := Task{
 		ID:        "task-cas-1",
@@ -167,14 +151,9 @@ func TestTaskCAS(t *testing.T) {
 }
 
 func TestGoalCRUDAndJSON(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "goal_crud_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	goal := Goal{
 		ID:        "goal-1",
@@ -233,14 +212,9 @@ func TestGoalCRUDAndJSON(t *testing.T) {
 }
 
 func TestGoalTasksOrderAndCascade(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "goal_tasks_test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := OpenForTest(t)
 
 	goal := Goal{
 		ID:        "goal-order-1",
