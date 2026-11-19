@@ -724,8 +724,11 @@ func runFakeACPFeatures(mode string) {
 			}
 			result["configOptions"] = options
 			current := "default"
-			if mode == "feature_agy_current_auto" {
+			switch mode {
+			case "feature_agy_current_auto":
 				current = "auto"
+			case "feature_agy_current_plan":
+				current = "plan"
 			}
 			available := []any{map[string]any{"id": "default"}, map[string]any{"id": "plan"}, map[string]any{"id": "accept-edits"}, map[string]any{"id": "auto"}}
 			if mode == "feature_agy_unadvertised" {
@@ -1547,6 +1550,17 @@ func TestACPAgyModeAndModel(t *testing.T) {
 				t.Fatal("sent prompt after config failure")
 			}
 		})
+	}
+}
+
+func TestACPAgyFullAccessLeavesPlanMode(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_agy_current_plan", AgentAgy, harness.Turn{Mode: harness.ModeFullAccess})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes := featureParams(messages, "session/set_mode")
+	if len(modes) != 1 || modes[0]["modeId"] != "default" {
+		t.Fatalf("modes = %v", modes)
 	}
 }
 

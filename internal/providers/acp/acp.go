@@ -400,6 +400,14 @@ func (h *Harness) mcpServers(turn harness.Turn, allowsHTTP bool) []any {
 	return servers
 }
 
+// launchMode 返回传给 LaunchArgs 的权限模式：plan 回合 Mode 被改成只读，完全访问档位在 PlanExitMode 里，agy plan 模式自身会拦截修改。
+func launchMode(agent Agent, turn harness.Turn) harness.PermissionMode {
+	if agent == AgentAgy && turn.PlanExitMode == harness.ModeFullAccess {
+		return harness.ModeFullAccess
+	}
+	return turn.Mode
+}
+
 // startProcess 创建进程与连接；进程级资源一直保留到进程退出。
 func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProcess, error) {
 	bin := h.opts.Binary
@@ -407,7 +415,7 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProc
 		bin = DefaultBinary(h.opts.Agent)
 	}
 
-	launchArgs := LaunchArgs(h.opts.Agent, turn.Mode)
+	launchArgs := LaunchArgs(h.opts.Agent, launchMode(h.opts.Agent, turn))
 	allArgs := append(append([]string{}, launchArgs...), h.opts.ExtraArgs...)
 	if h.opts.TurnArgs != nil {
 		allArgs = append(allArgs, h.opts.TurnArgs(turn)...)
@@ -1853,7 +1861,8 @@ func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn
 	if turn.InteractionMode == "plan" {
 		wanted = "plan"
 	}
-	if turn.Mode != harness.ModeFullAccess && wanted != modes.CurrentModeID {
+	// 计划获批后以完全访问续跑同一会话时，需要切出 plan
+	if (turn.Mode != harness.ModeFullAccess || modes.CurrentModeID == "plan") && wanted != modes.CurrentModeID {
 		for _, id := range modes.IDs() {
 			if id == wanted {
 				if err := conn.Call(ctx, "session/set_mode", map[string]any{"sessionId": sid, "modeId": wanted}, nil); err != nil {

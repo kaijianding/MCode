@@ -2,6 +2,7 @@ package acp
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"mcode/internal/harness"
@@ -118,5 +119,67 @@ func TestAgentCapabilities(t *testing.T) {
 		if got := AgentCapabilities(tc.agent); got != tc.want {
 			t.Errorf("AgentCapabilities(%s) = %+v, expected %+v", tc.agent, got, tc.want)
 		}
+	}
+}
+
+func TestAgyPlanTurnLaunchArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    Agent
+		turn     harness.Turn
+		wantSkip bool
+		wantArgs []string
+	}{
+		{
+			name:  "agy plan turn with fullAccess exit mode",
+			agent: AgentAgy,
+			turn: harness.Turn{
+				Mode:         harness.ModeReadOnly,
+				PlanExitMode: harness.ModeFullAccess,
+			},
+			wantSkip: true,
+		},
+		{
+			name:  "agy plan turn with auto exit mode",
+			agent: AgentAgy,
+			turn: harness.Turn{
+				Mode:         harness.ModeReadOnly,
+				PlanExitMode: harness.ModeAuto,
+			},
+			wantSkip: false,
+		},
+		{
+			name:  "agy normal fullAccess turn",
+			agent: AgentAgy,
+			turn: harness.Turn{
+				Mode: harness.ModeFullAccess,
+			},
+			wantSkip: true,
+		},
+		{
+			name:  "devin plan turn keeps readonly launch args",
+			agent: AgentDevin,
+			turn: harness.Turn{
+				Mode:         harness.ModeReadOnly,
+				PlanExitMode: harness.ModeFullAccess,
+			},
+			wantArgs: LaunchArgs(AgentDevin, harness.ModeReadOnly),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LaunchArgs(tc.agent, launchMode(tc.agent, tc.turn))
+			if tc.wantArgs != nil {
+				if !reflect.DeepEqual(got, tc.wantArgs) {
+					t.Fatalf("LaunchArgs(%s, launchMode) = %v, want %v", tc.agent, got, tc.wantArgs)
+				}
+				return
+			}
+			hasSkip := slices.Contains(got, "--dangerously-skip-permissions")
+			if hasSkip != tc.wantSkip {
+				t.Fatalf("LaunchArgs(%s, launchMode) = %v, has --dangerously-skip-permissions = %v, want %v", tc.agent, got, hasSkip, tc.wantSkip)
+			}
+		})
 	}
 }
