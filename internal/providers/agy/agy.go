@@ -487,9 +487,185 @@ type resultPayload struct {
 	} `json:"denied_actions"`
 }
 
+// Run 执行 agy 对话轮次；在交互模式 plan 下回合成功后弹出统一计划审批，批准或带反馈拒绝时在同一 Run 内续跑下一轮。
 func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+	var pendingApproval *harness.ApprovalRequest
+	for {
+		var ackOnce sync.Once
+		var reqToAck *harness.ApprovalRequest
+		if pendingApproval != nil {
+			reqCopy := *pendingApproval
+			reqToAck = &reqCopy
+			pendingApproval = nil
+		}
+		ackPending := func(ackErr error) {
+			if reqToAck == nil {
+				return
+			}
+			ackOnce.Do(func() {
+				harness.AckDelivery(turn.Approver, *reqToAck, ackErr)
+			})
+		}
+
+		if err := ctx.Err(); err != nil {
+			ackPending(err)
+			return err
+		}
+
+		var mu sync.Mutex
+		sessionID := turn.SessionID
+		var textBuf strings.Builder
+		var planPaths []string
+
+		roundEmit := func(ev harness.Event) {
+			mu.Lock()
+			switch ev.Type {
+			case harness.EventSession:
+				if strings.TrimSpace(ev.SessionID) != "" {
+					sessionID = ev.SessionID
+				}
+			case harness.EventText:
+				textBuf.WriteString(ev.Text)
+			case harness.EventToolStart:
+				if isWriteFileTool(ev.ToolName) {
+					if p := extractToolFilePath(ev.Input); p != "" && filepath.Base(p) == "implementation_plan.md" {
+						planPaths = append(planPaths, p)
+					}
+				}
+			case harness.EventFileChange:
+				if p := strings.TrimSpace(ev.Path); p != "" && filepath.Base(p) == "implementation_plan.md" {
+					planPaths = append(planPaths, p)
+				}
+			}
+			mu.Unlock()
+			if emit != nil {
+				emit(ev)
+			}
+		}
+
+		var onStarted func(error)
+		if reqToAck != nil {
+			onStarted = ackPending
+		}
+
+		err := h.runRound(ctx, turn, roundEmit, onStarted)
+		ackPending(err)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		interactor, ok := turn.Approver.(harness.Interactor)
+		if strings.TrimSpace(turn.InteractionMode) != "plan" || !ok || interactor == nil {
+			return nil
+		}
+
+		mu.Lock()
+		assistantText := textBuf.String()
+		paths := append([]string(nil), planPaths...)
+		resolvedSessionID := sessionID
+		mu.Unlock()
+
+		plan := resolvePlanText(paths, turn.WorkDir, assistantText)
+		if strings.TrimSpace(plan) == "" {
+			return nil
+		}
+
+		req := harness.ApprovalRequest{
+			ToolID:   "exit_plan_mode",
+			ToolName: "exit_plan_mode",
+			Kind:     harness.RequestKindPlan,
+			Summary:  "Implement this plan",
+			Plan:     plan,
+		}
+		resp, approvalErr := interactor.Interact(ctx, req)
+		if approvalErr == nil {
+			approvalErr = ctx.Err()
+		}
+		if approvalErr != nil {
+			harness.AckDelivery(turn.Approver, req, approvalErr)
+			return fmt.Errorf("agy: plan approval failed: %w", approvalErr)
+		}
+
+		if resp.Decision == harness.DecisionAllow {
+			turn.Mode, turn.InteractionMode = turn.PlanExitMode, ""
+			turn.Prompt = "Implement the plan."
+		} else if strings.TrimSpace(resp.Feedback) != "" {
+			turn.Prompt = resp.Feedback
+		} else {
+			harness.AckDelivery(turn.Approver, req, nil)
+			return nil
+		}
+
+		if strings.TrimSpace(resolvedSessionID) != "" {
+			turn.SessionID = resolvedSessionID
+		}
+		turn.Images = nil
+		pendingApproval = &req
+	}
+}
+
+func isWriteFileTool(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return false
+	}
+	for _, marker := range []string{"edit", "write", "writing", "create_file", "createfile", "apply_patch", "applypatch", "filechange", "notebook", "replace", "update_file", "updatefile"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractToolFilePath(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err != nil {
+		return ""
+	}
+	for _, key := range []string{"TargetFile", "AbsolutePath", "file_path", "filePath", "path", "target_file"} {
+		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func resolvePlanText(planPaths []string, workDir, assistantText string) string {
+	for i := len(planPaths) - 1; i >= 0; i-- {
+		p := strings.TrimSpace(planPaths[i])
+		if p == "" || filepath.Base(p) != "implementation_plan.md" {
+			continue
+		}
+		if !filepath.IsAbs(p) && workDir != "" {
+			p = filepath.Join(workDir, p)
+		}
+		if data, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(data)) != "" {
+			return string(data)
+		}
+	}
+	return assistantText
+}
+
+func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(harness.Event), onStarted func(error)) error {
 	if turn.Attach || h.acp.HasResidentProcess(turn.ThreadID) || h.channel(ctx) == ChannelACP {
-		return h.runACP(ctx, turn, emit)
+		acpEmit := emit
+		if onStarted != nil {
+			acpEmit = func(ev harness.Event) {
+				if ev.Type == harness.EventSession {
+					onStarted(nil)
+				}
+				if emit != nil {
+					emit(ev)
+				}
+			}
+		}
+		return h.runACP(ctx, turn, acpEmit)
 	}
 	bin := h.opts.Binary
 	if bin == "" {
@@ -672,14 +848,19 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 		}()
 
 		// 写入放到独立协程：主循环立即开始读 stdout，不被子进程的读 stdin 时机阻塞。
-		// 子进程被杀死或 stdin 被关闭后，内核返回 EPIPE，写协程自行结束（错误忽略）。
+		// 子进程被杀死或 stdin 被关闭后，内核返回 EPIPE，写协程自行结束；写入完成或失败时回报轮次启动状态。
+		writeDone := make(chan struct{})
 		go func() {
+			defer close(writeDone)
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
-			_, _ = stdinPipe.Write(data)
+			_, writeErr := stdinPipe.Write(data)
+			if onStarted != nil {
+				onStarted(writeErr)
+			}
 		}()
 
 		var streamedText bool
@@ -969,6 +1150,7 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 			resultWatchdog.Stop()
 		}
 		_ = stdinPipe.Close()
+		<-writeDone
 		close(shutdownCh)
 
 		waitErr := cmd.Wait()

@@ -729,6 +729,9 @@ func runFakeAgy(mode string) {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)
 
+	case "plan_approval":
+		runFakeAgyPlanApproval(firstLine, writeMsg)
+
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "unknown mode %s\n", mode)
 		os.Exit(1)

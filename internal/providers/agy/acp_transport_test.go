@@ -64,6 +64,7 @@ func runFakeAgyACP() {
 	failure := os.Getenv("MCODE_TEST_ACP_FAILURE")
 	limited := failure != "" && (os.Getenv("MCODE_TEST_ROUTED_ACCOUNT") == "account-0" || failure == "always")
 	promptCount := 0
+	currentMode := ""
 	rateLimit := func(id any) {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": 429, "message": acpRateLimitError}})
 	}
@@ -86,8 +87,23 @@ func runFakeAgyACP() {
 			}
 			setup = params
 			result["sessionId"] = "new-session"
+			if os.Getenv("MCODE_TEST_ACP_PLAN_FILE") != "" {
+				currentMode = "default"
+				result["modes"] = map[string]any{
+					"currentModeId":  currentMode,
+					"availableModes": []map[string]any{{"id": "default"}, {"id": "plan"}, {"id": "auto"}, {"id": "accept-edits"}},
+				}
+			}
+		case "session/set_mode":
+			if modeID, _ := params["modeId"].(string); modeID != "" {
+				currentMode = modeID
+			}
 		case "session/prompt":
 			promptCount++
+			if os.Getenv("MCODE_TEST_ACP_PLAN_FILE") != "" {
+				handleFakeAgyACPPlanPrompt(msg["id"], promptCount, currentMode, params)
+				continue
+			}
 			if os.Getenv("MCODE_TEST_ACP_HOLD") != "" {
 				if promptCount > 1 {
 					rateLimit(msg["id"])
