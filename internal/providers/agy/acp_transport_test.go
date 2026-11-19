@@ -37,11 +37,8 @@ func TestAgyChannelSelect(t *testing.T) {
 }
 
 func TestAgyACPLaunchArgs(t *testing.T) {
+	want := []string{"acp"}
 	for _, mode := range []harness.PermissionMode{harness.ModeFullAccess, harness.ModeAuto, harness.ModeAutoAcceptEdits, harness.ModeSupervised, harness.ModeReadOnly} {
-		want := []string{"acp", "--process-per-session"}
-		if mode == harness.ModeFullAccess {
-			want = append(want, "--dangerously-skip-permissions")
-		}
 		if got := acp.LaunchArgs(acp.AgentAgy, mode); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: %v, want %v", mode, got, want)
 		}
@@ -101,7 +98,7 @@ func runFakeAgyACP() {
 		case "session/prompt":
 			promptCount++
 			if os.Getenv("MCODE_TEST_ACP_PLAN_FILE") != "" {
-				handleFakeAgyACPPlanPrompt(reader, msg["id"], promptCount, currentMode, params)
+				handleFakeAgyACPPlanPrompt(msg["id"], currentMode, params)
 				continue
 			}
 			if os.Getenv("MCODE_TEST_ACP_HOLD") != "" {
@@ -212,7 +209,7 @@ func TestAgyACPRouting(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if !reflect.DeepEqual(got.Args, []string{"acp", "--process-per-session", "--gemini_dir", account}) || got.Env != account || len(got.Prompt) != 1 || got.Prompt[0].Text != prependIsolatedHomeHint(account, "raw prompt") {
+				if !reflect.DeepEqual(got.Args, []string{"acp", "--gemini_dir", account}) || got.Env != account || len(got.Prompt) != 1 || got.Prompt[0].Text != prependIsolatedHomeHint(account, "raw prompt") {
 					t.Errorf("wrong ACP route: %+v", got)
 				}
 				if turn.Prompt != "raw prompt" {
@@ -437,7 +434,7 @@ func TestRunACPRateLimitSwitchesAccount(t *testing.T) {
 			if err := json.Unmarshal([]byte(text.String()), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(payload.Args, []string{"acp", "--process-per-session", "--gemini_dir", "account-1"}) || payload.Env != "account-1" || payload.FirstOnly != "" {
+			if !reflect.DeepEqual(payload.Args, []string{"acp", "--gemini_dir", "account-1"}) || payload.Env != "account-1" || payload.FirstOnly != "" {
 				t.Fatalf("retry account params: %+v", payload)
 			}
 			if failure == "before_stream" && payload.Setup["sessionId"] != "new-session" {

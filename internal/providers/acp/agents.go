@@ -78,7 +78,7 @@ func DisplayName(a Agent) string {
 // LaunchArgs 返回不同权限模式下各 ACP Agent 的启动命令行参数。
 // 规则：
 //   - readonly 模式按 supervised 处理；
-//   - agy: ["acp", "--process-per-session"], fullAccess 追加 "--dangerously-skip-permissions"
+//   - agy: ["acp"]，由 ACP 客户端按权限模式应答
 //   - cline: ["--acp"]
 //   - droid: ["exec", "--output-format", "acp"]
 //   - cursor: auto -> ["--auto-review", "acp"], fullAccess -> ["--force", "acp"], 其他 -> ["acp"]
@@ -101,11 +101,7 @@ func LaunchArgs(a Agent, mode harness.PermissionMode) []string {
 
 	switch a {
 	case AgentAgy:
-		args := []string{"acp", "--process-per-session"}
-		if mode == harness.ModeFullAccess {
-			args = append(args, "--dangerously-skip-permissions")
-		}
-		return args
+		return []string{"acp"}
 	case AgentCline:
 		return []string{"--acp"}
 

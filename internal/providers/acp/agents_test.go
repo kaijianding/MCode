@@ -64,11 +64,11 @@ func TestLaunchArgsMatrix(t *testing.T) {
 		{AgentDroid, harness.ModeAuto, []string{"exec", "--output-format", "acp"}},
 		{AgentDroid, harness.ModeFullAccess, []string{"exec", "--output-format", "acp"}},
 
-		{AgentAgy, harness.ModeReadOnly, []string{"acp", "--process-per-session"}},
-		{AgentAgy, harness.ModeSupervised, []string{"acp", "--process-per-session"}},
-		{AgentAgy, harness.ModeAutoAcceptEdits, []string{"acp", "--process-per-session"}},
-		{AgentAgy, harness.ModeAuto, []string{"acp", "--process-per-session"}},
-		{AgentAgy, harness.ModeFullAccess, []string{"acp", "--process-per-session", "--dangerously-skip-permissions"}},
+		{AgentAgy, harness.ModeReadOnly, []string{"acp"}},
+		{AgentAgy, harness.ModeSupervised, []string{"acp"}},
+		{AgentAgy, harness.ModeAutoAcceptEdits, []string{"acp"}},
+		{AgentAgy, harness.ModeAuto, []string{"acp"}},
+		{AgentAgy, harness.ModeFullAccess, []string{"acp"}},
 
 		// Cursor
 		{AgentCursor, harness.ModeReadOnly, []string{"acp"}},
@@ -132,25 +132,27 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 		name     string
 		agent    Agent
 		turn     harness.Turn
-		wantArgs []string
+		wantArgs []any
 	}{
 		{
 			name:  "agy plan turn with fullAccess exit mode",
 			agent: AgentAgy,
 			turn: harness.Turn{
-				Mode:         harness.ModeReadOnly,
-				PlanExitMode: harness.ModeFullAccess,
+				Mode:            harness.ModeReadOnly,
+				InteractionMode: "plan",
+				PlanExitMode:    harness.ModeFullAccess,
 			},
-			wantArgs: []string{"acp", "--process-per-session", "--dangerously-skip-permissions"},
+			wantArgs: []any{"acp"},
 		},
 		{
 			name:  "agy plan turn with auto exit mode",
 			agent: AgentAgy,
 			turn: harness.Turn{
-				Mode:         harness.ModeReadOnly,
-				PlanExitMode: harness.ModeAuto,
+				Mode:            harness.ModeReadOnly,
+				InteractionMode: "plan",
+				PlanExitMode:    harness.ModeAuto,
 			},
-			wantArgs: []string{"acp", "--process-per-session"},
+			wantArgs: []any{"acp"},
 		},
 		{
 			name:  "agy normal fullAccess turn",
@@ -158,7 +160,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 			turn: harness.Turn{
 				Mode: harness.ModeFullAccess,
 			},
-			wantArgs: []string{"acp", "--process-per-session", "--dangerously-skip-permissions"},
+			wantArgs: []any{"acp"},
 		},
 		{
 			name:  "devin plan turn keeps readonly launch args",
@@ -167,15 +169,21 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 				Mode:         harness.ModeReadOnly,
 				PlanExitMode: harness.ModeFullAccess,
 			},
-			wantArgs: LaunchArgs(AgentDevin, harness.ModeReadOnly),
+			wantArgs: []any{"--permission-mode", "auto", "acp"},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := LaunchArgs(tc.agent, launchMode(tc.agent, tc.turn))
-			if !reflect.DeepEqual(got, tc.wantArgs) {
-				t.Fatalf("LaunchArgs(%s, launchMode) = %v, want %v", tc.agent, got, tc.wantArgs)
+			messages, _, err := runACPFeature(t, "feature_agy", tc.agent, tc.turn, func(opts *Options) {
+				opts.ExtraArgs = nil
+				opts.TurnArgs = nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := messages[0]["args"]; !reflect.DeepEqual(got, tc.wantArgs) {
+				t.Fatalf("%s args = %v, want %v", tc.agent, got, tc.wantArgs)
 			}
 		})
 	}

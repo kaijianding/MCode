@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -400,14 +401,6 @@ func (h *Harness) mcpServers(turn harness.Turn, allowsHTTP bool) []any {
 	return servers
 }
 
-// launchMode 返回传给 LaunchArgs 的权限模式：plan 回合 Mode 被改成只读，完全访问档位在 PlanExitMode 里，agy plan 模式自身会拦截修改。
-func launchMode(agent Agent, turn harness.Turn) harness.PermissionMode {
-	if agent == AgentAgy && turn.PlanExitMode == harness.ModeFullAccess {
-		return harness.ModeFullAccess
-	}
-	return turn.Mode
-}
-
 // startProcess 创建进程与连接；进程级资源一直保留到进程退出。
 func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProcess, error) {
 	bin := h.opts.Binary
@@ -415,7 +408,7 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProc
 		bin = DefaultBinary(h.opts.Agent)
 	}
 
-	launchArgs := LaunchArgs(h.opts.Agent, launchMode(h.opts.Agent, turn))
+	launchArgs := LaunchArgs(h.opts.Agent, turn.Mode)
 	allArgs := append(append([]string{}, launchArgs...), h.opts.ExtraArgs...)
 	if h.opts.TurnArgs != nil {
 		allArgs = append(allArgs, h.opts.TurnArgs(turn)...)
@@ -580,11 +573,6 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	servedReads := make(map[string]bool)
 	toolsFinished := false
 	var receivedText bool
-	agyPlanTurn := h.opts.Agent == AgentAgy && turn.InteractionMode == "plan"
-	planApproval, _ := ctx.Value(agyPlanApprovalKey{}).(agyPlanApproval)
-	var planMu sync.Mutex
-	var planFileText string
-	var planAssistantText strings.Builder
 
 	setRequestHandler, setNotificationHandler, detach := h.roundHandlers(p)
 	defer detach()
@@ -655,11 +643,6 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if err := os.WriteFile(target, []byte(p.Content), 0644); err != nil {
 				return nil, err
 			}
-			if agyPlanTurn && filepath.Base(rel) == "implementation_plan.md" {
-				planMu.Lock()
-				planFileText = p.Content
-				planMu.Unlock()
-			}
 			_ = harness.Emit(emit, harness.Event{
 				Type: harness.EventFileChange,
 				Path: rel,
@@ -686,8 +669,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			agyPlanExit := agyPlanTurn && p.ToolCall.Kind == "switch_mode"
-			if !agyPlanExit && h.opts.Agent == AgentAgy && strings.HasPrefix(p.ToolCall.ToolCallID, "interaction_") && len(p.Options) > 0 {
+			if h.opts.Agent == AgentAgy && strings.HasPrefix(p.ToolCall.ToolCallID, "interaction_") && len(p.Options) > 0 {
 				interactor, ok := turn.Approver.(harness.Interactor)
 				if !ok {
 					return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
@@ -765,13 +747,15 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if planExitName == "" {
 				planExitName = p.ToolCall.ToolName
 			}
-			droidPlanExit := h.opts.Agent == AgentDroid && DroidIsPlanExit(p.ToolCall.Title, planExitName, optionNames, input)
-			planExit := droidPlanExit || agyPlanExit
+			planExit := h.opts.Agent == AgentDroid && DroidIsPlanExit(p.ToolCall.Title, planExitName, optionNames, input)
 
 			var decision harness.Decision
 			var approveReq harness.ApprovalRequest
 			var approveErr error
-			if turn.Approver != nil {
+			lockedCommand := isCommandCall && turn.HardLocked && strings.TrimSpace(turn.HardLockOverride) == ""
+			autoApproveAgy := h.opts.Agent == AgentAgy && turn.Mode == harness.ModeFullAccess && !lockedCommand
+			useApprover := turn.Approver != nil && !autoApproveAgy
+			if useApprover {
 				approveReq = harness.ApprovalRequest{
 					ToolID:   toolID,
 					ToolName: toolName,
@@ -786,22 +770,6 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					approveReq.Kind = harness.RequestKindPlan
 					approveReq.Summary = "执行计划"
 					approveReq.Plan = DroidPlanMarkdown(input)
-					if agyPlanExit && approveReq.Plan == "" {
-						if planApproval.planFile != nil {
-							approveReq.Plan = planApproval.planFile()
-						}
-						if strings.TrimSpace(approveReq.Plan) == "" {
-							planMu.Lock()
-							approveReq.Plan = planFileText
-							if strings.TrimSpace(approveReq.Plan) == "" {
-								approveReq.Plan = planAssistantText.String()
-							}
-							planMu.Unlock()
-						}
-						if strings.TrimSpace(approveReq.Plan) == "" {
-							approveReq.Plan = p.ToolCall.Title
-						}
-					}
 				}
 				if !isCommandCall && !planExit {
 					switch p.ToolCall.Kind {
@@ -849,7 +817,18 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			}
 
 			var selectedID string
-			if droidPlanExit {
+			if h.opts.Agent == AgentAgy {
+				wantedKind := "reject_once"
+				if decision == harness.DecisionAllow {
+					wantedKind = "allow_once"
+				}
+				for _, opt := range p.Options {
+					if opt.Kind == wantedKind {
+						selectedID = opt.OptionID
+						break
+					}
+				}
+			} else if planExit {
 				// 批准时按用户所选档位选 Droid 的高档自动执行选项（Plan 回合的 Mode 是只读），驳回固定 cancel。
 				if decision == harness.DecisionAllow {
 					runMode := turn.Mode
@@ -872,13 +851,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 						break
 					}
 					if opt.Kind == "allow_once" || opt.Kind == "allow_always" || opt.Kind == "allow_session" ||
-						(!agyPlanExit && (strings.Contains(strings.ToLower(opt.Name), "allow") ||
-							strings.Contains(strings.ToLower(opt.Name), "proceed"))) {
+						strings.Contains(strings.ToLower(opt.Name), "allow") ||
+						strings.Contains(strings.ToLower(opt.Name), "proceed") {
 						selectedID = opt.OptionID
 						break
 					}
 				}
-				if selectedID == "" && !agyPlanExit && len(p.Options) > 0 {
+				if selectedID == "" && len(p.Options) > 0 {
 					selectedID = p.Options[0].OptionID
 				}
 			} else {
@@ -892,7 +871,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					if selectedID != "" {
 						break
 					}
-					if !agyPlanExit && opt.Kind != "reject_always" && (strings.Contains(strings.ToLower(opt.Name), "reject") ||
+					if opt.Kind != "reject_always" && (strings.Contains(strings.ToLower(opt.Name), "reject") ||
 						strings.Contains(strings.ToLower(opt.Name), "cancel") ||
 						strings.Contains(strings.ToLower(opt.Name), "deny")) {
 						selectedID = opt.OptionID
@@ -908,7 +887,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 						break
 					}
 				}
-				if selectedID == "" && !agyPlanExit && len(p.Options) > 0 {
+				if selectedID == "" && len(p.Options) > 0 {
 					selectedID = p.Options[len(p.Options)-1].OptionID
 				}
 			}
@@ -919,13 +898,10 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					"optionId": selectedID,
 				},
 			}
-			if approvalCancelled(ctx, approveErr) || (agyPlanExit && selectedID == "") {
+			if approvalCancelled(ctx, approveErr) || (h.opts.Agent == AgentAgy && selectedID == "") {
 				payload = acpCancelledOutcome()
 			}
-			if turn.Approver != nil && approveErr == nil {
-				if agyPlanExit && planApproval.answered != nil {
-					planApproval.answered(decision)
-				}
+			if useApprover && approveErr == nil {
 				return acpApprovalResponse{
 					payload: payload,
 					onAck: func(writeErr error) {
@@ -990,11 +966,6 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			_ = json.Unmarshal(u.Content, &content)
 			if content.Text != "" {
 				receivedText = true
-				if agyPlanTurn {
-					planMu.Lock()
-					planAssistantText.WriteString(content.Text)
-					planMu.Unlock()
-				}
 				_ = harness.Emit(emit, harness.Event{
 					Type: harness.EventText,
 					Text: content.Text,
@@ -1792,17 +1763,6 @@ func acpCancelledOutcome() map[string]any {
 	return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 }
 
-type agyPlanApprovalKey struct{}
-
-type agyPlanApproval struct {
-	planFile func() string
-	answered func(harness.Decision)
-}
-
-func WithAgyPlanApproval(ctx context.Context, planFile func() string, answered func(harness.Decision)) context.Context {
-	return context.WithValue(ctx, agyPlanApprovalKey{}, agyPlanApproval{planFile: planFile, answered: answered})
-}
-
 type acpApprovalResponse struct {
 	payload any
 	onAck   func(err error)
@@ -1943,27 +1903,16 @@ func handleElicitation(ctx context.Context, approver harness.Approver, params js
 }
 
 func configureAgy(ctx context.Context, conn *Conn, sid string, turn harness.Turn, modes *acpSessionModes, options *[]map[string]any) error {
+	modeIDs := modes.IDs()
 	wanted := "default"
-	switch turn.Mode {
-	case harness.ModeAutoAcceptEdits:
-		wanted = "accept-edits"
-	case harness.ModeAuto:
-		wanted = "auto"
-	}
-	if turn.InteractionMode == "plan" {
+	if turn.InteractionMode == "plan" && slices.Contains(modeIDs, "plan") {
 		wanted = "plan"
 	}
-	// 计划获批后以完全访问续跑同一会话时，需要切出 plan
-	if (turn.Mode != harness.ModeFullAccess || modes.CurrentModeID == "plan") && wanted != modes.CurrentModeID {
-		for _, id := range modes.IDs() {
-			if id == wanted {
-				if err := conn.Call(ctx, "session/set_mode", map[string]any{"sessionId": sid, "modeId": wanted}, nil); err != nil {
-					return fmt.Errorf("acp set mode: %w", err)
-				}
-				modes.CurrentModeID = wanted
-				break
-			}
+	if wanted != modes.CurrentModeID && slices.Contains(modeIDs, wanted) {
+		if err := conn.Call(ctx, "session/set_mode", map[string]any{"sessionId": sid, "modeId": wanted}, nil); err != nil {
+			return fmt.Errorf("acp set mode: %w", err)
 		}
+		modes.CurrentModeID = wanted
 	}
 	apply := func(id, value, name string) error {
 		var result struct {

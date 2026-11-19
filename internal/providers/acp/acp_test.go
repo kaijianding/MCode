@@ -725,7 +725,7 @@ func runFakeACPFeatures(mode string) {
 			result["configOptions"] = options
 			current := "default"
 			switch mode {
-			case "feature_agy_current_auto":
+			case "feature_agy_current_auto", "feature_agy_no_plan":
 				current = "auto"
 			case "feature_agy_current_plan":
 				current = "plan"
@@ -733,6 +733,8 @@ func runFakeACPFeatures(mode string) {
 			available := []any{map[string]any{"id": "default"}, map[string]any{"id": "plan"}, map[string]any{"id": "accept-edits"}, map[string]any{"id": "auto"}}
 			if mode == "feature_agy_unadvertised" {
 				available = nil
+			} else if mode == "feature_agy_no_plan" {
+				available = []any{map[string]any{"id": "default"}, map[string]any{"id": "auto"}}
 			}
 			result["modes"] = map[string]any{"currentModeId": current, "availableModes": available}
 		case "session/set_config_option":
@@ -965,21 +967,24 @@ func runFakeACPFeatures(mode string) {
 				}
 			}
 			if strings.HasPrefix(mode, "feature_permission") {
-				opts := []any{map[string]any{"optionId": "deny", "kind": "reject_once"}, map[string]any{"optionId": "session", "kind": "allow_session"}}
-				call := map[string]any{"toolCallId": "permission-test", "name": "read_file"}
-				if mode == "feature_permission_once" {
-					opts = append(opts, map[string]any{"optionId": "once", "kind": "allow_once"})
+				opts := []any{
+					map[string]any{"optionId": "always", "kind": "allow_always", "name": "Allow permanently"},
+					map[string]any{"optionId": "reject_always", "kind": "reject_always", "name": "Reject permanently"},
+					map[string]any{"optionId": "deny", "kind": "reject_once", "name": "No"},
 				}
-				if strings.HasPrefix(mode, "feature_permission_switch_mode") {
-					call = map[string]any{"toolCallId": "permission-test", "title": "Switch to execution", "kind": "switch_mode"}
-					if mode != "feature_permission_switch_mode_title" {
-						for _, text := range []string{"Draft ", "plan"} {
-							write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": text}}}})
-						}
-					}
-					if mode == "feature_permission_switch_mode_input" {
-						call["rawInput"] = map[string]any{"plan": "# Explicit plan"}
-					}
+				call := map[string]any{"toolCallId": "permission-test", "name": "read_file"}
+				if mode == "feature_permission_missing_reject" {
+					opts = opts[:2]
+				}
+				if mode == "feature_permission_once" || mode == "feature_permission_switch_mode" || mode == "feature_permission_command" {
+					opts = append(opts, map[string]any{"optionId": "once", "kind": "allow_once", "name": "Yes"})
+				}
+				if mode == "feature_permission_switch_mode" {
+					call["kind"], call["title"] = "switch_mode", "Switch to execution"
+					delete(call, "name")
+				} else if mode == "feature_permission_command" {
+					call["kind"], call["name"] = "execute", "run_command"
+					call["rawInput"] = map[string]any{"CommandLine": "git push --force"}
 				}
 				write(map[string]any{"jsonrpc": "2.0", "id": 9010, "method": "session/request_permission", "params": map[string]any{"toolCall": call, "options": opts}})
 				if read() == nil {
@@ -1148,7 +1153,7 @@ func TestACPElicitationForm(t *testing.T) {
 				t.Fatalf("content = %#v, want %#v", reply["content"], want)
 			}
 			init := featureParams(messages, "initialize")[0]
-			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--process-per-session", "--extra", "--gemini_dir", "routed-account"}) {
+			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--extra", "--gemini_dir", "routed-account"}) {
 				t.Fatalf("args order = %v", got)
 			}
 			caps := init["clientCapabilities"].(map[string]any)
@@ -1512,45 +1517,48 @@ func TestACPAgySkipsUnchangedModel(t *testing.T) {
 	}
 }
 
-func TestACPAgyModeAndModel(t *testing.T) {
-	for _, tc := range []struct {
-		name                string
-		mode                harness.PermissionMode
-		interaction, wanted string
-	}{
-		{"plan", harness.ModeSupervised, "plan", "plan"}, {"edits", harness.ModeAutoAcceptEdits, "", "accept-edits"}, {"auto", harness.ModeAuto, "", "auto"}, {"supervised", harness.ModeSupervised, "", ""}, {"readonly", harness.ModeReadOnly, "", ""}, {"full", harness.ModeFullAccess, "plan", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			messages, _, err := runACPFeature(t, "feature_agy", AgentAgy, harness.Turn{Mode: tc.mode, InteractionMode: tc.interaction, Model: "requested", Effort: "high"})
-			if err != nil {
-				t.Fatal(err)
+func TestAgyModeStaysDefaultUnlessPlan(t *testing.T) {
+	checkMode := func(t *testing.T, feature string, turn harness.Turn, wanted string) {
+		t.Helper()
+		messages, _, err := runACPFeature(t, feature, AgentAgy, turn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes := featureParams(messages, "session/set_mode")
+		if wanted == "" {
+			if len(modes) != 0 {
+				t.Fatalf("unexpected set_mode: %v", modes)
 			}
-			modes := featureParams(messages, "session/set_mode")
-			if tc.wanted == "" {
-				if len(modes) != 0 {
-					t.Fatal(modes)
-				}
-			} else if len(modes) != 1 || modes[0]["modeId"] != tc.wanted {
-				t.Fatal(modes)
-			}
-			if len(featureParams(messages, "session/set_model")) != 0 {
-				t.Fatal("agy used set_model")
-			}
-			if config := featureParams(messages, "session/set_config_option"); len(config) != 2 || config[0]["configId"] != "model" || config[1]["configId"] != "thought_level" {
-				t.Fatal(config)
-			}
+		} else if len(modes) != 1 || modes[0]["modeId"] != wanted {
+			t.Fatalf("set_mode = %v, want %s", modes, wanted)
+		}
+	}
+	for _, mode := range []harness.PermissionMode{harness.ModeAuto, harness.ModeAutoAcceptEdits, harness.ModeFullAccess} {
+		t.Run(string(mode), func(t *testing.T) {
+			turn := harness.Turn{Mode: mode}
+			checkMode(t, "feature_agy_current_auto", turn, "default")
+			checkMode(t, "feature_agy", turn, "")
 		})
 	}
-	for _, mode := range []string{"feature_agy_current_auto", "feature_agy_unadvertised"} {
-		t.Run(mode, func(t *testing.T) {
-			messages, _, err := runACPFeature(t, mode, AgentAgy, harness.Turn{Mode: harness.ModeAuto})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(featureParams(messages, "session/set_mode")) != 0 {
-				t.Fatal("unnecessary set_mode")
-			}
-		})
+	t.Run("plan", func(t *testing.T) {
+		turn := harness.Turn{Mode: harness.ModeReadOnly, InteractionMode: "plan"}
+		checkMode(t, "feature_agy", turn, "plan")
+		checkMode(t, "feature_agy_current_plan", turn, "")
+		checkMode(t, "feature_agy_no_plan", turn, "default")
+		checkMode(t, "feature_agy_unadvertised", turn, "")
+	})
+}
+
+func TestACPAgyModelAndEffortConfig(t *testing.T) {
+	messages, _, err := runACPFeature(t, "feature_agy", AgentAgy, harness.Turn{Mode: harness.ModeReadOnly, InteractionMode: "plan", Model: "requested", Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(featureParams(messages, "session/set_model")) != 0 {
+		t.Fatal("agy used set_model")
+	}
+	if config := featureParams(messages, "session/set_config_option"); len(config) != 2 || config[0]["configId"] != "model" || config[1]["configId"] != "thought_level" {
+		t.Fatal(config)
 	}
 	for _, name := range []string{"model", "effort"} {
 		t.Run(name+" mismatch", func(t *testing.T) {
@@ -1601,27 +1609,6 @@ func TestACPCancelDoesNotCloseSession(t *testing.T) {
 	}
 }
 
-func TestACPAgyPermissionOptions(t *testing.T) {
-	for _, wanted := range []string{"session", "once"} {
-		t.Run(wanted, func(t *testing.T) {
-			messages, _, err := runACPFeature(t, "feature_permission_"+wanted, AgentAgy, harness.Turn{Approver: &mockApprover{decision: harness.DecisionAllow}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, msg := range messages {
-				if msg["id"] == float64(9010) {
-					result := msg["result"].(map[string]any)
-					if result["outcome"].(map[string]any)["optionId"] != wanted {
-						t.Fatal(result)
-					}
-					return
-				}
-			}
-			t.Fatal("missing permission reply")
-		})
-	}
-}
-
 // failingApprover 按给定错误答复审批，模拟本轮取消。
 type failingApprover struct{ err error }
 
@@ -1650,48 +1637,83 @@ func permissionReply(t *testing.T, messages []map[string]any) map[string]any {
 	return nil
 }
 
-func TestAgySwitchModePermissionIsPlanRequest(t *testing.T) {
+func TestAgyPermissionOptionByKind(t *testing.T) {
 	for _, tc := range []struct {
-		name, feature, interactionMode, wantPlan string
-		wantKind                                 harness.RequestKind
+		name, feature, wanted string
+		decision              harness.Decision
 	}{
-		{"raw input", "feature_permission_switch_mode_input", "plan", "# Explicit plan", harness.RequestKindPlan},
-		{"assistant text", "feature_permission_switch_mode", "plan", "Draft plan", harness.RequestKindPlan},
-		{"title", "feature_permission_switch_mode_title", "plan", "Switch to execution", harness.RequestKindPlan},
-		{"non-plan turn", "feature_permission_switch_mode", "", "", ""},
+		{"allow once", "feature_permission_once", "once", harness.DecisionAllow},
+		{"reject once", "feature_permission_once", "deny", harness.DecisionDeny},
+		{"missing allow once", "feature_permission", "", harness.DecisionAllow},
+		{"missing reject once", "feature_permission_missing_reject", "", harness.DecisionDeny},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			approver := &recordingApprover{}
 			messages, _, err := runACPFeature(t, tc.feature, AgentAgy, harness.Turn{
-				InteractionMode: tc.interactionMode,
-				Approver:        approver,
+				Approver: &mockApprover{decision: tc.decision},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reply := permissionReply(t, messages); reply["outcome"] != "selected" || reply["optionId"] != "session" {
-				t.Fatalf("approval reply = %v", reply)
-			}
-			approver.mu.Lock()
-			defer approver.mu.Unlock()
-			if len(approver.reqs) != 1 || approver.reqs[0].Kind != tc.wantKind || approver.reqs[0].Plan != tc.wantPlan {
-				t.Fatalf("requests = %+v, want kind %q and plan %q", approver.reqs, tc.wantKind, tc.wantPlan)
-			}
-			if tc.wantKind == harness.RequestKindPlan && approver.reqs[0].Summary != "执行计划" {
-				t.Fatalf("plan summary = %q", approver.reqs[0].Summary)
+			reply := permissionReply(t, messages)
+			if tc.wanted == "" {
+				if reply["outcome"] != "cancelled" || reply["optionId"] != nil {
+					t.Fatalf("approval reply = %v, want cancelled", reply)
+				}
+			} else if reply["outcome"] != "selected" || reply["optionId"] != tc.wanted {
+				t.Fatalf("approval reply = %v, want %s", reply, tc.wanted)
 			}
 		})
 	}
-
-	messages, _, err := runACPFeature(t, "feature_permission_switch_mode", AgentAgy, harness.Turn{
-		InteractionMode: "plan",
-		Approver:        failingApprover{err: context.Canceled},
+	t.Run("switch_mode is a regular approval", func(t *testing.T) {
+		approver := &recordingApprover{}
+		messages, _, err := runACPFeature(t, "feature_permission_switch_mode", AgentAgy, harness.Turn{
+			Mode:            harness.ModeReadOnly,
+			InteractionMode: "plan",
+			Approver:        approver,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reply := permissionReply(t, messages); reply["outcome"] != "selected" || reply["optionId"] != "once" {
+			t.Fatalf("approval reply = %v", reply)
+		}
+		approver.mu.Lock()
+		defer approver.mu.Unlock()
+		if len(approver.reqs) != 1 || approver.reqs[0].Kind == harness.RequestKindPlan || approver.reqs[0].Plan != "" {
+			t.Fatalf("expected a regular approval, got %+v", approver.reqs)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reply := permissionReply(t, messages); reply["outcome"] != "cancelled" || reply["optionId"] != nil {
-		t.Fatalf("cancelled reply = %v", reply)
+}
+
+func TestAgyFullAccessPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name, override, wanted string
+		wantApprover           bool
+	}{
+		{name: "ordinary turn", wanted: "once"},
+		{name: "hard-locked command", wanted: "deny", wantApprover: true},
+		{name: "unlocked command", override: "approved", wanted: "once"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			approver := &mockApprover{decision: harness.DecisionDeny}
+			messages, _, err := runACPFeature(t, "feature_permission_command", AgentAgy, harness.Turn{
+				Mode:             harness.ModeFullAccess,
+				HardLocked:       tc.wantApprover || tc.override != "",
+				HardLockOverride: tc.override,
+				Approver:         approver,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reply := permissionReply(t, messages); reply["outcome"] != "selected" || reply["optionId"] != tc.wanted {
+				t.Fatalf("approval reply = %v, want %s", reply, tc.wanted)
+			}
+			approver.mu.Lock()
+			defer approver.mu.Unlock()
+			if approver.called != tc.wantApprover {
+				t.Fatalf("approver called = %v, want %v", approver.called, tc.wantApprover)
+			}
+		})
 	}
 }
 
