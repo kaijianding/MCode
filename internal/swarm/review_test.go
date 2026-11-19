@@ -502,6 +502,9 @@ func TestStartMergeReview_StartsReadOnlySession(t *testing.T) {
 	if req.RuntimeMode != "readonly" {
 		t.Fatalf("审查会话必须以只读模式启动: %q", req.RuntimeMode)
 	}
+	if req.InteractionMode != "build" {
+		t.Fatalf("审查会话必须以 build 交互模式启动: %q", req.InteractionMode)
+	}
 	if req.WorkDir != h.WorktreePath {
 		t.Fatalf("审查会话工作目录不符: %q", req.WorkDir)
 	}

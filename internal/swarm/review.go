@@ -227,9 +227,11 @@ func (m *Manager) startMergeReview(ctx context.Context, leadThreadID, beeThreadI
 		Title:        "合并审查：" + h.Name,
 		Prompt:       reviewPrompt(h, patchPath),
 		RuntimeMode:  "readonly",
-		Provider:     provider,
-		Model:        model,
-		Effort:       effort,
+		// 审查会话同样无人值守，固定 build 交互模式，不继承 lead 的 plan。
+		InteractionMode: "build",
+		Provider:        provider,
+		Model:           model,
+		Effort:          effort,
 	})
 	if err != nil {
 		fail(err.Error())

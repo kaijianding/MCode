@@ -1433,6 +1433,8 @@ func (m *Manager) startSingleBee(ctx context.Context, leadThreadID, beeProjectID
 		FastMode:     spec.FastMode,
 		// 宿主指定的权限模式优先；为空时照旧继承主线程的运行模式。
 		RuntimeMode: spec.RuntimeMode,
+		// bee 无人值守，固定 build 交互模式，不继承 lead 的 plan。
+		InteractionMode: "build",
 	}
 	if spec.ReadOnly {
 		sessionReq.RuntimeMode = string(harness.ModeReadOnly)
