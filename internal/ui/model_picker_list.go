@@ -610,7 +610,7 @@ func modelPickerRowName(prov ProviderInfo, name string) string {
 
 // modelPickerRowGroup 返回列表行要展示的分组名。
 // 优先提取模型 ID 的有效上游前缀（跳过空段与网关路由段 auto/group）；
-// 无有效前缀时仅在允许 Provider 回退（跨 Agent 收藏卡）时返回 prov.ID。
+// 无有效前缀时仅在允许 Provider 回退（跨 Agent 收藏卡）时返回 prov.Name，为空时用 prov.ID。
 func modelPickerRowGroup(prov ProviderInfo, modelItem ModelInfo, allowProviderFallback bool) string {
 	id := strings.TrimSpace(modelItem.ID)
 	if head, rest, ok := strings.Cut(id, "/"); ok && head != "" && rest != "" {
@@ -619,6 +619,9 @@ func modelPickerRowGroup(prov ProviderInfo, modelItem ModelInfo, allowProviderFa
 		}
 	}
 	if allowProviderFallback {
+		if name := strings.TrimSpace(prov.Name); name != "" {
+			return name
+		}
 		return strings.TrimSpace(prov.ID)
 	}
 	return ""

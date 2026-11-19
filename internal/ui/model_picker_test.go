@@ -2003,7 +2003,7 @@ func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
 		wantGroup     string
 	}{
 		{name: "Agent卡内无前缀不显示", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: false, showGroupName: true, wantGroup: ""},
-		{name: "收藏卡无前缀回退Provider", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: true, showGroupName: true, wantGroup: "· claude"},
+		{name: "收藏卡无前缀回退Provider", model: ModelInfo{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"}, showGroup: true, showGroupName: true, wantGroup: "· Claude"},
 		{name: "Agent卡内有前缀展示", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: false, showGroupName: true, wantGroup: "· bulita_claude"},
 		{name: "关闭ShowGroupName不显示", model: ModelInfo{ID: "bulita_claude/claude-opus-5.5", Name: "Claude Opus 5.5"}, showGroup: true, showGroupName: false, wantGroup: ""},
 	}
@@ -2026,7 +2026,7 @@ func TestModelPickerListRowGroupNameOptIn(t *testing.T) {
 				t.Fatalf("缺少模型名: %v", tt.Texts())
 			}
 			if tc.wantGroup == "" {
-				if slices.Contains(tt.Texts(), "· claude") || slices.Contains(tt.Texts(), "· bulita_claude") {
+				if slices.Contains(tt.Texts(), "· Claude") || slices.Contains(tt.Texts(), "· bulita_claude") {
 					t.Fatalf("不应显示分组名: %v", tt.Texts())
 				}
 				return
@@ -2107,7 +2107,7 @@ func TestModelPickerGroupedListShowsGroupName(t *testing.T) {
 	}
 
 	pinnedCard := render(modelPickerPinnedCardID)
-	for _, want := range []string{"Claude 3.7 Sonnet", "· claude"} {
+	for _, want := range []string{"Claude 3.7 Sonnet", "· Claude"} {
 		if !slices.Contains(pinnedCard.Texts(), want) {
 			t.Fatalf("收藏卡内无前缀模型应回退显示 %q: %v", want, pinnedCard.Texts())
 		}
@@ -2173,8 +2173,8 @@ func TestModelPickerSearchPinnedGroup(t *testing.T) {
 	if len(sonnetRows) != 2 {
 		t.Fatalf("收藏分组与 Agent 分组应各有一个可点击行, got %d (%+v)", len(sonnetRows), sonnetRows)
 	}
-	if !slices.Contains(hit.Texts(), "· claude") {
-		t.Fatalf("收藏卡片命中的跨 Agent 行应回退显示「· claude」: %v", hit.Texts())
+	if !slices.Contains(hit.Texts(), "· Claude") {
+		t.Fatalf("收藏卡片命中的跨 Agent 行应回退显示「· Claude」: %v", hit.Texts())
 	}
 	if !hit.HasText("Claude 3.5 Haiku") {
 		t.Fatalf("Claude 分组卡片应同时命中 Claude 3.5 Haiku: %v", hit.Texts())
@@ -2274,15 +2274,15 @@ func TestModelPickerGroupNameExtractionAndStripPrefix(t *testing.T) {
 		{id: "bulita_claude/claude-opus-5.5", fallback: true, want: "bulita_claude"},
 		{id: "bulita_grok/grok-4.6", fallback: false, want: "bulita_grok"},
 		{id: "foo/", fallback: false, want: ""},
-		{id: "foo/", fallback: true, want: "claude"},
+		{id: "foo/", fallback: true, want: "Claude"},
 		{id: "/bar", fallback: false, want: ""},
-		{id: "/bar", fallback: true, want: "claude"},
+		{id: "/bar", fallback: true, want: "Claude"},
 		{id: "auto/claude-sonnet", fallback: false, want: ""},
-		{id: "auto/claude-sonnet", fallback: true, want: "claude"},
+		{id: "auto/claude-sonnet", fallback: true, want: "Claude"},
 		{id: "GROUP/claude-sonnet", fallback: false, want: ""},
-		{id: "GROUP/claude-sonnet", fallback: true, want: "claude"},
+		{id: "GROUP/claude-sonnet", fallback: true, want: "Claude"},
 		{id: "claude-3-7-sonnet", fallback: false, want: ""},
-		{id: "claude-3-7-sonnet", fallback: true, want: "claude"},
+		{id: "claude-3-7-sonnet", fallback: true, want: "Claude"},
 	}
 	for _, tc := range groupCases {
 		if got := modelPickerRowGroup(prov, ModelInfo{ID: tc.id}, tc.fallback); got != tc.want {
@@ -2327,9 +2327,9 @@ func TestModelPickerGroupNameExtractionAndStripPrefix(t *testing.T) {
 		},
 		{
 			name:      "same_name_as_group_dedups_tooltip",
-			model:     ModelInfo{ID: "claude-default", Name: "claude"},
+			model:     ModelInfo{ID: "claude-default", Name: "Claude"},
 			showGroup: true,
-			wantTip:   "claude",
+			wantTip:   "Claude",
 		},
 	}
 	for _, tc := range tipCases {
@@ -2351,6 +2351,54 @@ func TestModelPickerGroupNameExtractionAndStripPrefix(t *testing.T) {
 			}
 			if acc.Description != tc.wantTip {
 				t.Fatalf("Tooltip = %q, want %q", acc.Description, tc.wantTip)
+			}
+		})
+	}
+}
+
+func TestModelPickerRowGroupFallbackPrefersName(t *testing.T) {
+	namedProv := ProviderInfo{ID: "custom-432db46a", Name: "magpie_jp", Available: true}
+	blankNameProv := ProviderInfo{ID: "custom-432db46a", Name: "  ", Available: true}
+	cases := []struct {
+		name     string
+		prov     ProviderInfo
+		model    ModelInfo
+		fallback bool
+		want     string
+	}{
+		{
+			name:     "fallback_prefers_provider_name",
+			prov:     namedProv,
+			model:    ModelInfo{ID: "deepseek-v4.1-flash"},
+			fallback: true,
+			want:     "magpie_jp",
+		},
+		{
+			name:     "fallback_uses_id_when_name_blank",
+			prov:     blankNameProv,
+			model:    ModelInfo{ID: "deepseek-v4.1-flash"},
+			fallback: true,
+			want:     "custom-432db46a",
+		},
+		{
+			name:     "prefix_takes_precedence_over_provider_name",
+			prov:     namedProv,
+			model:    ModelInfo{ID: "bulita/deepseek"},
+			fallback: true,
+			want:     "bulita",
+		},
+		{
+			name:     "no_fallback_returns_empty_without_prefix",
+			prov:     namedProv,
+			model:    ModelInfo{ID: "deepseek-v4.1-flash"},
+			fallback: false,
+			want:     "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modelPickerRowGroup(tc.prov, tc.model, tc.fallback); got != tc.want {
+				t.Fatalf("modelPickerRowGroup(%+v, %q, fallback=%v) = %q, want %q", tc.prov, tc.model.ID, tc.fallback, got, tc.want)
 			}
 		})
 	}
