@@ -163,6 +163,33 @@ func TestUnsolicitedTurn_OpensAttachTurn(t *testing.T) {
 	}
 }
 
+// TestUnsolicitedTurnRunsForHelperThread 覆盖 Swarm 子代理（helper）线程：bee 把命令转成后台任务后
+// 一轮已经结束，任务完成时的自发通知仍要开一轮 Turn.Attach 接住输出，否则后台完成事件发不出去、
+// 工具会一直停在 background，bee 也会因为一直显示运行中被看门狗判失败。
+func TestUnsolicitedTurnRunsForHelperThread(t *testing.T) {
+	h := &unsolicitedTestHarness{}
+	b := runtimeBackend(t, h)
+	id := runtimeThread(b)
+	b.SetThreadRelation(id, newUUID(), true)
+
+	h.notify(id)
+	turns := waitTurns(t, h, 1)
+	if !turns[0].Attach {
+		t.Fatalf("helper 线程的自发轮次 Turn.Attach 应为真，实际 %+v", turns[0])
+	}
+	waitThreadIdle(t, b, context.Background(), id)
+
+	var replied bool
+	for _, msg := range unsolicitedThreadMessages(t, b, id) {
+		if msg.Role == "assistant" && msg.Text == "接住的自发输出" {
+			replied = true
+		}
+	}
+	if !replied {
+		t.Fatalf("helper 线程接住的自发输出应落进线程消息，实际 %+v", unsolicitedThreadMessages(t, b, id))
+	}
+}
+
 // TestUnsolicitedTurn_RetryWhileThreadRunning 覆盖运行期间收到重复通知后，
 // 先等待当前轮结束，再且只再开启一个自发轮次。
 func TestUnsolicitedTurn_RetryWhileThreadRunning(t *testing.T) {

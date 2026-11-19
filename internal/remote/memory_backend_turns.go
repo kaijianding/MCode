@@ -738,7 +738,7 @@ func (b *MemoryBackend) publishStartedTurn(threadID string, st *startedTurn) {
 func (b *MemoryBackend) handleUnsolicitedTurn(threadID string) {
 	b.mu.Lock()
 	td, ok := b.threads[threadID]
-	if !ok || td.isHelper || td.pendingSend != nil {
+	if !ok || td.pendingSend != nil {
 		b.mu.Unlock()
 		return
 	}
