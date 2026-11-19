@@ -12,6 +12,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"mcode/internal/fsutil"
 )
 
 // 会话导出（/export 命令）：把会话元数据与消息写成 Markdown、HTML 或 JSON 文件。
@@ -505,7 +507,7 @@ func writeThreadExport(path string, t Thread, msgs []Message, now time.Time) err
 		md, _ := buildThreadExportMarkdownBudgeted(t, msgs, now, threadExportBudgetChars)
 		data = []byte(md)
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fsutil.WriteFileAtomic(path, data, 0o644)
 }
 
 // saveExportDialog 是可注入的保存对话框，测试时替换以避免弹出真实窗口。
