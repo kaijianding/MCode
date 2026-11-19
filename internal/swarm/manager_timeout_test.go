@@ -15,6 +15,7 @@ import (
 
 // TestSwarmBeeTimeoutConfigDefaults 验证配置默认值，以及缺少该字段的旧配置使用默认值。
 func TestSwarmBeeTimeoutConfigDefaults(t *testing.T) {
+	t.Parallel()
 	// 1. Defaults 使用配置的默认超时时间。
 	def := config.Defaults()
 	if def.Orchestration.BeeTimeoutMinutes != config.DefaultSwarmBeeTimeoutMinutes {
@@ -54,6 +55,7 @@ func TestSwarmBeeTimeoutConfigDefaults(t *testing.T) {
 
 // TestSwarmManager_SetBeeTimeout 验证 SetBeeTimeout 加锁修改能被 Manager 正确读取。
 func TestSwarmManager_SetBeeTimeout(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(Options{})
 	// 默认未设置时应为 40 分钟
 	if d := mgr.BeeTimeout(); d != DefaultBeeTimeout {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,18 +106,29 @@ func (d *fakeDriver) setSessionState(threadID string, st kanban.SessionState) {
 	d.sessions[threadID] = st
 }
 
-func initTestRepo(t *testing.T) (*git.Runner, string) {
-	t.Helper()
+var (
+	testRepoTemplateOnce sync.Once
+	testRepoTemplateDir  string
+	testRepoGitBin       string
+	testRepoTemplateSkip string
+	testRepoTemplateErr  error
+)
+
+func initTestRepoTemplate() {
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
-		t.Skip("git 可执行文件在 PATH 中未找到，跳过测试")
+		testRepoTemplateSkip = "git 可执行文件在 PATH 中未找到，跳过测试"
+		return
 	}
 
-	dir := t.TempDir()
-	runner := git.NewRunner(gitBin, 4)
-	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "mcode-swarm-template-repo-*")
+	if err != nil {
+		testRepoTemplateErr = fmt.Errorf("create template dir: %w", err)
+		return
+	}
 
-	runCmd := func(args ...string) {
+	ctx := context.Background()
+	runCmd := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, gitBin, args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
@@ -126,25 +138,201 @@ func initTestRepo(t *testing.T) (*git.Runner, string) {
 			"GIT_COMMITTER_EMAIL=test@localhost",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %v, out: %s", args, err, string(out))
+			return fmt.Errorf("git %v failed: %v, out: %s", args, err, string(out))
+		}
+		return nil
+	}
+
+	steps := [][]string{
+		{"init"},
+		{"config", "core.autocrlf", "false"},
+		{"config", "user.name", "test-user"},
+		{"config", "user.email", "test@localhost"},
+		// Runner 使用缓存的登录环境；用仓库配置隔离测试，避免后续 t.Setenv 失效而访问真实远端。
+		{"config", "protocol.https.allow", "never"},
+	}
+	for _, args := range steps {
+		if err := runCmd(args...); err != nil {
+			_ = os.RemoveAll(dir)
+			testRepoTemplateErr = err
+			return
 		}
 	}
 
-	runCmd("init")
-	runCmd("config", "core.autocrlf", "false")
-	runCmd("config", "user.name", "test-user")
-	runCmd("config", "user.email", "test@localhost")
-	// Runner 使用缓存的登录环境；用仓库配置隔离测试，避免后续 t.Setenv 失效而访问真实远端。
-	runCmd("config", "protocol.https.allow", "never")
-
 	baseFile := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(baseFile, []byte("# Demo Repo\n"), 0644); err != nil {
-		t.Fatalf("write README.md: %v", err)
+		_ = os.RemoveAll(dir)
+		testRepoTemplateErr = fmt.Errorf("write README.md: %w", err)
+		return
 	}
-	runCmd("add", "README.md")
-	runCmd("commit", "-m", "initial commit")
+	if err := runCmd("add", "README.md"); err != nil {
+		_ = os.RemoveAll(dir)
+		testRepoTemplateErr = err
+		return
+	}
+	if err := runCmd("commit", "-m", "initial commit"); err != nil {
+		_ = os.RemoveAll(dir)
+		testRepoTemplateErr = err
+		return
+	}
 
-	return runner, dir
+	testRepoGitBin = gitBin
+	testRepoTemplateDir = dir
+}
+
+func cleanupTestRepoTemplate() {
+	if testRepoTemplateDir != "" {
+		_ = os.RemoveAll(testRepoTemplateDir)
+	}
+}
+
+func copyDirContents(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			_ = out.Close()
+			return err
+		}
+		return out.Close()
+	})
+}
+
+func initTestRepo(t *testing.T) (*git.Runner, string) {
+	t.Helper()
+	testRepoTemplateOnce.Do(initTestRepoTemplate)
+	if testRepoTemplateSkip != "" {
+		t.Skip(testRepoTemplateSkip)
+	}
+	if testRepoTemplateErr != nil {
+		t.Fatalf("init test repo template: %v", testRepoTemplateErr)
+	}
+
+	dir := t.TempDir()
+	if err := copyDirContents(testRepoTemplateDir, dir); err != nil {
+		t.Fatalf("copy test repo template: %v", err)
+	}
+	return git.NewRunner(testRepoGitBin, 4), dir
+}
+
+func TestSwarmTemplateRepoCopyIsolation(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]string, 3)
+	var wg sync.WaitGroup
+	for i := range repos {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			runner, dir := initTestRepo(t)
+			if runner == nil || runner.Bin == "" {
+				t.Errorf("repo %d: expected non-empty git runner", idx)
+			}
+			repos[idx] = dir
+		}(i)
+	}
+	wg.Wait()
+
+	var initialHead string
+	for i, dir := range repos {
+		if allow := gitTestRun(t, dir, "config", "--get", "protocol.https.allow"); allow != "never" {
+			t.Fatalf("repo %d protocol.https.allow = %q, want never", i, allow)
+		}
+		if msg := gitTestRun(t, dir, "log", "-1", "--format=%s"); msg != "initial commit" {
+			t.Fatalf("repo %d initial commit = %q, want initial commit", i, msg)
+		}
+		readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+		if err != nil || string(readme) != "# Demo Repo\n" {
+			t.Fatalf("repo %d README.md = %q, err=%v", i, string(readme), err)
+		}
+		head := gitTestRun(t, dir, "rev-parse", "HEAD")
+		if initialHead == "" {
+			initialHead = head
+		} else if head != initialHead {
+			t.Fatalf("repo %d HEAD = %s, want %s", i, head, initialHead)
+		}
+	}
+
+	// 验证 .git 下关键文件是独立拷贝，未使用硬链接。
+	for _, rel := range []string{filepath.Join(".git", "HEAD"), filepath.Join(".git", "index")} {
+		tplInfo, err := os.Stat(filepath.Join(testRepoTemplateDir, rel))
+		if err != nil {
+			t.Fatalf("stat template %s: %v", rel, err)
+		}
+		aInfo, err := os.Stat(filepath.Join(repos[0], rel))
+		if err != nil {
+			t.Fatalf("stat repo[0] %s: %v", rel, err)
+		}
+		bInfo, err := os.Stat(filepath.Join(repos[1], rel))
+		if err != nil {
+			t.Fatalf("stat repo[1] %s: %v", rel, err)
+		}
+		if os.SameFile(tplInfo, aInfo) || os.SameFile(aInfo, bInfo) {
+			t.Fatalf("%s 不应硬链接共享底层文件", rel)
+		}
+	}
+
+	// 在第一个副本提交改动并改写配置，验证不影响模板及其他并行副本。
+	gitTestRun(t, repos[0], "config", "user.name", "mutated-user")
+	if err := os.WriteFile(filepath.Join(repos[0], "README.md"), []byte("# Mutated\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repos[0], "extra.txt"), []byte("only-in-repo-0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, repos[0], "add", "README.md", "extra.txt")
+	gitTestRun(t, repos[0], "commit", "-m", "mutated repo 0")
+
+	for i, dir := range []string{testRepoTemplateDir, repos[1], repos[2]} {
+		if head := gitTestRun(t, dir, "rev-parse", "HEAD"); head != initialHead {
+			t.Fatalf("target %d HEAD 被污染: got %s want %s", i, head, initialHead)
+		}
+		if status := gitTestRun(t, dir, "status", "--porcelain"); status != "" {
+			t.Fatalf("target %d 工作区不干净: %s", i, status)
+		}
+		if name := gitTestRun(t, dir, "config", "--get", "user.name"); name != "test-user" {
+			t.Fatalf("target %d user.name = %q, want test-user", i, name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "extra.txt")); !os.IsNotExist(err) {
+			t.Fatalf("target %d 出现跨仓库文件 extra.txt: %v", i, err)
+		}
+		readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+		if err != nil || string(readme) != "# Demo Repo\n" {
+			t.Fatalf("target %d README.md 被污染: %q, err=%v", i, string(readme), err)
+		}
+	}
 }
 
 func TestBeeCopyDetached(t *testing.T) {
@@ -748,6 +936,7 @@ func TestManager_StopBee_And_Errors(t *testing.T) {
 }
 
 func TestManager_LeadThreadForWorkDir(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(Options{})
 
 	lead1 := "lead-thread-1"
@@ -1169,6 +1358,7 @@ func TestManager_DispatchFromReply_NameAndProject(t *testing.T) {
 
 // 验证 BuildReport 在有 bee 和无 bee 两种情况下的输出都以 ReportPrefix 开头
 func TestBuildReport_Prefix(t *testing.T) {
+	t.Parallel()
 	// 1. 无 bee
 	emptyReport := BuildReport(nil)
 	if !strings.HasPrefix(emptyReport, ReportPrefix) {
@@ -1193,6 +1383,7 @@ func TestBuildReport_Prefix(t *testing.T) {
 
 // 验证 BuildReport 的「统计」行：含用时、工具调用与增删行数；全零统计时不输出该行。
 func TestBuildReportIncludesStats(t *testing.T) {
+	t.Parallel()
 	started := time.Date(2024, 5, 1, 10, 0, 0, 0, time.UTC)
 	finished := started.Add(33 * time.Second)
 	bee := Bee{
@@ -2354,6 +2545,7 @@ func TestEmptyReportNudgedUpToLimit(t *testing.T) {
 
 // TestIsNoticeAndBeePrompt 验证新旧两种通知与子代理任务前缀都能识别。
 func TestIsNoticeAndBeePrompt(t *testing.T) {
+	t.Parallel()
 	for _, text := range []string{ReportPrefix + "Ives 已结束工作。", NoticePrefix + "已派出 Ives", "[Hydra] 协作者汇报：Ives 已结束工作。"} {
 		if !IsNotice(text) {
 			t.Errorf("IsNotice(%q) = false", text)
@@ -2775,6 +2967,7 @@ func TestManager_BeeFailure_ReportsErrorReasonToLead(t *testing.T) {
 }
 
 func TestFormatFailureReason(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -2823,6 +3016,7 @@ func TestFormatFailureReason(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := formatFailureReason(tc.in)
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
@@ -2832,6 +3026,7 @@ func TestFormatFailureReason(t *testing.T) {
 }
 
 func TestHandoffPromptIncludesLastOutput(t *testing.T) {
+	t.Parallel()
 	short := handoffPrompt("因「失败」中断", []string{"a.go", "b.go"}, "最后输出", "原始任务")
 	for _, want := range []string{"a.go, b.go", "最后输出", "原始任务", "## 交接", "## 你要做"} {
 		if !strings.Contains(short, want) {
@@ -2916,6 +3111,7 @@ func TestDispatchQueuesOverlappingBrief(t *testing.T) {
 }
 
 func TestDispatchScopeBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name      string
 		active    Bee
@@ -2937,6 +3133,7 @@ func TestDispatchScopeBoundaries(t *testing.T) {
 		{name: "同句修改路径仍占范围", active: Bee{Status: StatusRunning, Brief: "修改 a.go。参考 b.go 的写法。"}, spec: BeeSpec{Brief: "修改 a.go"}, want: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mgr := NewManager(Options{})
 			leadID := "lead"
 			if tt.otherLead {
@@ -3035,6 +3232,7 @@ func (d *sessionStatusDriver) SessionStatus(ctx context.Context, threadID string
 }
 
 func TestTickIdleLeadUsesSessionStatus(t *testing.T) {
+	t.Parallel()
 	driver := &sessionStatusDriver{fakeDriver: newFakeDriver()}
 	driver.setSessionState("lead", kanban.SessionState{})
 	idleCalls := 0

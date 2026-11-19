@@ -783,6 +783,7 @@ func TestTick_DirtyPathWaitUsesShortTimeout(t *testing.T) {
 
 // 汇报里补丁已另存时给出补丁路径与重试指引；已合入的 bee 不出现这些内容。
 func TestBuildReport_SavedPatchRetryGuidance(t *testing.T) {
+	t.Parallel()
 	const patchPath = "/tmp/swarm-patches/lead-0.patch"
 	const dirtyPatchPath = "/tmp/swarm-patches/lead-1.patch"
 

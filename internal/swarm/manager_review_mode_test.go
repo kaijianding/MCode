@@ -28,6 +28,7 @@ func collectReports(m *Manager, leadThreadID string) func() []string {
 
 // 人工审查档：待审查期间不汇报，批准后的下一个 Tick 汇报一次并写明审查通过。
 func TestReviewMode_HumanApproveReportsAfterDecision(t *testing.T) {
+	t.Parallel()
 	m, _, bee := pendingReviewBee(t)
 	ctx := context.Background()
 	reports := collectReports(m, "lead-review")
@@ -51,6 +52,7 @@ func TestReviewMode_HumanApproveReportsAfterDecision(t *testing.T) {
 
 // 人工审查档：放弃合并后下一个 Tick 汇报一次，正文写明已放弃。
 func TestReviewMode_HumanDiscardReportsAfterDecision(t *testing.T) {
+	t.Parallel()
 	m, _, bee := pendingReviewBee(t)
 	ctx := context.Background()
 	reports := collectReports(m, "lead-review")
@@ -74,6 +76,7 @@ func TestReviewMode_HumanDiscardReportsAfterDecision(t *testing.T) {
 
 // 一个 bee 仍在审查、另一个已经结束时，整批都不汇报；审查通过后一次汇报里两个 bee 都有结果。
 func TestReviewMode_ReviewRunningHoldsBatchReport(t *testing.T) {
+	t.Parallel()
 	m, dir, first := pendingReviewBee(t)
 	ctx := context.Background()
 	reports := collectReports(m, "lead-review")
@@ -116,6 +119,7 @@ func TestReviewMode_ReviewRunningHoldsBatchReport(t *testing.T) {
 
 // 拒绝审查只标记结论，不丢补丁与工作副本，汇报里给出审查意见和补丁路径供返工。
 func TestReviewMode_RejectKeepsWorktreeAndReportsReason(t *testing.T) {
+	t.Parallel()
 	m, _, bee := pendingReviewBee(t)
 	ctx := context.Background()
 	reports := collectReports(m, "lead-review")
@@ -160,6 +164,7 @@ func TestReviewMode_RejectKeepsWorktreeAndReportsReason(t *testing.T) {
 
 // 交回人工后仍保持待审查，且不汇报。
 func TestReviewMode_NeedsHumanStaysPendingAndSilent(t *testing.T) {
+	t.Parallel()
 	m, _, bee := pendingReviewBee(t)
 	ctx := context.Background()
 	reports := collectReports(m, "lead-review")
@@ -182,6 +187,7 @@ func TestReviewMode_NeedsHumanStaysPendingAndSilent(t *testing.T) {
 
 // 审查进行中算忙并占用并发名额；只剩等人工决定的 bee 时不算忙。
 func TestReviewMode_BusyDuringAIReviewOnly(t *testing.T) {
+	t.Parallel()
 	m, _, _ := pendingReviewBee(t)
 	if m.Busy("lead-review") {
 		t.Fatal("只剩等人工审查的 bee 时不应算忙")

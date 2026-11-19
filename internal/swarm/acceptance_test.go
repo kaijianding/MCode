@@ -20,6 +20,7 @@ type noMessengerDriver struct {
 }
 
 func TestParseDelegationsAcceptance(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		raw  string
 		want []string
@@ -32,6 +33,7 @@ func TestParseDelegationsAcceptance(t *testing.T) {
 		{`["1","2","3","4","5","6","7","8","9"]`, []string{"1", "2", "3", "4", "5", "6", "7", "8"}},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
+			t.Parallel()
 			entries, _, err := ParseDelegations("```swarm\n[{\"prompt\":\"edit\",\"acceptance\":" + tc.raw + "}]\n```")
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("parse: %v %v", entries, err)
@@ -44,6 +46,7 @@ func TestParseDelegationsAcceptance(t *testing.T) {
 }
 
 func TestManagerAcceptanceModes(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"ai", "human", "off"} {
 		for _, pass := range []bool{false, true} {
 			name := mode + "/false"
@@ -53,6 +56,7 @@ func TestManagerAcceptanceModes(t *testing.T) {
 				command = "test -f internal/feature.go"
 			}
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				fake := &funnelFake{}
 				m, dir := newFunnelManager(t, fake)
 				defer m.Stop()
@@ -135,6 +139,7 @@ func TestManagerAcceptanceModes(t *testing.T) {
 }
 
 func TestRunAcceptanceStopsAndSkips(t *testing.T) {
+	t.Parallel()
 	m := NewManager(Options{})
 	dir := t.TempDir()
 	h := Bee{WorktreePath: dir, ChangedFiles: []string{"a.go"}, Acceptance: []string{"printf before; exit 7", "touch should-not-run"}}
@@ -157,8 +162,10 @@ func TestRunAcceptanceStopsAndSkips(t *testing.T) {
 }
 
 func TestRunAcceptanceReportsProgress(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"通过", "失败", "取消", "超时"} {
 		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
 			m := NewManager(Options{ReviewProjectConfig: func(string, string) (reviewcheck.ProjectConfig, error) {
 				return reviewcheck.ProjectConfig{TimeoutSeconds: 1}, nil
 			}})
@@ -260,6 +267,7 @@ func TestRunAcceptanceReportsProgress(t *testing.T) {
 }
 
 func TestRunAcceptanceRewritesAbsoluteCdToWorktree(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	source := filepath.Join(parent, "source")
 	worktree := filepath.Join(parent, "copy")
@@ -288,6 +296,7 @@ func TestRunAcceptanceRewritesAbsoluteCdToWorktree(t *testing.T) {
 }
 
 func TestRunAcceptanceTimeoutAndCancel(t *testing.T) {
+	t.Parallel()
 	m := NewManager(Options{ReviewProjectConfig: func(string, string) (reviewcheck.ProjectConfig, error) {
 		return reviewcheck.ProjectConfig{TimeoutSeconds: 1}, nil
 	}})
@@ -306,6 +315,7 @@ func TestRunAcceptanceTimeoutAndCancel(t *testing.T) {
 }
 
 func TestAcceptancePlanAndPersistence(t *testing.T) {
+	t.Parallel()
 	m, dir := newFunnelManager(t, &funnelFake{})
 	commands := []string{"true", "false"}
 	plan := m.planEntry(context.Background(), "lead", Delegation{Prompt: "edit", Acceptance: commands}, nil, "", dir, map[int]BeeStatus{}, 0)
@@ -341,6 +351,7 @@ func TestAcceptancePlanAndPersistence(t *testing.T) {
 }
 
 func TestAcceptanceContinuesToL2(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	settings := m.Settings()
@@ -362,8 +373,10 @@ func TestAcceptanceContinuesToL2(t *testing.T) {
 }
 
 func TestAcceptanceCommitLanding(t *testing.T) {
+	t.Parallel()
 	for _, command := range []string{"true", "false"} {
 		t.Run(command, func(t *testing.T) {
+			t.Parallel()
 			m, _, root := newCommitLandingManager(t)
 			bee := startCommitLandingBee(t, m, root, "lead-commit-acceptance", 0)
 			m.mu.Lock()
@@ -389,8 +402,10 @@ func TestAcceptanceCommitLanding(t *testing.T) {
 }
 
 func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
-	for _, command := range []string{"sleep 3", ""} {
+	t.Parallel()
+	for _, command := range []string{"sleep 0.9", ""} {
 		t.Run(command, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			settings := m.Settings()
@@ -414,7 +429,7 @@ func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
 			defer func() { cancel(); m.wg.Wait() }()
 			started := time.Now()
 			m.Tick(ctx)
-			if elapsed := time.Since(started); elapsed >= time.Second {
+			if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
 				t.Fatalf("Tick blocked: %v", elapsed)
 			}
 			h := beeByThread(t, m, "lead-async-acceptance", bee.ThreadID)
@@ -436,8 +451,10 @@ func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
 }
 
 func TestAcceptanceOffReportsAfterSettlement(t *testing.T) {
+	t.Parallel()
 	for _, result := range []string{"false", "true"} {
 		t.Run(result, func(t *testing.T) {
+			t.Parallel()
 			m, dir := newFunnelManager(t, &funnelFake{})
 			driver := m.opts.Driver.(*fakeDriver)
 			if result == "false" {
@@ -531,9 +548,11 @@ func TestAcceptanceOffReportsAfterSettlement(t *testing.T) {
 }
 
 func TestAcceptanceOffStoppedBeeDoesNotMerge(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"stop", "stop-all", "delete"} {
 		for _, result := range []string{"true", "false"} {
 			t.Run(action+"/"+result, func(t *testing.T) {
+				t.Parallel()
 				m, dir := newFunnelManager(t, &funnelFake{})
 				settings := m.Settings()
 				settings.ReviewMode = "off"
@@ -593,6 +612,7 @@ func TestAcceptanceOffStoppedBeeDoesNotMerge(t *testing.T) {
 }
 
 func TestAcceptanceHumanCannotApproveBeforeChecks(t *testing.T) {
+	t.Parallel()
 	started, release := make(chan struct{}), make(chan struct{})
 	fake := &funnelFake{checkFn: func(ctx context.Context, _ string, _ []string, _ string, _ time.Duration) reviewcheck.Result {
 		close(started)
@@ -634,6 +654,7 @@ func TestAcceptanceHumanCannotApproveBeforeChecks(t *testing.T) {
 }
 
 func TestRewriteWorkDirBackslashBoundary(t *testing.T) {
+	t.Parallel()
 	got := rewriteWorkDir(`cd /source\sub`, "/source", "/copy")
 	if got != `cd /copy\sub` {
 		t.Fatalf("rewrite = %q", got)
@@ -641,6 +662,7 @@ func TestRewriteWorkDirBackslashBoundary(t *testing.T) {
 }
 
 func TestStopBeeCancelsAcceptance(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"stop", "stop-all", "delete"} {
 		m := NewManager(Options{})
 		dir := t.TempDir()
@@ -719,6 +741,7 @@ func TestStopBeeCancelsAcceptance(t *testing.T) {
 }
 
 func TestAcceptanceProblem(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		command string
@@ -749,6 +772,7 @@ func TestAcceptanceProblem(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := acceptanceProblem(tc.command); got != tc.want {
 				t.Fatalf("acceptanceProblem(%q) = %q, want %q", tc.command, got, tc.want)
 			}
@@ -757,6 +781,7 @@ func TestAcceptanceProblem(t *testing.T) {
 }
 
 func TestAcceptanceLintRejectsEntryBeforeStart(t *testing.T) {
+	t.Parallel()
 	m, dir := newFunnelManager(t, &funnelFake{})
 	defer m.Stop()
 	settings := m.Settings()
@@ -835,6 +860,7 @@ func TestAcceptanceLintRejectsEntryBeforeStart(t *testing.T) {
 }
 
 func TestAcceptanceNoTestsRunFails(t *testing.T) {
+	t.Parallel()
 	m := NewManager(Options{})
 	dir := t.TempDir()
 
@@ -870,6 +896,7 @@ func TestAcceptanceNoTestsRunFails(t *testing.T) {
 }
 
 func TestAcceptancePassedMarkerHiddenFromReport(t *testing.T) {
+	t.Parallel()
 	report := BuildReport([]Bee{{
 		Name:           "Aspen",
 		Task:           "改代码",
@@ -888,8 +915,10 @@ func TestAcceptancePassedMarkerHiddenFromReport(t *testing.T) {
 }
 
 func TestAcceptanceFailureReturnsToSameBee(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"off", "ai"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			defer m.Stop()
@@ -971,8 +1000,10 @@ func TestAcceptanceFailureReturnsToSameBee(t *testing.T) {
 }
 
 func TestAcceptanceFailureAfterReturnReportsFailure(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"off", "ai"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			defer m.Stop()
@@ -1039,8 +1070,10 @@ func TestAcceptanceFailureAfterReturnReportsFailure(t *testing.T) {
 }
 
 func TestAcceptanceDisputeSkipsRerun(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"off", "ai"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			defer m.Stop()
@@ -1109,6 +1142,7 @@ func TestAcceptanceDisputeSkipsRerun(t *testing.T) {
 }
 
 func TestAcceptanceReturnGuardsAndDisputeParsing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		summary string
 		want    string
@@ -1143,8 +1177,10 @@ func TestAcceptanceReturnGuardsAndDisputeParsing(t *testing.T) {
 }
 
 func TestAcceptanceRerunOnKeptCopy(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"off", "ai"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			defer m.Stop()
@@ -1266,6 +1302,7 @@ func TestAcceptanceRerunOnKeptCopy(t *testing.T) {
 }
 
 func TestAcceptanceRerunRejected(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	defer m.Stop()
@@ -1400,8 +1437,10 @@ func TestAcceptanceRerunRejected(t *testing.T) {
 }
 
 func TestAcceptanceRerunWithoutChangesRejected(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"off", "ai"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			defer m.Stop()
@@ -1490,6 +1529,7 @@ func TestAcceptanceRerunWithoutChangesRejected(t *testing.T) {
 }
 
 func TestAcceptanceRejectedCopyKeptForRerun(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	finished := now.Add(-beeCopyReclaimIdle - time.Minute)
 

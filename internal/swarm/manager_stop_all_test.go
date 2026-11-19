@@ -9,6 +9,7 @@ import (
 )
 
 func TestStopAllSuppressesReportsAndIdle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, _ := initTestRepo(t)
 	driver := newFakeDriver()
@@ -36,6 +37,7 @@ func TestStopAllSuppressesReportsAndIdle(t *testing.T) {
 }
 
 func TestStopAllHoldsCompletedReportUntilLeadRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, _ := initTestRepo(t)
 	driver := newFakeDriver()
@@ -73,6 +75,7 @@ func TestStopAllHoldsCompletedReportUntilLeadRuns(t *testing.T) {
 }
 
 func TestStopAllHoldsUnreportedCompletedBee(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, _ := initTestRepo(t)
 	driver := newFakeDriver()
@@ -103,6 +106,7 @@ func TestStopAllHoldsUnreportedCompletedBee(t *testing.T) {
 
 // StopAll 落在投递窗口内时必须等正在进行的 OnReport 返回，不能与投递并行生效。
 func TestStopAllWaitsForInFlightReport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, _ := initTestRepo(t)
 	driver := newFakeDriver()
@@ -154,6 +158,7 @@ func TestStopAllWaitsForInFlightReport(t *testing.T) {
 
 // StopAll 先于投递生效时，OnReport 与 OnBeesIdle 都不应被调用，bee 保持未汇报。
 func TestStopAllBeforeDeliverySkipsReport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, _ := initTestRepo(t)
 	driver := newFakeDriver()
@@ -189,6 +194,7 @@ func TestStopAllBeforeDeliverySkipsReport(t *testing.T) {
 }
 
 func TestStopAllNewDispatchResumesReports(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner, dir := initTestRepo(t)
 	driver := newFakeDriver()

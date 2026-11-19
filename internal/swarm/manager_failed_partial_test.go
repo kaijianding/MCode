@@ -8,6 +8,7 @@ import (
 
 // 验证失败的 bee 留下半成品时，汇报里追加「半成品」一行，且原有的改动文件行照旧。
 func TestBuildReport_FailedBeeShowsPartialWork(t *testing.T) {
+	t.Parallel()
 	bee := Bee{
 		Name:         "Bee-Partial",
 		Task:         "改一半",
@@ -35,6 +36,7 @@ func TestBuildReport_FailedBeeShowsPartialWork(t *testing.T) {
 
 // 验证未注入 Git 时 recordPartialWork 不 panic，也不改已有改动清单。
 func TestRecordPartialWork_NilGit(t *testing.T) {
+	t.Parallel()
 	m := NewManager(Options{})
 	bee := Bee{
 		Status:       StatusFailed,

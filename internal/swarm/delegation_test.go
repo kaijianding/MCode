@@ -9,6 +9,7 @@ import (
 )
 
 func TestRosterNameAndIndex(t *testing.T) {
+	t.Parallel()
 	// 基础索引与轮次
 	if got := RosterName(0); got != "Aspen" {
 		t.Errorf("expected Aspen, got %s", got)
@@ -49,6 +50,7 @@ func TestRosterNameAndIndex(t *testing.T) {
 }
 
 func TestParseDelegations_NoBlock(t *testing.T) {
+	t.Parallel()
 	text := "Here is the response without any delegation block."
 	entries, found, err := ParseDelegations(text)
 	if found {
@@ -63,6 +65,7 @@ func TestParseDelegations_NoBlock(t *testing.T) {
 }
 
 func TestParseDelegations_EmptyArray(t *testing.T) {
+	t.Parallel()
 	text := "I have completed all the work myself.\n```swarm\n[]\n```\nDone."
 	entries, found, err := ParseDelegations(text)
 	if !found {
@@ -77,6 +80,7 @@ func TestParseDelegations_EmptyArray(t *testing.T) {
 }
 
 func TestParseDelegations_SingleEntryObject(t *testing.T) {
+	t.Parallel()
 	text := `Prefix text
 ` + "```swarm\n" + `{
   "task": "Refactor store",
@@ -112,6 +116,7 @@ func TestParseDelegations_SingleEntryObject(t *testing.T) {
 }
 
 func TestParseDelegations_MultiEntryArray(t *testing.T) {
+	t.Parallel()
 	text := "```swarm-sent\n" + `[
   {
     "bee": "Aspen",
@@ -142,6 +147,7 @@ func TestParseDelegations_MultiEntryArray(t *testing.T) {
 }
 
 func TestParseDelegations_NestedCodeBlocksInPrompt(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   {
     "task": "Implement parser",
@@ -166,6 +172,7 @@ func TestParseDelegations_NestedCodeBlocksInPrompt(t *testing.T) {
 }
 
 func TestParseDelegations_BadJSON(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n{ invalid json here\n```"
 	entries, found, err := ParseDelegations(text)
 	if !found {
@@ -183,6 +190,7 @@ func TestParseDelegations_BadJSON(t *testing.T) {
 }
 
 func TestParseDelegations_EmptyPromptFiltered(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   { "prompt": "   ", "task": "empty" },
   { "prompt": "valid prompt", "task": "" }
@@ -202,6 +210,7 @@ func TestParseDelegations_EmptyPromptFiltered(t *testing.T) {
 }
 
 func TestParseDelegations_AllEmptyPromptsReturnErr(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   { "prompt": "   ", "task": "empty" }
 ]
@@ -217,6 +226,7 @@ func TestParseDelegations_AllEmptyPromptsReturnErr(t *testing.T) {
 }
 
 func TestParseDelegations_ProfileAndPair(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   {
     "task": "Routed work",
@@ -244,6 +254,7 @@ func TestParseDelegations_ProfileAndPair(t *testing.T) {
 
 // skills 数组形式、逗号字符串形式、去空去重、超 8 个截断、类型错误忽略、不写时为 nil。
 func TestParseDelegations_Skills(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -288,6 +299,7 @@ func TestParseDelegations_Skills(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			text := "```swarm\n" + `[` + tc.body + `]` + "\n```"
 			entries, found, err := ParseDelegations(text)
 			if !found || err != nil {
@@ -305,6 +317,7 @@ func TestParseDelegations_Skills(t *testing.T) {
 
 // replaces 键用于声明要取代的在跑 bee：读取时 TrimSpace，不写时为空。
 func TestParseDelegations_Replaces(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[{"prompt": "P", "replaces": " Alice "}, {"prompt": "Q"}]` + "\n```"
 	entries, found, err := ParseDelegations(text)
 	if !found || err != nil {
@@ -323,6 +336,7 @@ func TestParseDelegations_Replaces(t *testing.T) {
 
 // reworkOf / rework_of 键声明返工对象：两种写法都接受并 TrimSpace，不写时为空。
 func TestParseDelegations_ReworkOf(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[{"prompt": "P", "reworkOf": " Aspen "}, {"prompt": "Q", "rework_of": "bee-thread-7"}, {"prompt": "R"}]` + "\n```"
 	entries, found, err := ParseDelegations(text)
 	if !found || err != nil {
@@ -337,6 +351,7 @@ func TestParseDelegations_ReworkOf(t *testing.T) {
 }
 
 func TestParseDelegations_Rerun(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[{"prompt": "重跑", "reworkOf": "Aspen", "rerun": true, "acceptance": ["go test -run TestFoo ./p"]}, {"prompt": "普通"}]` + "\n```"
 	entries, found, err := ParseDelegations(text)
 	if !found || err != nil {
@@ -359,6 +374,7 @@ func TestParseDelegations_Rerun(t *testing.T) {
 
 // beePrompt 不参与技能拼接：不含 skills 的条目输出固定为各段以空行分隔。
 func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
+	t.Parallel()
 	d := Delegation{Task: "T", Prompt: "P"}
 	cfg := BeeConfig{}
 	want := BeePromptPrefix + "Aspen" + "，由主代理派发，完成以下任务。\n\n## 任务：T\n\nP\n\n## 工作方式\n" + beeWorkRulesFor(cfg, false) + "\n\n## 汇报\n" + beeReportRulesFor(cfg, false)
@@ -374,6 +390,7 @@ func TestBeePrompt_WithoutSkillsUnchanged(t *testing.T) {
 }
 
 func TestBeePromptListsAcceptance(t *testing.T) {
+	t.Parallel()
 	d := Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test ./...", "go vet ./..."}}
 	got := beePrompt("Aspen", d, BeeConfig{})
 	for _, want := range []string{"## 验收", "汇报前不要自己跑这些命令或同一批测试，失败时 mcode 会把输出发回给你修。", "- `go test ./...`", "- `go vet ./...`", "## 工作方式"} {
@@ -391,6 +408,7 @@ func TestBeePromptListsAcceptance(t *testing.T) {
 }
 
 func TestBeePromptAcceptanceSkipsSelfTests(t *testing.T) {
+	t.Parallel()
 	withAcc := beePrompt("Aspen", Delegation{Task: "T", Prompt: "P", Acceptance: []string{"go test -run Foo ./..."}}, BeeConfig{})
 	for _, want := range []string{"汇报前不跑测试", "测试结果由 mcode 验收给出"} {
 		if !strings.Contains(withAcc, want) {
@@ -412,6 +430,7 @@ func TestBeePromptAcceptanceSkipsSelfTests(t *testing.T) {
 }
 
 func TestBeePrompt_ScopedSelfChecks(t *testing.T) {
+	t.Parallel()
 	got := beePrompt("Aspen", Delegation{Task: "T", Prompt: "P"}, BeeConfig{})
 	for _, want := range []string{"有范围的自测", "-timeout", "跑了哪些自测命令及结果"} {
 		if !strings.Contains(got, want) {
@@ -424,6 +443,7 @@ func TestBeePrompt_ScopedSelfChecks(t *testing.T) {
 }
 
 func TestBeePrompt_TierRequirements(t *testing.T) {
+	t.Parallel()
 	d := Delegation{Task: "T", Prompt: "P"}
 
 	with := beePrompt("Aspen", d, BeeConfig{SystemPrompt: "  只出方案  "})
@@ -447,6 +467,7 @@ func TestBeePrompt_TierRequirements(t *testing.T) {
 }
 
 func TestBeePrompt_RulesByTier(t *testing.T) {
+	t.Parallel()
 	d := Delegation{Task: "T", Prompt: "P"}
 	readOnly := beePrompt("Aspen", d, BeeConfig{ReadOnly: true})
 	plan := beePrompt("Aspen", d, BeeConfig{WritePaths: []string{"docs/plans/**", "notes/*.md"}})
@@ -488,6 +509,7 @@ func TestBeePrompt_RulesByTier(t *testing.T) {
 }
 
 func TestBeeWorkRules_NetworkResearch(t *testing.T) {
+	t.Parallel()
 	for name, cfg := range map[string]BeeConfig{"只读": {ReadOnly: true}, "方案": {WritePaths: []string{"docs/**"}}, "改代码": {}} {
 		rules := beeWorkRulesFor(cfg, false)
 		for _, want := range []string{"web_fetch、web_search", "curl（必须带 -m 超时）", "只读不写", "不向外部服务提交、发布或上传内容", "不发送密钥或用户信息"} {
@@ -505,6 +527,7 @@ func TestBeeWorkRules_NetworkResearch(t *testing.T) {
 }
 
 func TestStreamParser_EmitsOnClosingBrace(t *testing.T) {
+	t.Parallel()
 	entry1 := `{"task": "A", "prompt": "do A"}`
 	entry2 := `{"task": "B", "prompt": "do B"}`
 	text := "```swarm\n[\n" + entry1 + ",\n" + entry2 + "\n]\n```\n"
@@ -540,6 +563,7 @@ func TestStreamParser_EmitsOnClosingBrace(t *testing.T) {
 }
 
 func TestStreamParser_HalfWrittenEmitsNothing(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n[{\"task\": \"A\", \"prompt\": \"尚未写完\""
 	p := NewStreamParser()
 	for i := 0; i < len(text); i++ {
@@ -556,6 +580,7 @@ func TestStreamParser_HalfWrittenEmitsNothing(t *testing.T) {
 }
 
 func TestStreamParser_TwoEntriesInOneChunkInOrder(t *testing.T) {
+	t.Parallel()
 	text := "```swarm-sent\n" + `[
   {
     "bee": "Aspen",
@@ -587,6 +612,7 @@ func TestStreamParser_TwoEntriesInOneChunkInOrder(t *testing.T) {
 }
 
 func TestStreamParser_NestedAndQuotedBraces(t *testing.T) {
+	t.Parallel()
 	raw, err := json.Marshal(map[string]string{
 		"task":   "parser",
 		"prompt": "看这段代码 {\"a\": {\"b\": 1}} 以及单独的右括号 } 和引号 \"x\"，还有行首围栏\n```go\nfunc f() { return }\n```",
@@ -618,6 +644,7 @@ func TestStreamParser_NestedAndQuotedBraces(t *testing.T) {
 }
 
 func TestStreamParser_SingleBareObject(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `{
   "task": "Refactor store",
   "prompt": "Please refactor internal/store/swarm.go",
@@ -640,6 +667,7 @@ func TestStreamParser_SingleBareObject(t *testing.T) {
 }
 
 func TestStreamParser_IgnoresTextAfterClosingFence(t *testing.T) {
+	t.Parallel()
 	first := "```swarm\n[{\"prompt\": \"第一个块\"}]\n```\n"
 	second := "\n```swarm\n[{\"prompt\": \"第二个块\"}]\n```\n"
 
@@ -658,6 +686,7 @@ func TestStreamParser_IgnoresTextAfterClosingFence(t *testing.T) {
 }
 
 func TestStreamParser_MatchesParseDelegations(t *testing.T) {
+	t.Parallel()
 	texts := []string{
 		"```swarm\n[\n" +
 			`{"task": "A", "prompt": "do A"}` + ",\n" +
@@ -714,6 +743,7 @@ func TestStreamParser_MatchesParseDelegations(t *testing.T) {
 
 // TestParseDelegations_LegacyFenceAndBeeKey 验证旧围栏 ```hydra 与旧名字键 head 仍然能解析。
 func TestParseDelegations_LegacyFenceAndBeeKey(t *testing.T) {
+	t.Parallel()
 	text := "```hydra\n" + `[{"prompt": "旧围栏任务", "head": "Aspen"}]` + "\n```\n"
 	entries, found, err := ParseDelegations(text)
 	if !found || err != nil {
@@ -731,6 +761,7 @@ func TestParseDelegations_LegacyFenceAndBeeKey(t *testing.T) {
 
 // TestParseDelegations_BeeKeyWins 验证 bee 与 bee 同时出现时以 bee 为准。
 func TestParseDelegations_BeeKeyWins(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[{"prompt": "任务", "bee": "Birch", "head": "Aspen"}]` + "\n```\n"
 	entries, found, err := ParseDelegations(text)
 	if !found || err != nil || len(entries) != 1 {
@@ -744,6 +775,7 @@ func TestParseDelegations_BeeKeyWins(t *testing.T) {
 // TestParseDelegations_RepairsInvalidEscape 验证提示词里写成字面反斜杠（如 .onnx）
 // 造成的非法转义会被修复，且解码后仍是字面反斜杠。
 func TestParseDelegations_RepairsInvalidEscape(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   {
     "task": "Export model",
@@ -774,6 +806,7 @@ func TestParseDelegations_RepairsInvalidEscape(t *testing.T) {
 // TestStreamParser_RepairsInvalidEscape 验证流式解析器逐字节喂入含非法转义的块时
 // 仍能产出条目。
 func TestStreamParser_RepairsInvalidEscape(t *testing.T) {
+	t.Parallel()
 	entry := `{"task": "Export", "prompt": "保存到 out\model.onnx"}`
 	text := "```swarm\n[\n" + entry + "\n]\n```\n"
 
@@ -795,6 +828,7 @@ func TestStreamParser_RepairsInvalidEscape(t *testing.T) {
 
 // TestParseDelegations_KeepsValidEscapes 验证合法转义（\n、\t、\uXXXX）不受修复影响。
 func TestParseDelegations_KeepsValidEscapes(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   {
     "task": "Keep escapes",
@@ -818,6 +852,7 @@ func TestParseDelegations_KeepsValidEscapes(t *testing.T) {
 
 // TestParseDelegations_RepairKeepsStructuralErrors 验证修复不会掩盖缺逗号这类结构错误。
 func TestParseDelegations_RepairKeepsStructuralErrors(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[
   { "prompt": "a\nb" "task": "missing comma" }
 ]
@@ -837,6 +872,7 @@ func TestParseDelegations_RepairKeepsStructuralErrors(t *testing.T) {
 
 // TestStreamParser_LegacyFence 验证流式解析器同样认旧围栏 ```hydra。
 func TestStreamParser_LegacyFence(t *testing.T) {
+	t.Parallel()
 	p := NewStreamParser()
 	var got []Delegation
 	chunk := "```hydra\n" + `[{"prompt": "流式旧围栏", "head": "Cove"}]` + "\n```\n"

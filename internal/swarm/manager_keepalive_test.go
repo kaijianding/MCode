@@ -12,6 +12,7 @@ import (
 )
 
 func TestCacheKeepalive(t *testing.T) {
+	t.Parallel()
 	newManager := func(t *testing.T) (*Manager, *testClock, *fakeDriver, *[]string) {
 		t.Helper()
 		clock := newTestClock()
@@ -58,6 +59,7 @@ func TestCacheKeepalive(t *testing.T) {
 	}
 
 	t.Run("50分钟边界与并发Tick去重", func(t *testing.T) {
+		t.Parallel()
 		mgr, clock, _, messages := newManager(t)
 		startedAt := clock.Now()
 		before := mgr.RequestLimits("lead", 5)
@@ -98,6 +100,7 @@ func TestCacheKeepalive(t *testing.T) {
 	})
 
 	t.Run("回合结束重新计时", func(t *testing.T) {
+		t.Parallel()
 		mgr, clock, _, messages := newManager(t)
 		clock.Advance(49 * time.Minute)
 		mgr.NoteLeadTurn("lead")
@@ -139,6 +142,7 @@ func TestCacheKeepalive(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mgr, clock, driver, messages := newManager(t)
 			tc.setup(mgr.leads["lead"], driver)
 			clock.Advance(time.Hour)

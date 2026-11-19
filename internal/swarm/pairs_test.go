@@ -3,6 +3,7 @@ package swarm
 import "testing"
 
 func TestFindPair(t *testing.T) {
+	t.Parallel()
 	pairs := []Pair{
 		{ID: "pair-1", Name: "Deep Work", BeeProvider: "claude", BeeModel: "opus"},
 		{ID: "pair-2", Name: "Quick", BeeProvider: "gemini", BeeModel: "flash"},
@@ -25,6 +26,7 @@ func TestFindPair(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := FindPair(pairs, tt.ref)
 			if ok != tt.wantHit {
 				t.Fatalf("FindPair(%q) ok=%v, want %v", tt.ref, ok, tt.wantHit)
@@ -40,6 +42,7 @@ func TestFindPair(t *testing.T) {
 }
 
 func TestFindPair_IDTakesPrecedenceOverName(t *testing.T) {
+	t.Parallel()
 	pairs := []Pair{
 		{ID: "alpha", Name: "Second"},
 		{ID: "beta", Name: "alpha"},
@@ -54,6 +57,7 @@ func TestFindPair_IDTakesPrecedenceOverName(t *testing.T) {
 }
 
 func TestMatchPair(t *testing.T) {
+	t.Parallel()
 	exact := Pair{ID: "exact", LeadProvider: "claude", LeadModel: "opus", BeeProvider: "claude", BeeModel: "sonnet"}
 	wildcard := Pair{ID: "wildcard", LeadProvider: "claude", BeeProvider: "claude", BeeModel: "sonnet"}
 	exactSecond := Pair{ID: "exact-second", LeadProvider: "claude", LeadModel: "opus", BeeProvider: "claude", BeeModel: "sonnet"}
@@ -122,6 +126,7 @@ func TestMatchPair(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := MatchPair(tt.pairs, tt.leadProvider, tt.leadModel, tt.beeProvider, tt.beeModel)
 			if ok != tt.wantHit {
 				t.Fatalf("MatchPair ok=%v, want %v (got %+v)", ok, tt.wantHit, got)
@@ -137,6 +142,7 @@ func TestMatchPair(t *testing.T) {
 }
 
 func TestPairStillMatches(t *testing.T) {
+	t.Parallel()
 	exact := Pair{ID: "exact", LeadProvider: "claude", LeadModel: "opus", BeeProvider: "claude", BeeModel: "sonnet"}
 	wildcard := Pair{ID: "wildcard", LeadProvider: "claude", BeeProvider: "claude", BeeModel: "sonnet"}
 
@@ -156,6 +162,7 @@ func TestPairStillMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := PairStillMatches(tt.pair, "claude", tt.leadModel, tt.beeProvider, tt.beeModel); got != tt.want {
 				t.Errorf("PairStillMatches = %v, want %v", got, tt.want)
 			}

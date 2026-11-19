@@ -9,6 +9,7 @@ import (
 
 // 同一 lead 两个 bee 在窗口内完成时只调用一次模型。
 func TestReviewFunnelBatchOneCall(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(context.Context, string, string, string, string) (string, error) {
@@ -30,6 +31,7 @@ func TestReviewFunnelBatchOneCall(t *testing.T) {
 
 // 批量结果缺一个 bee 时单独重试一次，第二次仍缺失则升级 L3。
 func TestReviewFunnelBatchMissingRetry(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	var calls int
@@ -59,6 +61,7 @@ func TestReviewFunnelBatchMissingRetry(t *testing.T) {
 
 // 攒批在 lead 空闲、最老排队满窗口或队列满 6 个时发车。
 func TestCollectL2BatchConditions(t *testing.T) {
+	t.Parallel()
 	m := NewManager(Options{Persister: newFakePersister()})
 	m.SetSettingsFunc(func() Settings {
 		return Settings{Enabled: true, AutoDelegate: true, WorkspaceMode: "worktree", ReviewMode: "ai"}

@@ -228,6 +228,7 @@ func containsReviewConcern(concerns []string, want string) bool {
 
 // 硬越界但检查通过的改动进 L2，不会被 L0/L1 直接驳回。
 func TestReviewFunnelL0ScopeDoesNotReject(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(context.Context, string, string, string, string) (string, error) {
@@ -248,6 +249,7 @@ func TestReviewFunnelL0ScopeDoesNotReject(t *testing.T) {
 
 // 检查命令失败时直接驳回，原因包含命令与输出尾部。
 func TestReviewFunnelL0CheckFailureRejects(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.checkFn = func(context.Context, string, []string, string, time.Duration) reviewcheck.Result {
@@ -273,6 +275,7 @@ func TestReviewFunnelL0CheckFailureRejects(t *testing.T) {
 
 // 只改计划文档时 L1 直接放行，不调用检查命令与模型。
 func TestReviewFunnelL1PlanDocApproves(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	bee := dispatchFunnelBee(t, m, fake, "lead-plan", "Aspen", dir, "写计划 docs/superpowers/plans/2026-11-03-x.md")
@@ -293,6 +296,7 @@ func TestReviewFunnelL1PlanDocApproves(t *testing.T) {
 
 // 配置了检查命令时，计划文档仍然跳过命令。
 func TestReviewFunnelPlanSkipsCheckCommand(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	m.SetSettingsFunc(func() Settings {
@@ -316,11 +320,13 @@ func TestReviewFunnelPlanSkipsCheckCommand(t *testing.T) {
 
 // 40 行以内由 L1 放行，41 行进入 L2。
 func TestReviewFunnelL1LineThreshold(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		lines int
 		layer string
 	}{{40, "l1"}, {41, "l2"}} {
 		t.Run(fmt.Sprintf("%d行", tc.lines), func(t *testing.T) {
+			t.Parallel()
 			fake := &funnelFake{}
 			m, dir := newFunnelManager(t, fake)
 			bee := dispatchFunnelBee(t, m, fake, "lead-lines", "Aspen", dir, "修改 internal/feature.go")
@@ -338,6 +344,7 @@ func TestReviewFunnelL1LineThreshold(t *testing.T) {
 
 // 派发短标题里没有路径时，L1 应读取 Prompt 里的完整 brief 核对范围。
 func TestReviewFunnelL1UsesBriefPrompt(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	brief := "修改 internal/feature.go：把常量改成 2"
@@ -356,6 +363,7 @@ func TestReviewFunnelL1UsesBriefPrompt(t *testing.T) {
 
 // L2 请求里的 Brief 应取 bee 的 Prompt 原文，而不是短标题。
 func TestReviewFunnelL2PromptContainsBrief(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	brief := "修改 internal/other.go：补充 X 的注释"
@@ -387,6 +395,7 @@ func TestReviewFunnelL2PromptContainsBrief(t *testing.T) {
 
 // L2 approve 后合入主工作区，并记录层、tokens 与 concerns。
 func TestReviewFunnelL2ApproveMerges(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(context.Context, string, string, string, string) (string, error) {
@@ -411,6 +420,7 @@ func TestReviewFunnelL2ApproveMerges(t *testing.T) {
 
 // L2 escalate 升级到 L3，只启动一次审查会话。
 func TestReviewFunnelL2EscalateStartsSession(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(context.Context, string, string, string, string) (string, error) {
@@ -442,6 +452,7 @@ func TestReviewFunnelL2EscalateStartsSession(t *testing.T) {
 
 // L2 通过但主工作区未落定时只重试合入，不再调用模型。
 func TestReviewFunnelL2ApproveRetriesSettle(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{busy: true}
 	m, dir := newFunnelManager(t, fake)
 	bee := dispatchFunnelBee(t, m, fake, "lead-retry", "Aspen", dir, "修改 internal/feature.go")
@@ -467,6 +478,7 @@ func TestReviewFunnelL2ApproveRetriesSettle(t *testing.T) {
 
 // 审查期间工作副本被改动时，approve 结论不再应用，转人工。
 func TestReviewFunnelApproveRejectsChangedWorktree(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(_ context.Context, _, _, _, _ string) (string, error) {
@@ -493,6 +505,7 @@ func TestReviewFunnelApproveRejectsChangedWorktree(t *testing.T) {
 
 // 整批解析失败时升级 L3。
 func TestReviewFunnelL2ParseFailurePromotesL3(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	fake.generateFn = func(context.Context, string, string, string, string) (string, error) {
@@ -510,6 +523,7 @@ func TestReviewFunnelL2ParseFailurePromotesL3(t *testing.T) {
 
 // 返工 bee 的 L2 输入只带旧原因与增量 diff。
 func TestReviewFunnelReworkUsesDelta(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, _ := newFunnelManager(t, fake)
 	oldDir := t.TempDir()
@@ -550,6 +564,7 @@ func TestReviewFunnelReworkUsesDelta(t *testing.T) {
 
 // L0 跑 3 分钟不会被 2 分钟宽限误判；L2 超过 90 秒则转人工。
 func TestReviewFunnelPollReviewSkipsGraceForL0AndL2(t *testing.T) {
+	t.Parallel()
 	m, _, bee := pendingReviewBee(t)
 	ctx := context.Background()
 	started := time.Now().Add(-3 * time.Minute)
@@ -585,6 +600,7 @@ func TestReviewFunnelPollReviewSkipsGraceForL0AndL2(t *testing.T) {
 
 // Stop 取消漏斗 ctx，正在跑的 L0 检查立即退出。
 func TestReviewFunnelStopCancelsCheck(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	entered := make(chan struct{})
@@ -618,6 +634,7 @@ func TestReviewFunnelStopCancelsCheck(t *testing.T) {
 
 // 晚到的 L2 结论在写回前发现 stage 已变时直接丢弃。
 func TestReviewFunnelLateResultIgnored(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	var threadID string
@@ -638,6 +655,7 @@ func TestReviewFunnelLateResultIgnored(t *testing.T) {
 
 // BuildReport 的审查结论与疑点行。
 func TestBuildReportReviewFunnelLines(t *testing.T) {
+	t.Parallel()
 	approved := Bee{
 		Name: "Aspen", Task: "改代码", Status: StatusCompleted,
 		Merged: true, ReviewState: ReviewApproved, ReviewLayer: "l2",
@@ -664,6 +682,7 @@ func TestBuildReportReviewFunnelLines(t *testing.T) {
 
 // planEntry 把 reworkOf 或 brief 里的补丁路径关联到被驳回的 bee。
 func TestPlanEntryLinksReworkOf(t *testing.T) {
+	t.Parallel()
 	fake := &funnelFake{}
 	m, dir := newFunnelManager(t, fake)
 	old := dispatchFunnelBee(t, m, fake, "lead-rework-entry", "Aspen", dir, "旧任务")
@@ -695,6 +714,7 @@ func TestPlanEntryLinksReworkOf(t *testing.T) {
 
 // 回退到其他 provider 时不能沿用显式 provider 的模型与 effort。
 func TestReviewModelForFallback(t *testing.T) {
+	t.Parallel()
 	if model, effort := reviewModelFor("codex", "codex", "gpt-6.1-sol", "high"); model != "gpt-6.1-sol" || effort != "high" {
 		t.Fatalf("显式 provider 应使用配置: model=%q effort=%q", model, effort)
 	}

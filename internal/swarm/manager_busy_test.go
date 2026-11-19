@@ -10,6 +10,7 @@ import (
 // lead 被用户中断、汇报暂扣时，未汇报的 bee 不再算忙，否则 web 端会一直显示运行中；
 // 用户下一句话之后 lead 正常跑完，汇报照旧投递并标记已汇报。
 func TestBusyIgnoresUnreportedBeesWhenLeadInterrupted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newFakeDriver()
 	const leadID = "lead-interrupted"

@@ -156,6 +156,7 @@ func TestRequestLimitsSnapshot(t *testing.T) {
 
 // formatBudgetDuration 输出中文时长文本。
 func TestFormatBudgetDuration(t *testing.T) {
+	t.Parallel()
 	cases := map[time.Duration]string{
 		3 * time.Hour:                "3 小时",
 		2*time.Hour + 30*time.Minute: "2 小时 30 分钟",

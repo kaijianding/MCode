@@ -8,6 +8,7 @@ import (
 )
 
 func TestLeadPolicyPlansOnlyOmitsDoAlone(t *testing.T) {
+	t.Parallel()
 	got := LeadPolicy(true, "off", false)
 	if strings.Contains(got, "yours to do alone") {
 		t.Fatalf("只规划策略不应保留「可独自完成」的说法:\n%s", got)
@@ -27,6 +28,7 @@ func TestLeadPolicyPlansOnlyOmitsDoAlone(t *testing.T) {
 }
 
 func TestLeadPolicyDefaultKeepsDoAlone(t *testing.T) {
+	t.Parallel()
 	got := LeadPolicy(false, "off", false)
 	if !strings.Contains(got, "yours to do alone") {
 		t.Fatalf("默认策略应保留「可独自完成」的说法:\n%s", got)
@@ -37,11 +39,13 @@ func TestLeadPolicyDefaultKeepsDoAlone(t *testing.T) {
 }
 
 func TestLeadPolicyReadOnlyDelegation(t *testing.T) {
+	t.Parallel()
 	const questionsRule = "- Questions follow the same delegation rule: answer directly only from existing context or one quick lookup; otherwise delegate the investigation, even when no files need changing."
 	const oldQuestionsRule = "Questions and explanations, which change nothing, you answer directly from what you have read"
 	for _, plansOnly := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			t.Run(fmt.Sprintf("plansOnly=%v/review=%s", plansOnly, mode), func(t *testing.T) {
+				t.Parallel()
 				got := LeadPolicy(plansOnly, mode, false)
 				for _, want := range []string{
 					"For a new user request, if answering requires tracing multiple call sites, comparing files or checking runtime evidence, delegate that investigation to at least one read-only bee in your first reply; a question or a no-edit task is not an exception.",
@@ -65,6 +69,7 @@ func TestLeadPolicyReadOnlyDelegation(t *testing.T) {
 
 // 常驻策略需保持精简：补丁另存与 swarm-answer 两条说明不再常驻，随对应事件消息下发。
 func TestLeadPolicyOmitsOnDemandRules(t *testing.T) {
+	t.Parallel()
 	for _, plansOnly := range []bool{false, true} {
 		got := LeadPolicy(plansOnly, "off", false)
 		for _, unwanted := range []string{".patch", "swarm-answer", "then Aspen 2"} {
@@ -78,6 +83,7 @@ func TestLeadPolicyOmitsOnDemandRules(t *testing.T) {
 // TestLeadPolicyRequiresTestsAndPostMergeRead 验证策略要求验收标准写明要验证的行为、brief 让 bee 补测试，
 // 并要求主代理汇总前读一遍各 bee 改过的文件；只规划模式还需说明读改动文件归属主代理。
 func TestLeadPolicyRequiresTestsAndPostMergeRead(t *testing.T) {
+	t.Parallel()
 	for _, plansOnly := range []bool{false, true} {
 		got := LeadPolicy(plansOnly, "off", false)
 		for _, want := range []string{
@@ -99,6 +105,7 @@ func TestLeadPolicyRequiresTestsAndPostMergeRead(t *testing.T) {
 }
 
 func TestTierPromptSectionCrossFileReferences(t *testing.T) {
+	t.Parallel()
 	tiers := []Tier{{ID: "fast", Description: "Quick responses"}}
 	got := TierPromptSection(tiers, "fast", nil)
 	if !strings.Contains(got, "goes to the default tier unless the brief already lists every file and reference to change") {
@@ -109,6 +116,7 @@ func TestTierPromptSectionCrossFileReferences(t *testing.T) {
 // TestLeadPolicyReviewMode 验证审查档策略：off 与改动前一致（自动合并），
 // ai/human 说明改动要过审查才合入，且不再说汇报已落地。
 func TestLeadPolicyReviewMode(t *testing.T) {
+	t.Parallel()
 	off := LeadPolicy(false, "off", false)
 	if !strings.Contains(off, "Merging is automatic") {
 		t.Fatalf("off 档应保留自动合并规则:\n%s", off)
@@ -145,6 +153,7 @@ func TestLeadPolicyReviewMode(t *testing.T) {
 // ai 档额外的漏斗措辞：主代理只看 merge result 的 concerns，自己跑构建与测试；
 // human 与 off 档都不出现这句，且 off 档逐字保持原样。
 func TestLeadPolicyReviewFunnelWording(t *testing.T) {
+	t.Parallel()
 	const funnelClause = "read only the review concerns listed in each merge result and the code they point to"
 	ai := LeadPolicy(false, "ai", false)
 	if !strings.Contains(ai, funnelClause) || !strings.Contains(ai, "the funnel already reviewed the rest") {
@@ -173,6 +182,7 @@ func TestLeadPolicyReviewFunnelWording(t *testing.T) {
 
 // bee 可跑有范围的自测并汇报命令与结果；所有策略档都不再说 bee 不构建、不测试。
 func TestLeadPolicyScopedBees(t *testing.T) {
+	t.Parallel()
 	for _, plansOnly := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(plansOnly, mode, false)
@@ -197,6 +207,7 @@ func TestLeadPolicyScopedBees(t *testing.T) {
 // RosterPromptSection 需只列在跑的 bee，开头为 [Swarm roster]，末尾附固定规则段；
 // 无在跑且无排队时返回空串。
 func TestRosterPromptSection(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	newBee := func(name, id, task, tier string, status BeeStatus) Bee {
 		return Bee{
@@ -296,6 +307,7 @@ func TestRosterPromptSection(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := RosterPromptSection(tc.bees, tc.queued, now)
 			if tc.wantNone {
 				if got != "" {
@@ -322,6 +334,7 @@ func TestRosterPromptSection(t *testing.T) {
 
 // LimitsPromptSection 需给出轮次、并发、bee 预算与总时长四项上限。
 func TestLimitsPromptSection(t *testing.T) {
+	t.Parallel()
 	got := LimitsPromptSection(RequestLimits{
 		MaxRounds:     2,
 		RoundsUsed:    1,
@@ -364,6 +377,7 @@ func TestLimitsPromptSection(t *testing.T) {
 // TestLeadNoticePolicy 验证在子代理汇报等通知轮次注入的精简规则文案：
 // 默认模式仅输出基础提醒；只规划模式在此基础上追加规划约束。
 func TestLeadNoticePolicy(t *testing.T) {
+	t.Parallel()
 	defaultGot := LeadNoticePolicy(false, false)
 	if defaultGot != LeadNoticeReminder {
 		t.Fatalf("默认通知提示词应与常量一致:\ngot: %s\nwant: %s", defaultGot, LeadNoticeReminder)
@@ -402,6 +416,7 @@ func TestLeadNoticePolicy(t *testing.T) {
 
 // TestLeadPolicyBriefShapeByWork 验证 brief 写法按工作性质区分，且审查档改写子串仍命中。
 func TestLeadPolicyBriefShapeByWork(t *testing.T) {
+	t.Parallel()
 	for _, plansOnly := range []bool{false, true} {
 		got := LeadPolicy(plansOnly, "", false)
 		for _, want := range []string{"For read-only research: numbered questions", "For diagnosis: the symptom, how to reproduce it and numbered questions; the bee reports the root cause with evidence, and you design the fix."} {
@@ -422,6 +437,7 @@ func TestLeadPolicyBriefShapeByWork(t *testing.T) {
 }
 
 func TestLeadPolicyDelegateTool(t *testing.T) {
+	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		got := LeadPolicy(true, "off", enabled)
 		for _, want := range []string{"```swarm", "In orchestration-enabled sessions, these rules override general advice elsewhere, including user or project instructions, to handle simple or clear tasks yourself.", "Then dispatch in that same reply."} {
@@ -447,6 +463,7 @@ func TestLeadPolicyDelegateTool(t *testing.T) {
 }
 
 func TestLeadNoticePolicyDelegateTool(t *testing.T) {
+	t.Parallel()
 	for _, plansOnly := range []bool{false, true} {
 		got := LeadNoticePolicy(plansOnly, true)
 		if !strings.Contains(got, "call swarm_delegate to dispatch it and stop") || !strings.Contains(got, "if none remains, run your checks and report") {
@@ -459,6 +476,7 @@ func TestLeadNoticePolicyDelegateTool(t *testing.T) {
 }
 
 func TestLeadPolicyAcceptance(t *testing.T) {
+	t.Parallel()
 	for _, tool := range []bool{false, true} {
 		for _, mode := range []string{"off", "ai", "human"} {
 			got := LeadPolicy(false, mode, tool)

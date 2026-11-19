@@ -167,6 +167,7 @@ func TestManager_SweepOrphanCopies_MissingWorktreeDir(t *testing.T) {
 }
 
 func TestManager_SweepOrphanCopies_Project(t *testing.T) {
+	t.Parallel()
 	runner, repo := initTestRepo(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

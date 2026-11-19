@@ -71,6 +71,7 @@ func newProgressTestManager(t *testing.T) (*Manager, *countingPersister) {
 
 // TestManager_ProgressChangesCoalesced 验证连续多次进度类变更在合并窗口内只落盘并通知一次。
 func TestManager_ProgressChangesCoalesced(t *testing.T) {
+	t.Parallel()
 	mgr, persister := newProgressTestManager(t)
 	base := persister.saveCount()
 
@@ -99,6 +100,7 @@ func TestManager_ProgressChangesCoalesced(t *testing.T) {
 
 // TestManager_StateChangePersistsImmediately 验证状态类变更立即落盘并顺带覆盖排队中的进度变更。
 func TestManager_StateChangePersistsImmediately(t *testing.T) {
+	t.Parallel()
 	mgr, persister := newProgressTestManager(t)
 
 	var notified []string
@@ -126,6 +128,7 @@ func TestManager_StateChangePersistsImmediately(t *testing.T) {
 
 // TestManager_ProgressFlushPersistsLatestState 验证合并落盘写的是窗口关闭时的最新状态。
 func TestManager_ProgressFlushPersistsLatestState(t *testing.T) {
+	t.Parallel()
 	mgr, persister := newProgressTestManager(t)
 
 	mgr.mu.Lock()
@@ -146,6 +149,7 @@ func TestManager_ProgressFlushPersistsLatestState(t *testing.T) {
 
 // TestManager_StopFlushesPendingProgress 验证退出时兑现合并窗口内的进度变更，保证最后状态已落盘。
 func TestManager_StopFlushesPendingProgress(t *testing.T) {
+	t.Parallel()
 	mgr, persister := newProgressTestManager(t)
 	base := persister.saveCount()
 

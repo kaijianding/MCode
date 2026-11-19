@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +24,9 @@ func TestMain(m *testing.M) {
 	if cfg, ok := gitWrapperConfigPath(); ok {
 		os.Exit(runGitWrapperHelper(cfg))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanupTestRepoTemplate()
+	os.Exit(code)
 }
 
 // gitWrapperConfigPath 判断当前进程是否是 git 替身：替身旁边放着配置文件。
@@ -108,6 +111,53 @@ func linkOrCopyFile(src, dst string) error {
 	return out.Close()
 }
 
+func writeGitWrapper(t *testing.T, dir, realGit, other, flag string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		wrapper := filepath.Join(dir, "git.exe")
+		if err := linkOrCopyFile(os.Args[0], wrapper); err != nil {
+			t.Fatalf("创建 git 替身失败: %v", err)
+		}
+		cfg := filepath.Join(dir, "git-wrapper.conf")
+		if err := os.WriteFile(cfg, []byte(realGit+"\n"+other+"\n"+flag+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return wrapper
+	}
+	quote := func(s string) string {
+		return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+	}
+	var body string
+	if other == "fail-reset" {
+		body = fmt.Sprintf(`#!/bin/sh
+set -eu
+real_git=%s
+flag=%s
+if [ "$#" -ge 4 ] && [ "$1" = "reset" ] && [ "$2" = "-q" ] && rm "$flag" 2>/dev/null; then
+  printf '模拟索引同步失败\n' >&2
+  exit 1
+fi
+exec "$real_git" "$@"
+`, quote(realGit), quote(flag))
+	} else {
+		body = fmt.Sprintf(`#!/bin/sh
+set -eu
+real_git=%s
+other=%s
+flag=%s
+if [ "$#" -ge 6 ] && [ "$1" = "update-ref" ] && [ "$4" = "HEAD" ] && rm "$flag" 2>/dev/null; then
+  "$real_git" update-ref HEAD "$other" "$6"
+fi
+exec "$real_git" "$@"
+`, quote(realGit), quote(other), quote(flag))
+	}
+	wrapper := filepath.Join(dir, "git")
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatalf("创建 git 替身失败: %v", err)
+	}
+	return wrapper
+}
+
 func newCommitLandingManager(t *testing.T) (*Manager, *fakeDriver, string) {
 	t.Helper()
 	runner, root := initTestRepo(t)
@@ -174,6 +224,7 @@ func TestManager_CommitLanding_Describe(t *testing.T) {
 		{name: "未配置", nilFunc: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, _, root := newCommitLandingManager(t)
 			const lead = "lead-describe"
 			bee := startCommitLandingBee(t, m, root, lead, 0)
@@ -405,6 +456,7 @@ func TestManager_CommitLanding_UserChanges(t *testing.T) {
 	t.Parallel()
 	for _, staged := range []bool{false, true} {
 		t.Run(fmt.Sprintf("staged=%v", staged), func(t *testing.T) {
+			t.Parallel()
 			m, _, root := newCommitLandingManager(t)
 			var reports []string
 			m.opts.OnReport = func(_, message string) error { reports = append(reports, message); return nil }
@@ -497,15 +549,8 @@ func TestManager_CommitLanding_HeadMoved(t *testing.T) {
 	if err := os.WriteFile(flag, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	// 测试二进制充当 git 替身：脚本在 Windows 上无法直接执行，且替身需要自己的入口分支。
-	wrapper := filepath.Join(scriptDir, "git.exe")
-	if err := linkOrCopyFile(os.Args[0], wrapper); err != nil {
-		t.Fatalf("创建 git 替身失败: %v", err)
-	}
-	cfg := filepath.Join(scriptDir, "git-wrapper.conf")
-	if err := os.WriteFile(cfg, []byte(realGit+"\n"+other+"\n"+flag+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	// 非 Windows 下使用轻量 sh 替身：在 -race 模式下重复启动整个测试二进制开销过高。
+	wrapper := writeGitWrapper(t, scriptDir, realGit, other, flag)
 	m.opts.Git = git.NewRunner(wrapper, 4)
 	beeText := strings.Replace(landingBase, "one\n", "bee\n", 1)
 	writePipelineFile(t, bee.WorktreePath, "lines.txt", beeText)
@@ -537,13 +582,7 @@ func TestLandingIndexSyncFailureAfterCommitIsNotMergeError(t *testing.T) {
 	if err := os.WriteFile(flag, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	wrapper := filepath.Join(dir, "git.exe")
-	if err := linkOrCopyFile(os.Args[0], wrapper); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "git-wrapper.conf"), []byte(m.opts.Git.Bin+"\nfail-reset\n"+flag+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	wrapper := writeGitWrapper(t, dir, m.opts.Git.Bin, "fail-reset", flag)
 	m.opts.Git = git.NewRunner(wrapper, 4)
 	writePipelineFile(t, bee.WorktreePath, "lines.txt", strings.Replace(landingBase, "one\n", "bee\n", 1))
 	bee.MergeError = "旧错误"

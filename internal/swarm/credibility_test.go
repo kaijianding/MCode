@@ -10,6 +10,7 @@ import (
 
 // 验证正常代码引用的核验：双引号、反引号包裹的标记与片段均可核验成功。
 func TestCheckCitations_Verified(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := `package example
 
@@ -39,6 +40,7 @@ func CalculateTotal() int {
 
 // 验证空白不敏感匹配：代码中的缩进与空格差异不影响比对结果。
 func TestCheckCitations_WhitespaceInsensitive(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "package example\n\nfunc CalculateTotal(a, b int) int {\n\treturn a + b\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "calc.go"), []byte(content), 0644); err != nil {
@@ -54,6 +56,7 @@ func TestCheckCitations_WhitespaceInsensitive(t *testing.T) {
 
 // 验证行号偏差在 3 行以内核验成功，超出 3 行标记为不可核实。
 func TestCheckCitations_LineOffsetWithin3(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	lines := []string{
 		"line 1",
@@ -108,6 +111,7 @@ func TestCheckCitations_LineOffsetWithin3(t *testing.T) {
 
 // 验证错误的代码片段会被标记为不可核实。
 func TestCheckCitations_WrongSnippetUnverified(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "package example\n\nfunc Hello() {}\n"
 	if err := os.WriteFile(filepath.Join(dir, "hello.go"), []byte(content), 0644); err != nil {
@@ -129,6 +133,7 @@ func TestCheckCitations_WrongSnippetUnverified(t *testing.T) {
 
 // 验证引用不存在的文件标记为不可核实。
 func TestCheckCitations_MissingFileUnverified(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	report := `- missing/file.go:10 "func Missing()"`
 	cred := CheckCitations(dir, report)
@@ -142,6 +147,7 @@ func TestCheckCitations_MissingFileUnverified(t *testing.T) {
 
 // 验证 '..' 越界路径与外部绝对路径被拒绝并标记为不可核实。
 func TestCheckCitations_DotDotEscapeUnverified(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	report := `- ../escape.go:10 "func Escaped()"`
 	cred := CheckCitations(dir, report)
@@ -165,6 +171,7 @@ func TestCheckCitations_DotDotEscapeUnverified(t *testing.T) {
 
 // 验证去空格后短于 4 个字符的代码片段被忽略（不计入 Cited）。
 func TestCheckCitations_ShortSnippetIgnored(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "package example\n\nfunc A() {}\n"
 	if err := os.WriteFile(filepath.Join(dir, "example.go"), []byte(content), 0644); err != nil {
@@ -183,6 +190,7 @@ func TestCheckCitations_ShortSnippetIgnored(t *testing.T) {
 
 // 验证 Credibility.Summary 输出文本格式，包括至多列出 3 项不可核实引用的截断。
 func TestCredibility_Summary(t *testing.T) {
+	t.Parallel()
 	// Cited == 0
 	c0 := Credibility{Cited: 0}
 	if s := c0.Summary(); s != "" {
@@ -215,6 +223,7 @@ func TestCredibility_Summary(t *testing.T) {
 
 // 验证 BuildReport 在有档位与无档位情况下输出的可信度行位置。
 func TestBuildReport_CredibilityLine(t *testing.T) {
+	t.Parallel()
 	// 场景 1：有档位时，可信度紧跟在档位行之后
 	h1 := Bee{
 		Name:        "Bee-1",
@@ -293,6 +302,7 @@ func writeTestFiles(t *testing.T, root string, files map[string]string) {
 
 // TestCheckCitations_TableDriven 覆盖路径后缀解析与片段解析的各类真实汇报写法。
 func TestCheckCitations_TableDriven(t *testing.T) {
+	t.Parallel()
 	calcContent := "package pkg\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
 	subCalcContent := "package sub\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
 	traceContent := "package swarm\n\nfunc ApplyReadTrace(root string) {\n\tvar cred Credibility\n\tcred.ReadChecked = true\n}\n"
@@ -474,6 +484,7 @@ func TestCheckCitations_TableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			writeTestFiles(t, dir, tc.files)
 			cred := CheckCitations(dir, tc.report)
@@ -503,6 +514,7 @@ func TestCheckCitations_TableDriven(t *testing.T) {
 // TestCheckCitations_IdentifierFallbackTightened 验证标识符回退收紧：
 // 单个短标识符不再单独让片段通过，整词匹配取代子串匹配，单个标识符需不短于 8 个字符。
 func TestCheckCitations_IdentifierFallbackTightened(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFiles(t, dir, map[string]string{
 		"internal/ui/settings.go":          "package ui\n\nfunc NewSettingsState(dataDir string, lockedKeys map[string]bool) *SettingsState {\n\treturn &SettingsState{}\n}\n",
@@ -564,6 +576,7 @@ func TestCheckCitations_IdentifierFallbackTightened(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cred := CheckCitations(dir, tc.report)
 			if cred.Cited != tc.wantCited {
 				t.Fatalf("期望 Cited 为 %d，实际: %d（%+v）", tc.wantCited, cred.Cited, cred)
@@ -585,6 +598,7 @@ func TestCheckCitations_IdentifierFallbackTightened(t *testing.T) {
 
 // TestCheckCitations_ResolvedPathFeedsReadTrace 验证 CitedPaths 记录解析后的相对路径，便于读取核对。
 func TestCheckCitations_ResolvedPathFeedsReadTrace(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFiles(t, dir, map[string]string{
 		"pkg/calc.go": "package pkg\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",

@@ -78,6 +78,7 @@ func TestManager_DispatchSingleEntryWithoutMemoryRecall(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			runner, dir := initTestRepo(t)
 

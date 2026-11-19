@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadProfiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	write := func(name, body string) string {
@@ -58,6 +59,7 @@ func TestLoadProfiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ps, err := LoadProfiles(tt.path)
 			if tt.wantErr {
 				if err == nil {
@@ -85,6 +87,7 @@ func TestLoadProfiles(t *testing.T) {
 }
 
 func TestFindProfile(t *testing.T) {
+	t.Parallel()
 	profiles := []BeeProfile{
 		{Name: "Quick", Model: "flash"},
 		{Name: "Deep Work", Model: "opus"},
@@ -102,6 +105,7 @@ func TestFindProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := FindProfile(profiles, tt.ref)
 			if ok != tt.wantHit {
 				t.Fatalf("FindProfile(%q) ok=%v, want %v", tt.ref, ok, tt.wantHit)
@@ -117,6 +121,7 @@ func TestFindProfile(t *testing.T) {
 }
 
 func TestResolveBeeConfig(t *testing.T) {
+	t.Parallel()
 	pairs := []Pair{
 		{ID: "pair-deep", Name: "Deep", BeeProvider: "claude", BeeModel: "opus", BeeEffort: "high", BeeFastMode: true},
 		{ID: "pair-quick", Name: "Quick", BeeProvider: "claude", BeeModel: "haiku"},
@@ -364,6 +369,7 @@ func TestResolveBeeConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, notes := ResolveBeeConfig(tt.in)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("config = %+v, want %+v", got, tt.want)
@@ -378,6 +384,7 @@ func TestResolveBeeConfig(t *testing.T) {
 // deep 档的写入白名单随档位解析进入 BeeConfig；未知档位回落默认档时也带上默认档的白名单。
 // 解析结果是切片拷贝，改档位上的白名单不影响已解析的配置。
 func TestResolveBeeConfigWritePaths(t *testing.T) {
+	t.Parallel()
 	deepPaths := []string{"docs/superpowers/plans/**/*.md"}
 	tiers := []Tier{
 		{ID: "read", ReadOnly: true},

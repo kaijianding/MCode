@@ -793,8 +793,10 @@ func TestPipeline_SkipsNonGitBees(t *testing.T) {
 
 // 缺少或无法读取补丁存档时，保留工作区且不创建提交。
 func TestPipeline_SkipsUnavailableLandedPatch(t *testing.T) {
+	t.Parallel()
 	for _, patchPath := range []string{"", "/不存在的补丁"} {
 		t.Run(fmt.Sprintf("path=%q", patchPath), func(t *testing.T) {
+			t.Parallel()
 			runner, dir := initTestRepo(t)
 			writePipelineFile(t, dir, "a.txt", "user change\n")
 			before := gitTestRun(t, dir, "rev-parse", "HEAD")
@@ -818,6 +820,7 @@ func TestPipeline_SkipsUnavailableLandedPatch(t *testing.T) {
 }
 
 func TestPipeline_AlreadyCommittedAndMissingPatch(t *testing.T) {
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	writePipelineFile(t, dir, "a.txt", "bee change\n")
 	gitTestRun(t, dir, "add", "a.txt")
@@ -1070,6 +1073,7 @@ func TestPipeline_CommitPatchesConflictFallbackFailureReportsFailed(t *testing.T
 }
 
 func TestPipeline_AllBeesAlreadyCommitted(t *testing.T) {
+	t.Parallel()
 	runner, root := initTestRepo(t)
 	sha := gitTestRun(t, root, "rev-parse", "HEAD")
 	// 将 bee 路径替换为目录；若读取工作区或扫描标记就会失败。
@@ -1105,6 +1109,7 @@ func TestPipeline_AllBeesAlreadyCommitted(t *testing.T) {
 
 // defaultCommitMessage 按改动性质生成 Conventional Commits 类型前缀。
 func TestDefaultCommitMessageType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		bees []Bee
@@ -1146,6 +1151,7 @@ func TestDefaultCommitMessageType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			subject, _ := defaultCommitMessage(tt.bees)
 			if subject != tt.want {
 				t.Fatalf("首行 = %q, want %q", subject, tt.want)

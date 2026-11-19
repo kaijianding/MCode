@@ -9,6 +9,7 @@ import (
 
 // TestApplyReadTrace_NoPaths 验证当读取记录为空或未提供时，ReadChecked 保持 false，Summary 包含"读取记录不可用"。
 func TestApplyReadTrace_NoPaths(t *testing.T) {
+	t.Parallel()
 	c := Credibility{
 		Cited:      2,
 		Verified:   2,
@@ -36,6 +37,7 @@ func TestApplyReadTrace_NoPaths(t *testing.T) {
 
 // TestApplyReadTrace_AllRead 验证当引用的文件全部在读取记录中时，ReadChecked 为 true，NotRead 为空，Summary 包含"读取一致"。
 func TestApplyReadTrace_AllRead(t *testing.T) {
+	t.Parallel()
 	c := Credibility{
 		Cited:      2,
 		Verified:   2,
@@ -57,6 +59,7 @@ func TestApplyReadTrace_AllRead(t *testing.T) {
 
 // TestApplyReadTrace_OneMissing 验证当存在未读引用的文件时，NotRead 包含该文件，Summary 列出未读引用。
 func TestApplyReadTrace_OneMissing(t *testing.T) {
+	t.Parallel()
 	c := Credibility{
 		Cited:      3,
 		Verified:   3,
@@ -93,6 +96,7 @@ func TestApplyReadTrace_OneMissing(t *testing.T) {
 
 // TestApplyReadTrace_SuffixMatching 验证绝对路径与相对路径之间的前缀与后缀匹配。
 func TestApplyReadTrace_SuffixMatching(t *testing.T) {
+	t.Parallel()
 	// 场景 1：引用为相对路径，读取记录为绝对路径
 	c1 := Credibility{
 		Cited:      1,
@@ -135,6 +139,7 @@ func TestApplyReadTrace_SuffixMatching(t *testing.T) {
 
 // TestCheckCitations_CitedPathsPopulated 验证 CheckCitations 填充去重且规范化的 CitedPaths。
 func TestCheckCitations_CitedPathsPopulated(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "calc.go"), []byte(content), 0644); err != nil {

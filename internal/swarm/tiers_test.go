@@ -7,6 +7,7 @@ import (
 )
 
 func TestFindTier(t *testing.T) {
+	t.Parallel()
 	tiers := []Tier{
 		{ID: "fast", Name: "Fast Tier", Provider: "gemini", Model: "flash"},
 		{ID: "deep", Name: "Deep Work", Provider: "claude", Model: "opus"},
@@ -30,6 +31,7 @@ func TestFindTier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := FindTier(tiers, tt.ref)
 			if ok != tt.wantHit {
 				t.Fatalf("FindTier(%q) ok=%v, want %v", tt.ref, ok, tt.wantHit)
@@ -42,6 +44,7 @@ func TestFindTier(t *testing.T) {
 }
 
 func TestFindTier_IDTakesPrecedenceOverName(t *testing.T) {
+	t.Parallel()
 	tiers := []Tier{
 		{ID: "alpha", Name: "Second"},
 		{ID: "beta", Name: "alpha"},
@@ -53,6 +56,7 @@ func TestFindTier_IDTakesPrecedenceOverName(t *testing.T) {
 }
 
 func TestMentionsInMessage_Boundaries(t *testing.T) {
+	t.Parallel()
 	// e.g. gpt-5 must not match gpt-5.1, must match 用 gpt-5 做
 	if MentionsInMessage("请使用 gpt-5.1 完成", "gpt-5") {
 		t.Errorf("gpt-5 must not match gpt-5.1")
@@ -90,6 +94,7 @@ func TestMentionsInMessage_Boundaries(t *testing.T) {
 }
 
 func TestAuthorizeDirectModel(t *testing.T) {
+	t.Parallel()
 	enabled := func(p string) bool {
 		return p == "openai" || p == "anthropic"
 	}
@@ -126,6 +131,7 @@ func TestAuthorizeDirectModel(t *testing.T) {
 }
 
 func TestResolveBeeConfig_Tiers(t *testing.T) {
+	t.Parallel()
 	fastModeTrue := true
 	fastModeFalse := false
 
@@ -148,6 +154,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 1. default tier: empty d.Tier uses in.DefaultTier
 	t.Run("default tier", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Task: "t"},
 			Tiers:       tiers,
@@ -163,6 +170,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 2. unknown tier note: unknown tier produces note and applies default tier
 	t.Run("unknown tier note", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "unknown-tier"},
 			Tiers:       tiers,
@@ -179,6 +187,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 3. pair override: in.PairID has BeeTiers override for cfg.Tier
 	t.Run("pair override", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "fast"},
 			Tiers:       tiers,
@@ -196,6 +205,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 4. thread override beating pair override
 	t.Run("thread override beating pair override", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "fast"},
 			Tiers:       tiers,
@@ -216,6 +226,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 5. unauthorized model ignored with note
 	t.Run("unauthorized model ignored with note", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "fast", Provider: "openai", Model: "gpt-4o"},
 			Tiers:       tiers,
@@ -236,6 +247,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 6. authorized model sets DirectModel
 	t.Run("authorized model sets DirectModel", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "fast", Provider: "openai", Model: "gpt-4o"},
 			Tiers:       tiers,
@@ -255,6 +267,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 
 	// 7. ReadOnly kept when direct model applied
 	t.Run("ReadOnly kept when direct model applied", func(t *testing.T) {
+		t.Parallel()
 		cfg, notes := ResolveBeeConfig(ResolveInput{
 			Delegation:  Delegation{Tier: "read", Provider: "openai", Model: "gpt-4o"},
 			Tiers:       tiers,
@@ -277,6 +290,7 @@ func TestResolveBeeConfig_Tiers(t *testing.T) {
 }
 
 func TestTierPromptSection(t *testing.T) {
+	t.Parallel()
 	if TierPromptSection(nil, "fast", nil) != "" {
 		t.Errorf("expected empty string for empty tiers")
 	}
@@ -352,6 +366,7 @@ func TestTierPromptSection(t *testing.T) {
 // 档位带写入白名单时提示词追加 writes only 标注与配套规则句；
 // 没有这类档位时输出与改动前完全一致。
 func TestTierPromptSection_WritePaths(t *testing.T) {
+	t.Parallel()
 	plain := []Tier{
 		{ID: "fast", Description: "Quick responses"},
 		{ID: "read", Description: "Read only tasks", ReadOnly: true},
@@ -382,6 +397,7 @@ func TestTierPromptSection_WritePaths(t *testing.T) {
 // MatchWritePaths 按 glob 判断仓库相对路径是否在白名单内：空白名单不限制，
 // ** 匹配零个或多个路径段，其他段按单段通配符匹配。
 func TestMatchWritePaths(t *testing.T) {
+	t.Parallel()
 	patterns := []string{"docs/superpowers/plans/**/*.md"}
 
 	tests := []struct {
@@ -403,6 +419,7 @@ func TestMatchWritePaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := MatchWritePaths(tt.patterns, tt.path); got != tt.want {
 				t.Fatalf("MatchWritePaths(%v, %q) = %v, want %v", tt.patterns, tt.path, got, tt.want)
 			}

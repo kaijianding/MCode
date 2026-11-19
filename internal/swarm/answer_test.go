@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseBeeAnswersObject(t *testing.T) {
+	t.Parallel()
 	text := "结论如下。\n\n```swarm-answer\n" +
 		`{"bee":"bee-1","request":"req-1","answers":{"q1":["后端"]}}` +
 		"\n```\n\n其余说明。\n"
@@ -24,6 +25,7 @@ func TestParseBeeAnswersObject(t *testing.T) {
 }
 
 func TestParseBeeAnswersArray(t *testing.T) {
+	t.Parallel()
 	text := "```swarm-answer\n" +
 		`[{"bee":"bee-1","request":"req-1","answers":{"q1":["A"]}},{"bee":"bee-2","request":"req-2","defer":true}]` +
 		"\n```\n"
@@ -37,6 +39,7 @@ func TestParseBeeAnswersArray(t *testing.T) {
 }
 
 func TestParseBeeAnswersSkipsInvalid(t *testing.T) {
+	t.Parallel()
 	text := "```swarm-answer\n{broken}\n```\n\n" +
 		"```swarm-answer\n" + `{"bee":"","request":"req-1","answers":{"q1":["A"]}}` + "\n```\n\n" +
 		"```swarm-answer\n" + `[{"bee":"bee-1","request":""}]` + "\n```\n"
@@ -46,6 +49,7 @@ func TestParseBeeAnswersSkipsInvalid(t *testing.T) {
 }
 
 func TestParseBeeAnswersIgnoresDispatchBlocks(t *testing.T) {
+	t.Parallel()
 	text := "```swarm\n" + `[{"prompt":"HEAD_WORK","bee":"Ives"}]` + "\n```\n\n" +
 		"```swarm-sent\n" + `[{"prompt":"HEAD_WORK"}]` + "\n```\n\n" +
 		"```swarm-answer\n" + `{"bee":"bee-1","request":"req-1","skip":true}` + "\n```\n\n" +
@@ -65,6 +69,7 @@ func TestParseBeeAnswersIgnoresDispatchBlocks(t *testing.T) {
 }
 
 func TestBuildAutoForwardQuestionMessageAddsWaitedNotice(t *testing.T) {
+	t.Parallel()
 	qs := []ForwardQuestion{{
 		ID:             "q1",
 		Header:         "范围",
@@ -107,6 +112,7 @@ func TestBuildAutoForwardQuestionMessageAddsWaitedNotice(t *testing.T) {
 }
 
 func TestBuildForwardQuestionMessageCarriesIDs(t *testing.T) {
+	t.Parallel()
 	msg := BuildForwardQuestionMessage("Ives", "bee-1", "req-1", []ForwardQuestion{{
 		ID:             "q1",
 		Header:         "范围",
@@ -130,6 +136,7 @@ func TestBuildForwardQuestionMessageCarriesIDs(t *testing.T) {
 
 // TestParseBeeAnswers_LegacyFenceAndKey 验证旧围栏 ```hydra-answer 与旧键 head 仍然能解析。
 func TestParseBeeAnswers_LegacyFenceAndKey(t *testing.T) {
+	t.Parallel()
 	text := "```hydra-answer\n" + `{"head": "bee-9", "request": "req-9", "answers": {"q9": ["A"]}}` + "\n```\n"
 	got := ParseBeeAnswers(text)
 	if len(got) != 1 {
@@ -147,6 +154,7 @@ func TestParseBeeAnswers_LegacyFenceAndKey(t *testing.T) {
 
 // TestParseBeeAnswers_BeeKeyWins 验证 bee 与旧键 head 同时出现时以 bee 为准。
 func TestParseBeeAnswers_BeeKeyWins(t *testing.T) {
+	t.Parallel()
 	text := "```swarm-answer\n" + `{"bee": "bee-2", "head": "bee-1", "request": "req-1", "skip": true}` + "\n```\n"
 	got := ParseBeeAnswers(text)
 	if len(got) != 1 || got[0].BeeThreadID != "bee-2" {
@@ -156,6 +164,7 @@ func TestParseBeeAnswers_BeeKeyWins(t *testing.T) {
 
 // TestBuildForwardQuestionMessageUsesNewFenceAndKey 验证系统生成的答案块示例只用新围栏与新键。
 func TestBuildForwardQuestionMessageUsesNewFenceAndKey(t *testing.T) {
+	t.Parallel()
 	msg := BuildForwardQuestionMessage("Ives", "bee-1", "req-1", []ForwardQuestion{{ID: "q1", Prompt: "要改哪个模块？"}})
 	if !strings.Contains(msg, "```swarm-answer") {
 		t.Fatalf("答案块示例应使用 swarm-answer 围栏:\n%s", msg)

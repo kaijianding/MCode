@@ -88,6 +88,7 @@ func TestParseReviewVerdict(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := ParseReviewVerdict(tc.text)
 			if ok != tc.ok {
 				t.Fatalf("ok = %v, want %v", ok, tc.ok)
@@ -153,6 +154,7 @@ func TestReviewRuntime(t *testing.T) {
 	}
 
 	t.Run("follows lead", func(t *testing.T) {
+		t.Parallel()
 		m := NewManager(Options{Driver: lead})
 		m.SetSettingsFunc(func() Settings { return defaults })
 		provider, model, effort := m.reviewRuntime(context.Background(), "lead-1")
@@ -162,6 +164,7 @@ func TestReviewRuntime(t *testing.T) {
 	})
 
 	t.Run("explicit review model wins", func(t *testing.T) {
+		t.Parallel()
 		m := NewManager(Options{Driver: lead})
 		m.SetSettingsFunc(func() Settings {
 			s := defaults
@@ -178,6 +181,7 @@ func TestReviewRuntime(t *testing.T) {
 	})
 
 	t.Run("falls back to bee defaults", func(t *testing.T) {
+		t.Parallel()
 		m := NewManager(Options{Driver: newFakeDriver()})
 		m.SetSettingsFunc(func() Settings { return defaults })
 		provider, model, effort := m.reviewRuntime(context.Background(), "lead-1")
@@ -260,11 +264,13 @@ func TestPollReviews_TimeoutStopsSession(t *testing.T) {
 }
 
 func TestPollReviews_L3BudgetIndependentOfAcceptance(t *testing.T) {
+	t.Parallel()
 	if defaultReviewTimeout != 10*time.Minute {
 		t.Fatalf("L3 timeout = %s, want 10m", defaultReviewTimeout)
 	}
 	for _, commands := range []int{0, 1, 8} {
 		t.Run(strconv.Itoa(commands), func(t *testing.T) {
+			t.Parallel()
 			started := time.Now()
 			now := started.Add(defaultReviewTimeout - time.Nanosecond)
 			driver := newFakeDriver()

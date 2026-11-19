@@ -3,7 +3,6 @@ package swarm
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -12,6 +11,7 @@ import (
 )
 
 func TestTruncateReportSummaryNamesBeeIDArg(t *testing.T) {
+	t.Parallel()
 	text, truncated := truncateReportSummary(strings.Repeat("长", ReportSummaryLimit+1))
 	if !truncated || !strings.Contains(text, "bee_id") {
 		t.Fatalf("unexpected truncated summary: truncated=%v, text=%q", truncated, text)
@@ -20,6 +20,7 @@ func TestTruncateReportSummaryNamesBeeIDArg(t *testing.T) {
 
 // 短汇报与改动前逐字一致：不加 ID 字段，也没有截断提示。
 func TestBuildReport_ShortSummaryUnchanged(t *testing.T) {
+	t.Parallel()
 	bee := Bee{ThreadID: "bee-short", Name: "Ada", Task: "改文件", Status: StatusCompleted, Merged: true, Summary: "  改好了  "}
 	want := ReportPrefix + "Ada 已结束工作。\n\n\n" +
 		"## Ada：改文件 (已完成)\n" +
@@ -33,6 +34,7 @@ func TestBuildReport_ShortSummaryUnchanged(t *testing.T) {
 
 // 超过上限的汇报只保留前 ReportSummaryLimit 个 rune，带 ID 字段与截断提示行。
 func TestBuildReport_LongSummaryTruncated(t *testing.T) {
+	t.Parallel()
 	full := strings.Repeat("长", ReportSummaryLimit+500)
 	bee := Bee{ThreadID: "bee-long", Name: "Ada", Task: "改文件", Status: StatusCompleted, Merged: true, Summary: full}
 	got := BuildReport([]Bee{bee})
@@ -57,12 +59,9 @@ func TestBuildReport_LongSummaryTruncated(t *testing.T) {
 
 // 全文存档在投递汇报前写入，ClearFinished 丢掉 bee 记录之后仍能读到。
 func TestArchiveReport_SurvivesClearFinished(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "archive.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	defer st.Close()
+	st := store.OpenForTest(t)
 
 	const leadID = "lead-archive"
 	full := strings.Repeat("全", ReportSummaryLimit*2)

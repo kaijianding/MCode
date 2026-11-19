@@ -8,6 +8,7 @@ import (
 )
 
 func TestManager_ProjectIDForWorkDir_RestoredAndStartingBees(t *testing.T) {
+	t.Parallel()
 	// Restore 会清空磁盘上不存在的 WorktreePath，所以这里用真实临时目录。
 	root := t.TempDir()
 	cross := filepath.Join(root, "cross")
@@ -55,6 +56,7 @@ func TestManager_ProjectIDForWorkDir_RestoredAndStartingBees(t *testing.T) {
 
 // 验证恢复时工作副本已丢失的 bee 被清理：路径清空、取消待审合并并记录错误。
 func TestManager_RestoreClearsMissingWorktree(t *testing.T) {
+	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "gone")
 	persister := newFakePersister()
 	if err := persister.SaveLead(context.Background(), LeadRecord{
