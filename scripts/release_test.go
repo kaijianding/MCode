@@ -93,6 +93,7 @@ func fakeReleaseAI(t *testing.T, body string) string {
 }
 
 func TestReleaseAINotes(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	input := filepath.Join(t.TempDir(), "input")
 	ai := fakeReleaseAI(t, "for arg do :; done\nprintf '%s' \"$arg\" > "+strconv.Quote(input)+"\nprintf '%s\\n' '```markdown' '### 新功能' '- AI 生成的说明' '## 标题' '```'")
@@ -113,6 +114,7 @@ func TestReleaseAINotes(t *testing.T) {
 }
 
 func TestReleaseAIEmptyFallback(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	ai := fakeReleaseAI(t, "exit 0")
 	out, err := runReleaseWithAI(t, dir, ai)
@@ -126,6 +128,7 @@ func TestReleaseAIEmptyFallback(t *testing.T) {
 }
 
 func TestReleaseNotesFileSkipsAI(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	marker := filepath.Join(t.TempDir(), "marker")
 	ai := fakeReleaseAI(t, "touch "+strconv.Quote(marker))
@@ -146,6 +149,7 @@ func TestReleaseNotesFileSkipsAI(t *testing.T) {
 }
 
 func TestReleaseAIDryRun(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	before := releaseGit(t, dir, "rev-parse", "HEAD")
 	ai := fakeReleaseAI(t, "printf '%s\\n' '- AI 生成的说明'")
@@ -179,6 +183,7 @@ func (b *syncBuffer) String() string {
 }
 
 func TestReleaseConfirmCountdown(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "darwin" {
 		t.Skip("仅在 macOS 上使用 script 测试终端")
 	}
@@ -272,6 +277,7 @@ func TestReleaseConfirmCountdown(t *testing.T) {
 }
 
 func TestReleaseDotenv(t *testing.T) {
+	t.Parallel()
 	for _, override := range []bool{false, true} {
 		t.Run(strconv.FormatBool(override), func(t *testing.T) {
 			dir, _ := releaseRepo(t)
@@ -297,6 +303,7 @@ func TestReleaseDotenv(t *testing.T) {
 }
 
 func TestReleaseUnsupportedAgent(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	before := releaseGit(t, dir, "rev-parse", "HEAD")
 	out, err := runReleaseWithEnv(t, dir, []string{"MCODE_RELEASE_AGENT=foo"})
@@ -309,6 +316,7 @@ func TestReleaseUnsupportedAgent(t *testing.T) {
 }
 
 func TestReleaseVersions(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, version string
 		args          []string
@@ -357,6 +365,7 @@ func TestReleaseVersions(t *testing.T) {
 }
 
 func TestReleaseNotesFromCommits(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	releaseGit(t, dir, "tag", "v0.2.9")
 	for _, subject := range []string{"feat: 新增更新说明", "test: 补测试"} {
@@ -379,6 +388,7 @@ func TestReleaseNotesFromCommits(t *testing.T) {
 }
 
 func TestReleaseNotesFile(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	notes := filepath.Join(t.TempDir(), "notes.md")
 	if err := os.WriteFile(notes, []byte("\n### 新功能\n- 中文说明\n\n"), 0o644); err != nil {
@@ -397,6 +407,7 @@ func TestReleaseNotesFile(t *testing.T) {
 }
 
 func TestReleaseExistingChangelog(t *testing.T) {
+	t.Parallel()
 	dir, _ := releaseRepo(t)
 	path := filepath.Join(dir, "CHANGELOG.md")
 	if err := os.WriteFile(path, []byte("# 更新日志\n\n## 0.2.9\n\n- 旧内容\n"), 0o644); err != nil {
@@ -418,6 +429,7 @@ func TestReleaseExistingChangelog(t *testing.T) {
 }
 
 func TestReleasePreconditionsAndDryRun(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name            string
 		args            []string

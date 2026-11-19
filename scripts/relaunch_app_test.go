@@ -175,6 +175,7 @@ func startProcess(t *testing.T, name string, args ...string) *exec.Cmd {
 }
 
 func TestRelaunchAppNotRunning(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 
 	cmd := exec.Command("bash", f.script, "MCode", f.appPath)
@@ -202,6 +203,7 @@ func TestRelaunchAppNotRunning(t *testing.T) {
 // 回归用例：非 UTF-8 locale 下，紧跟在变量名后的全角字符不能被当成变量名的一部分，
 // 否则 set -u 会报 'APP_NAME\xef: unbound variable'。
 func TestRelaunchAppNonUTF8Locale(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 
 	cmd := exec.Command("bash", f.script, "MCode", f.appPath)
@@ -224,6 +226,7 @@ func TestRelaunchAppNonUTF8Locale(t *testing.T) {
 }
 
 func TestRelaunchAppQuitsRunningApp(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	app := startProcess(t, "sleep", "60")
 	pid := strconv.Itoa(app.Process.Pid)
@@ -250,6 +253,7 @@ func TestRelaunchAppQuitsRunningApp(t *testing.T) {
 }
 
 func TestRelaunchAppQuitTimeout(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	// 忽略 TERM 且 exec，让 SIGTERM 无效，同时保证 kill -9 能一次清掉。
 	app := startProcess(t, "bash", "-c", "trap '' TERM; exec sleep 60")
@@ -277,6 +281,7 @@ func TestRelaunchAppQuitTimeout(t *testing.T) {
 }
 
 func TestRelaunchAppFindsAppViaLsappinfo(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	// pgrep 漏掉（TEST_APP_PID 留空），只能靠 lsappinfo 找到旧实例。
 	app := startProcess(t, "sleep", "60")
@@ -305,6 +310,7 @@ func TestRelaunchAppFindsAppViaLsappinfo(t *testing.T) {
 
 // 回归用例：pgrep 必须带 -a（macOS 默认排除自身祖先进程）并用 ^ 锚定可执行文件路径。
 func TestRelaunchAppPgrepIncludesAncestors(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 
 	cmd := exec.Command("bash", f.script, "MCode", f.appPath)
@@ -321,6 +327,7 @@ func TestRelaunchAppPgrepIncludesAncestors(t *testing.T) {
 
 // open 在旧实例还活着时只激活它、不报错，脚本必须因此失败而不是报告已重启。
 func TestRelaunchAppReportsStaleInstance(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	app := startProcess(t, "sleep", "60")
 	pid := strconv.Itoa(app.Process.Pid)
@@ -344,6 +351,7 @@ func TestRelaunchAppReportsStaleInstance(t *testing.T) {
 }
 
 func TestRelaunchAppCallerTimeout(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	// 永远不退出的调用方：脚本必须等到 CALLER_TIMEOUT 后继续重启，而不是一直等下去。
 	caller := startProcess(t, "sleep", "60")
@@ -365,6 +373,7 @@ func TestRelaunchAppCallerTimeout(t *testing.T) {
 }
 
 func TestRelaunchAppSurvivesCallerProcessGroupKill(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 	// 包装进程自成一个进程组：模拟 MCode 内置终端/运行脚本菜单里的调用方。
 	wrapper := exec.Command("bash", "-c",
@@ -393,6 +402,7 @@ func TestRelaunchAppSurvivesCallerProcessGroupKill(t *testing.T) {
 }
 
 func TestRelaunchAppMissingArgs(t *testing.T) {
+	t.Parallel()
 	f := newRelaunchFixture(t)
 
 	cmd := exec.Command("bash", f.script, "MCode")

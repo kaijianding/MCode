@@ -385,29 +385,33 @@ func Open(opts Options) (*App, error) {
 	config.ApplyEnv(&cfg, os.LookupEnv)
 	loginenv.SetCommandShell(cfg.Workbench.CommandShell)
 
-	claudeBin := opts.ClaudeBin
-	if claudeBin == "" {
-		claudeBin = cfg.Providers.Claude.Bin
-	}
-	if claudeBin == "" {
-		claudeBin = "claude"
-	}
-	// 检测整体丢到后台，与后续启动并行，结果在原处等待。通道缓冲为 1：Open 在等待前
-	// 因错误提前返回时 goroutine 仍能写完退出，不会泄漏。goroutine 只读入参、只写通道。
-	claudeProbe := make(chan claudeProbeResult, 1)
-	go func() {
-		resolved, resolveErr := loginenv.LookPath(claudeBin)
-		if resolveErr == nil {
-			resolved, resolveErr = filepath.Abs(resolved)
+	var claudeBin string
+	var claudeProbe chan claudeProbeResult
+	if opts.Provider != "memory" {
+		claudeBin = opts.ClaudeBin
+		if claudeBin == "" {
+			claudeBin = cfg.Providers.Claude.Bin
 		}
-		if resolveErr != nil {
-			claudeProbe <- claudeProbeResult{lookPathErr: resolveErr}
-			return
+		if claudeBin == "" {
+			claudeBin = "claude"
 		}
-		lookPathErr, authErr := probeClaudeBinary(resolved)
-		startuptrace.Mark("claude auth probe finished (bg)")
-		claudeProbe <- claudeProbeResult{lookPathErr: lookPathErr, authErr: authErr, binary: resolved}
-	}()
+		// 检测整体丢到后台，与后续启动并行，结果在原处等待。通道缓冲为 1：Open 在等待前
+		// 因错误提前返回时 goroutine 仍能写完退出，不会泄漏。goroutine 只读入参、只写通道。
+		claudeProbe = make(chan claudeProbeResult, 1)
+		go func() {
+			resolved, resolveErr := loginenv.LookPath(claudeBin)
+			if resolveErr == nil {
+				resolved, resolveErr = filepath.Abs(resolved)
+			}
+			if resolveErr != nil {
+				claudeProbe <- claudeProbeResult{lookPathErr: resolveErr}
+				return
+			}
+			lookPathErr, authErr := probeClaudeBinary(resolved)
+			startuptrace.Mark("claude auth probe finished (bg)")
+			claudeProbe <- claudeProbeResult{lookPathErr: lookPathErr, authErr: authErr, binary: resolved}
+		}()
+	}
 
 	dbPath := filepath.Join(opts.DataDir, "mcode.db")
 	// 首次切增量 auto_vacuum 要整库重写一次，打开前先用 VACUUM INTO 完成并上报字节进度；
@@ -1104,46 +1108,46 @@ func Open(opts Options) (*App, error) {
 	remote.DefaultTitleRegenerator = func(ctx context.Context, threadID string) (string, error) {
 		return RegenerateTitle(ctx, backend, opts.DataDir, threadID)
 	}
-	codexBin := opts.CodexBin
-	if codexBin == "" {
-		codexBin = cfg.Providers.Codex.Bin
-	}
-	if codexBin == "" {
-		codexBin = "codex"
-	}
-	resolvedCodex, codexErr := loginenv.LookPath(codexBin)
-	if codexErr == nil {
-		resolvedCodex, codexErr = filepath.Abs(resolvedCodex)
-		if codexErr == nil {
-			codexBin = resolvedCodex
-		}
-	}
-
-	probe := <-claudeProbe
-	claudeErr, claudeAuthErr := probe.lookPathErr, probe.authErr
-	if probe.binary != "" {
-		claudeBin = probe.binary
-	}
-	startuptrace.Mark("claude auth probed")
-	claudeAvailable := claudeErr == nil && claudeAuthErr == nil
-
-	// provider CLI 缺失或未登录时不再阻止启动：记一条警告后继续，界面里可以在设置中配置 CLI 路径或安装后重启。
-	if opts.Provider == "claude" && claudeErr != nil {
-		log.Printf("warning: claude binary %q not found in PATH: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", claudeBin, claudeErr)
-	}
-	if opts.Provider == "claude" && claudeAuthErr != nil {
-		log.Printf("warning: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", claudeAuthErr)
-	}
-	if opts.Provider == "codex" && codexErr != nil {
-		log.Printf("warning: codex binary %q not found in PATH: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", codexBin, codexErr)
-	}
-
 	var primaryHarness harness.Harness
 	var otherHarness harness.Harness
 	var agyAccountsMgr *accounts.Manager
 	var agyHarness harness.Harness
 
 	if opts.Provider != "memory" {
+		codexBin := opts.CodexBin
+		if codexBin == "" {
+			codexBin = cfg.Providers.Codex.Bin
+		}
+		if codexBin == "" {
+			codexBin = "codex"
+		}
+		resolvedCodex, codexErr := loginenv.LookPath(codexBin)
+		if codexErr == nil {
+			resolvedCodex, codexErr = filepath.Abs(resolvedCodex)
+			if codexErr == nil {
+				codexBin = resolvedCodex
+			}
+		}
+
+		probe := <-claudeProbe
+		claudeErr, claudeAuthErr := probe.lookPathErr, probe.authErr
+		if probe.binary != "" {
+			claudeBin = probe.binary
+		}
+		startuptrace.Mark("claude auth probed")
+		claudeAvailable := claudeErr == nil && claudeAuthErr == nil
+
+		// provider CLI 缺失或未登录时不再阻止启动：记一条警告后继续，界面里可以在设置中配置 CLI 路径或安装后重启。
+		if opts.Provider == "claude" && claudeErr != nil {
+			log.Printf("warning: claude binary %q not found in PATH: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", claudeBin, claudeErr)
+		}
+		if opts.Provider == "claude" && claudeAuthErr != nil {
+			log.Printf("warning: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", claudeAuthErr)
+		}
+		if opts.Provider == "codex" && codexErr != nil {
+			log.Printf("warning: codex binary %q not found in PATH: %v; MCode 将继续启动，可在设置中配置 CLI 路径或安装后重启", codexBin, codexErr)
+		}
+
 		fi, err := os.Stat(absWorkDir)
 		if err != nil {
 			cleanup()

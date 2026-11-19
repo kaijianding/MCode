@@ -173,6 +173,7 @@ func (f *checkFixture) lines() []string {
 }
 
 func TestCheckScriptExcludesBuildOutput(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	_, lines, err := f.run(t, nil)
 	if err != nil {
@@ -222,6 +223,7 @@ func TestCheckScriptExcludesBuildOutput(t *testing.T) {
 }
 
 func TestCheckScriptRaceFlag(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	f.envvs = []string{"--race"}
 	_, lines, err := f.run(t, nil)
@@ -238,6 +240,7 @@ func TestCheckScriptRaceFlag(t *testing.T) {
 }
 
 func TestCheckScriptStopsOnGofmtDiff(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	output, lines, err := f.run(t, map[string]string{"CHECK_GOFMT_OUTPUT": "bad.go\n"})
 	if err == nil {
@@ -255,6 +258,7 @@ func TestCheckScriptStopsOnGofmtDiff(t *testing.T) {
 }
 
 func TestCheckScriptRunsMygoVet(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	output, lines, err := f.run(t, nil)
 	if err != nil {
@@ -273,6 +277,7 @@ func TestCheckScriptRunsMygoVet(t *testing.T) {
 }
 
 func TestCheckScriptGoTestTimeout(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("check.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -285,6 +290,7 @@ func TestCheckScriptGoTestTimeout(t *testing.T) {
 }
 
 func TestCheckScriptShardsUITests(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	output, lines, err := f.run(t, map[string]string{"MCODE_UI_SHARDS": "4"})
 	if err != nil {
@@ -349,6 +355,7 @@ func TestCheckScriptShardsUITests(t *testing.T) {
 }
 
 func TestCheckScriptRaceSkipsNonRaceAndShardsUI(t *testing.T) {
+	t.Parallel()
 	f := newCheckFixture(t)
 	f.envvs = []string{"--race"}
 	output, lines, err := f.run(t, map[string]string{"MCODE_UI_SHARDS": "4"})
@@ -394,6 +401,7 @@ func TestCheckScriptRaceSkipsNonRaceAndShardsUI(t *testing.T) {
 }
 
 func TestCheckScriptDefaultUIShardClamp(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("check.sh")
 	if err != nil {
 		t.Fatal(err)

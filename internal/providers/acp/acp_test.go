@@ -2729,7 +2729,14 @@ func TestACPHoldProcessExitAndAttachRecovery(t *testing.T) {
 	f.run(t, f.turn)
 	f.complete(t, 1, "finished")
 	f.complete(t, 2, "finished")
-	waitACPHold(t, func() bool { return f.h.HasUnsolicitedOutput(f.turn.ThreadID) })
+	waitACPHold(t, func() bool {
+		if !f.h.HasUnsolicitedOutput(f.turn.ThreadID) {
+			return false
+		}
+		f.h.residentMu.Lock()
+		defer f.h.residentMu.Unlock()
+		return len(f.h.finishedTasks[f.turn.ThreadID]) == 2
+	})
 	roots := f.h.ProcessRootPIDs(f.turn.ThreadID)
 	if err := syscall.Kill(roots[0], syscall.SIGKILL); err != nil {
 		t.Fatal(err)
@@ -2752,6 +2759,7 @@ func TestACPHoldProcessExitAndAttachRecovery(t *testing.T) {
 
 func TestACPHoldIdleUpdates(t *testing.T) {
 	f := newACPHoldFixture(t, "feature_hold_idle")
+	f.h.opts.BackgroundPollInterval = 20 * time.Millisecond
 	calls := make(chan time.Duration, 10)
 	f.h.SetUnsolicitedTurnHandler(func(string) {
 		f.h.residentMu.Lock()
@@ -3155,6 +3163,7 @@ func TestACPHoldCompletionReader(t *testing.T) {
 
 func TestACPHoldClose(t *testing.T) {
 	fixture := newACPHoldFixture(t, "feature_hold_content")
+	fixture.h.opts.BackgroundPollInterval = 20 * time.Millisecond
 	var _ io.Closer = fixture.h
 	fixture.run(t, fixture.turn)
 	threadID := fixture.turn.ThreadID

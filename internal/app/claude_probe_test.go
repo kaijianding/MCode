@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"mcode/internal/providers/claude"
@@ -225,5 +226,43 @@ func TestProbeClaudeBinaryMissingBinary(t *testing.T) {
 	}
 	if *loginEnvCalls != 0 || *readCalls != 0 {
 		t.Fatalf("不应走任何检测路径，loginEnvCalls=%d readCalls=%d", *loginEnvCalls, *readCalls)
+	}
+}
+
+// TestOpenMemorySkipsProviderProbe 验证 memory 模式下 Open 不启动 claude 探测。
+func TestOpenMemorySkipsProviderProbe(t *testing.T) {
+	fakeClaude := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	var checkCalls atomic.Int64
+	stubClaudeProbe(t,
+		[]string{"HOME=" + t.TempDir()},
+		[]string{"HOME=" + t.TempDir()},
+		func(ctx context.Context, binary string, env []string) (claude.AuthStatus, bool) {
+			checkCalls.Add(1)
+			return claude.AuthStatus{LoggedIn: true, Method: "oauth_token"}, true
+		},
+		func(ctx context.Context, binary string, env []string) (claude.AuthStatus, bool) {
+			checkCalls.Add(1)
+			return claude.AuthStatus{LoggedIn: true, Method: "oauth_token"}, true
+		},
+	)
+
+	a, err := Open(Options{
+		DataDir:   t.TempDir(),
+		Provider:  "memory",
+		WorkDir:   t.TempDir(),
+		Mode:      "agent",
+		ClaudeBin: fakeClaude,
+	})
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if got := checkCalls.Load(); got != 0 {
+		t.Fatalf("memory 模式不应探测 claude，checkCalls = %d", got)
 	}
 }

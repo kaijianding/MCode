@@ -11,6 +11,7 @@ import (
 )
 
 func TestPackagePersonalHelp(t *testing.T) {
+	t.Parallel()
 	script, err := filepath.Abs("package_personal.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +29,7 @@ func TestPackagePersonalHelp(t *testing.T) {
 }
 
 func TestPackagePersonalAdHocWithoutIdentity(t *testing.T) {
+	t.Parallel()
 	cmd := packagePersonalDotenvCommand(t, nil, false, "")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -81,6 +83,7 @@ func packagePersonalDotenvCommand(t *testing.T, identity *string, dotenv bool, s
 }
 
 func TestPackagePersonalVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		arg  string
@@ -144,6 +147,7 @@ func TestPackagePersonalVersion(t *testing.T) {
 }
 
 func TestPackagePersonalLoadsDotenv(t *testing.T) {
+	t.Parallel()
 	cmd := packagePersonalDotenvCommand(t, nil, true, `  1) ABCDEF "Developer ID Application: Test (ABC123)"`)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -154,6 +158,7 @@ func TestPackagePersonalLoadsDotenv(t *testing.T) {
 }
 
 func TestPackagePersonalEnvOverridesDotenv(t *testing.T) {
+	t.Parallel()
 	identity := ""
 	cmd := packagePersonalDotenvCommand(t, &identity, true, `  1) ABCDEF "Developer ID Application: Test (ABC123)"`)
 	var stderr bytes.Buffer
@@ -165,6 +170,7 @@ func TestPackagePersonalEnvOverridesDotenv(t *testing.T) {
 }
 
 func TestPackagePersonalAdHocWhenIdentityNotFound(t *testing.T) {
+	t.Parallel()
 	cmd := packagePersonalDotenvCommand(t, nil, true, "")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -175,6 +181,7 @@ func TestPackagePersonalAdHocWhenIdentityNotFound(t *testing.T) {
 }
 
 func TestPackagePersonalIdentityMatchesLiterally(t *testing.T) {
+	t.Parallel()
 	identity := "Developer ID Application: Test*"
 	cmd := packagePersonalDotenvCommand(t, &identity, false, `  1) ABCDEF "Developer ID Application: Test (ABC123)"`)
 	var stderr bytes.Buffer
@@ -186,6 +193,7 @@ func TestPackagePersonalIdentityMatchesLiterally(t *testing.T) {
 }
 
 func TestPackagePersonalWindows(t *testing.T) {
+	t.Parallel()
 	script, err := filepath.Abs("package_personal.sh")
 	if err != nil {
 		t.Fatal(err)
