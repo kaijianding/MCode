@@ -2,6 +2,7 @@ package acp
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -139,6 +140,117 @@ func agyStepIndex(dbPath string) (int64, bool) {
 		return -1, true
 	}
 	return index.Int64, true
+}
+
+func agyStepsUsage(dbPath string, start int64) acpPromptUsage {
+	var usage acpPromptUsage
+	if dbPath == "" {
+		return usage
+	}
+	db, err := agyOpenSteps(dbPath)
+	if err != nil {
+		return usage
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT metadata FROM steps WHERE idx > ?", start)
+	if err != nil {
+		return usage
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var metadata []byte
+		if err := rows.Scan(&metadata); err != nil {
+			return acpPromptUsage{}
+		}
+		step := agyStepUsage(metadata)
+		usage.InputTokens += step.InputTokens
+		usage.OutputTokens += step.OutputTokens
+		usage.CachedReadTokens += step.CachedReadTokens
+		usage.ThoughtTokens += step.ThoughtTokens
+	}
+	if rows.Err() != nil {
+		return acpPromptUsage{}
+	}
+	return usage
+}
+
+func agyStepUsage(metadata []byte) acpPromptUsage {
+	var usage acpPromptUsage
+	valid := true
+	if !walkAgyProto(metadata, func(field, wire, _ uint64, payload []byte) {
+		if field != 9 || wire != 2 {
+			return
+		}
+		if !walkAgyProto(payload, func(field, wire, value uint64, _ []byte) {
+			if wire != 0 || int64(value) < 0 {
+				return
+			}
+			switch field {
+			case 2:
+				usage.InputTokens = int64(value)
+			case 3:
+				usage.OutputTokens = int64(value)
+			case 5:
+				usage.CachedReadTokens = int64(value)
+			case 9:
+				usage.ThoughtTokens = int64(value)
+			}
+		}) {
+			valid = false
+		}
+	}) || !valid {
+		return acpPromptUsage{}
+	}
+	return usage
+}
+
+func walkAgyProto(data []byte, visit func(field, wire, value uint64, payload []byte)) bool {
+	var groups []uint64
+	for len(data) > 0 {
+		tag, tagSize := binary.Uvarint(data)
+		field, wire := tag>>3, tag&7
+		if tagSize <= 0 || field == 0 || field >= 1<<29 {
+			return false
+		}
+		data = data[tagSize:]
+		var value, size uint64
+		switch wire {
+		case 0, 2:
+			number, numberSize := binary.Uvarint(data)
+			if numberSize <= 0 {
+				return false
+			}
+			data = data[numberSize:]
+			if wire == 0 {
+				value = number
+			} else {
+				size = number
+			}
+		case 1:
+			size = 8
+		case 3:
+			groups = append(groups, field)
+			continue
+		case 4:
+			if len(groups) == 0 || groups[len(groups)-1] != field {
+				return false
+			}
+			groups = groups[:len(groups)-1]
+			continue
+		case 5:
+			size = 4
+		default:
+			return false
+		}
+		if size > uint64(len(data)) {
+			return false
+		}
+		if len(groups) == 0 {
+			visit(field, wire, value, data[:size])
+		}
+		data = data[size:]
+	}
+	return len(groups) == 0
 }
 
 func agyNewStepError(dbPath string, start int64) (string, bool) {

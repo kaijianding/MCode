@@ -111,6 +111,13 @@ type acpSessionModes struct {
 	} `json:"availableModes"`
 }
 
+type acpPromptUsage struct {
+	InputTokens      int64 `json:"inputTokens"`
+	OutputTokens     int64 `json:"outputTokens"`
+	ThoughtTokens    int64 `json:"thoughtTokens"`
+	CachedReadTokens int64 `json:"cachedReadTokens"`
+}
+
 // IDs 返回会话广告的可用模式 ID 列表。
 func (m acpSessionModes) IDs() []string {
 	ids := make([]string, 0, len(m.AvailableModes))
@@ -553,10 +560,14 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		readPath   string
 		background bool
 	}
+	type startedTool struct {
+		id      string
+		command string
+	}
 	pendingTools := make(map[string]pendingTool)
 	startedTools := make(map[string]bool)
 	pendingOrder := make([]string, 0)
-	var toolStartOrder []string
+	var toolStartOrder []startedTool
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
 	toolsFinished := false
@@ -979,7 +990,9 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath}
 			startedTools[u.ToolCallID] = true
 			if h.opts.HoldBackgroundTasks {
-				toolStartOrder = append(toolStartOrder, u.ToolCallID)
+				var raw struct{ CommandLine string }
+				_ = json.Unmarshal(u.RawInput, &raw)
+				toolStartOrder = append(toolStartOrder, startedTool{id: u.ToolCallID, command: raw.CommandLine})
 			}
 			if readPath != "" {
 				pendingOrder = append(pendingOrder, u.ToolCallID)
@@ -1348,16 +1361,32 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	} else if h.opts.HoldBackgroundTasks {
 		transcriptPath, transcriptOffset = agyTranscriptPosition(p, sid)
 	}
-	scanTranscript := func(path, toolID string) bool {
+	scanTranscript := func(path, fallback string) {
 		offset := transcriptOffset
 		if path != transcriptPath {
 			offset = 0
 		}
-		return h.backgroundTaskTranscriptStarts(p, path, offset, toolID, emit)
+		h.backgroundTaskTranscriptStarts(p, path, offset, func(description string) string {
+			if description != "" {
+				for index := len(toolStartOrder) - 1; index >= 0; index-- {
+					tool := toolStartOrder[index]
+					if tool.id != "" && tool.command == description {
+						return tool.id
+					}
+				}
+			}
+			return fallback
+		}, func(event harness.Event) {
+			if pending, ok := pendingTools[event.ToolID]; ok {
+				pending.background = true
+				pendingTools[event.ToolID] = pending
+			}
+			_ = harness.Emit(emit, event)
+		})
 	}
 	lastPendingTool := func() string {
 		for index := len(toolStartOrder) - 1; index >= 0; index-- {
-			toolID := toolStartOrder[index]
+			toolID := toolStartOrder[index].id
 			if pending, ok := pendingTools[toolID]; toolID != "" && ok && !pending.background {
 				return toolID
 			}
@@ -1369,33 +1398,49 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	if attach {
 		setNotificationHandler(onNotification, true)
 		ticker := time.NewTicker(200 * time.Millisecond)
-		scannedPath, scannedSize := transcriptPath, transcriptOffset
+		scannedPath, scannedOffset := transcriptPath, transcriptOffset
+		taskPath, taskSize, taskFallback := transcriptPath, transcriptOffset, ""
+		seenFinalStep := false
 		waitStart := time.Now()
 	waitForReply:
 		for {
+			path, size := agyTranscriptPosition(p, sid)
+			if path != "" && !seenFinalStep {
+				if path != scannedPath || size < scannedOffset {
+					scannedPath, scannedOffset = path, 0
+				}
+				if size > scannedOffset {
+					scannedOffset = readAgyTranscript(path, scannedOffset, func(step agyTranscriptStep) {
+						if step.Type == "PLANNER_RESPONSE" && step.Status == "DONE" && len(step.ToolCalls) == 0 {
+							seenFinalStep = true
+						}
+					})
+				}
+			}
 			p.notificationMu.Lock()
 			h.residentMu.Lock()
 			lastUpdate := p.lastUpdate
 			if lastUpdate.Before(waitStart) {
 				lastUpdate = waitStart
 			}
-			quiet := time.Since(lastUpdate) >= 3*time.Second
+			idleFor := time.Since(lastUpdate)
 			h.residentMu.Unlock()
 			ready := false
-			if quiet {
+			if seenFinalStep || idleFor >= 3*time.Second {
 				toolsMu.Lock()
 				if toolID := lastPendingTool(); toolID != "" {
-					path, size := agyTranscriptPosition(p, sid)
-					if path != scannedPath || size != scannedSize {
-						scannedPath, scannedSize = path, size
-						if scanTranscript(path, toolID) {
-							pending := pendingTools[toolID]
-							pending.background = true
-							pendingTools[toolID] = pending
-						}
+					if path != taskPath || size != taskSize || toolID != taskFallback {
+						taskPath, taskSize, taskFallback = path, size, toolID
+						scanTranscript(path, toolID)
 					}
 				}
-				ready = lastPendingTool() == ""
+				if lastPendingTool() == "" {
+					if receivedText {
+						ready = seenFinalStep || idleFor >= 30*time.Second
+					} else {
+						ready = idleFor >= 3*time.Second
+					}
+				}
 				toolsMu.Unlock()
 				if ready && receivedText {
 					spontaneous = true
@@ -1446,9 +1491,15 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 	var agyDBPath string
 	agyStepStart := int64(-1)
-	if h.opts.Agent == AgentAgy && !spontaneous && promptErr == nil {
+	if h.opts.Agent == AgentAgy && promptErr == nil {
 		agyDBPath = agySessionDB(agyGeminiDir(allArgs, cmd.Env), sid)
-		if start, ok := agyStepIndex(agyDBPath); ok {
+		if spontaneous {
+			if reusedSession && p.agyStepStartOK {
+				agyStepStart = p.agyStepStart
+			} else {
+				agyDBPath = ""
+			}
+		} else if start, ok := agyStepIndex(agyDBPath); ok {
 			agyStepStart = start
 		} else {
 			agyDBPath = ""
@@ -1456,13 +1507,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 
 	var promptResult struct {
-		StopReason string `json:"stopReason"`
-		Usage      struct {
-			InputTokens      int64 `json:"inputTokens"`
-			OutputTokens     int64 `json:"outputTokens"`
-			ThoughtTokens    int64 `json:"thoughtTokens"`
-			CachedReadTokens int64 `json:"cachedReadTokens"`
-		} `json:"usage"`
+		StopReason string         `json:"stopReason"`
+		Usage      acpPromptUsage `json:"usage"`
 	}
 	if spontaneous {
 		promptResult.StopReason = "end_turn"
@@ -1475,19 +1521,22 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	detach()
 
 	var agyErr error
-	if h.opts.HoldBackgroundTasks && promptErr == nil {
-		if h.opts.Agent == AgentAgy && !spontaneous {
+	if h.opts.Agent == AgentAgy && promptErr == nil {
+		if spontaneous {
+			agyErr = agyTurnFailure(agyDBPath, agyStepStart, "")
+			if agyErr == nil {
+				promptResult.Usage = agyStepsUsage(agyDBPath, agyStepStart)
+			}
+		} else {
 			agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
 		}
-		if agyErr == nil && ctx.Err() == nil {
-			toolID := lastPendingTool()
-			if toolID == "" && spontaneous && len(toolStartOrder) > 0 {
-				toolID = toolStartOrder[len(toolStartOrder)-1]
-			}
-			if toolID != "" {
-				scanTranscript(agyRecordPath(p, sid, "logs/transcript.jsonl"), toolID)
-			}
+	}
+	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil && ctx.Err() == nil && len(toolStartOrder) > 0 {
+		toolID := lastPendingTool()
+		if toolID == "" && spontaneous {
+			toolID = toolStartOrder[len(toolStartOrder)-1].id
 		}
+		scanTranscript(agyRecordPath(p, sid, "logs/transcript.jsonl"), toolID)
 	}
 
 	toolsMu.Lock()
@@ -1507,9 +1556,6 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	}
 	toolsMu.Unlock()
 
-	if !h.opts.HoldBackgroundTasks && promptErr == nil && h.opts.Agent == AgentAgy {
-		agyErr = agyTurnFailure(agyDBPath, agyStepStart, promptResult.StopReason)
-	}
 	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil {
 		h.reconcileRoundTasks(p, turn.ThreadID, emit)
 	}
@@ -1529,6 +1575,9 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 
 	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil && ctx.Err() == nil && h.holdProcess(p, turn.ThreadID) {
 		p.transcriptPath, p.transcriptSize = agyTranscriptPosition(p, sid)
+		if h.opts.Agent == AgentAgy {
+			p.agyStepStart, p.agyStepStartOK = agyStepIndex(agySessionDB(agyGeminiDir(allArgs, cmd.Env), sid))
+		}
 		return nil
 	}
 	if h.opts.HoldBackgroundTasks {

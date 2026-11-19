@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -45,6 +46,8 @@ type acpProcess struct {
 	watchOnce      sync.Once
 	transcriptPath string
 	transcriptSize int64
+	agyStepStart   int64
+	agyStepStartOK bool
 
 	notificationMu      sync.Mutex
 	notificationHandler NotificationHandler
@@ -379,32 +382,58 @@ func agyTranscriptPosition(p *acpProcess, sid string) (string, int64) {
 	return path, 0
 }
 
-func (h *Harness) backgroundTaskTranscriptStarts(p *acpProcess, path string, offset int64, toolID string, emit func(harness.Event)) bool {
+type agyTranscriptStep struct {
+	Content   string            `json:"content"`
+	Type      string            `json:"type"`
+	Status    string            `json:"status"`
+	ToolCalls []json.RawMessage `json:"tool_calls"`
+}
+
+func readAgyTranscript(path string, offset int64, visit func(agyTranscriptStep)) int64 {
 	if path == "" {
-		return false
+		return offset
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return offset
 	}
 	defer file.Close()
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return false
+		return offset
 	}
 	reader := bufio.NewReader(file)
-	started := false
 	for {
-		line, err := reader.ReadBytes('\n')
-		var step struct {
-			Content string `json:"content"`
+		line, readErr := reader.ReadBytes('\n')
+		var step agyTranscriptStep
+		valid := json.Unmarshal(line, &step) == nil
+		if valid {
+			visit(step)
 		}
-		if json.Unmarshal(line, &step) == nil && h.backgroundTaskStarts(p, toolID, []string{step.Content}, emit) {
-			started = true
+		if readErr == nil || valid {
+			offset += int64(len(line))
 		}
-		if err != nil {
-			return started
+		if readErr != nil {
+			return offset
 		}
 	}
+}
+
+func (h *Harness) backgroundTaskTranscriptStarts(p *acpProcess, path string, offset int64, resolveTool func(string) string, emit func(harness.Event)) {
+	readAgyTranscript(path, offset, func(step agyTranscriptStep) {
+		if !backgroundTaskPattern.MatchString(step.Content) {
+			return
+		}
+		var description string
+		for line := range strings.SplitSeq(step.Content, "\n") {
+			if value, ok := strings.CutPrefix(line, "Task Description: "); ok {
+				description = value
+				break
+			}
+		}
+		if toolID := resolveTool(description); toolID != "" {
+			h.backgroundTaskStarts(p, toolID, []string{step.Content}, emit)
+		}
+	})
 }
 
 // reconcileRoundTasks 把本轮 prompt 返回前已经结束的后台任务直接记成完成：

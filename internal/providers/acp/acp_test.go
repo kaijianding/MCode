@@ -748,11 +748,27 @@ func runFakeACPFeatures(mode string) {
 					notify := func(update map[string]any) {
 						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
 					}
-					records := mode == "feature_hold_agy_records" || mode == "feature_hold_spontaneous" || mode == "feature_hold_late_spontaneous"
-					if records {
+					descriptionMatch := mode == "feature_hold_task_description"
+					records := descriptionMatch || mode == "feature_hold_agy_records" || mode == "feature_hold_spontaneous" || mode == "feature_hold_late_spontaneous" || mode == "feature_hold_final_step"
+					recordsDir := fakeACPHoldRecords("antigravity-cli")
+					if descriptionMatch {
+						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "edit", "name": "edit_file"})
+						for index, command := range []string{"go build ./... && go vet ./...", "go build ./..."} {
+							toolID := fmt.Sprintf("command-%d", index+1)
+							notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command", "rawInput": map[string]any{"CommandLine": command, "WaitMsBeforeAsync": 10000}})
+							notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": toolID, "status": "completed"})
+							appendFakeACPHoldTask(recordsDir, index+1, command)
+						}
+					} else if records {
 						toolID := "agy-record-tool"
 						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command"})
-						appendFakeACPHoldTask(fakeACPHoldRecords("antigravity-cli"), 1)
+						appendFakeACPHoldTask(recordsDir, 1, "")
+					}
+					if mode == "feature_hold_spontaneous" {
+						writeFakeACPHoldUsage(1)
+					}
+					if mode == "feature_hold_final_step" {
+						appendFakeACPHoldTranscript(recordsDir, map[string]any{"type": "PLANNER_RESPONSE", "status": "DONE"})
 					}
 					tasks := 2
 					if mode == "feature_hold_inround" {
@@ -1669,7 +1685,15 @@ func fakeACPHoldRecords(dir string) string {
 	return filepath.Join(agyGeminiDir(os.Args[1:], os.Environ()), dir, "brain", fakeHoldSession, ".system_generated")
 }
 
-func appendFakeACPHoldTask(dir string, task int) {
+func appendFakeACPHoldTask(dir string, task int, command string) {
+	content := fmt.Sprintf("Tool is running as a background task with task id: %s/task-%d", fakeHoldSession, task)
+	if command != "" {
+		content += "\nTask Description: " + command + "\nTask logs are available at: file:///task.log"
+	}
+	appendFakeACPHoldTranscript(dir, map[string]any{"step_index": task, "status": "RUNNING", "content": content})
+}
+
+func appendFakeACPHoldTranscript(dir string, step map[string]any) {
 	path := filepath.Join(dir, "logs", "transcript.jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		panic(err)
@@ -1679,8 +1703,25 @@ func appendFakeACPHoldTask(dir string, task int) {
 		panic(err)
 	}
 	defer file.Close()
-	line := map[string]any{"step_index": task, "status": "RUNNING", "content": fmt.Sprintf("Tool is running as a background task with task id: %s/task-%d", fakeHoldSession, task)}
-	if err := json.NewEncoder(file).Encode(line); err != nil {
+	if err := json.NewEncoder(file).Encode(step); err != nil {
+		panic(err)
+	}
+}
+
+func writeFakeACPHoldUsage(index int) {
+	path := agySessionDB(agyGeminiDir(os.Args[1:], os.Environ()), fakeHoldSession)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		panic(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS steps (idx INTEGER, step_type INTEGER, step_payload BLOB, metadata BLOB)"); err != nil {
+		panic(err)
+	}
+	if _, err := db.Exec("INSERT INTO steps (idx, step_type, metadata) VALUES (?, 1, x'4a081007180b280d4811')", index); err != nil {
 		panic(err)
 	}
 }
@@ -1724,7 +1765,11 @@ func runFakeACPBackground(mode string, write func(any)) {
 			notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "idle-tool", "name": "read"})
 			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "空闲续写"}})
 			notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "idle-background-tool", "name": "run_command"})
-			appendFakeACPHoldTask(records, 2)
+			appendFakeACPHoldTask(records, 2, "")
+		}
+		if mode == "feature_hold_final_step" {
+			appendFakeACPHoldTranscript(records, map[string]any{"type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": []any{map[string]any{"name": "read"}}})
+			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "第一段"}})
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			panic(err)
@@ -1750,8 +1795,19 @@ func runFakeACPBackground(mode string, write func(any)) {
 					break
 				}
 			}
+			writeFakeACPHoldUsage(2)
+			writeFakeACPHoldUsage(3)
+			notify(map[string]any{"sessionUpdate": "usage_update", "used": 400, "size": 1024})
 			notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "idle-tool", "status": "completed", "output": "工具输出"})
 			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "实时续写"}})
+		}
+		if mode == "feature_hold_final_step" {
+			for range ticker.C {
+				if _, err := os.Stat(control + ".attach"); err == nil {
+					break
+				}
+			}
+			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "第二段"}})
 		}
 		if mode == "feature_hold_late_spontaneous" {
 			for range ticker.C {
@@ -1760,6 +1816,7 @@ func runFakeACPBackground(mode string, write func(any)) {
 				}
 			}
 			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "迟到续写"}})
+			appendFakeACPHoldTranscript(records, map[string]any{"type": "PLANNER_RESPONSE", "status": "DONE"})
 		}
 		if mode == "feature_hold_idle" {
 			for i := 0; i < 15; i++ {
@@ -2117,11 +2174,13 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 		defer f.h.residentMu.Unlock()
 		return len(process.idleUpdates) == 3
 	})
+	records := filepath.Dir(filepath.Dir(process.transcriptPath))
 	attach := f.turn
 	attach.Attach, attach.SessionID = true, fakeHoldSession
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	var events []harness.Event
 	replayed := make(chan struct{})
+	liveText := make(chan struct{})
 	result := make(chan error, 1)
 	finished := make(chan struct{})
 	defer func() {
@@ -2134,6 +2193,9 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 			events = append(events, event)
 			if event.Type == harness.EventToolStart && event.ToolID == "idle-tool" {
 				close(replayed)
+			}
+			if event.Type == harness.EventText && event.Text == "实时续写" {
+				close(liveText)
 			}
 		})
 	}()
@@ -2157,6 +2219,14 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	if err := os.WriteFile(f.control+".attach", nil, 0600); err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case <-liveText:
+	case err := <-result:
+		t.Fatalf("Attach 未接住实时续写: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	appendFakeACPHoldTranscript(records, map[string]any{"type": "PLANNER_RESPONSE", "status": "DONE"})
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
@@ -2165,6 +2235,7 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	}
 	var reply []string
 	backgroundStarted, done := false, false
+	var usage *harness.Usage
 	for _, event := range events {
 		switch event.Type {
 		case harness.EventToolStart:
@@ -2179,6 +2250,8 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 			reply = append(reply, event.Text)
 		case harness.EventBackgroundTaskStart:
 			backgroundStarted = event.TaskID == fakeHoldSession+"/task-2" && event.ToolID == "idle-background-tool"
+		case harness.EventUsage:
+			usage = event.Usage
 		case harness.EventDone:
 			done = event.StopReason == "end_turn"
 		}
@@ -2186,8 +2259,97 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	if !reflect.DeepEqual(reply, []string{"tool_start", "空闲续写", "工具输出", "实时续写"}) || !backgroundStarted || !done {
 		t.Fatalf("Attach 未有序回放或未接住新后台任务: %+v", events)
 	}
+	if want := (&harness.Usage{InputTokens: 14, OutputTokens: 56, CachedTokens: 26, ContextTokens: 400, ContextWindow: 1024}); !reflect.DeepEqual(usage, want) {
+		t.Fatalf("Attach usage = %+v, want %+v", usage, want)
+	}
 	if len(featureParams(f.messages(t), "session/prompt")) != 1 || !f.h.HasResidentProcess(f.turn.ThreadID) {
 		t.Fatal("Attach 重发了 prompt 或未为新后台任务保留进程")
+	}
+}
+
+func TestACPHoldAgyTaskDescriptionMatch(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_task_description")
+	ended := make(map[string]bool)
+	var matched []string
+	for _, event := range f.run(t, f.turn) {
+		switch event.Type {
+		case harness.EventToolEnd:
+			ended[event.ToolID] = true
+		case harness.EventBackgroundTaskStart:
+			if !ended[event.ToolID] || event.ToolID == "edit" {
+				t.Fatalf("后台任务未绑定已完成的命令: %+v", event)
+			}
+			matched = append(matched, event.TaskID+"="+event.ToolID)
+		}
+	}
+	want := []string{fakeHoldSession + "/task-1=command-1", fakeHoldSession + "/task-2=command-2"}
+	if !reflect.DeepEqual(matched, want) || !ended["edit"] {
+		t.Fatalf("后台任务绑定 = %v, want %v; 工具结束 = %v", matched, want, ended)
+	}
+}
+
+func TestACPHoldAgySpontaneousWaitsForFinalStep(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_final_step")
+	f.run(t, f.turn)
+	f.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return f.h.HasUnsolicitedOutput(f.turn.ThreadID) })
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	texts := make(chan string, 2)
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	defer func() {
+		cancel()
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		result <- f.h.Run(ctx, attach, func(event harness.Event) {
+			if event.Type == harness.EventText {
+				texts <- event.Text
+			}
+		})
+	}()
+	expectText := func(want string) {
+		t.Helper()
+		select {
+		case text := <-texts:
+			if text != want {
+				t.Fatalf("Attach 正文 = %q, want %q", text, want)
+			}
+		case err := <-result:
+			t.Fatalf("Attach 在收到 %q 前结束: %v", want, err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	expectText("第一段")
+	pause := time.NewTimer(3400 * time.Millisecond)
+	defer pause.Stop()
+	select {
+	case err := <-result:
+		t.Fatalf("Attach 在最终步前结束: %v", err)
+	case <-pause.C:
+	}
+	if err := os.WriteFile(f.control+".attach", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	expectText("第二段")
+	fast := time.NewTimer(1500 * time.Millisecond)
+	defer fast.Stop()
+	records := filepath.Join(f.turn.WorkDir, "antigravity-cli", "brain", fakeHoldSession, ".system_generated")
+	appendFakeACPHoldTranscript(records, map[string]any{"type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": []any{}})
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-fast.C:
+		t.Fatal("Attach 未在最终步后及时结束")
+	}
+	if prompts := featureParams(f.messages(t), "session/prompt"); len(prompts) != 1 {
+		t.Fatalf("Attach 补发了 prompt: %+v", prompts)
 	}
 }
 
