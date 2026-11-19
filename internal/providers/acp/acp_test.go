@@ -1610,6 +1610,81 @@ func TestACPAgyPermissionOptions(t *testing.T) {
 	}
 }
 
+// failingApprover 按给定错误答复审批，模拟本轮取消。
+type failingApprover struct{ err error }
+
+func (a failingApprover) Approve(context.Context, harness.ApprovalRequest) (harness.Decision, error) {
+	return harness.DecisionDeny, a.err
+}
+
+// permissionReply 取出假 Agent 收到的 session/request_permission 应答。
+func permissionReply(t *testing.T, messages []map[string]any) map[string]any {
+	t.Helper()
+	for _, msg := range messages {
+		if msg["method"] != nil || msg["id"] != float64(9010) {
+			continue
+		}
+		result, ok := msg["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("permission result = %v", msg)
+		}
+		outcome, ok := result["outcome"].(map[string]any)
+		if !ok {
+			t.Fatalf("permission outcome = %v", msg)
+		}
+		return outcome
+	}
+	t.Fatal("missing permission reply")
+	return nil
+}
+
+func TestACPPermissionCancelledOutcome(t *testing.T) {
+	// 审批因取消返回错误时，按 ACP 规范应答 cancelled，且不带 optionId。
+	messages, _, err := runACPFeature(t, "feature_permission", AgentAgy, harness.Turn{
+		Approver: failingApprover{err: fmt.Errorf("approval aborted: %w", context.Canceled)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled := permissionReply(t, messages)
+	if cancelled["outcome"] != "cancelled" {
+		t.Fatalf("outcome = %v", cancelled)
+	}
+	if _, ok := cancelled["optionId"]; ok {
+		t.Fatalf("cancelled outcome carries optionId: %v", cancelled)
+	}
+
+	// 对照：普通拒绝仍按选中的 reject option 回复。
+	messages, _, err = runACPFeature(t, "feature_permission", AgentAgy, harness.Turn{
+		Approver: &mockApprover{decision: harness.DecisionDeny},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected := permissionReply(t, messages)
+	if rejected["outcome"] != "selected" || rejected["optionId"] != "deny" {
+		t.Fatalf("outcome = %v", rejected)
+	}
+}
+
+func TestPickAuthMethodSkipsTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		methods []acpAuthMethod
+		want    string
+	}{
+		{name: "skips terminal", methods: []acpAuthMethod{{ID: "login", Type: "terminal"}, {ID: "agent", Type: "agent"}}, want: "agent"},
+		{name: "terminal only", methods: []acpAuthMethod{{ID: "login", Type: "terminal"}}, want: ""},
+		{name: "empty", methods: nil, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickAuthMethod(tc.methods); got != tc.want {
+				t.Fatalf("pickAuthMethod(%v) = %q, want %q", tc.methods, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestACPToolCallUpdateContentArray(t *testing.T) {
 	_, events, err := runACPFeature(t, "feature_tool_array", AgentAgy, harness.Turn{})
 	if err != nil {

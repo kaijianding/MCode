@@ -713,8 +713,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 						}
 					}
 				}
-				if selected == "" {
-					payload := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+				if selected == "" || ctx.Err() != nil {
+					payload := acpCancelledOutcome()
 					return acpApprovalResponse{payload: payload, onAck: func(err error) { harness.AckDelivery(turn.Approver, req, err) }}, nil
 				}
 				payload := map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": selected}}
@@ -890,6 +890,9 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 					"outcome":  "selected",
 					"optionId": selectedID,
 				},
+			}
+			if approvalCancelled(ctx, approveErr) {
+				payload = acpCancelledOutcome()
 			}
 			if turn.Approver != nil && approveErr == nil {
 				return acpApprovalResponse{
@@ -1263,10 +1266,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	if sid == "" {
 		sid, err = createOrResume()
 	}
-	// 若需要且包含 auth 错误，且非 Droid，尝试执行 authenticate 后重试
-	if err != nil && len(authMethods) > 0 && h.opts.Agent != AgentDroid && strings.Contains(strings.ToLower(err.Error()), "auth") {
-		_ = conn.Call(ctx, "authenticate", map[string]any{"methodId": authMethods[0].ID}, nil)
-		sid, err = createOrResume()
+	// 若需要且属于认证错误，且非 Droid，尝试执行 authenticate 后重试。
+	// ACP 规定客户端不得传 terminal 方法：没有其他方法时不重试，保留原错误。
+	if err != nil && h.opts.Agent != AgentDroid && acpAuthRequired(err) {
+		if methodID := pickAuthMethod(authMethods); methodID != "" {
+			_ = conn.Call(ctx, "authenticate", map[string]any{"methodId": methodID}, nil)
+			sid, err = createOrResume()
+		}
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -1646,9 +1652,35 @@ type acpInitializeResult struct {
 			HTTP bool `json:"http"`
 		} `json:"mcpCapabilities"`
 	} `json:"agentCapabilities"`
-	AuthMethods []struct {
-		ID string `json:"id"`
-	} `json:"authMethods"`
+	AuthMethods []acpAuthMethod `json:"authMethods"`
+}
+
+// acpAuthMethod 是 Agent 广告的认证方法。
+type acpAuthMethod struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+}
+
+// pickAuthMethod 返回可用的认证方法 ID：ACP 客户端不得传 terminal 方法，
+// 因此跳过 terminal，取第一个可用的；没有可用方法时返回空。
+func pickAuthMethod(methods []acpAuthMethod) string {
+	for _, method := range methods {
+		if method.ID == "" || method.Type == "terminal" {
+			continue
+		}
+		return method.ID
+	}
+	return ""
+}
+
+// acpAuthRequired 判断会话建立失败是否属于未认证：错误文本带 auth，
+// 或 JSON-RPC 错误码为 -32000（agy 未登录）。
+func acpAuthRequired(err error) bool {
+	var rpcErr *RPCError
+	if errors.As(err, &rpcErr) && rpcErr.Code == -32000 {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "auth")
 }
 
 // selectACPConfigOptions 从会话响应的 configOptions 里找出推理强度与快速模式配置项。
@@ -1709,6 +1741,19 @@ func hasACPEffortScale(option map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// approvalCancelled 判断审批是否因本轮取消而结束：
+// ACP 规范要求取消时以 cancelled 应答所有挂起的 permission 请求。
+func approvalCancelled(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func acpCancelledOutcome() map[string]any {
+	return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 }
 
 type acpApprovalResponse struct {
