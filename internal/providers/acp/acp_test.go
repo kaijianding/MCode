@@ -748,7 +748,7 @@ func runFakeACPFeatures(mode string) {
 					notify := func(update map[string]any) {
 						write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
 					}
-					records := mode == "feature_hold_agy_records" || mode == "feature_hold_spontaneous"
+					records := mode == "feature_hold_agy_records" || mode == "feature_hold_spontaneous" || mode == "feature_hold_late_spontaneous"
 					if records {
 						toolID := "agy-record-tool"
 						notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolID, "name": "run_command"})
@@ -1753,6 +1753,14 @@ func runFakeACPBackground(mode string, write func(any)) {
 			notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "idle-tool", "status": "completed", "output": "工具输出"})
 			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "实时续写"}})
 		}
+		if mode == "feature_hold_late_spontaneous" {
+			for range ticker.C {
+				if _, err := os.Stat(control + ".late"); err == nil {
+					break
+				}
+			}
+			notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "迟到续写"}})
+		}
 		if mode == "feature_hold_idle" {
 			for i := 0; i < 15; i++ {
 				notify(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "idle"}})
@@ -2180,6 +2188,68 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	}
 	if len(featureParams(f.messages(t), "session/prompt")) != 1 || !f.h.HasResidentProcess(f.turn.ThreadID) {
 		t.Fatal("Attach 重发了 prompt 或未为新后台任务保留进程")
+	}
+}
+
+func TestACPHoldAgyLateSpontaneousReply(t *testing.T) {
+	f := newACPHoldFixture(t, "feature_hold_late_spontaneous")
+	calls := make(chan string, 2)
+	f.h.SetUnsolicitedTurnHandler(func(threadID string) { calls <- threadID })
+	f.run(t, f.turn)
+	f.h.residentMu.Lock()
+	process := f.h.residents[f.turn.ThreadID]
+	f.h.residentMu.Unlock()
+	if process == nil {
+		t.Fatal("第 0 轮未保留进程")
+	}
+	f.complete(t, 1, "finished")
+	waitACPHold(t, func() bool { return len(calls) > 0 })
+	if got := <-calls; got != f.turn.ThreadID {
+		t.Fatalf("unsolicited thread = %q", got)
+	}
+	// 改动前 Attach 开始时静默条件已经成立，会立即补发 prompt。
+	waitACPHold(t, func() bool {
+		f.h.residentMu.Lock()
+		defer f.h.residentMu.Unlock()
+		return time.Since(process.lastUpdate) >= 3400*time.Millisecond
+	})
+	attach := f.turn
+	attach.Attach, attach.SessionID = true, fakeHoldSession
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	var events []harness.Event
+	result := make(chan error, 1)
+	go func() {
+		result <- f.h.Run(ctx, attach, func(event harness.Event) {
+			mu.Lock()
+			events = append(events, event)
+			mu.Unlock()
+		})
+	}()
+	// Attach 轮开始约 1 秒后 agy 才推送自发回答。
+	time.Sleep(time.Second)
+	if err := os.WriteFile(f.control+".late", nil, 0600); err != nil {
+		cancel()
+		<-result
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	var texts []string
+	for _, event := range events {
+		if event.Type == harness.EventText {
+			texts = append(texts, event.Text)
+		}
+	}
+	if !reflect.DeepEqual(texts, []string{"迟到续写"}) {
+		t.Fatalf("Attach 未接住迟到的自发回答: %v", events)
+	}
+	if prompts := featureParams(f.messages(t), "session/prompt"); len(prompts) != 1 {
+		t.Fatalf("Attach 在自发回答前补发了 prompt: %+v", prompts)
 	}
 }
 

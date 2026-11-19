@@ -1370,11 +1370,16 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		setNotificationHandler(onNotification, true)
 		ticker := time.NewTicker(200 * time.Millisecond)
 		scannedPath, scannedSize := transcriptPath, transcriptOffset
+		waitStart := time.Now()
 	waitForReply:
 		for {
 			p.notificationMu.Lock()
 			h.residentMu.Lock()
-			quiet := time.Since(p.lastUpdate) >= 3*time.Second
+			lastUpdate := p.lastUpdate
+			if lastUpdate.Before(waitStart) {
+				lastUpdate = waitStart
+			}
+			quiet := time.Since(lastUpdate) >= 3*time.Second
 			h.residentMu.Unlock()
 			ready := false
 			if quiet {
