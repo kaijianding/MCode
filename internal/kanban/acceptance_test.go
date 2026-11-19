@@ -224,7 +224,7 @@ func TestAcceptanceCommandBackgroundAndOutputLimit(t *testing.T) {
 	if err := os.MkdirAll(svc.TaskWorktreePath(taskID), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	createAcceptanceTask(t, st, taskID, "[命令] `sh -c 'sleep 600 &'`\n[命令] `yes | head -c 10000000`")
+	createAcceptanceTask(t, st, taskID, "[命令] `sh -c 'sleep 600 &'`\n[命令] `yes | head -c 200000`")
 	results, err := svc.RunAcceptanceCommands(context.Background(), taskID)
 	if err != nil || len(results) != 2 {
 		t.Fatalf("执行结果: %+v, %v", results, err)

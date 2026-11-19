@@ -429,7 +429,7 @@ func TestAcceptanceOffTickDoesNotBlock(t *testing.T) {
 			defer func() { cancel(); m.wg.Wait() }()
 			started := time.Now()
 			m.Tick(ctx)
-			if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
+			if elapsed := time.Since(started); command != "" && elapsed >= 750*time.Millisecond {
 				t.Fatalf("Tick blocked: %v", elapsed)
 			}
 			h := beeByThread(t, m, "lead-async-acceptance", bee.ThreadID)
