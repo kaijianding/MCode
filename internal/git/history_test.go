@@ -14,7 +14,9 @@ func TestLogShowCommitAndCommitBase(t *testing.T) {
 	ctx := context.Background()
 	first := strings.TrimSpace(runGitOutput(t, r, dir, "rev-parse", "HEAD"))
 	runGitOutput(t, r, dir, "mv", "README.md", "renamed file")
-	runGitOutput(t, r, dir, "-c", "user.name=Unique Author", "commit", "-qm", "Needle message")
+	if _, err := r.run(ctx, dir, []string{"GIT_AUTHOR_NAME=Unique Author", "GIT_COMMITTER_NAME=Unique Author"}, "-c", "user.name=Unique Author", "commit", "-qm", "Needle message"); err != nil {
+		t.Fatal(err)
+	}
 	second := strings.TrimSpace(runGitOutput(t, r, dir, "rev-parse", "HEAD"))
 	all, err := r.Log(ctx, dir, LogOptions{})
 	if err != nil || len(all) != 2 {

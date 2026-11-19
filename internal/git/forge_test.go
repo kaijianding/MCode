@@ -9,8 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 // forgeCall 记录一次被假执行器拦截的命令调用。
@@ -39,7 +37,7 @@ func (f *fakeForgeExecutor) client() *ForgeClient {
 }
 
 func TestDetectForge(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	cases := []struct {
 		name string
@@ -67,7 +65,7 @@ func TestDetectForge(t *testing.T) {
 }
 
 func TestForgeClient_DefaultExecutorUsesOsExec(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	client := NewForgeClient(nil)
 	out, err := client.Exec(context.Background(), t.TempDir(), "echo", "hello")
 	if err != nil {
@@ -79,7 +77,7 @@ func TestForgeClient_DefaultExecutorUsesOsExec(t *testing.T) {
 }
 
 func TestForgeClient_GitHubCreatePullRequest(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("Creating pull request for feat into main in owner/repo\nhttps://github.com/owner/repo/pull/1\n"), nil
 	}}
@@ -108,7 +106,7 @@ func TestForgeClient_GitHubCreatePullRequest(t *testing.T) {
 }
 
 func TestForgeClient_CreateTakesLastURL(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("see https://github.com/owner/repo/pull/1 and\nhttps://github.com/owner/repo/pull/2\n"), nil
 	}}
@@ -124,7 +122,7 @@ func TestForgeClient_CreateTakesLastURL(t *testing.T) {
 }
 
 func TestForgeClient_GitHubCreateFallsBackToViewWhenExists(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
 			return []byte("a pull request for branch \"feat\" into branch \"main\" already exists:\nhttps://github.com/owner/repo/pull/3\n"),
@@ -154,7 +152,7 @@ func TestForgeClient_GitHubCreateFallsBackToViewWhenExists(t *testing.T) {
 }
 
 func TestForgeClient_GitLabCreatePullRequest(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("https://gitlab.com/owner/repo/-/merge_requests/5\n"), nil
 	}}
@@ -174,7 +172,7 @@ func TestForgeClient_GitLabCreatePullRequest(t *testing.T) {
 }
 
 func TestForgeClient_GitLabCreateReusesURLWhenExists(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("! MR already exists: https://gitlab.com/owner/repo/-/merge_requests/5\n"),
 			errors.New("exit status 1")
@@ -195,7 +193,7 @@ func TestForgeClient_GitLabCreateReusesURLWhenExists(t *testing.T) {
 
 // glab 失败时即使输出里带了 MR 地址（鉴权/网络失败常见），也不能当成功复用。
 func TestForgeClient_GitLabCreateErrorDoesNotReuseURL(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("glab: 401 Unauthorized, see https://gitlab.com/owner/repo/-/merge_requests/5\n"),
 			errors.New("exit status 1")
@@ -365,7 +363,7 @@ func TestForgeClient_ReviewPullRequest(t *testing.T) {
 }
 
 func TestForgeClient_UnsupportedForge(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{}
 	client := exec.client()
 
@@ -381,7 +379,7 @@ func TestForgeClient_UnsupportedForge(t *testing.T) {
 }
 
 func TestForgeClient_ErrorWrapsOutput(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("GraphQL: 405 Checking in progress"), errors.New("exit status 1")
 	}}
@@ -400,7 +398,7 @@ func TestForgeClient_ErrorWrapsOutput(t *testing.T) {
 }
 
 func TestForgeClient_CreateWithoutURL(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	exec := &fakeForgeExecutor{handler: func(name string, args []string) ([]byte, error) {
 		return []byte("created, but no link printed\n"), nil
 	}}
@@ -412,7 +410,7 @@ func TestForgeClient_CreateWithoutURL(t *testing.T) {
 }
 
 func TestIsRetryableForgeError(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	retryable := []error{
 		errors.New("glab mr create: exit status 1: 405 Not Allowed"),

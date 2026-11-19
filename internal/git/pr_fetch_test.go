@@ -15,16 +15,8 @@ import (
 // 返回执行器、主检出目录与裸仓库路径。
 func setupPRConflict(t *testing.T) (*Runner, string, string) {
 	t.Helper()
-	runner, dir, bare := initSyncRemote(t)
-	runTestGit(t, dir, "switch", "-q", "-c", "pr-head")
-	writeTestFile(t, dir, "seed.txt", "pr\n")
-	runTestGit(t, dir, "commit", "-qam", "pr change")
-	runTestGit(t, dir, "push", "-q", "origin", "HEAD:refs/heads/pr-head", "HEAD:refs/pull/1/head")
-	runTestGit(t, dir, "switch", "-q", "main")
-	writeTestFile(t, dir, "seed.txt", "main\n")
-	runTestGit(t, dir, "commit", "-qam", "main change")
-	runTestGit(t, dir, "push", "-q", "origin", "main")
-	return runner, dir, bare
+	gitBin, tplWork, tplBare := ensurePRConflictTemplate(t)
+	return cloneRemoteRepoTemplate(t, gitBin, tplWork, tplBare)
 }
 
 func TestPRResolveWorktreeReuseMergesNewBase(t *testing.T) {

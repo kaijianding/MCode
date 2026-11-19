@@ -11,8 +11,6 @@ import (
 	"testing"
 
 	"golang.org/x/text/unicode/norm"
-
-	"mcode/internal/testenv"
 )
 
 // runTestGit 在测试仓库中直接执行 git 命令（仅用于测试准备与断言）。
@@ -67,7 +65,7 @@ func readTestFile(t *testing.T, dir, name string) string {
 }
 
 func TestPreviewRestoreKeepsSecondEdits(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -122,7 +120,7 @@ func TestPreviewRestoreKeepsSecondEdits(t *testing.T) {
 }
 
 func TestExecuteRevertRestoresUnmodifiedFiles(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -162,7 +160,7 @@ func TestExecuteRevertRestoresUnmodifiedFiles(t *testing.T) {
 }
 
 func TestDeleteCheckpointsRemovesOnlyTargetThread(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -196,7 +194,7 @@ func TestDeleteCheckpointsRemovesOnlyTargetThread(t *testing.T) {
 }
 
 func TestPreviewRestoreNormalizesNFDPaths(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -247,7 +245,7 @@ func TestPreviewRestoreNormalizesNFDPaths(t *testing.T) {
 }
 
 func TestDeferredPatchExpansion(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -337,7 +335,7 @@ func TestDeferredPatchExpansion(t *testing.T) {
 // RestoreFiles 按 ls-tree 给出的模式还原：可执行位保留、符号链接重建、子模块跳过；
 // ls-tree 本身出错时向上返回，而不是把路径当成「检查点中不存在」删掉工作区文件。
 func TestRestoreFilesKeepsFileTypes(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -408,7 +406,6 @@ func TestRestoreFilesKeepsFileTypes(t *testing.T) {
 }
 
 func TestRevertSymlinkFallbackWritesFile(t *testing.T) {
-	testenv.TempHome(t)
 	runner, dir := newRevertTestRepo(t)
 	const target = "scripts/run.sh"
 	writeTestFile(t, dir, "current", target)
@@ -437,7 +434,7 @@ func TestRevertSymlinkFallbackWritesFile(t *testing.T) {
 }
 
 func TestRestoreFilesReplacesSymlink(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 

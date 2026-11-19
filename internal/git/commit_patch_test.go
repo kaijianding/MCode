@@ -5,12 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 func TestCommitPatchesOnHead_PreservesUnstagedWorktreeChanges(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -94,7 +92,7 @@ func TestCommitPatchesOnHead_PreservesUnstagedWorktreeChanges(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_AddNewFile(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -130,7 +128,7 @@ func TestCommitPatchesOnHead_AddNewFile(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_Conflict(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -175,7 +173,7 @@ func TestCommitPatchesOnHead_Conflict(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_CASFailure(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -211,7 +209,7 @@ func TestCommitPatchesOnHead_CASFailure(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_StagedKept(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -254,7 +252,7 @@ func TestCommitPatchesOnHead_StagedKept(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_NoHead(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	dir := t.TempDir()
 	runTestGit(t, dir, "init", "-q")
 	runner := NewRunner("git", 2)
@@ -268,7 +266,7 @@ func TestCommitPatchesOnHead_NoHead(t *testing.T) {
 }
 
 func TestCommitPatchesOnHead_EmptyPatch(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 

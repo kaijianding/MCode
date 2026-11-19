@@ -64,6 +64,7 @@ func TestStageUnstageLines(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"新增行", "删除行", "未跟踪文件", "无末尾换行", "中文 空格.txt"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
 			r, root := setupTestRepo(t)
 			ctx := context.Background()
 			path, before, after := "file.txt", "base\n", "base\none\ntwo\n"

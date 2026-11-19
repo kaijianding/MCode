@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -15,8 +16,28 @@ func TestMain(m *testing.M) {
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	}
+	homeDir, err := os.MkdirTemp("", "mcode-git-test-home-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create temp home: %v\n", err)
+		os.Exit(1)
+	}
+	for _, kv := range [][2]string{
+		{"HOME", homeDir},
+		{"USERPROFILE", homeDir},
+		{"GIT_AUTHOR_NAME", "test-user"},
+		{"GIT_AUTHOR_EMAIL", "test@localhost"},
+		{"GIT_COMMITTER_NAME", "test-user"},
+		{"GIT_COMMITTER_EMAIL", "test@localhost"},
+	} {
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			_ = os.RemoveAll(homeDir)
+			fmt.Fprintf(os.Stderr, "setenv %s: %v\n", kv[0], err)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	cleanupGitTestTemplates()
+	_ = os.RemoveAll(homeDir)
 	os.Exit(code)
 }
 

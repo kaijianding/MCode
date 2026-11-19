@@ -2,32 +2,16 @@ package git
 
 import (
 	"context"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 // initSyncRemote 创建带首个提交的本地仓库，并接入 t.TempDir 下的裸仓库 origin（默认分支 main）。
 // 仅使用本地裸仓库，不涉及任何真实远程。
 func initSyncRemote(t *testing.T) (runner *Runner, dir string, bare string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git 可执行文件不在 PATH 中，跳过测试")
-	}
-	runner, dir = newRevertTestRepo(t)
-	bare = filepath.Join(t.TempDir(), "origin.git")
-	runTestGit(t, t.TempDir(), "init", "--bare", "-q", bare)
-	runTestGit(t, bare, "symbolic-ref", "HEAD", "refs/heads/main")
-	// 不同 Git 版本/配置的初始分支名不同，统一改名为 main
-	if cur := runTestGit(t, dir, "symbolic-ref", "--short", "HEAD"); cur != "main" {
-		runTestGit(t, dir, "branch", "-m", "main")
-	}
-	runTestGit(t, dir, "remote", "add", "origin", bare)
-	runTestGit(t, dir, "push", "-q", "-u", "origin", "main")
-	return runner, dir, bare
+	gitBin, tplWork, tplBare := ensureSyncRemoteTemplate(t)
+	return cloneRemoteRepoTemplate(t, gitBin, tplWork, tplBare)
 }
 
 // initSecondaryCheckout 在临时目录准备 origin 的第二个检出（detached HEAD），
@@ -45,7 +29,7 @@ func initSecondaryCheckout(t *testing.T, bare string) string {
 }
 
 func TestDefaultRemoteBranch(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	t.Run("回退到远端跟踪的 main", func(t *testing.T) {
 		runner, dir, _ := initSyncRemote(t)
@@ -131,7 +115,7 @@ func TestSaveReadPRBaseRef(t *testing.T) {
 }
 
 func TestCommitPaths_OnlyCommitsGivenPaths(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 
@@ -188,7 +172,7 @@ func TestCommitPaths_OnlyCommitsGivenPaths(t *testing.T) {
 }
 
 func TestCommitPaths_UnbornHead(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner := NewRunner("git", 2)
 	dir := t.TempDir()
 	ctx := context.Background()
@@ -225,7 +209,7 @@ func TestCommitPaths_UnbornHead(t *testing.T) {
 }
 
 func TestPushRef(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir, bare := initSyncRemote(t)
 	ctx := context.Background()
 
@@ -252,7 +236,7 @@ func TestPushRef(t *testing.T) {
 }
 
 func TestSyncDefaultBranch_FastForward(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir, bare := initSyncRemote(t)
 	ctx := context.Background()
 
@@ -279,7 +263,7 @@ func TestSyncDefaultBranch_FastForward(t *testing.T) {
 }
 
 func TestSyncDefaultBranch_SquashSameTree(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir, bare := initSyncRemote(t)
 	ctx := context.Background()
 
@@ -325,7 +309,7 @@ func TestSyncDefaultBranch_SquashSameTree(t *testing.T) {
 }
 
 func TestSyncDefaultBranch_KeepsCheckoutWhenDiverged(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir, bare := initSyncRemote(t)
 	ctx := context.Background()
 
@@ -356,7 +340,7 @@ func TestSyncDefaultBranch_KeepsCheckoutWhenDiverged(t *testing.T) {
 }
 
 func TestSyncDefaultBranch_SkipsWhenNotOnBaseBranch(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir, _ := initSyncRemote(t)
 
 	runTestGit(t, dir, "checkout", "-q", "-b", "feature")
@@ -375,7 +359,7 @@ func TestSyncDefaultBranch_SkipsWhenNotOnBaseBranch(t *testing.T) {
 }
 
 func TestPullFastForward(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("快进成功", func(t *testing.T) {
@@ -420,7 +404,7 @@ func TestPullFastForward(t *testing.T) {
 // PullCurrentFastForward 先 fetch 当前分支的上游再 merge --ff-only：本地从未抓取、
 // 远程跟踪分支还停在旧提交时（AheadBehind 看到 0/0）也能快进到远端最新提交。
 func TestPullCurrentFastForward(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("本地未抓取时先 fetch 再快进", func(t *testing.T) {
@@ -478,7 +462,7 @@ func TestPullCurrentFastForward(t *testing.T) {
 }
 
 func TestDiffPaths(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := newRevertTestRepo(t)
 	ctx := context.Background()
 

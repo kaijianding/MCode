@@ -8,7 +8,7 @@ import (
 )
 
 func TestPurgeWorktree_RemovesCleanMergedWorktree(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -45,7 +45,7 @@ func TestPurgeWorktree_RemovesCleanMergedWorktree(t *testing.T) {
 }
 
 func TestPurgeWorktree_DirtyRejectedWithoutAllowDirty(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -79,7 +79,7 @@ func TestPurgeWorktree_DirtyRejectedWithoutAllowDirty(t *testing.T) {
 }
 
 func TestPurgeWorktree_UnmergedBranchKept(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -112,7 +112,6 @@ func TestPurgeWorktree_UnmergedBranchKept(t *testing.T) {
 }
 
 func TestPurgeWorktree_OrphanOutsideBaseRejected(t *testing.T) {
-	setGitTestEnv(t)
 	SetWorktreePurgeRoots(filepath.Join(t.TempDir(), "managed-worktrees"))
 	t.Cleanup(func() { SetWorktreePurgeRoots() })
 
@@ -139,7 +138,6 @@ func TestPurgeWorktree_OrphanOutsideBaseRejected(t *testing.T) {
 }
 
 func TestPurgeWorktree_OrphanUnderBasePruned(t *testing.T) {
-	setGitTestEnv(t)
 	base := filepath.Join(t.TempDir(), "managed-worktrees")
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		t.Fatal(err)

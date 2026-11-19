@@ -6,18 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"mcode/internal/testenv"
 )
-
-func setGitTestEnv(t *testing.T) {
-	t.Helper()
-	testenv.TempHome(t)
-	t.Setenv("GIT_AUTHOR_NAME", "test-user")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@localhost")
-	t.Setenv("GIT_COMMITTER_NAME", "test-user")
-	t.Setenv("GIT_COMMITTER_EMAIL", "test@localhost")
-}
 
 // addTestWorktree 在主仓库下新建 worktree，并返回其路径。
 func addTestWorktree(t *testing.T, r *Runner, root, name string) string {
@@ -52,7 +41,7 @@ func findScanItem(items []WorktreeScanItem, path string) (WorktreeScanItem, bool
 }
 
 func TestDefaultBranchAndIsBranchMerged(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -84,7 +73,7 @@ func TestDefaultBranchAndIsBranchMerged(t *testing.T) {
 }
 
 func TestScanWorktrees(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -140,7 +129,7 @@ func TestScanWorktrees(t *testing.T) {
 }
 
 func TestScanWorktrees_Orphan(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	wt := addTestWorktree(t, r, root, "gone")
 	if err := os.RemoveAll(wt); err != nil {
@@ -157,7 +146,6 @@ func TestScanWorktrees_Orphan(t *testing.T) {
 }
 
 func TestCleanSafeWorktrees(t *testing.T) {
-	setGitTestEnv(t)
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -217,7 +205,6 @@ func TestCleanSafeWorktrees(t *testing.T) {
 }
 
 func TestCleanSafeWorktrees_FromLinkedWorktreeRoot(t *testing.T) {
-	setGitTestEnv(t)
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 	base := t.TempDir()
@@ -243,7 +230,6 @@ func TestCleanSafeWorktrees_FromLinkedWorktreeRoot(t *testing.T) {
 }
 
 func TestCleanSafeWorktrees_SkipsWorktreeOutsideBase(t *testing.T) {
-	setGitTestEnv(t)
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 

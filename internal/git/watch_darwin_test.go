@@ -8,13 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"mcode/internal/testenv"
 )
 
 // TestFSEventsWatcherGeneration 在真实仓库上验证 FSEvents 监听：写文件后 5 秒内 generation 应增大。
 func TestFSEventsWatcherGeneration(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	_, dir := initGitRepo(t)
 
 	w, err := newPlatformWatcher(dir)

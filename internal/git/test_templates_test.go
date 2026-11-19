@@ -41,10 +41,20 @@ type gitRepoTemplate struct {
 	err    error
 }
 
+type remoteRepoTemplate struct {
+	once    sync.Once
+	workDir string
+	bareDir string
+	gitBin  string
+	err     error
+}
+
 var (
 	emptyRepoTemplate  gitRepoTemplate
 	readmeRepoTemplate gitRepoTemplate
 	revertRepoTemplate gitRepoTemplate
+	syncRemoteTpl      remoteRepoTemplate
+	prConflictTpl      remoteRepoTemplate
 )
 
 func ensureEmptyRepoTemplate(t *testing.T) (string, string) {
@@ -206,6 +216,172 @@ func ensureRevertRepoTemplate(t *testing.T) string {
 	return revertRepoTemplate.dir
 }
 
+func ensureSyncRemoteTemplate(t *testing.T) (string, string, string) {
+	t.Helper()
+	revertDir := ensureRevertRepoTemplate(t)
+	syncRemoteTpl.once.Do(func() {
+		gitBin := revertRepoTemplate.gitBin
+		root, err := getGitTemplateRootDir()
+		if err != nil {
+			syncRemoteTpl.err = err
+			return
+		}
+		tplRoot := filepath.Join(root, "sync-remote")
+		workDir := filepath.Join(tplRoot, "work")
+		bareDir := filepath.Join(tplRoot, "origin.git")
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			syncRemoteTpl.err = err
+			return
+		}
+		if err := os.MkdirAll(bareDir, 0o755); err != nil {
+			syncRemoteTpl.err = err
+			return
+		}
+		if err := copyDirContents(revertDir, workDir); err != nil {
+			syncRemoteTpl.err = fmt.Errorf("copy revert template: %w", err)
+			return
+		}
+		runner := NewRunner(gitBin, 4)
+		ctx := context.Background()
+		if _, err := runner.run(ctx, tplRoot, nil, "init", "--bare", "-q", bareDir); err != nil {
+			syncRemoteTpl.err = fmt.Errorf("git init --bare: %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, bareDir, nil, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
+			syncRemoteTpl.err = fmt.Errorf("git symbolic-ref: %w", err)
+			return
+		}
+		out, err := runner.run(ctx, workDir, nil, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			syncRemoteTpl.err = fmt.Errorf("git symbolic-ref HEAD: %w", err)
+			return
+		}
+		if strings.TrimSpace(string(out)) != "main" {
+			if _, err := runner.run(ctx, workDir, nil, "branch", "-m", "main"); err != nil {
+				syncRemoteTpl.err = fmt.Errorf("git branch -m main: %w", err)
+				return
+			}
+		}
+		if _, err := runner.run(ctx, workDir, nil, "remote", "add", "origin", bareDir); err != nil {
+			syncRemoteTpl.err = fmt.Errorf("git remote add origin: %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, nil, "push", "-q", "-u", "origin", "main"); err != nil {
+			syncRemoteTpl.err = fmt.Errorf("git push origin main: %w", err)
+			return
+		}
+		syncRemoteTpl.gitBin = gitBin
+		syncRemoteTpl.workDir = workDir
+		syncRemoteTpl.bareDir = bareDir
+	})
+	if syncRemoteTpl.err != nil {
+		t.Fatalf("init sync remote template failed: %v", syncRemoteTpl.err)
+	}
+	return syncRemoteTpl.gitBin, syncRemoteTpl.workDir, syncRemoteTpl.bareDir
+}
+
+func ensurePRConflictTemplate(t *testing.T) (string, string, string) {
+	t.Helper()
+	gitBin, syncWork, syncBare := ensureSyncRemoteTemplate(t)
+	prConflictTpl.once.Do(func() {
+		root, err := getGitTemplateRootDir()
+		if err != nil {
+			prConflictTpl.err = err
+			return
+		}
+		tplRoot := filepath.Join(root, "pr-conflict")
+		workDir := filepath.Join(tplRoot, "work")
+		bareDir := filepath.Join(tplRoot, "origin.git")
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			prConflictTpl.err = err
+			return
+		}
+		if err := os.MkdirAll(bareDir, 0o755); err != nil {
+			prConflictTpl.err = err
+			return
+		}
+		if err := copyDirContents(syncWork, workDir); err != nil {
+			prConflictTpl.err = fmt.Errorf("copy sync work template: %w", err)
+			return
+		}
+		if err := copyDirContents(syncBare, bareDir); err != nil {
+			prConflictTpl.err = fmt.Errorf("copy sync bare template: %w", err)
+			return
+		}
+		runner := NewRunner(gitBin, 4)
+		ctx := context.Background()
+		if _, err := runner.run(ctx, workDir, nil, "remote", "set-url", "origin", bareDir); err != nil {
+			prConflictTpl.err = fmt.Errorf("git remote set-url origin: %w", err)
+			return
+		}
+		env := []string{
+			"GIT_AUTHOR_NAME=mcode-test",
+			"GIT_AUTHOR_EMAIL=mcode-test@localhost",
+			"GIT_COMMITTER_NAME=mcode-test",
+			"GIT_COMMITTER_EMAIL=mcode-test@localhost",
+		}
+		if _, err := runner.run(ctx, workDir, nil, "switch", "-q", "-c", "pr-head"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git switch -c pr-head: %w", err)
+			return
+		}
+		if err := os.WriteFile(filepath.Join(workDir, "seed.txt"), []byte("pr\n"), 0o644); err != nil {
+			prConflictTpl.err = fmt.Errorf("write seed.txt (pr): %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, env, "commit", "-qam", "pr change"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git commit pr change: %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, nil, "push", "-q", "origin", "HEAD:refs/heads/pr-head", "HEAD:refs/pull/1/head"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git push pr-head: %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, nil, "switch", "-q", "main"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git switch main: %w", err)
+			return
+		}
+		if err := os.WriteFile(filepath.Join(workDir, "seed.txt"), []byte("main\n"), 0o644); err != nil {
+			prConflictTpl.err = fmt.Errorf("write seed.txt (main): %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, env, "commit", "-qam", "main change"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git commit main change: %w", err)
+			return
+		}
+		if _, err := runner.run(ctx, workDir, nil, "push", "-q", "origin", "main"); err != nil {
+			prConflictTpl.err = fmt.Errorf("git push main: %w", err)
+			return
+		}
+		prConflictTpl.gitBin = gitBin
+		prConflictTpl.workDir = workDir
+		prConflictTpl.bareDir = bareDir
+	})
+	if prConflictTpl.err != nil {
+		t.Fatalf("init pr conflict template failed: %v", prConflictTpl.err)
+	}
+	return prConflictTpl.gitBin, prConflictTpl.workDir, prConflictTpl.bareDir
+}
+
+func cloneRemoteRepoTemplate(t *testing.T, gitBin, tplWork, tplBare string) (*Runner, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		t.Fatalf("mkdir bare repo: %v", err)
+	}
+	if err := copyDirContents(tplWork, dir); err != nil {
+		t.Fatalf("copy work repo template: %v", err)
+	}
+	if err := copyDirContents(tplBare, bare); err != nil {
+		t.Fatalf("copy bare repo template: %v", err)
+	}
+	runner := NewRunner(gitBin, 2)
+	if _, err := runner.run(context.Background(), dir, nil, "remote", "set-url", "origin", bare); err != nil {
+		t.Fatalf("git remote set-url origin failed: %v", err)
+	}
+	return runner, dir, bare
+}
+
 // copyDirContents 使用普通文件内容拷贝递归复制目录结构、文件权限与符号链接（严禁硬链接）。
 func copyDirContents(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
@@ -337,6 +513,42 @@ func TestGitTemplateRepoCopyIsolation(t *testing.T) {
 	}
 	if got := readTestFile(t, dirC2, "seed.txt"); got != "seed\n" {
 		t.Fatalf("dirC2 seed.txt 被污染: %q", got)
+	}
+}
+
+func TestSyncRemoteTemplateCopyIsolation(t *testing.T) {
+	t.Parallel()
+
+	r1, dir1, bare1 := initSyncRemote(t)
+	r2, dir2, bare2 := initSyncRemote(t)
+
+	if url1 := strings.TrimSpace(string(mustRunGit(t, r1, dir1, "remote", "get-url", "origin"))); url1 != bare1 {
+		t.Fatalf("dir1 origin URL = %q, want %q", url1, bare1)
+	}
+	if url2 := strings.TrimSpace(string(mustRunGit(t, r2, dir2, "remote", "get-url", "origin"))); url2 != bare2 {
+		t.Fatalf("dir2 origin URL = %q, want %q", url2, bare2)
+	}
+	if bare1 == bare2 || dir1 == dir2 {
+		t.Fatalf("两次调用应返回独立目录: dir1=%q dir2=%q bare1=%q bare2=%q", dir1, dir2, bare1, bare2)
+	}
+
+	bare2HeadBefore := strings.TrimSpace(string(mustRunGit(t, r2, bare2, "rev-parse", "refs/heads/main")))
+
+	writeTestFile(t, dir1, "sync-isolated.txt", "only in 1\n")
+	mustRunGit(t, r1, dir1, "add", "sync-isolated.txt")
+	mustRunGit(t, r1, dir1, "commit", "-m", "push from 1")
+	mustRunGit(t, r1, dir1, "push", "origin", "main")
+
+	bare1HeadAfter := strings.TrimSpace(string(mustRunGit(t, r1, bare1, "rev-parse", "refs/heads/main")))
+	if bare1HeadAfter == bare2HeadBefore {
+		t.Fatalf("bare1 应在 push 后前进")
+	}
+	bare2HeadAfter := strings.TrimSpace(string(mustRunGit(t, r2, bare2, "rev-parse", "refs/heads/main")))
+	if bare2HeadAfter != bare2HeadBefore {
+		t.Fatalf("bare2 被污染: got %q want %q", bare2HeadAfter, bare2HeadBefore)
+	}
+	if out := strings.TrimSpace(string(mustRunGit(t, r2, dir2, "status", "--porcelain"))); out != "" {
+		t.Fatalf("dir2 status 应为空，实际 %q", out)
 	}
 }
 

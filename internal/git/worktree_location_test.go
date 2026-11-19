@@ -49,7 +49,7 @@ func TestIsManagedWorktreePathProject(t *testing.T) {
 }
 
 func TestProjectWorktreeExcludedAndPurgeable(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 	wt := filepath.Join(root, ".mcode", "worktrees", "task")

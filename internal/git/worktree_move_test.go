@@ -10,7 +10,7 @@ import (
 )
 
 func TestPreviewWorktreeMove_NoCommit(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, dir := initGitRepo(t)
 	if _, err := r.PreviewWorktreeMove(context.Background(), dir); err == nil {
 		t.Fatal("没有 commit 的仓库应报错")
@@ -18,7 +18,7 @@ func TestPreviewWorktreeMove_NoCommit(t *testing.T) {
 }
 
 func TestMoveIntoWorktree(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -107,7 +107,7 @@ func TestMoveIntoWorktree(t *testing.T) {
 }
 
 func TestMoveIntoWorktree_RollbackWhenNotIdle(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	ctx := context.Background()
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed\n"), 0o644); err != nil {
@@ -131,7 +131,7 @@ func TestMoveIntoWorktree_RollbackWhenNotIdle(t *testing.T) {
 }
 
 func TestMoveIntoWorktree_StaleDirectoryRemoved(t *testing.T) {
-	setGitTestEnv(t)
+	t.Parallel()
 	r, root := setupTestRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt")
 	if err := os.MkdirAll(wt, 0o755); err != nil {
