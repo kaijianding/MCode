@@ -666,6 +666,98 @@ func TestResolveWorkDirPathRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestResolveWorkDirPathAcceptsRealPathOfSymlinkedWorkDir(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir := filepath.Join(base, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(base, "link-workdir")
+	if err := os.Symlink(realDir, workDir); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(realDir, "escape-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 以真实路径开头的绝对路径能通过
+	realFile := filepath.Join(realDir, "sub", "a.go")
+	abs, rel, err := resolveWorkDirPath(workDir, realFile)
+	if err != nil {
+		t.Fatalf("real path rejected: %v", err)
+	}
+	if abs != realFile || rel != filepath.Join("sub", "a.go") {
+		t.Fatalf("real path got abs=%q rel=%q, want abs=%q", abs, rel, realFile)
+	}
+
+	// 2. 以软链路径开头的绝对路径仍能通过
+	symFile := filepath.Join(workDir, "sub", "b.go")
+	abs, rel, err = resolveWorkDirPath(workDir, symFile)
+	if err != nil {
+		t.Fatalf("symlink path rejected: %v", err)
+	}
+	wantAbs := filepath.Join(realDir, "sub", "b.go")
+	if abs != wantAbs || rel != filepath.Join("sub", "b.go") {
+		t.Fatalf("symlink path got abs=%q rel=%q, want abs=%q", abs, rel, wantAbs)
+	}
+
+	// 3. 工作目录内指向外部目录的软链仍然被拒绝
+	for _, escape := range []string{
+		filepath.Join(realDir, "escape-link", "secret.txt"),
+		filepath.Join(workDir, "escape-link", "secret.txt"),
+		filepath.Join("escape-link", "secret.txt"),
+	} {
+		if _, _, err := resolveWorkDirPath(workDir, escape); err == nil {
+			t.Fatalf("expected rejection for escape symlink %q", escape)
+		}
+	}
+}
+
+func TestAgySessionCwdUsesRealPath(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir := filepath.Join(base, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(base, "link-workdir")
+	if err := os.Symlink(realDir, workDir); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		agent   Agent
+		wantCwd string
+	}{
+		{name: "agy uses real path", agent: AgentAgy, wantCwd: realDir},
+		{name: "non-agy keeps original path", agent: AgentOpenCode, wantCwd: workDir},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages, _, err := runACPFeature(t, "feature_new", tc.agent, harness.Turn{WorkDir: workDir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			params := featureParams(messages, "session/new")
+			if len(params) != 1 || params[0]["cwd"] != tc.wantCwd {
+				t.Fatalf("session/new params = %v, want cwd=%q", params, tc.wantCwd)
+			}
+		})
+	}
+}
+
 func runFakeACPFeatures(mode string) {
 	reader := bufio.NewReader(os.Stdin)
 	trace, _ := os.OpenFile(os.Getenv("MCODE_TEST_ACP_TRACE"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -1259,7 +1351,7 @@ func TestACPElicitationForm(t *testing.T) {
 				t.Fatalf("content = %#v, want %#v", reply["content"], want)
 			}
 			init := featureParams(messages, "initialize")[0]
-			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--extra", "--gemini_dir", "routed-account"}) {
+			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--disable-telemetry", "--extra", "--gemini_dir", "routed-account"}) {
 				t.Fatalf("args order = %v", got)
 			}
 			caps := init["clientCapabilities"].(map[string]any)
@@ -1586,30 +1678,41 @@ func TestACPResumeAndClose(t *testing.T) {
 }
 
 func TestACPPromptUsage(t *testing.T) {
-	_, events, err := runACPFeature(t, "feature_usage", AgentAgy, harness.Turn{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var usages []harness.Usage
-	for i, e := range events {
-		if e.Type == harness.EventUsage {
-			usages = append(usages, *e.Usage)
-			if i+1 == len(events) {
-				t.Fatal("usage after done")
+	for _, tc := range []struct {
+		name       string
+		agent      Agent
+		wantOutput int64
+	}{
+		{name: "agy does not double count thought", agent: AgentAgy, wantOutput: 20},
+		{name: "other agent sums output and thought", agent: AgentOpenCode, wantOutput: 25},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, events, err := runACPFeature(t, "feature_usage", tc.agent, harness.Turn{})
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	if len(usages) != 3 {
-		t.Fatalf("usages = %v", usages)
-	}
-	if want := (harness.Usage{InputTokens: 200, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[1], want) {
-		t.Fatalf("update = %+v", usages[1])
-	}
-	if want := (harness.Usage{InputTokens: 500, OutputTokens: 25, CachedTokens: 100, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[2], want) {
-		t.Fatalf("final = %+v", usages[2])
-	}
-	if events[len(events)-1].Type != harness.EventDone {
-		t.Fatal("done must be last")
+			var usages []harness.Usage
+			for i, e := range events {
+				if e.Type == harness.EventUsage {
+					usages = append(usages, *e.Usage)
+					if i+1 == len(events) {
+						t.Fatal("usage after done")
+					}
+				}
+			}
+			if len(usages) != 3 {
+				t.Fatalf("usages = %v", usages)
+			}
+			if want := (harness.Usage{InputTokens: 200, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[1], want) {
+				t.Fatalf("update = %+v", usages[1])
+			}
+			if want := (harness.Usage{InputTokens: 500, OutputTokens: tc.wantOutput, CachedTokens: 100, ContextTokens: 200, ContextWindow: 2000}); !reflect.DeepEqual(usages[2], want) {
+				t.Fatalf("final = %+v", usages[2])
+			}
+			if events[len(events)-1].Type != harness.EventDone {
+				t.Fatal("done must be last")
+			}
+		})
 	}
 }
 
@@ -3016,7 +3119,7 @@ func TestACPHoldAgySpontaneousReply(t *testing.T) {
 	if !reflect.DeepEqual(reply, []string{"tool_start", "空闲续写", "工具输出", "实时续写"}) || !backgroundStarted || !done {
 		t.Fatalf("Attach 未有序回放或未接住新后台任务: %+v", events)
 	}
-	if want := (&harness.Usage{InputTokens: 14, OutputTokens: 56, CachedTokens: 26, ContextTokens: 400, ContextWindow: 1024}); !reflect.DeepEqual(usage, want) {
+	if want := (&harness.Usage{InputTokens: 14, OutputTokens: 22, CachedTokens: 26, ContextTokens: 400, ContextWindow: 1024}); !reflect.DeepEqual(usage, want) {
 		t.Fatalf("Attach usage = %+v, want %+v", usage, want)
 	}
 	if len(featureParams(f.messages(t), "session/prompt")) != 1 || !f.h.HasResidentProcess(f.turn.ThreadID) {

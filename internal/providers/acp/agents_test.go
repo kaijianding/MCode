@@ -66,11 +66,11 @@ func TestLaunchArgsMatrix(t *testing.T) {
 		{AgentDroid, harness.ModeAuto, []string{"exec", "--output-format", "acp"}},
 		{AgentDroid, harness.ModeFullAccess, []string{"exec", "--output-format", "acp"}},
 
-		{AgentAgy, harness.ModeReadOnly, []string{"acp"}},
-		{AgentAgy, harness.ModeSupervised, []string{"acp"}},
-		{AgentAgy, harness.ModeAutoAcceptEdits, []string{"acp"}},
-		{AgentAgy, harness.ModeAuto, []string{"acp"}},
-		{AgentAgy, harness.ModeFullAccess, []string{"acp"}},
+		{AgentAgy, harness.ModeReadOnly, []string{"acp", "--disable-telemetry"}},
+		{AgentAgy, harness.ModeSupervised, []string{"acp", "--disable-telemetry"}},
+		{AgentAgy, harness.ModeAutoAcceptEdits, []string{"acp", "--disable-telemetry"}},
+		{AgentAgy, harness.ModeAuto, []string{"acp", "--disable-telemetry"}},
+		{AgentAgy, harness.ModeFullAccess, []string{"acp", "--disable-telemetry"}},
 
 		// Cursor
 		{AgentCursor, harness.ModeReadOnly, []string{"acp"}},
@@ -146,7 +146,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 				InteractionMode: "plan",
 				PlanExitMode:    harness.ModeFullAccess,
 			},
-			wantArgs: []any{"acp"},
+			wantArgs: []any{"acp", "--disable-telemetry"},
 		},
 		{
 			name:  "agy plan turn with auto exit mode",
@@ -156,7 +156,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 				InteractionMode: "plan",
 				PlanExitMode:    harness.ModeAuto,
 			},
-			wantArgs: []any{"acp"},
+			wantArgs: []any{"acp", "--disable-telemetry"},
 		},
 		{
 			name:  "agy normal fullAccess turn",
@@ -164,7 +164,7 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 			turn: harness.Turn{
 				Mode: harness.ModeFullAccess,
 			},
-			wantArgs: []any{"acp"},
+			wantArgs: []any{"acp", "--disable-telemetry"},
 		},
 		{
 			name:  "devin plan turn keeps readonly launch args",
@@ -191,4 +191,15 @@ func TestAgyPlanTurnLaunchArgs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtraEnvAgyDisablesAutoUpdate(t *testing.T) {
+	t.Parallel()
+	got := ExtraEnv(AgentAgy)
+	for _, env := range got {
+		if env == "AGY_CLI_DISABLE_AUTO_UPDATE=true" {
+			return
+		}
+	}
+	t.Fatalf("ExtraEnv(AgentAgy) = %v, want AGY_CLI_DISABLE_AUTO_UPDATE=true", got)
 }

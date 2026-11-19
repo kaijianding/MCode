@@ -325,7 +325,8 @@ func resolveWorkDirPath(workDir, path string, extraDirs ...string) (string, stri
 	}
 	target = filepath.Clean(target)
 
-	if !withinAnyRoot(target, roots) {
+	// 同时放行词法根与真实根：agy 会话 cwd 使用真实路径，回传的绝对路径也是真实路径形式。
+	if !withinAnyRoot(target, roots) && !withinAnyRoot(target, rootsReal) {
 		return "", "", fmt.Errorf("access denied: path outside workdir")
 	}
 
@@ -1477,7 +1478,14 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			Modes         acpSessionModes  `json:"modes"`
 		}
 
-		params := map[string]any{"cwd": turn.WorkDir, "mcpServers": servers}
+		cwd := turn.WorkDir
+		if h.opts.Agent == AgentAgy {
+			// agy 按真实路径判定编辑目标是否在工作区内，传软链路径会导致工作区内编辑触发越界权限请求。
+			if real, err := filepath.EvalSymlinks(turn.WorkDir); err == nil {
+				cwd = real
+			}
+		}
+		params := map[string]any{"cwd": cwd, "mcpServers": servers}
 		if h.opts.Agent == AgentAgy && len(turn.AdditionalDirs) > 0 {
 			params["additionalDirectories"] = turn.AdditionalDirs
 		}
@@ -1883,8 +1891,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	if promptErr == nil && agyErr == nil && (h.opts.Agent != AgentAgy || ctx.Err() == nil) {
 		u := promptResult.Usage
 		if u.InputTokens != 0 || u.OutputTokens != 0 || u.ThoughtTokens != 0 || u.CachedReadTokens != 0 {
+			// agy 的 outputTokens 已含 thoughtTokens，不能重复相加；其他 Agent 仍按 ACP 规范草案累加。
+			output := u.OutputTokens + u.ThoughtTokens
+			if h.opts.Agent == AgentAgy {
+				output = u.OutputTokens
+			}
 			_ = harness.Emit(emit, harness.Event{Type: harness.EventUsage, Usage: &harness.Usage{
-				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens + u.ThoughtTokens, CachedTokens: u.CachedReadTokens,
+				InputTokens: u.InputTokens, OutputTokens: output, CachedTokens: u.CachedReadTokens,
 				ContextTokens: contextUsed.Load(), ContextWindow: contextSize.Load(),
 			}})
 		}

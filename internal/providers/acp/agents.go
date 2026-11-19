@@ -78,7 +78,7 @@ func DisplayName(a Agent) string {
 // LaunchArgs 返回不同权限模式下各 ACP Agent 的启动命令行参数。
 // 规则：
 //   - readonly 模式按 supervised 处理；
-//   - agy: ["acp"]，由 ACP 客户端按权限模式应答
+//   - agy: ["acp", "--disable-telemetry"]，由 ACP 客户端按权限模式应答
 //   - cline: ["--acp"]
 //   - droid: ["exec", "--output-format", "acp"]
 //   - cursor: auto -> ["--auto-review", "acp"], fullAccess -> ["--force", "acp"], 其他 -> ["acp"]
@@ -101,7 +101,7 @@ func LaunchArgs(a Agent, mode harness.PermissionMode) []string {
 
 	switch a {
 	case AgentAgy:
-		return []string{"acp"}
+		return []string{"acp", "--disable-telemetry"}
 	case AgentCline:
 		return []string{"--acp"}
 
@@ -150,9 +150,12 @@ func LaunchArgs(a Agent, mode harness.PermissionMode) []string {
 }
 
 // ExtraEnv 返回对应 Agent 所需的额外预设环境变量：
-// - Cline 默认通过 CLINE_PROVIDER 指定上游提供方
+//   - Agy 默认通过 AGY_CLI_DISABLE_AUTO_UPDATE=true 禁用自动更新
+//   - Cline 默认通过 CLINE_PROVIDER 指定上游提供方
 func ExtraEnv(a Agent) []string {
 	switch a {
+	case AgentAgy:
+		return []string{"AGY_CLI_DISABLE_AUTO_UPDATE=true"}
 	case AgentCline:
 		// 已有 CLINE_PROVIDER（进程环境）时不覆盖；否则取 providers.json 里生效的提供方，
 		// 让 cline-pass 账号只拿到订阅模型，而不是整个 openrouter 目录。
