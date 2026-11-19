@@ -2,7 +2,6 @@ package kanban
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 // pokeCall 记录一次催促投递。
@@ -88,12 +86,7 @@ func (d *pokeDriver) setStateErr(err error) {
 // setupPokeWatchdog 创建注入 Now 的看板服务与巡视器，驱动由调用方指定。
 func setupPokeWatchdog(t *testing.T, driver SessionDriver, autoRescue bool, nudgeTimeout, interruptTimeout time.Duration, nowFn func() time.Time) (*Service, *store.Store, *Watchdog) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test_poke.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	svc := NewService(Options{
 		Store:                 s,
@@ -113,7 +106,7 @@ func setupPokeWatchdog(t *testing.T, driver SessionDriver, autoRescue bool, nudg
 
 // TestWatchdogPokeSendsFollowUpOnce 验证超过 nudge 超时后只发送一次催促，且文案为 StuckPokeMessage。
 func TestWatchdogPokeSendsFollowUpOnce(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -170,7 +163,7 @@ func TestWatchdogPokeSendsFollowUpOnce(t *testing.T) {
 
 // TestWatchdogInterruptPutsTaskBackToTodo 验证超过 interrupt 超时且开启 AutoRescueStuck 时中断会话并把任务置回待办。
 func TestWatchdogInterruptPutsTaskBackToTodo(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -222,7 +215,7 @@ func TestWatchdogInterruptPutsTaskBackToTodo(t *testing.T) {
 
 // TestWatchdogResetsTaskWhenSessionNotFound 验证会话不存在（store.ErrNotFound）时任务被重置为待办。
 func TestWatchdogResetsTaskWhenSessionNotFound(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -258,7 +251,7 @@ func TestWatchdogResetsTaskWhenSessionNotFound(t *testing.T) {
 
 // TestWatchdogNudgeWithoutMessengerDriver 验证驱动仅实现 SessionDriver 时催促不 panic，文案为发送失败。
 func TestWatchdogNudgeWithoutMessengerDriver(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	driver := newMockDriver() // 仅实现 SessionDriver，不支持催促与中断
@@ -296,7 +289,7 @@ func TestWatchdogNudgeWithoutMessengerDriver(t *testing.T) {
 // TestWatchdogInterruptFailureKeepsTaskAndRetries 验证驱动不支持中断时保留任务与 ThreadID，
 // 下一轮巡视继续重试，且同一失败文案不重复写库。
 func TestWatchdogInterruptFailureKeepsTaskAndRetries(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	driver := newMockDriver() // 仅实现 SessionDriver，不支持中断

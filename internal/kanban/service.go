@@ -215,8 +215,10 @@ type Service struct {
 	// receipts 保存执行会话的回执、追问与求助状态，由独立互斥锁保护
 	receipts receiptState
 	// acceptanceMu 同时保护在跑集合和验收 goroutine 的启动/关闭。
-	acceptanceMu      sync.Mutex
-	acceptanceRunning map[string]bool
+	acceptanceMu             sync.Mutex
+	acceptanceRunning        map[string]bool
+	acceptanceCommandTimeout time.Duration
+	acceptanceTotalTimeout   time.Duration
 }
 
 // SetOnResult 设置执行结果落库后的回调。

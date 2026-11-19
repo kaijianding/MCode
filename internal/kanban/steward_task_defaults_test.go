@@ -10,6 +10,7 @@ import (
 // TestStartTaskAppliesStewardTaskDefaults 验证总管下发的任务按设置的编排配对下发：
 // 任务未指定模型时用配对主导侧模型，指定了则保留；配对的子代理模型与配对 ID 总会带上并开启编排；非总管任务不受影响。
 func TestStartTaskAppliesStewardTaskDefaults(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, mock := setupTestService(t)
 	svc.opts.StewardTasks = func() StewardTaskDefaults {
@@ -52,6 +53,7 @@ func TestStartTaskAppliesStewardTaskDefaults(t *testing.T) {
 
 // TestStartTaskStewardSingleModelNoSwarm 验证任务模型选的是单个模型（没有配对）时不开编排。
 func TestStartTaskStewardSingleModelNoSwarm(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, mock := setupTestService(t)
 	svc.opts.StewardTasks = func() StewardTaskDefaults {

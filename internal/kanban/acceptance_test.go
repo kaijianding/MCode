@@ -14,6 +14,7 @@ import (
 )
 
 func TestReviewTagBlocksAutoAccept(t *testing.T) {
+	t.Parallel()
 	if !hasUserVerify(store.Task{AcceptanceCriteria: "- [审阅] 看 diff"}) {
 		t.Error("审阅应阻止自动接受")
 	}
@@ -25,11 +26,7 @@ func TestReviewTagBlocksAutoAccept(t *testing.T) {
 // setupAcceptanceService 创建带 worktree 目录配置的看板服务与存储。
 func setupAcceptanceService(t *testing.T, worktreeDir string) (*Service, *store.Store) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "acceptance.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := store.OpenForTest(t)
 
 	svc := NewService(Options{
 		Store:       st,
@@ -60,6 +57,7 @@ func createAcceptanceTask(t *testing.T, st *store.Store, taskID, criteria string
 }
 
 func TestParseAcceptanceCommands(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		criteria string
@@ -81,6 +79,7 @@ func TestParseAcceptanceCommands(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := ParseAcceptanceCommands(tc.criteria)
 			if len(got) != len(tc.want) {
 				t.Fatalf("期望 %v，实际 %v", tc.want, got)
@@ -95,6 +94,7 @@ func TestParseAcceptanceCommands(t *testing.T) {
 }
 
 func TestFormatAcceptanceCriteria(t *testing.T) {
+	t.Parallel()
 	got := formatAcceptanceCriteria([]string{"[命令] `go test ./...`", "  ", "[审阅] 看 diff"})
 	want := "- [命令] `go test ./...`\n- [审阅] 看 diff"
 	if got != want {
@@ -110,6 +110,7 @@ func TestFormatAcceptanceCriteria(t *testing.T) {
 }
 
 func TestTruncateAcceptanceOutput(t *testing.T) {
+	t.Parallel()
 	short := "编译通过"
 	if got := truncateAcceptanceOutput(short); got != short {
 		t.Fatalf("短输出不应变化: %q", got)
@@ -134,6 +135,7 @@ func TestTruncateAcceptanceOutput(t *testing.T) {
 }
 
 func TestRunAcceptanceCommands(t *testing.T) {
+	t.Parallel()
 	wtRoot := t.TempDir()
 	svc, st := setupAcceptanceService(t, wtRoot)
 	ctx := context.Background()
@@ -190,11 +192,9 @@ func TestRunAcceptanceCommands(t *testing.T) {
 }
 
 func TestRunAcceptanceCommandsTimeout(t *testing.T) {
-	old := acceptanceCommandTimeout
-	acceptanceCommandTimeout = 80 * time.Millisecond
-	t.Cleanup(func() { acceptanceCommandTimeout = old })
-
+	t.Parallel()
 	svc, st := setupAcceptanceService(t, t.TempDir())
+	svc.acceptanceCommandTimeout = 80 * time.Millisecond
 	taskID := "task-command-timeout"
 	if err := os.MkdirAll(svc.TaskWorktreePath(taskID), 0o755); err != nil {
 		t.Fatalf("创建 worktree 目录失败: %v", err)
@@ -217,10 +217,9 @@ func TestRunAcceptanceCommandsTimeout(t *testing.T) {
 }
 
 func TestAcceptanceCommandBackgroundAndOutputLimit(t *testing.T) {
-	old := acceptanceCommandTimeout
-	acceptanceCommandTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { acceptanceCommandTimeout = old })
+	t.Parallel()
 	svc, st := setupAcceptanceService(t, t.TempDir())
+	svc.acceptanceCommandTimeout = 100 * time.Millisecond
 	taskID := "task-background-output"
 	if err := os.MkdirAll(svc.TaskWorktreePath(taskID), 0o755); err != nil {
 		t.Fatal(err)
@@ -240,10 +239,7 @@ func TestAcceptanceCommandBackgroundAndOutputLimit(t *testing.T) {
 
 // TestRunAcceptanceCommandsTotalTimeout 用极小的合计上限验证：越界后剩余命令不再执行且标记超时。
 func TestRunAcceptanceCommandsTotalTimeout(t *testing.T) {
-	oldTotal := acceptanceTotalTimeout
-	acceptanceTotalTimeout = 0
-	t.Cleanup(func() { acceptanceTotalTimeout = oldTotal })
-
+	t.Parallel()
 	svc, st := setupAcceptanceService(t, t.TempDir())
 	taskID := "task-total-timeout"
 	if err := os.MkdirAll(svc.TaskWorktreePath(taskID), 0o755); err != nil {
@@ -255,7 +251,7 @@ func TestRunAcceptanceCommandsTotalTimeout(t *testing.T) {
 		"- [命令] `touch " + marker + ".2`",
 	}, "\n"))
 
-	results, err := svc.RunAcceptanceCommands(context.Background(), taskID)
+	results, err := svc.runAcceptanceCommands(context.Background(), taskID, acceptanceCommandTimeout, 0)
 	if err != nil {
 		t.Fatalf("合计超时不应作为方法错误返回: %v", err)
 	}
@@ -273,6 +269,7 @@ func TestRunAcceptanceCommandsTotalTimeout(t *testing.T) {
 }
 
 func TestBuildStartPromptAcceptanceCriteria(t *testing.T) {
+	t.Parallel()
 	criteria := "- [命令] `go test ./...`\n- [审阅] 看 diff"
 	prompt := buildStartPrompt(store.Task{Title: "任务", AcceptanceCriteria: criteria}, nil, "branch", "", false, false)
 	if !strings.Contains(prompt, "## Acceptance Criteria") {
@@ -292,6 +289,7 @@ func TestBuildStartPromptAcceptanceCriteria(t *testing.T) {
 }
 
 func TestTaskWorktreePath(t *testing.T) {
+	t.Parallel()
 	svc, _ := setupAcceptanceService(t, "")
 	if got := svc.TaskWorktreePath("task-1"); got != "" {
 		t.Fatalf("未配置 WorktreeDir 时应返回空串，实际 %q", got)
@@ -314,13 +312,10 @@ func policyNumber(t *testing.T, policy map[string]any, key string) float64 {
 }
 
 func TestCreateGoalWithOptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	planner := &mockPlanner{result: PlanResult{Summary: "s", Tasks: []PlannedTask{{Title: "任务"}}}}
-	st, err := store.Open(filepath.Join(t.TempDir(), "create_goal.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := store.OpenForTest(t)
 	svc := NewService(Options{Store: st, Driver: newMockDriver(), Projects: &mockProjects{dir: t.TempDir()}, Planner: planner})
 	t.Cleanup(func() { svc.Close() })
 
@@ -375,6 +370,7 @@ func TestCreateGoalWithOptions(t *testing.T) {
 }
 
 func TestReviewRejectCountIncrements(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -421,6 +417,7 @@ func TestReviewRejectCountIncrements(t *testing.T) {
 }
 
 func TestParsePlanOutputAcceptanceCriteria(t *testing.T) {
+	t.Parallel()
 	text := "```json\n{\"summary\":\"s\",\"tasks\":[{\"title\":\"任务\",\"notes\":\"n\",\"dependsOn\":[],\"acceptanceCriteria\":[\"[命令] `go test ./...`\",\"[审阅] 看 diff\"]}]}\n```"
 	result, err := parsePlanOutput(text, "thread-1")
 	if err != nil {
@@ -489,6 +486,7 @@ func (d *planReuseDriver) snapshot() (starts []SessionRequest, followUps []pokeC
 }
 
 func TestPlanReusesPlanThreadForFirstPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPlanReuseDriver(`{"summary":"复用会话规划","tasks":[{"title":"任务一","notes":"n","dependsOn":[],"acceptanceCriteria":["[命令] ` + "`go test ./...`" + `"]}]}`)
 	threadID := "thread-plan"
@@ -541,6 +539,7 @@ func TestPlanReusesPlanThreadForFirstPlan(t *testing.T) {
 
 // TestPlanStartsNewSessionWithoutPlanThread 校验没有规划会话时仍新开 plan 会话。
 func TestPlanStartsNewSessionWithoutPlanThread(t *testing.T) {
+	t.Parallel()
 	driver := newPlanReuseDriver(`{"summary":"新会话","tasks":[{"title":"任务一"}]}`)
 	planner := NewAgentPlanner(driver, &mockProjects{dir: t.TempDir()})
 	planner.PollInterval = time.Millisecond
@@ -563,12 +562,9 @@ func TestPlanStartsNewSessionWithoutPlanThread(t *testing.T) {
 
 // TestRunPlanKeepsPlannedAcceptanceCriteria 校验规划的验收标准落到任务上。
 func TestRunPlanKeepsPlannedAcceptanceCriteria(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "planned_criteria.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := store.OpenForTest(t)
 	planner := &mockPlanner{result: PlanResult{
 		Summary: "带验收标准的规划",
 		Tasks: []PlannedTask{{

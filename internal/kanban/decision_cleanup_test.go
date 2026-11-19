@@ -10,6 +10,7 @@ import (
 )
 
 func TestCancelClosesDecision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _ := setupTestService(t)
 	if err := db.CreateTask(ctx, store.Task{ID: "task", Status: "needs_approval", Meta: EncodeTaskMeta(TaskMeta{DecisionID: "D-0001"})}); err != nil {
@@ -45,8 +46,10 @@ func TestCancelClosesDecision(t *testing.T) {
 }
 
 func TestAnswerDecisionRejectsTerminalTasks(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"done", "failed", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, _ := setupTestService(t)
 			if err := db.CreateTask(ctx, store.Task{ID: "task", Status: status}); err != nil {
@@ -68,6 +71,7 @@ func TestAnswerDecisionRejectsTerminalTasks(t *testing.T) {
 }
 
 func TestReceiptClosesDecision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, watchdog, _ := setupReceiptTestService(t, driver, true, false, nil)
@@ -101,6 +105,7 @@ func TestReceiptClosesDecision(t *testing.T) {
 }
 
 func TestCancelStopsRunningSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _ := setupTestService(t)
 	thread := "executor"
@@ -122,6 +127,7 @@ func TestCancelStopsRunningSession(t *testing.T) {
 }
 
 func TestDeleteTaskRemovesReferences(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _ := setupTestService(t)
 	for _, task := range []store.Task{
@@ -173,8 +179,10 @@ func TestDeleteTaskRemovesReferences(t *testing.T) {
 }
 
 func TestStewardReviewClosedDecisionAndMissingSession(t *testing.T) {
+	t.Parallel()
 	for _, missingSession := range []bool{false, true} {
 		t.Run(map[bool]string{false: "closed decision", true: "missing sessions"}[missingSession], func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			driver := newPokeDriver()
 			_, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)

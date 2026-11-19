@@ -3,6 +3,7 @@ package kanban
 import "testing"
 
 func TestParseExecutorResultLastBlock(t *testing.T) {
+	t.Parallel()
 	r, err := ParseExecutorResult("```json\n{\"status\":\"failed\"}\n```\n```json\n{\"status\":\"waiting\",\"wait_kind\":\"human\",\"wait_minutes\":999}\n```")
 	if err != nil || r.Status != ResultWaiting || r.WaitMinutes != 120 {
 		t.Fatalf("结果 %v，错误 %v", r, err)
@@ -10,6 +11,7 @@ func TestParseExecutorResultLastBlock(t *testing.T) {
 }
 
 func TestExecutorResultValidate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		result ExecutorResult
 		valid  bool
@@ -44,6 +46,7 @@ func TestExecutorResultValidate(t *testing.T) {
 }
 
 func TestParseExecutorResultNoChange(t *testing.T) {
+	t.Parallel()
 	r, err := ParseExecutorResult(`{"status":"done","no_change":true}`)
 	if err != nil || !r.NoChange {
 		t.Fatalf("结果 %v，错误 %v", r, err)

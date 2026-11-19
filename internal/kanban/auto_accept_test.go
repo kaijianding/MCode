@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 func TestFinishedTaskAcceptanceCommands(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, criteria, status, feedback string
 		autoAccept, missingWorktree      bool
@@ -34,18 +34,16 @@ func TestFinishedTaskAcceptanceCommands(t *testing.T) {
 				name = tc.name + "/watchdog"
 			}
 			t.Run(name, func(t *testing.T) {
-				if tc.name == "超时" {
-					oldTimeout := acceptanceCommandTimeout
-					acceptanceCommandTimeout = 80 * time.Millisecond
-					t.Cleanup(func() { acceptanceCommandTimeout = oldTimeout })
-				}
-				testenv.TempHome(t)
+				t.Parallel()
 				ctx := context.Background()
 				repo := initMergeTestRepo(t)
 				wtDir := t.TempDir()
 				st := openMergeTestStore(t)
 				driver := newMockDriver()
 				svc := newMergeTestService(t, st, repo, wtDir, driver)
+				if tc.name == "超时" {
+					svc.acceptanceCommandTimeout = 80 * time.Millisecond
+				}
 				taskID, threadID := "task-acceptance", "thread-acceptance"
 				if !tc.missingWorktree {
 					wtPath := svc.TaskWorktreePath(taskID)
@@ -102,6 +100,7 @@ func TestFinishedTaskAcceptanceCommands(t *testing.T) {
 }
 
 func TestAcceptanceCommandsResumeAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, watchdog := range []bool{false, true} {
 		for _, tc := range []struct {
 			name, status, text, criteria string
@@ -121,6 +120,7 @@ func TestAcceptanceCommandsResumeAfterRestart(t *testing.T) {
 				continue
 			}
 			t.Run(fmt.Sprintf("watchdog=%t/%s", watchdog, tc.name), func(t *testing.T) {
+				t.Parallel()
 				ctx := context.Background()
 				svc, st := setupAcceptanceService(t, t.TempDir())
 				text := acceptanceRunningText
@@ -175,6 +175,7 @@ func TestAcceptanceCommandsResumeAfterRestart(t *testing.T) {
 }
 
 func TestAcceptanceCommandsRecoveryDoesNotDuplicateRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st := setupAcceptanceService(t, t.TempDir())
 	taskID := "task-recovery-dedup"
@@ -215,8 +216,10 @@ func TestAcceptanceCommandsRecoveryDoesNotDuplicateRunning(t *testing.T) {
 }
 
 func TestAcceptanceCommandsConcurrentLifecycle(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"latest_revision", "left_review", "left_review_new_text", "close"} {
 		t.Run(action, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, st := setupAcceptanceService(t, t.TempDir())
 			taskID := "task-concurrent-acceptance"
@@ -327,6 +330,7 @@ func waitAcceptanceMarker(t *testing.T, path string) {
 }
 
 func TestAcceptanceStartRacesClose(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st := setupAcceptanceService(t, t.TempDir())
 	var tasks []store.Task
@@ -376,7 +380,7 @@ func TestAcceptanceStartRacesClose(t *testing.T) {
 // TestAutoAcceptMergesFinishedTask 覆盖自动接受：无 [命令]/[你验] 的任务完成后走评审接受触发合并，
 // 最终状态为 done，改动进入主工作区。
 func TestAutoAcceptMergesFinishedTask(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	repo := initMergeTestRepo(t)
@@ -431,6 +435,7 @@ func TestAutoAcceptMergesFinishedTask(t *testing.T) {
 // TestAutoAcceptKeepsGatedTaskInReview 覆盖含 [你验] 的任务：自动接受不生效，
 // 任务停在 review，既不合并也不标记 done。
 func TestAutoAcceptKeepsGatedTaskInReview(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		criteria string
@@ -441,7 +446,7 @@ func TestAutoAcceptKeepsGatedTaskInReview(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			testenv.TempHome(t)
+			t.Parallel()
 			ctx := context.Background()
 
 			repo := initMergeTestRepo(t)
@@ -500,7 +505,7 @@ func TestAutoAcceptKeepsGatedTaskInReview(t *testing.T) {
 // TestReviewAcceptMergeFailureStaysReview 覆盖合并失败：任务留在 review，ReviewStatus 为 merge_failed，
 // 失败原因同时写入 LastActivityText，主工作区保持原样。
 func TestReviewAcceptMergeFailureStaysReview(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	repo := initMergeTestRepo(t)

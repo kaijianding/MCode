@@ -26,11 +26,7 @@ func (p *promptCapturePlanner) Plan(ctx context.Context, goal store.Goal, feedba
 // newGoalPromptTestService 创建带独立数据目录的看板服务。
 func newGoalPromptTestService(t *testing.T, dataDir string) (*Service, *store.Store, *promptCapturePlanner) {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := store.OpenForTest(t)
 
 	planner := &promptCapturePlanner{}
 	svc := NewService(Options{
@@ -57,6 +53,7 @@ func promptContentHash(prompt string) string {
 // TestCreateGoalMaterializesLongPrompt：超长 Prompt 落盘为 <hash>.md，库内只留摘要，
 // ReadGoal 回读全文一致，规划器收到的是全文。
 func TestCreateGoalMaterializesLongPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	svc, _, planner := newGoalPromptTestService(t, dataDir)
@@ -108,6 +105,7 @@ func TestCreateGoalMaterializesLongPrompt(t *testing.T) {
 
 // TestCreateGoalReusesMaterializedFile：相同内容只落盘一个文件。
 func TestCreateGoalReusesMaterializedFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	svc, _, _ := newGoalPromptTestService(t, dataDir)
@@ -130,6 +128,7 @@ func TestCreateGoalReusesMaterializedFile(t *testing.T) {
 
 // TestReadGoalRejectsTamperedMaterializedPrompt：落盘文件被篡改时读取报错。
 func TestReadGoalRejectsTamperedMaterializedPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	svc, _, _ := newGoalPromptTestService(t, dataDir)
@@ -150,6 +149,7 @@ func TestReadGoalRejectsTamperedMaterializedPrompt(t *testing.T) {
 
 // TestCreateGoalKeepsShortPromptInline：未超阈值的 Prompt 不落盘。
 func TestCreateGoalKeepsShortPromptInline(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	svc, _, _ := newGoalPromptTestService(t, dataDir)
@@ -179,6 +179,7 @@ func TestCreateGoalKeepsShortPromptInline(t *testing.T) {
 
 // TestCreateGoalWithoutDataDirFallsBackToInline：未配置数据目录时退化为全部存库。
 func TestCreateGoalWithoutDataDirFallsBackToInline(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := newGoalPromptTestService(t, "")
 
@@ -204,6 +205,7 @@ func TestCreateGoalWithoutDataDirFallsBackToInline(t *testing.T) {
 
 // TestCreateGoalFallsBackWhenGoalDirUnwritable：落盘失败时回退为库内全文，不阻断创建。
 func TestCreateGoalFallsBackWhenGoalDirUnwritable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	blocker := filepath.Join(t.TempDir(), "blocked")
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {

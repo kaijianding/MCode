@@ -10,6 +10,7 @@ import (
 )
 
 func TestDelegationAndWakeParents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 	parent := store.Task{ID: "parent", Title: "父任务", Status: "in_progress"}

@@ -77,6 +77,7 @@ func (d *plainSequenceDriver) SessionState(ctx context.Context, threadID string)
 // TestPlanWaitsForNewTurnWhenReusedSessionBusy：复用会话追加时正在运行，第一次停止的文本是任务书，
 // 应等下一回合再解析，而不是直接判失败或发补交提示。
 func TestPlanWaitsForNewTurnWhenReusedSessionBusy(t *testing.T) {
+	t.Parallel()
 	driver := newRepairSequenceDriver(
 		// 追加提示词时会话仍在运行，文本只是流式输出到一半。
 		SessionState{Running: true, LastAssistantText: "任务书开头"},
@@ -117,6 +118,7 @@ func TestPlanWaitsForNewTurnWhenReusedSessionBusy(t *testing.T) {
 
 // TestPlanRepairsInvalidPlanOutput：新会话第一次输出非法，补交提示后输出合法计划，Plan 应成功。
 func TestPlanRepairsInvalidPlanOutput(t *testing.T) {
+	t.Parallel()
 	driver := newRepairSequenceDriver(
 		SessionState{LastAssistantText: "这不是 JSON"},
 		SessionState{LastAssistantText: repairTestPlanJSON},
@@ -146,6 +148,7 @@ func TestPlanRepairsInvalidPlanOutput(t *testing.T) {
 
 // TestPlanGivesUpAfterTwoRepairs：连续非法输出时补交 2 次后返回原解析错误。
 func TestPlanGivesUpAfterTwoRepairs(t *testing.T) {
+	t.Parallel()
 	driver := newRepairSequenceDriver(SessionState{LastAssistantText: "始终不是 JSON"})
 	planner := NewAgentPlanner(driver, &mockProjects{dir: t.TempDir()})
 	planner.PollInterval = time.Millisecond
@@ -174,6 +177,7 @@ func TestPlanGivesUpAfterTwoRepairs(t *testing.T) {
 
 // TestPlanFailsWithoutMessengerOnInvalidOutput：驱动不支持 SessionMessenger 时，非法输出直接返回错误。
 func TestPlanFailsWithoutMessengerOnInvalidOutput(t *testing.T) {
+	t.Parallel()
 	inner := newRepairSequenceDriver(SessionState{LastAssistantText: "这不是 JSON"})
 	planner := NewAgentPlanner(&plainSequenceDriver{inner: inner}, &mockProjects{dir: t.TempDir()})
 	planner.PollInterval = time.Millisecond

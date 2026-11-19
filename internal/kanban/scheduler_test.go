@@ -20,6 +20,7 @@ type mockPlanner struct {
 }
 
 func TestLeaderExclusiveAndTakeover(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban-scheduler.lock")
 	leaders := []*Leader{NewLeader(path), NewLeader(path)}
 	for _, leader := range leaders {
@@ -56,6 +57,7 @@ func TestLeaderExclusiveAndTakeover(t *testing.T) {
 }
 
 func TestLeaderRetriesAfterError(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "parent")
 	if err := os.WriteFile(dir, nil, 0600); err != nil {
 		t.Fatal(err)
@@ -74,6 +76,7 @@ func TestLeaderRetriesAfterError(t *testing.T) {
 }
 
 func TestLeaderConcurrentClose(t *testing.T) {
+	t.Parallel()
 	leader := NewLeader(filepath.Join(t.TempDir(), "scheduler.lock"))
 	var wg sync.WaitGroup
 	for range 16 {
@@ -96,6 +99,7 @@ func TestLeaderConcurrentClose(t *testing.T) {
 }
 
 func TestGoalSchedulerLeaderGate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, driver, scheduler := setupSchedulerTestService(t, false)
 	leader := false
@@ -128,8 +132,10 @@ func TestGoalSchedulerLeaderGate(t *testing.T) {
 }
 
 func TestGoalSchedulerStartupRecoveryLeaderGate(t *testing.T) {
+	t.Parallel()
 	for _, held := range []bool{false, true} {
 		t.Run(fmt.Sprint(held), func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, _, scheduler := setupSchedulerTestService(t, false)
 			checked := make(chan struct{})
@@ -152,10 +158,12 @@ func TestGoalSchedulerStartupRecoveryLeaderGate(t *testing.T) {
 }
 
 func TestStewardOwnerCompletionScheduler(t *testing.T) {
+	t.Parallel()
 	testStewardOwnerCompletion(t, false)
 }
 
 func TestPlanningGoalOwnerCompletionGoesToReview(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -177,6 +185,7 @@ func testStewardOwnerCompletion(t *testing.T, watchdogFirst bool) {
 	for _, autoReview := range []bool{false, true} {
 		for _, autoAccept := range []bool{false, true} {
 			t.Run(fmt.Sprintf("review=%t/accept=%t", autoReview, autoAccept), func(t *testing.T) {
+				t.Parallel()
 				ctx := context.Background()
 				driver := newPokeDriver()
 				svc, db, wd, scheduler := setupReceiptTestService(t, driver, autoReview, false, nil)
@@ -216,6 +225,7 @@ func testStewardOwnerCompletion(t *testing.T, watchdogFirst bool) {
 	}
 	for _, tc := range []struct{ owner, title, origin string }{{"user", "普通", "owner"}, {goalOwnerSteward, "总管", "delegated"}} {
 		t.Run(fmt.Sprintf("%s-%s", tc.title, tc.origin), func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			driver := newPokeDriver()
 			svc, db, wd, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -243,6 +253,7 @@ func testStewardOwnerCompletion(t *testing.T, watchdogFirst bool) {
 // TestStewardOwnerReviewResolution 验证旧总管 owner 任务停在 review 时的结算边界：
 // ResultStatus 为 done 转 done、failed 转 todo，有未处理决策或会话仍在运行时保持 review。
 func TestStewardOwnerReviewResolution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := []struct {
 		name       string
@@ -258,6 +269,7 @@ func TestStewardOwnerReviewResolution(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			driver := newPokeDriver()
 			_, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
 			thread := "steward-review"
@@ -286,9 +298,11 @@ func TestStewardOwnerReviewResolution(t *testing.T) {
 // TestStewardQueueGoalCompletionBoundary 验证常驻总管目标不会因所有任务 done 而被置为 completed，
 // 普通目标同样情况下仍会 completed。
 func TestStewardQueueGoalCompletionBoundary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("常驻总管目标保持running", func(t *testing.T) {
+		t.Parallel()
 		_, db, _, scheduler := setupSchedulerTestService(t, true)
 		seedSchedulerGoal(t, ctx, db, store.Goal{ID: "g-steward-queue", ProjectID: "p", Title: "总管", Owner: goalOwnerSteward},
 			store.Task{ID: "t-steward-queue", Title: "任务", Status: string(TaskStatusDone)})
@@ -305,6 +319,7 @@ func TestStewardQueueGoalCompletionBoundary(t *testing.T) {
 	})
 
 	t.Run("普通目标完成", func(t *testing.T) {
+		t.Parallel()
 		_, db, _, scheduler := setupSchedulerTestService(t, true)
 		seedSchedulerGoal(t, ctx, db, store.Goal{ID: "g-normal-queue", ProjectID: "p", Title: "普通目标", Owner: "user"},
 			store.Task{ID: "t-normal-queue", Title: "任务", Status: string(TaskStatusDone)})
@@ -325,6 +340,7 @@ func TestStewardQueueGoalCompletionBoundary(t *testing.T) {
 }
 
 func TestStewardQueuePrunesOldTerminalTasks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, scheduler := setupSchedulerTestService(t, true)
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
@@ -391,6 +407,7 @@ func TestStewardQueuePrunesOldTerminalTasks(t *testing.T) {
 }
 
 func TestStewardQueueKeepsTasksWithRunningSessions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -426,9 +443,11 @@ func TestStewardQueueKeepsTasksWithRunningSessions(t *testing.T) {
 }
 
 func TestStewardSessionFailureSummary(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{"scheduler", "watchdog"} {
 		for _, reason := range []string{"", "构建失败", strings.Repeat("错", 301)} {
 			t.Run(fmt.Sprintf("%s/%d", source, len([]rune(reason))), func(t *testing.T) {
+				t.Parallel()
 				ctx := context.Background()
 				driver := newPokeDriver()
 				svc, db, watchdog, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -465,6 +484,7 @@ func TestStewardSessionFailureSummary(t *testing.T) {
 }
 
 func TestGoalSchedulerStewardOwnerStartFailureBudget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, mock, scheduler := setupSchedulerTestService(t, true)
 	svc.opts.Driver = &failingStartDriver{mockDriver: mock, err: errors.New("session boom")}
@@ -500,13 +520,9 @@ func (m *mockPlanner) Plan(ctx context.Context, goal store.Goal, feedback string
 }
 
 func TestGoalSchedulerEndToEnd(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -655,13 +671,9 @@ func TestGoalSchedulerEndToEnd(t *testing.T) {
 }
 
 func TestGoalSchedulerRetryFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -760,12 +772,7 @@ func TestGoalSchedulerRetryFailure(t *testing.T) {
 // setupSchedulerTestService 创建调度器测试用的服务，autoReview 控制自动评审开关。
 func setupSchedulerTestService(t *testing.T, autoReview bool) (*Service, *store.Store, *mockDriver, *GoalScheduler) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "scheduler.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	svc := NewService(Options{
@@ -808,9 +815,11 @@ func seedSchedulerGoal(t *testing.T, ctx context.Context, s *store.Store, goal s
 // TestGoalSchedulerNeedsApprovalPaths 覆盖 needs_approval 的回归路径：
 // 仍在等待审批或输入时任务与槽位都不动，会话恢复运行后改回 in_progress，会话结束时释放槽位。
 func TestGoalSchedulerNeedsApprovalPaths(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("等待审批时保持needs_approval并保留ThreadID", func(t *testing.T) {
+		t.Parallel()
 		_, s, driver, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-wait-approval"
 		seedSchedulerGoal(t, ctx, s, store.Goal{ID: "goal-wait-approval", ProjectID: "proj-1", Title: "等待审批"},
@@ -835,6 +844,7 @@ func TestGoalSchedulerNeedsApprovalPaths(t *testing.T) {
 	})
 
 	t.Run("等待输入时保持needs_approval", func(t *testing.T) {
+		t.Parallel()
 		_, s, driver, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-wait-input"
 		seedSchedulerGoal(t, ctx, s, store.Goal{ID: "goal-wait-input", ProjectID: "proj-1", Title: "等待输入"},
@@ -856,6 +866,7 @@ func TestGoalSchedulerNeedsApprovalPaths(t *testing.T) {
 	})
 
 	t.Run("会话恢复运行时改回in_progress", func(t *testing.T) {
+		t.Parallel()
 		_, s, driver, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-resumed"
 		seedSchedulerGoal(t, ctx, s, store.Goal{ID: "goal-resumed", ProjectID: "proj-1", Title: "恢复运行"},
@@ -874,6 +885,7 @@ func TestGoalSchedulerNeedsApprovalPaths(t *testing.T) {
 	})
 
 	t.Run("会话结束后释放槽位并转review", func(t *testing.T) {
+		t.Parallel()
 		_, s, driver, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-ended"
 		seedSchedulerGoal(t, ctx, s, store.Goal{ID: "goal-ended", ProjectID: "proj-1", Title: "会话结束"},
@@ -902,6 +914,7 @@ func TestGoalSchedulerNeedsApprovalPaths(t *testing.T) {
 
 // TestGoalSchedulerSkipsUnchangedProgress 验证进度未变化时不重复改写目标版本号。
 func TestGoalSchedulerSkipsUnchangedProgress(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, s, driver, scheduler := setupSchedulerTestService(t, true)
 	threadID := "thread-progress"
@@ -926,6 +939,7 @@ func TestGoalSchedulerSkipsUnchangedProgress(t *testing.T) {
 
 // TestGoalSchedulerManualReviewWhenSwitchesOff 验证自动接受与自动评审都关闭时任务离开 in_progress 转入 review。
 func TestGoalSchedulerManualReviewWhenSwitchesOff(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, s, driver, scheduler := setupSchedulerTestService(t, false)
 	threadID := "thread-manual-review"
@@ -953,6 +967,7 @@ func TestGoalSchedulerManualReviewWhenSwitchesOff(t *testing.T) {
 
 // TestGoalSchedulerCrossGoalDependency 验证依赖其他目标里已完成的任务时也能启动。
 func TestGoalSchedulerCrossGoalDependency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, s, _, scheduler := setupSchedulerTestService(t, true)
 	depTaskID := "task-other-goal-done"
@@ -984,6 +999,7 @@ func (d *failingStartDriver) StartSession(ctx context.Context, req SessionReques
 
 // TestGoalSchedulerStartFailureRecordedOnce 验证启动失败会写入原因，且同一错误只记录一次。
 func TestGoalSchedulerStartFailureRecordedOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, s, mock, scheduler := setupSchedulerTestService(t, true)
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
@@ -1022,6 +1038,7 @@ func TestGoalSchedulerStartFailureRecordedOnce(t *testing.T) {
 }
 
 func TestGoalSchedulerStartFailureBackoffRejectsAtLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, mock, scheduler := setupSchedulerTestService(t, true)
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
@@ -1055,6 +1072,7 @@ func TestGoalSchedulerStartFailureBackoffRejectsAtLimit(t *testing.T) {
 }
 
 func TestGoalSchedulerClearsBackoffAfterSuccessfulStart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, driver, scheduler := setupSchedulerTestService(t, true)
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
@@ -1092,7 +1110,9 @@ func (d *sessionStateHookDriver) SessionState(ctx context.Context, threadID stri
 }
 
 func TestTickGoalPauseRetriesOnRevisionConflict(t *testing.T) {
+	t.Parallel()
 	t.Run("并发更新后重读并暂停目标", func(t *testing.T) {
+		t.Parallel()
 		ctx := context.Background()
 		svc, s, mock, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-fail-conflict"
@@ -1157,6 +1177,7 @@ func TestTickGoalPauseRetriesOnRevisionConflict(t *testing.T) {
 	})
 
 	t.Run("并发取消后不覆盖终态", func(t *testing.T) {
+		t.Parallel()
 		ctx := context.Background()
 		svc, s, mock, scheduler := setupSchedulerTestService(t, true)
 		threadID := "thread-fail-cancelled"

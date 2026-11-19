@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 // coordinatorDriver 记录规划器的启动请求、会话状态与交互模式切换，供协调员相关测试使用。
@@ -68,13 +67,8 @@ func (d *coordinatorDriver) snapshot() (starts []SessionRequest, modes []string,
 
 func setupCoordinatorService(t *testing.T, worktreeDir string) (*Service, *store.Store) {
 	t.Helper()
-	testenv.TempHome(t)
 
-	s, err := store.Open(filepath.Join(t.TempDir(), "coordinator.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	svc := NewService(Options{
 		Store:       s,
@@ -105,7 +99,7 @@ func createCoordinatorGoal(t *testing.T, s *store.Store, status GoalStatus, plan
 }
 
 func TestCoordinatorPrefaceSkipsUnplannedGoal(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	svc, s := setupCoordinatorService(t, "")
 
@@ -119,7 +113,7 @@ func TestCoordinatorPrefaceSkipsUnplannedGoal(t *testing.T) {
 }
 
 func TestCoordinatorPrefaceIncludesGoalAndTasks(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	svc, s := setupCoordinatorService(t, "")
 
@@ -157,7 +151,7 @@ func TestCoordinatorPrefaceIncludesGoalAndTasks(t *testing.T) {
 }
 
 func TestAgentPlannerStartsInPlanModeAndSwitchesToBuild(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	driver := newCoordinatorDriver()
@@ -196,7 +190,7 @@ func TestAgentPlannerStartsInPlanModeAndSwitchesToBuild(t *testing.T) {
 }
 
 func TestIsTaskWorktreeDir(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "worktrees")
 	svc, _ := setupCoordinatorService(t, root)
 

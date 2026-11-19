@@ -3,7 +3,6 @@ package kanban
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -72,6 +71,7 @@ func (d *startHookDriver) StartSession(ctx context.Context, req SessionRequest) 
 }
 
 func TestStartTaskStopsSessionOnUpdateFailure(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                         string
 		conflict, cancelled, nilStop bool
@@ -84,6 +84,7 @@ func TestStartTaskStopsSessionOnUpdateFailure(t *testing.T) {
 		{name: "successful update keeps session"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			svc, db, driver := setupTestService(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -145,12 +146,7 @@ func (m *mockProjects) ProjectRoot(ctx context.Context, projectID string) (strin
 
 func setupTestService(t *testing.T) (*Service, *store.Store, *mockDriver) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -167,10 +163,12 @@ func setupTestService(t *testing.T) (*Service, *store.Store, *mockDriver) {
 }
 
 func TestBuildStartPromptTaskContext(t *testing.T) {
+	t.Parallel()
 	goal := "目标正文"
 	task := store.Task{ID: "e58a7f8a-1d03-4f10-8643-15b487f293e9", Title: "任务标题", Notes: "任务正文", GoalPrompt: &goal}
 	for _, workDir := range []string{"/Users/test/项目", ""} {
 		t.Run(workDir, func(t *testing.T) {
+			t.Parallel()
 			prompt := buildStartPrompt(task, nil, "branch", workDir, false, false)
 			if !strings.Contains(prompt, "任务 ID：`"+task.ID+"`，调用看板工具时使用此 ID。") {
 				t.Fatalf("开工提示缺少完整任务 ID: %s", prompt)
@@ -190,6 +188,7 @@ func TestBuildStartPromptTaskContext(t *testing.T) {
 }
 
 func TestStartTaskMetaSessionRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, meta, provider, model string
 		attachments                 []string
@@ -203,6 +202,7 @@ func TestStartTaskMetaSessionRequest(t *testing.T) {
 		{"源消息无附件", `{"source_message":"empty"}`, "", "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, driver := setupTestService(t)
 			now := time.Now()
@@ -250,6 +250,7 @@ func TestStartTaskMetaSessionRequest(t *testing.T) {
 }
 
 func TestCreateTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -319,6 +320,7 @@ func TestCreateTask(t *testing.T) {
 }
 
 func TestMoveTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -356,6 +358,7 @@ func TestMoveTask(t *testing.T) {
 }
 
 func TestStartTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, driver := setupTestService(t)
 
@@ -399,6 +402,7 @@ func TestStartTask(t *testing.T) {
 }
 
 func TestReviewTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, driver := setupTestService(t)
 
@@ -491,6 +495,7 @@ func TestReviewTask(t *testing.T) {
 }
 
 func TestSkipGoalTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, s, _ := setupTestService(t)
 
@@ -565,6 +570,7 @@ func progressInt(v any) int {
 }
 
 func TestRetryGoalTaskResetsAttempts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, s, _ := setupTestService(t)
 
@@ -617,6 +623,7 @@ func TestRetryGoalTaskResetsAttempts(t *testing.T) {
 }
 
 func TestAgentPlannerParsing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -662,12 +669,8 @@ func TestAgentPlannerParsing(t *testing.T) {
 }
 
 func TestAutoCleanupMergedWorktreesOption(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	defer s.Close()
+	t.Parallel()
+	s := store.OpenForTest(t)
 
 	cleanupCalls := 0
 	svc := NewService(Options{

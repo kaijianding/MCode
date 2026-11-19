@@ -2,16 +2,19 @@ package kanban
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"mcode/internal/git"
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 // orphanDriver 模拟执行会话已丢失的驱动：missing 中的线程返回 store.ErrNotFound，其余视为运行中。
@@ -42,33 +45,137 @@ func execGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// initMergeTestRepo 创建带一次初始提交的临时 Git 仓库，返回仓库根目录。
+var (
+	mergeTestTemplateOnce sync.Once
+	mergeTestTemplateDir  string
+	mergeTestTemplateErr  error
+)
+
+func cleanupMergeTestTemplate() {
+	if mergeTestTemplateDir != "" {
+		_ = os.RemoveAll(mergeTestTemplateDir)
+	}
+}
+
+func initMergeTestRepoTemplate() {
+	dir, err := os.MkdirTemp("", "mcode-kanban-merge-template-*")
+	if err != nil {
+		mergeTestTemplateErr = err
+		return
+	}
+	run := func(args ...string) error {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Kanban Test",
+			"GIT_AUTHOR_EMAIL=kanban@example.com",
+			"GIT_COMMITTER_NAME=Kanban Test",
+			"GIT_COMMITTER_EMAIL=kanban@example.com",
+		)
+		if out, runErr := cmd.CombinedOutput(); runErr != nil {
+			return fmt.Errorf("git %s 失败: %w\n%s", strings.Join(args, " "), runErr, out)
+		}
+		return nil
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.name", "Kanban Test"},
+		{"config", "user.email", "kanban@example.com"},
+	} {
+		if err := run(args...); err != nil {
+			_ = os.RemoveAll(dir)
+			mergeTestTemplateErr = err
+			return
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.txt"), []byte("line1\nline2\n"), 0o644); err != nil {
+		_ = os.RemoveAll(dir)
+		mergeTestTemplateErr = fmt.Errorf("写入初始文件失败: %v", err)
+		return
+	}
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-m", "init"},
+	} {
+		if err := run(args...); err != nil {
+			_ = os.RemoveAll(dir)
+			mergeTestTemplateErr = err
+			return
+		}
+	}
+	mergeTestTemplateDir = dir
+}
+
+// copyDirContents 使用普通文件内容拷贝递归复制目录结构、文件权限与符号链接（严禁硬链接）。
+func copyDirContents(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			mode := info.Mode().Perm()
+			if mode == 0 {
+				mode = 0o755
+			}
+			return os.MkdirAll(target, mode)
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			_ = out.Close()
+			return err
+		}
+		return out.Close()
+	})
+}
+
+// initMergeTestRepo 从进程级模板仓库拷贝带一次初始提交的临时 Git 仓库，返回仓库根目录。
 func initMergeTestRepo(t *testing.T) string {
 	t.Helper()
+	mergeTestTemplateOnce.Do(initMergeTestRepoTemplate)
+	if mergeTestTemplateErr != nil {
+		t.Fatalf("初始化模板仓库失败: %v", mergeTestTemplateErr)
+	}
 	repo := filepath.Join(t.TempDir(), "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("创建仓库目录失败: %v", err)
 	}
-	execGit(t, repo, "init")
-	execGit(t, repo, "config", "user.name", "Kanban Test")
-	execGit(t, repo, "config", "user.email", "kanban@example.com")
-	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("line1\nline2\n"), 0o644); err != nil {
-		t.Fatalf("写入初始文件失败: %v", err)
+	if err := copyDirContents(mergeTestTemplateDir, repo); err != nil {
+		t.Fatalf("复制模板仓库失败: %v", err)
 	}
-	execGit(t, repo, "add", ".")
-	execGit(t, repo, "commit", "-m", "init")
 	return repo
 }
 
 // openMergeTestStore 打开测试数据库并注册清理。
 func openMergeTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-	return st
+	return store.OpenForTest(t)
 }
 
 // newMergeTestService 构造带真实 Git runner 与 worktree 目录的看板服务。
@@ -116,7 +223,7 @@ func taskBranchPrefix(taskID string) string {
 }
 
 func TestAutoMergeSquashSuccess(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	repo := initMergeTestRepo(t)
@@ -178,7 +285,7 @@ func TestAutoMergeSquashSuccess(t *testing.T) {
 }
 
 func TestAutoMergeRejectsDirtyMainWorktree(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	repo := initMergeTestRepo(t)
@@ -234,7 +341,7 @@ func TestAutoMergeRejectsDirtyMainWorktree(t *testing.T) {
 }
 
 func TestAutoMergeConflictRollsBack(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	repo := initMergeTestRepo(t)
@@ -288,7 +395,7 @@ func TestAutoMergeConflictRollsBack(t *testing.T) {
 }
 
 func TestRecoverOrphanTasks(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	st := openMergeTestStore(t)

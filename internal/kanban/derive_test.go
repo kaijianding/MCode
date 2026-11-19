@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeriveDisplayColumnMapping(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 
 	tests := []struct {
@@ -126,6 +127,7 @@ func TestDeriveDisplayColumnMapping(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			derived := Derive(tc.task, nil, tc.rt)
 			if derived.DisplayColumn != tc.wantCol {
 				t.Errorf("列映射不符: got %s, want %s", derived.DisplayColumn, tc.wantCol)
@@ -144,6 +146,7 @@ func TestDeriveDisplayColumnMapping(t *testing.T) {
 }
 
 func TestDeriveBlocked(t *testing.T) {
+	t.Parallel()
 	projA := "proj-a"
 	projB := "proj-b"
 
@@ -199,6 +202,7 @@ func TestDeriveBlocked(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			derived := Derive(tc.task, allTasks, RuntimeState{})
 			if derived.Blocked != tc.wantBlocked {
 				t.Errorf("Blocked 状态不符合期望: got %v, want %v", derived.Blocked, tc.wantBlocked)
@@ -208,6 +212,7 @@ func TestDeriveBlocked(t *testing.T) {
 }
 
 func TestDeriveCapabilities(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		task        store.Task
@@ -304,6 +309,7 @@ func TestDeriveCapabilities(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			derived := Derive(tc.task, tc.all, tc.rt)
 			if derived.CanStart != tc.wantStart {
 				t.Errorf("CanStart 不符: got %v, want %v", derived.CanStart, tc.wantStart)
@@ -322,6 +328,7 @@ func TestDeriveCapabilities(t *testing.T) {
 }
 
 func TestDetectCycle(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		tasks     map[string]store.Task
@@ -379,6 +386,7 @@ func TestDetectCycle(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cycle := DetectCycle(tc.tasks)
 			hasCycle := len(cycle) > 0
 			if hasCycle != tc.wantCycle {
@@ -395,6 +403,7 @@ func TestDetectCycle(t *testing.T) {
 }
 
 func TestEnumsValid(t *testing.T) {
+	t.Parallel()
 	// 验证 TaskStatus
 	if !TaskStatusTodo.Valid() || !TaskStatusInProgress.Valid() || !TaskStatusNeedsApproval.Valid() ||
 		!TaskStatusReview.Valid() || !TaskStatusDone.Valid() || !TaskStatusRejected.Valid() {
@@ -433,6 +442,7 @@ func TestEnumsValid(t *testing.T) {
 }
 
 func TestDeriveValidatesFullDependencyChain(t *testing.T) {
+	t.Parallel()
 	project := "p"
 	other := "other"
 	tests := []struct {
@@ -459,6 +469,7 @@ func TestDeriveValidatesFullDependencyChain(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			task := store.Task{ID: "a", ProjectID: &project, Status: "todo", DependsOn: []string{"b"}}
 			got := Derive(task, tc.all, RuntimeState{})
 			if !got.Blocked || got.CanStart {
@@ -469,6 +480,7 @@ func TestDeriveValidatesFullDependencyChain(t *testing.T) {
 }
 
 func TestDeriveHeartbeatBoundaries(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		age   time.Duration
@@ -482,6 +494,7 @@ func TestDeriveHeartbeatBoundaries(t *testing.T) {
 		{StuckHardInterval, DisplayColumnNeedsYou, true},
 	} {
 		t.Run(tc.age.String(), func(t *testing.T) {
+			t.Parallel()
 			got := Derive(store.Task{Status: "in_progress"}, nil, RuntimeState{Heartbeat: now.Add(-tc.age), Now: now})
 			if got.DisplayColumn != tc.col || contains(got.AttentionFlags, AttentionFlagStuck) != tc.stuck {
 				t.Fatalf("heartbeat boundary mismatch: %+v", got)

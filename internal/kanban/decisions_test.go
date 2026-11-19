@@ -12,6 +12,7 @@ import (
 )
 
 func TestAnswerDecision(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		status string
 		want   string
@@ -22,6 +23,7 @@ func TestAnswerDecision(t *testing.T) {
 		{"review", "review"},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 			svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, func() time.Time { return now })
@@ -83,8 +85,10 @@ func TestAnswerDecision(t *testing.T) {
 }
 
 func TestAnswerDecisionStop(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"waiting", "needs_approval", "todo", "in_progress"} {
 		t.Run(status, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 			thread := "executor"
@@ -127,6 +131,7 @@ func TestAnswerDecisionStop(t *testing.T) {
 }
 
 func TestDecisionStopScheduler(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, _, scheduler := setupReceiptTestService(t, driver, true, true, nil)
@@ -149,6 +154,7 @@ func TestDecisionStopScheduler(t *testing.T) {
 }
 
 func TestDecisionAnswerOptions(t *testing.T) {
+	t.Parallel()
 	d := store.StewardDecision{OptionsJSON: `[{"key":"A","text":"继续等"},{"key":"B","text":"停下"}]`}
 	for _, tc := range []struct{ input, text, display string }{{" a ", "继续等", "A · 继续等"}, {"停下", "停下", "B · 停下"}, {"其他", "其他", "其他"}} {
 		text, display := decisionAnswer(d, tc.input)
@@ -159,6 +165,7 @@ func TestDecisionAnswerOptions(t *testing.T) {
 }
 
 func TestAnswerDecisionContinueOption(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, func() time.Time { return now })
@@ -180,6 +187,7 @@ func TestAnswerDecisionContinueOption(t *testing.T) {
 }
 
 func TestAnswerDecisionStopPrefix(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 	if err := db.CreateTask(ctx, store.Task{ID: "task-stop-prefix", Status: "waiting", Meta: EncodeTaskMeta(TaskMeta{WaitKind: "human", WakeAt: "later"})}); err != nil {
@@ -199,6 +207,7 @@ func TestAnswerDecisionStopPrefix(t *testing.T) {
 }
 
 func TestAnswerDecisionReanswerWindow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	current := now
@@ -239,6 +248,7 @@ func TestAnswerDecisionReanswerWindow(t *testing.T) {
 
 // TestAnswerDecisionTaskUpdateFailureKeepsCardOpen 验证任务更新失败时卡片仍是 open，修好后可以再次回答。
 func TestAnswerDecisionTaskUpdateFailureKeepsCardOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 	d, err := db.CreateStewardDecision(ctx, store.StewardDecision{TaskID: "task-1", Question: "继续吗"})
@@ -266,6 +276,7 @@ func TestAnswerDecisionTaskUpdateFailureKeepsCardOpen(t *testing.T) {
 }
 
 func TestExecutorResultGateOverride(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		status ResultStatus
 		want   string
@@ -277,6 +288,7 @@ func TestExecutorResultGateOverride(t *testing.T) {
 		{ResultNeedsDecision, ""},
 	} {
 		t.Run(string(tc.status), func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 			task := store.Task{ID: "task-1", Title: "任务", Status: "in_progress", Meta: EncodeTaskMeta(TaskMeta{GateOverride: "D-0001"})}

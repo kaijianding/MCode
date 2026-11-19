@@ -4,18 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 // TestWriteConcurrencyManager 校验写并发锁管理器的并发限流、排他与幂等释放特性。
 func TestWriteConcurrencyManager(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	mgr := NewWriteConcurrencyManager()
 
@@ -92,7 +90,7 @@ func TestWriteConcurrencyManager(t *testing.T) {
 
 // TestWriteConcurrencyAndMoveTaskRace 保证在 -race 下 Service.MoveTask 与 AcquireWrite 无竞态。
 func TestWriteConcurrencyAndMoveTaskRace(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -122,7 +120,7 @@ func TestWriteConcurrencyAndMoveTaskRace(t *testing.T) {
 
 // TestTaskStatusTransitions 校验非法流转被拒与合法流转推进。
 func TestTaskStatusTransitions(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -189,7 +187,7 @@ func TestTaskStatusTransitions(t *testing.T) {
 
 // TestOccupiedSlotsAndTickGoal 校验 occupiedSlots 及调度器对活跃审查会话的槽位考量。
 func TestOccupiedSlotsAndTickGoal(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	// 1. occupiedSlots 纯函数计数测试
@@ -219,12 +217,7 @@ func TestOccupiedSlotsAndTickGoal(t *testing.T) {
 	}
 
 	// 2. tickGoal 在 review 活跃时不会超出 maxConcurrency 继续启动任务
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -315,18 +308,13 @@ func TestOccupiedSlotsAndTickGoal(t *testing.T) {
 
 // TestOptimisticDispatch 校验乐观派发在 30s 内推导为 in_progress，超时后自愈恢复为持久化真实状态。
 func TestOptimisticDispatch(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 
 	nowBase := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
 	currentTime := nowBase
 
-	dbPath := filepath.Join(t.TempDir(), "t.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开数据库失败: %v", err)
-	}
-	defer s.Close()
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -385,7 +373,7 @@ func TestOptimisticDispatch(t *testing.T) {
 
 // TestGoalProgressStalled 校验目标停滞判定逻辑。
 func TestGoalProgressStalled(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	// 1. 全部失败或等待用户 -> running == 0 && ready == 0 && done < total => stalled == true
 	stalledTasks := []store.Task{

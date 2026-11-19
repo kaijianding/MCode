@@ -2,7 +2,6 @@ package kanban
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,11 +19,7 @@ func (d *pokeDriver) setThreadState(threadID string, st SessionState) {
 // setupReceiptTestService 创建带巡视器与调度器的看板服务，Now 可注入。
 func setupReceiptTestService(t *testing.T, driver SessionDriver, autoReview, autoStart bool, nowFn func() time.Time) (*Service, *store.Store, *Watchdog, *GoalScheduler) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "receipt.db"))
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	svc := NewService(Options{
 		Store:             s,
@@ -41,6 +36,7 @@ func setupReceiptTestService(t *testing.T, driver SessionDriver, autoReview, aut
 
 // TestReceiptDoneMovesTaskToReview 验证 done 回执让会话停止的任务进入 review，活动文本使用回执摘要。
 func TestReceiptDoneMovesTaskToReview(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -77,6 +73,7 @@ func TestReceiptDoneMovesTaskToReview(t *testing.T) {
 }
 
 func TestWaitingTaskCanSubmitReceiptOnlyFromItsThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, wd, _ := setupReceiptTestService(t, driver, true, false, nil)
@@ -113,6 +110,7 @@ func TestWaitingTaskCanSubmitReceiptOnlyFromItsThread(t *testing.T) {
 }
 
 func TestDelegatingBeesSuppressReceiptFollowUp(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -133,6 +131,7 @@ func TestDelegatingBeesSuppressReceiptFollowUp(t *testing.T) {
 }
 
 func TestOpenDecisionKeepsOrdinaryGoalTaskInApproval(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	_, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -166,8 +165,10 @@ func TestOpenDecisionKeepsOrdinaryGoalTaskInApproval(t *testing.T) {
 }
 
 func TestExecutorResultFailedAndDecision(t *testing.T) {
+	t.Parallel()
 	for _, status := range []ResultStatus{ResultFailed, ResultNeedsDecision} {
 		t.Run(string(status), func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			driver := newPokeDriver()
 			svc, db, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -210,8 +211,10 @@ func TestExecutorResultFailedAndDecision(t *testing.T) {
 }
 
 func TestStewardOwnerFailureBudgetAndDecision(t *testing.T) {
+	t.Parallel()
 	for _, watchdogFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "scheduler", true: "watchdog"}[watchdogFirst], func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			driver := newPokeDriver()
 			svc, db, wd, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -257,6 +260,7 @@ func TestStewardOwnerFailureBudgetAndDecision(t *testing.T) {
 }
 
 func TestStewardOwnerDecisionRemainsBlocked(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, wd, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -280,6 +284,7 @@ func TestStewardOwnerDecisionRemainsBlocked(t *testing.T) {
 // TestStewardOwnerMissingReceiptUsesAssistantText 验证总管 owner 任务缺回执、会话调不到回执工具时，
 // 用最后一条助手文本作为结果摘要并直接结算为 done。
 func TestStewardOwnerMissingReceiptUsesAssistantText(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -322,6 +327,7 @@ func TestStewardOwnerMissingReceiptUsesAssistantText(t *testing.T) {
 // TestStewardOwnerMissingReceiptRetriesThenFailsOnce 验证总管 owner 任务缺回执且没有助手文本时，
 // 失败预算内先回到 todo 且不通知，超过 maxAttempts 后 failed 且只通知一次。
 func TestStewardOwnerMissingReceiptRetriesThenFailsOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, db, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -376,6 +382,7 @@ func TestStewardOwnerMissingReceiptRetriesThenFailsOnce(t *testing.T) {
 
 // TestReceiptMissingAsksThenEscalates 验证缺回执时先追问两次，宽限过后升级到 needs_approval 并停住。
 func TestReceiptMissingAsksThenEscalates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -442,6 +449,7 @@ func TestReceiptMissingAsksThenEscalates(t *testing.T) {
 
 // TestReceiptWatchdogBlocked 验证 blocked 回执让 watchdog 把任务迁到 needs_approval 并写入求助文案。
 func TestReceiptWatchdogBlocked(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -474,6 +482,7 @@ func TestReceiptWatchdogBlocked(t *testing.T) {
 
 // TestReceiptSchedulerBlockedAndResume 验证调度器遇到求助任务保持不动，会话恢复后清除标记并回到 in_progress。
 func TestReceiptSchedulerBlockedAndResume(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -510,6 +519,7 @@ func TestReceiptSchedulerBlockedAndResume(t *testing.T) {
 // TestReceiptDoneClearsBlocked 验证求助后会话在两次 Tick 之间跑完并提交 done 时，
 // 回执会解除求助标记，调度器直接按回执送审，而不是继续停在 needs_approval。
 func TestReceiptDoneClearsBlocked(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, _, scheduler := setupReceiptTestService(t, driver, true, false, nil)
@@ -549,6 +559,7 @@ func TestReceiptDoneClearsBlocked(t *testing.T) {
 
 // TestReceiptStandaloneNeedsApprovalDone 验证没有目标调度的独立任务求助后补交 done 回执也能自动送审。
 func TestReceiptStandaloneNeedsApprovalDone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -591,6 +602,7 @@ func TestReceiptStandaloneNeedsApprovalDone(t *testing.T) {
 // TestReceiptDoneWithAutoAcceptHandoff 验证自动接受目标下 watchdog 先消费回执、调度器再按同一摘要结算，
 // 调度器不会把已完成的任务误判成缺回执而追问。
 func TestReceiptDoneWithAutoAcceptHandoff(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, wd, scheduler := setupReceiptTestService(t, driver, false, false, nil)
@@ -633,6 +645,7 @@ func TestReceiptDoneWithAutoAcceptHandoff(t *testing.T) {
 
 // TestReceiptFallbackWithoutFollowUp 验证驱动不支持追问时保持旧行为：直接用最后一条助手文本完成任务。
 func TestReceiptFallbackWithoutFollowUp(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newMockDriver()
 	svc, s, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -659,6 +672,7 @@ func TestReceiptFallbackWithoutFollowUp(t *testing.T) {
 // TestReceiptFallbackWhenHostToolsUnavailable 会话调不到回执工具（HostToolsUnavailable）时，
 // 即使驱动支持追问也按旧行为收尾：不追问，直接用最后一条助手文本完成任务并进入 review。
 func TestReceiptFallbackWhenHostToolsUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newPokeDriver()
 	svc, s, wd, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -691,6 +705,7 @@ func TestReceiptFallbackWhenHostToolsUnavailable(t *testing.T) {
 
 // TestSubmitTaskResultValidation 验证回执校验：线程不匹配、非法 outcome、空摘要与非法状态都被拒绝。
 func TestSubmitTaskResultValidation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	driver := newMockDriver()
 	svc, s, _, _ := setupReceiptTestService(t, driver, true, true, nil)
@@ -758,6 +773,7 @@ func TestSubmitTaskResultValidation(t *testing.T) {
 
 // TestReceiptConsumedOnce 验证同一条回执只会被消费一次：消费后既不重复追问，也不会被再次结算。
 func TestReceiptConsumedOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
 	driver := newPokeDriver()
@@ -801,6 +817,7 @@ func TestReceiptConsumedOnce(t *testing.T) {
 
 // TestStartPromptMentionsSubmitResult 验证执行会话的启动提示词要求调用 kanban_submit_result。
 func TestStartPromptMentionsSubmitResult(t *testing.T) {
+	t.Parallel()
 	prompt := buildStartPrompt(store.Task{ID: "task-prompt", Title: "提示词任务"}, nil, "kanban/task-prompt", "", false, false)
 	if !strings.Contains(prompt, "kanban_submit_result") {
 		t.Fatalf("启动提示词应包含 kanban_submit_result，实际: %s", prompt)

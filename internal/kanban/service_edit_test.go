@@ -11,6 +11,7 @@ import (
 )
 
 func TestServiceEdit_CreateDraft(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, driver := setupTestService(t)
 
@@ -130,6 +131,7 @@ func TestServiceEdit_CreateDraft(t *testing.T) {
 }
 
 func TestServiceEdit_UpdateTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 
@@ -179,6 +181,7 @@ func TestServiceEdit_UpdateTask(t *testing.T) {
 }
 
 func TestServiceEdit_ReplaceTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, _ := setupTestService(t)
 	task, err := svc.CreateTask(ctx, CreateTaskInput{ProjectID: "proj-1", Title: "Initial"})
@@ -220,6 +223,7 @@ func TestServiceEdit_ReplaceTask(t *testing.T) {
 }
 
 func TestServiceEdit_DeleteTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, _ := setupTestService(t)
 
@@ -284,6 +288,7 @@ func (d *missingSessionDriver) SessionState(context.Context, string) (SessionSta
 }
 
 func TestServiceEdit_DeleteTaskWithMissingSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, driver := setupTestService(t)
 	svc.opts.Driver = &missingSessionDriver{mockDriver: driver}
@@ -307,6 +312,7 @@ func TestServiceEdit_DeleteTaskWithMissingSession(t *testing.T) {
 }
 
 func TestServiceEdit_SetGoalAndReadGoal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, _ := setupTestService(t)
 	task, err := svc.CreateTask(ctx, CreateTaskInput{ProjectID: "proj-1", Title: "Task"})
@@ -359,6 +365,7 @@ func TestServiceEdit_SetGoalAndReadGoal(t *testing.T) {
 }
 
 func TestServiceEdit_DeleteLiveTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, driver := setupTestService(t)
 	task, err := svc.CreateTask(ctx, CreateTaskInput{ProjectID: "proj-1", Title: "Running task"})
@@ -394,6 +401,7 @@ func TestServiceEdit_DeleteLiveTask(t *testing.T) {
 }
 
 func TestServiceEdit_StartTaskClearsIsDraft(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, _ := setupTestService(t)
 

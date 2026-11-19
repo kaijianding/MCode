@@ -28,6 +28,7 @@ func (p *cancellingPlanner) Plan(ctx context.Context, goal store.Goal, feedback 
 // TestRunPlanRollsBackTasksWhenGoalCancelled：规划期间目标被取消时，本轮新建的任务要删掉，
 // 不能留下没有 goal_tasks 关联、可被手工启动的幽灵卡片。
 func TestRunPlanRollsBackTasksWhenGoalCancelled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	st := openMergeTestStore(t)
 	planner := &cancellingPlanner{}
@@ -70,6 +71,7 @@ func TestRunPlanRollsBackTasksWhenGoalCancelled(t *testing.T) {
 // TestRecoverStalePlanningGoals：启动恢复时超时仍为 planning 的目标置为 plan_failed 并写原因，
 // 刚创建的目标不受影响。
 func TestRecoverStalePlanningGoals(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	st := openMergeTestStore(t)
 	svc := NewService(Options{Store: st})
@@ -128,6 +130,7 @@ func TestRecoverStalePlanningGoals(t *testing.T) {
 // TestRunPlanFailsWhenMaterializedPromptUnreadable：落盘的目标提示词读不出来时，
 // 目标要落到 plan_failed 并写原因，不能用库内摘要继续规划。
 func TestRunPlanFailsWhenMaterializedPromptUnreadable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	svc, st, planner := newGoalPromptTestService(t, dataDir)

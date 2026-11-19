@@ -13,6 +13,7 @@ import (
 )
 
 func TestCheckWaits(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, command string
 		wakes         int
@@ -22,6 +23,7 @@ func TestCheckWaits(t *testing.T) {
 		{"超时", "false", 6, "needs_approval"}, {"写命令", "rm marker", 0, "needs_approval"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 			dir := svc.opts.Projects.(*mockProjects).dir
@@ -66,6 +68,7 @@ func TestCheckWaits(t *testing.T) {
 }
 
 func TestCheckWaitsBadTaskDoesNotStopRound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 	project := "p"
@@ -90,6 +93,7 @@ func TestCheckWaitsBadTaskDoesNotStopRound(t *testing.T) {
 }
 
 func TestCheckWaitsHumanExpiryCreatesDecision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, func() time.Time { return now })
@@ -134,6 +138,7 @@ func (p *conflictProjects) ProjectRoot(ctx context.Context, projectID string) (s
 }
 
 func TestCheckWaitsContinuesAfterConflict(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, _ := setupReceiptTestService(t, newPokeDriver(), true, false, nil)
 	projects := &conflictProjects{dir: t.TempDir(), db: db}

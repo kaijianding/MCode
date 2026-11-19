@@ -17,8 +17,8 @@ import (
 	"mcode/internal/store"
 )
 
-// 验收命令执行超时；用变量声明以便测试注入更短的超时。
-var (
+// 验收命令执行超时默认值。
+const (
 	// acceptanceCommandTimeout 为单条验收命令的执行超时。
 	acceptanceCommandTimeout = 5 * time.Minute
 	// acceptanceTotalTimeout 为一次验收中所有命令的合计上限，超出后剩余命令记为超时并不再执行。
@@ -216,10 +216,27 @@ func (s *Service) finishAcceptanceCommands(original store.Task, autoAccept bool)
 	}
 }
 
+func (s *Service) acceptanceTimeouts() (time.Duration, time.Duration) {
+	cmdTimeout := acceptanceCommandTimeout
+	if s != nil && s.acceptanceCommandTimeout > 0 {
+		cmdTimeout = s.acceptanceCommandTimeout
+	}
+	totalTimeout := acceptanceTotalTimeout
+	if s != nil && s.acceptanceTotalTimeout > 0 {
+		totalTimeout = s.acceptanceTotalTimeout
+	}
+	return cmdTimeout, totalTimeout
+}
+
 // RunAcceptanceCommands 在任务 worktree 里依次执行验收标准里的 [命令] 条目。
 // 没有命令时返回空切片；单条命令超时 5 分钟，全部命令合计上限 15 分钟，
 // 超出合计上限后剩余命令直接记为超时且不再执行。本方法不改变任务状态，调用方负责接线。
 func (s *Service) RunAcceptanceCommands(ctx context.Context, taskID string) ([]AcceptanceCommandResult, error) {
+	cmdTimeout, totalTimeout := s.acceptanceTimeouts()
+	return s.runAcceptanceCommands(ctx, taskID, cmdTimeout, totalTimeout)
+}
+
+func (s *Service) runAcceptanceCommands(ctx context.Context, taskID string, commandTimeout, totalTimeout time.Duration) ([]AcceptanceCommandResult, error) {
 	if s == nil || s.opts.Store == nil {
 		return nil, errors.New("kanban: store is nil")
 	}
@@ -241,7 +258,7 @@ func (s *Service) RunAcceptanceCommands(ctx context.Context, taskID string) ([]A
 	}
 
 	results := make([]AcceptanceCommandResult, 0, len(commands))
-	deadline := time.Now().Add(acceptanceTotalTimeout)
+	deadline := time.Now().Add(totalTimeout)
 	for i, command := range commands {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -257,7 +274,7 @@ func (s *Service) RunAcceptanceCommands(ctx context.Context, taskID string) ([]A
 			break
 		}
 
-		timeout := acceptanceCommandTimeout
+		timeout := commandTimeout
 		if timeout <= 0 || timeout > remaining {
 			timeout = remaining
 		}

@@ -3,7 +3,6 @@ package kanban
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,10 +11,12 @@ import (
 )
 
 func TestStewardOwnerCompletionWatchdog(t *testing.T) {
+	t.Parallel()
 	testStewardOwnerCompletion(t, true)
 }
 
 func TestWatchdogLeaderGate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, _, watchdog := setupWatchdogTestService(t, true, false, true, time.Minute, time.Hour, nil)
 	leader := false
@@ -43,6 +44,7 @@ func TestWatchdogLeaderGate(t *testing.T) {
 }
 
 func TestWatchdogFailedSessionFailsStandaloneTaskOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, db, driver, watchdog := setupWatchdogTestService(t, true, false, true, time.Minute, time.Hour, nil)
 	thread := "failed-standalone"
@@ -67,6 +69,7 @@ func TestWatchdogFailedSessionFailsStandaloneTaskOnce(t *testing.T) {
 }
 
 func TestWatchdogRequeuesOldTaskWithoutThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Now()
 	_, db, _, watchdog := setupWatchdogTestService(t, true, false, true, time.Minute, time.Hour, func() time.Time { return now })
@@ -86,12 +89,7 @@ func TestWatchdogRequeuesOldTaskWithoutThread(t *testing.T) {
 // setupWatchdogTestService 辅助创建用于测试自动化特性的看板服务。
 func setupWatchdogTestService(t *testing.T, autoReview, autoStart, autoRescue bool, nudgeTimeout, interruptTimeout time.Duration, nowFn func() time.Time) (*Service, *store.Store, *mockDriver, *Watchdog) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test_features.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("打开测试数据库失败: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := store.OpenForTest(t)
 
 	driver := newMockDriver()
 	projects := &mockProjects{dir: t.TempDir()}
@@ -116,9 +114,11 @@ func setupWatchdogTestService(t *testing.T, autoReview, autoStart, autoRescue bo
 
 // TestKanbanAutoStartOnCreate 测试新建任务自动排队启动。
 func TestKanbanAutoStartOnCreate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("启动失败时记录原因", func(t *testing.T) {
+		t.Parallel()
 		svc, db, driver, _ := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		startErr := errors.New("session boom")
 		svc.opts.Driver = &failingStartDriver{mockDriver: driver, err: startErr}
@@ -138,6 +138,7 @@ func TestKanbanAutoStartOnCreate(t *testing.T) {
 	})
 
 	t.Run("开启自启且无依赖时创建后立即为in_progress", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, _ := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -155,6 +156,7 @@ func TestKanbanAutoStartOnCreate(t *testing.T) {
 	})
 
 	t.Run("开启自启但有未完成前置依赖时保持todo", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, _ := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		// 前置任务（未完成）
 		err := svc.opts.Store.CreateTask(ctx, store.Task{
@@ -180,6 +182,7 @@ func TestKanbanAutoStartOnCreate(t *testing.T) {
 	})
 
 	t.Run("关闭自启时保持todo", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, _ := setupWatchdogTestService(t, true, false, true, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -196,9 +199,11 @@ func TestKanbanAutoStartOnCreate(t *testing.T) {
 
 // TestKanbanAutoReview 测试 Agent 完成后自动转入审查状态。
 func TestKanbanAutoReview(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("开启自动审查时完成自动转入review", func(t *testing.T) {
+		t.Parallel()
 		svc, s, driver, wd := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -233,6 +238,7 @@ func TestKanbanAutoReview(t *testing.T) {
 	})
 
 	t.Run("两个开关都关闭时完成转入review等待人工处理", func(t *testing.T) {
+		t.Parallel()
 		svc, s, driver, wd := setupWatchdogTestService(t, false, true, false, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -265,6 +271,7 @@ func TestKanbanAutoReview(t *testing.T) {
 	})
 
 	t.Run("开启自动接受时保持原状态交给调度器", func(t *testing.T) {
+		t.Parallel()
 		_, s, driver, wd := setupWatchdogTestService(t, false, true, false, 600*time.Second, 1800*time.Second, nil)
 		threadID := "thread-auto-accept"
 		seedSchedulerGoal(t, ctx, s, store.Goal{
@@ -289,6 +296,7 @@ func TestKanbanAutoReview(t *testing.T) {
 	})
 
 	t.Run("遇到审批请求时转入needs_approval", func(t *testing.T) {
+		t.Parallel()
 		svc, s, driver, wd := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -323,6 +331,7 @@ func TestKanbanAutoReview(t *testing.T) {
 	})
 
 	t.Run("遇到输入请求时转入needs_approval", func(t *testing.T) {
+		t.Parallel()
 		svc, s, driver, wd := setupWatchdogTestService(t, true, true, true, 600*time.Second, 1800*time.Second, nil)
 		task, err := svc.CreateTask(ctx, CreateTaskInput{
 			ProjectID: "proj-1",
@@ -356,6 +365,7 @@ func TestKanbanAutoReview(t *testing.T) {
 
 // TestWatchdog_StuckRescue 测试卡死救援（提醒与强制中断）。
 func TestWatchdog_StuckRescue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	currTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	nowFn := func() time.Time { return currTime }

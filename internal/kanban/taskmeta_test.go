@@ -10,6 +10,7 @@ import (
 )
 
 func TestTaskMetaEncoding(t *testing.T) {
+	t.Parallel()
 	m := TaskMeta{Origin: "owner", ParentID: "parent", Children: []string{"child"}, Provider: "provider", Model: "model", Wakes: 2}
 	got, err := ParseTaskMeta(EncodeTaskMeta(m))
 	if err != nil || !reflect.DeepEqual(got, m) {
@@ -27,6 +28,7 @@ func TestTaskMetaEncoding(t *testing.T) {
 }
 
 func TestPatchTaskMeta(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, st, _ := setupTestService(t)
 	task, err := svc.CreateTask(ctx, CreateTaskInput{Title: "task", Origin: "owner", Provider: "provider", Model: "model"})

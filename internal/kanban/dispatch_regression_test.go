@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"mcode/internal/store"
-	"mcode/internal/testenv"
 )
 
 type blockingDispatchDriver struct {
@@ -33,9 +32,10 @@ func (d *blockingDispatchDriver) StartSession(ctx context.Context, req SessionRe
 }
 
 func TestBoardDuringRealDispatch(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			t.Parallel()
 			svc, _, mock := setupTestService(t)
 			driver := &blockingDispatchDriver{mockDriver: mock, entered: make(chan struct{}), resume: make(chan struct{}), fail: fail}
 			svc.opts.Driver = driver
@@ -103,7 +103,7 @@ func TestBoardDuringRealDispatch(t *testing.T) {
 }
 
 func TestReviewProgressStalledNotifications(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	ctx := context.Background()
 	svc, db, driver := setupTestService(t)
 	goal := store.Goal{ID: "review-goal", ProjectID: "p", Title: "review", Status: string(GoalStatusRunning)}

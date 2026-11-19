@@ -11,9 +11,11 @@ import (
 )
 
 func TestTaskWorktreePathLocations(t *testing.T) {
+	t.Parallel()
 	for _, location := range []string{config.WorktreeLocationCentral, config.WorktreeLocationProject} {
 		for _, existing := range []string{"none", "central", "project", "both"} {
 			t.Run(location+"/"+existing, func(t *testing.T) {
+				t.Parallel()
 				data, repo := t.TempDir(), t.TempDir()
 				svc, st := setupAcceptanceService(t, filepath.Join(data, "worktrees"))
 				svc.opts.DataDir = data
@@ -55,6 +57,7 @@ func TestTaskWorktreePathLocations(t *testing.T) {
 }
 
 func TestTaskWorktreeProjectStartAndResume(t *testing.T) {
+	t.Parallel()
 	repo := initMergeTestRepo(t)
 	data := t.TempDir()
 	st := openMergeTestStore(t)
