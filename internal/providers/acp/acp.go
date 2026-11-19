@@ -648,6 +648,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	type pendingTool struct {
 		readPath   string
 		background bool
+		editPath   string
+		editPatch  string
 	}
 	type startedTool struct {
 		id      string
@@ -661,6 +663,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	planTurnID := turn.ID
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
+	// writtenPaths 记录本轮已通过 fs/write_text_file 发过文件变更的路径，避免编辑工具补发的 diff 重复。
+	writtenPaths := make(map[string]bool)
 	toolsFinished := false
 	var receivedText bool
 
@@ -732,6 +736,11 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			}
 			if err := os.WriteFile(target, []byte(p.Content), 0644); err != nil {
 				return nil, err
+			}
+			if h.opts.Agent == AgentAgy {
+				toolsMu.Lock()
+				writtenPaths[rel] = true
+				toolsMu.Unlock()
 			}
 			_ = harness.Emit(emit, harness.Event{
 				Type: harness.EventFileChange,
@@ -1107,6 +1116,24 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if len(input) == 0 {
 				input = u.RawInput
 			}
+			editPath, editPatch := "", ""
+			if h.opts.Agent == AgentAgy {
+				rawInput := u.RawInput
+				if len(rawInput) == 0 {
+					rawInput = u.Input
+				}
+				locationPath := ""
+				if len(u.Locations) > 0 {
+					locationPath = u.Locations[0].Path
+				}
+				// agy 的编辑工具常常只给路径和新旧片段，不给 diff；在 pending 时文件还是旧内容，
+				// 这时生成 patch 才有真实行号（对齐 t3code 在 pending 时读 pre-edit 文件的做法）。
+				if targetPath, chunks, ok := agyEditInput(rawInput, locationPath); ok {
+					if target, rel, err := resolveWorkDirPath(turn.WorkDir, targetPath, turn.AdditionalDirs...); err == nil {
+						editPath, editPatch = rel, agyEditPatch(target, chunks)
+					}
+				}
+			}
 			toolsMu.Lock()
 			if toolsFinished {
 				toolsMu.Unlock()
@@ -1116,7 +1143,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if h.opts.Agent == AgentAgy {
 				readPath = agyReadPath(u.Title, u.Locations, input)
 			}
-			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath}
+			pendingTools[u.ToolCallID] = pendingTool{readPath: readPath, editPath: editPath, editPatch: editPatch}
 			startedTools[u.ToolCallID] = true
 			if h.opts.HoldBackgroundTasks {
 				var raw struct{ CommandLine string }
@@ -1189,6 +1216,17 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if output == "" {
 				output = u.Output
 			}
+			if h.opts.Agent == AgentAgy {
+				combined, exitCode, hasExit := agyCommandResult(u.RawOutput)
+				if output == "" {
+					output = combined
+				}
+				// t3code 不把非 0 退出码当工具失败（AntigravityProtocol.ts 只把它放进 item.exitCode）；
+				// mcode 没有这个字段，就把退出码附在输出末尾显示。
+				if hasExit && exitCode != 0 {
+					output = agyWithExitCode(output, exitCode)
+				}
+			}
 			toolsMu.Lock()
 			if toolsFinished {
 				toolsMu.Unlock()
@@ -1198,6 +1236,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				toolsMu.Unlock()
 				return
 			}
+			pending := pendingTools[u.ToolCallID]
 			delete(pendingTools, u.ToolCallID)
 			for i, id := range pendingOrder {
 				if id == u.ToolCallID {
@@ -1212,7 +1251,16 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				Output:  output,
 				IsError: isErr,
 			})
+			fileChanged := h.opts.Agent == AgentAgy && u.Status == "completed" && !isErr && pending.editPatch != "" &&
+				u.Path == "" && u.Patch == "" && u.Diff == "" && !writtenPaths[pending.editPath]
 			toolsMu.Unlock()
+			if fileChanged {
+				_ = harness.Emit(emit, harness.Event{
+					Type:  harness.EventFileChange,
+					Path:  pending.editPath,
+					Patch: pending.editPatch,
+				})
+			}
 
 		case "usage_update":
 			contextUsed.Store(u.Used)

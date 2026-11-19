@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"mcode/internal/fsutil"
+	"mcode/internal/harness"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,6 +31,114 @@ func agyCommand(input []byte) string {
 		}
 	}
 	return ""
+}
+
+// agyCommandResult 从命令工具的 rawOutput 里取合并输出与退出码。
+// 字段名对齐 t3code apps/server/src/provider/acp/AntigravityProtocol.ts 的
+// `output?.combinedOutput ?? output?.combined_output` 与 `output?.exitCode ?? output?.exit_code`。
+func agyCommandResult(rawOutput []byte) (output string, exitCode int, hasExit bool) {
+	var fields map[string]json.RawMessage
+	if jsonErr := json.Unmarshal(rawOutput, &fields); jsonErr != nil {
+		return "", 0, false
+	}
+	for _, key := range []string{"combinedOutput", "combined_output"} {
+		var value string
+		if raw, ok := fields[key]; ok && json.Unmarshal(raw, &value) == nil && value != "" {
+			output = value
+			break
+		}
+	}
+	for _, key := range []string{"exitCode", "exit_code"} {
+		var value int
+		if raw, ok := fields[key]; ok && json.Unmarshal(raw, &value) == nil {
+			return output, value, true
+		}
+	}
+	return output, 0, false
+}
+
+// agyWithExitCode 把非 0 退出码附在输出末尾。mcode 的 EventToolEnd 没有退出码字段，
+// 界面按文本里的 `exit code N` 显示退出码（internal/ui/timeline_rows.go），
+// 与 t3code 把 exitCode 单独放进 item.exitCode、不标工具失败的做法对应。
+func agyWithExitCode(output string, exitCode int) string {
+	line := fmt.Sprintf("exit code %d", exitCode)
+	if strings.TrimSpace(output) == "" {
+		return line
+	}
+	return strings.TrimRight(output, "\n") + "\n" + line
+}
+
+// agyEditInput 从 agy 编辑工具的 rawInput 里取目标文件与替换片段。
+// 字段名对齐 t3code apps/server/src/provider/acp/AntigravityEditLocation.ts：
+// PascalCase 优先，snake_case 作别名；路径先用原始输入里的 TargetFile 等字段，
+// 取不到再回退到 tool_call 的 locations[0].path。
+func agyEditInput(rawInput []byte, locationPath string) (path string, chunks []harness.EditOperation, ok bool) {
+	var fields map[string]json.RawMessage
+	if jsonErr := json.Unmarshal(rawInput, &fields); jsonErr != nil {
+		return "", nil, false
+	}
+	for _, key := range []string{"TargetFile", "target_file", "file_path", "FilePath", "path"} {
+		if value, found := agyTextField(fields, key); found && strings.TrimSpace(value) != "" {
+			path = value
+			break
+		}
+	}
+	if path == "" {
+		path = locationPath
+	}
+
+	var items []map[string]json.RawMessage
+	for _, key := range []string{"ReplacementChunks", "replacement_chunks"} {
+		var list []json.RawMessage
+		if raw, found := fields[key]; found && json.Unmarshal(raw, &list) == nil && len(list) > 0 {
+			for _, item := range list {
+				var chunk map[string]json.RawMessage
+				if json.Unmarshal(item, &chunk) == nil {
+					items = append(items, chunk)
+				}
+			}
+			break
+		}
+	}
+	if len(items) == 0 {
+		items = []map[string]json.RawMessage{fields}
+	}
+	for _, item := range items {
+		target, hasTarget := agyTextField(item, "TargetContent", "target_content")
+		replacement, hasReplacement := agyTextField(item, "ReplacementContent", "replacement_content")
+		// 旧片段为空时无法定位，跳过（PreviewEditDiff 也会直接返回空串）。
+		if !hasTarget || !hasReplacement || target == "" {
+			continue
+		}
+		chunks = append(chunks, harness.EditOperation{OldString: target, NewString: replacement})
+	}
+	if path == "" || len(chunks) == 0 {
+		return "", nil, false
+	}
+	return path, chunks, true
+}
+
+func agyTextField(fields map[string]json.RawMessage, keys ...string) (string, bool) {
+	for _, key := range keys {
+		raw, found := fields[key]
+		if !found {
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		return value, true
+	}
+	return "", false
+}
+
+// agyEditPatch 复用仓库已有的 diff 实现生成 patch，不自己重写 diff 算法。
+func agyEditPatch(target string, chunks []harness.EditOperation) string {
+	if len(chunks) == 1 {
+		return harness.PreviewEditDiff(target, chunks[0].OldString, chunks[0].NewString, false)
+	}
+	return harness.PreviewMultiEditDiff(target, chunks)
 }
 
 func agyReadPath(title string, locations []struct {

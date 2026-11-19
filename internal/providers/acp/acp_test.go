@@ -690,6 +690,7 @@ func runFakeACPFeatures(mode string) {
 		go runFakeACPBackground(mode, write)
 	}
 	promptCount := 0
+	sessionWorkDir := ""
 	_ = json.NewEncoder(trace).Encode(map[string]any{"args": os.Args[1:]})
 	options := []map[string]any{
 		{"id": "model", "category": "model", "currentValue": "old"},
@@ -726,6 +727,9 @@ func runFakeACPFeatures(mode string) {
 				continue
 			}
 		case "session/new", "session/load", "session/resume":
+			if cwd, ok := params["cwd"].(string); ok && cwd != "" {
+				sessionWorkDir = cwd
+			}
 			if mode == "feature_resume_missing" && msg["method"] == "session/resume" {
 				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": -32603, "message": "Failed to read session X; retry, or load it with session/load"}})
 				continue
@@ -979,6 +983,21 @@ func runFakeACPFeatures(mode string) {
 						return
 					}
 				}
+			}
+			if mode == "feature_agy_tool_result" {
+				notify := func(update map[string]any) {
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": update}})
+				}
+				workDir := sessionWorkDir
+				if workDir == "" {
+					workDir, _ = os.Getwd()
+				}
+				target := filepath.Join(workDir, "agy-edit.txt")
+				_ = os.WriteFile(target, []byte("line 1\nold line\nline 3\n"), 0600)
+				notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "command", "name": "run_command", "rawInput": map[string]any{"CommandLine": "false"}})
+				notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "command", "status": "completed", "rawOutput": map[string]any{"combinedOutput": "hello\n", "exitCode": 1}})
+				notify(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "edit", "name": "replace_file_content", "kind": "edit", "locations": []any{map[string]any{"path": target}}, "rawInput": map[string]any{"TargetFile": target, "TargetContent": "old line", "ReplacementContent": "new line"}})
+				notify(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "edit", "status": "completed", "rawOutput": map[string]any{"output": "ok"}})
 			}
 			if strings.HasPrefix(mode, "feature_tool_") {
 				notify := func(update map[string]any) {
@@ -1991,6 +2010,32 @@ func TestPickAuthMethodSkipsTerminal(t *testing.T) {
 				t.Fatalf("pickAuthMethod(%v) = %q, want %q", tc.methods, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAgyToolUpdateUsesCombinedOutput(t *testing.T) {
+	_, events, err := runACPFeature(t, "feature_agy_tool_result", AgentAgy, harness.Turn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var end, change *harness.Event
+	for i := range events {
+		switch events[i].Type {
+		case harness.EventToolEnd:
+			if events[i].ToolID == "command" {
+				end = &events[i]
+			}
+		case harness.EventFileChange:
+			if events[i].Path == "agy-edit.txt" {
+				change = &events[i]
+			}
+		}
+	}
+	if end == nil || end.Output != "hello\nexit code 1" || end.IsError {
+		t.Fatalf("命令结束事件 = %+v", end)
+	}
+	if change == nil || !strings.Contains(change.Patch, "-old line") || !strings.Contains(change.Patch, "+new line") {
+		t.Fatalf("编辑文件变更 = %+v", change)
 	}
 }
 
