@@ -779,6 +779,33 @@ func runFakeACPFeatures(mode string) {
 				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": map[string]any{"stopReason": "cancelled"}})
 				continue
 			}
+			if mode == "feature_agy_stall_error" || mode == "feature_agy_stall_ok" {
+				dbPath := agySessionDB(agyGeminiDir(os.Args[1:], os.Environ()), "feature-session")
+				if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+					panic(err)
+				}
+				db, err := sql.Open("sqlite", dbPath)
+				if err != nil {
+					panic(err)
+				}
+				if _, err := db.Exec("CREATE TABLE IF NOT EXISTS steps (idx INTEGER, step_type INTEGER, step_payload BLOB)"); err != nil {
+					panic(err)
+				}
+				kind := 1
+				if mode == "feature_agy_stall_error" {
+					kind = 17
+				}
+				if _, err := db.Exec("INSERT INTO steps VALUES (2, ?, ?)", kind, []byte("Error 502, Message: Bad Gateway: Failed to connect to backend API, Status: 502 Bad Gateway, Details: [] ... The model is currently unreachable.")); err != nil {
+					panic(err)
+				}
+				if err := db.Close(); err != nil {
+					panic(err)
+				}
+				write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "pending"}}}})
+				for read() != nil {
+				}
+				return
+			}
 			if mode == "feature_agy_cancel_timeout" || mode == "feature_agy_cancel_exit" {
 				if mode == "feature_agy_cancel_timeout" {
 					signal.Ignore(syscall.SIGTERM)
@@ -1935,6 +1962,94 @@ func TestAgyCancelKillsAfterTimeout(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAgyPromptStepErrorStall(t *testing.T) {
+	prevPoll := agyStepPollInterval
+	prevStall := agyStepErrorStall
+	prevCancel := agyCancelWait
+	agyStepPollInterval = 20 * time.Millisecond
+	agyStepErrorStall = 60 * time.Millisecond
+	agyCancelWait = 50 * time.Millisecond
+	t.Cleanup(func() {
+		agyStepPollInterval = prevPoll
+		agyStepErrorStall = prevStall
+		agyCancelWait = prevCancel
+	})
+
+	t.Run("step_type=17 stalls and returns error", func(t *testing.T) {
+		geminiDir := filepath.Join(t.TempDir(), "gemini # account")
+		trace := filepath.Join(t.TempDir(), "trace.jsonl")
+		h := New(Options{
+			Agent:                AgentAgy,
+			Binary:               os.Args[0],
+			DisableLaunchSpacing: true,
+			Env:                  []string{fakeACPEnv + "=feature_agy_stall_error", "MCODE_TEST_ACP_TRACE=" + trace},
+			TurnArgs:             func(harness.Turn) []string { return []string{"--gemini_dir=" + geminiDir} },
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := h.Run(ctx, harness.Turn{ThreadID: "stall-err-thread", WorkDir: t.TempDir(), Prompt: "hi"}, func(harness.Event) {})
+		if err == nil || !strings.Contains(err.Error(), "Bad Gateway") {
+			t.Fatalf("Run error = %v, want substring %q", err, "Bad Gateway")
+		}
+		if len(h.ProcessRootPIDs("stall-err-thread")) != 0 {
+			t.Fatalf("leaked process roots: %v", h.ProcessRootPIDs("stall-err-thread"))
+		}
+	})
+
+	t.Run("non-error step does not stall", func(t *testing.T) {
+		geminiDir := filepath.Join(t.TempDir(), "gemini # account")
+		trace := filepath.Join(t.TempDir(), "trace.jsonl")
+		h := New(Options{
+			Agent:                AgentAgy,
+			Binary:               os.Args[0],
+			DisableLaunchSpacing: true,
+			Env:                  []string{fakeACPEnv + "=feature_agy_stall_ok", "MCODE_TEST_ACP_TRACE=" + trace},
+			TurnArgs:             func(harness.Turn) []string { return []string{"--gemini_dir=" + geminiDir} },
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pendingCh := make(chan struct{})
+		var pendingOnce sync.Once
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- h.Run(ctx, harness.Turn{ThreadID: "stall-ok-thread", WorkDir: t.TempDir(), Prompt: "hi"}, func(e harness.Event) {
+				if e.Type == harness.EventText {
+					pendingOnce.Do(func() { close(pendingCh) })
+				}
+			})
+		}()
+
+		select {
+		case <-pendingCh:
+		case err := <-errCh:
+			t.Fatalf("Run exited unexpectedly before pending event: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for fake agy session/prompt")
+		}
+
+		// 等待超过 4 倍 stall 时长，确认非 step_type=17 时不会误判卡死。
+		select {
+		case err := <-errCh:
+			t.Fatalf("Run exited early when latest step is not error: %v", err)
+		case <-time.After(4 * agyStepErrorStall):
+		}
+
+		cancel()
+		var err error
+		select {
+		case err = <-errCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for Run to exit after cancel")
+		}
+		if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "Bad Gateway") {
+			t.Fatalf("Run error = %v, want context.Canceled without Bad Gateway", err)
+		}
+		if len(h.ProcessRootPIDs("stall-ok-thread")) != 0 {
+			t.Fatalf("leaked process roots: %v", h.ProcessRootPIDs("stall-ok-thread"))
+		}
+	})
 }
 
 func TestAgyPromptResponseSkipsCancel(t *testing.T) {

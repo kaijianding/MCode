@@ -1828,6 +1828,8 @@ func isTransientNetworkError(text string) bool {
 		"stream disconnected",
 		"rst_stream",
 		"fetch failed",
+		// 上游网关瞬时故障（如 agy 的 Antigravity 后端）。
+		"502 bad gateway",
 	}
 	for _, target := range targets {
 		if strings.Contains(lowered, target) {

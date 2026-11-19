@@ -13,6 +13,7 @@ func TestIsTransientNetworkError(t *testing.T) {
 		{"流空闲超时", "Stream idle timeout after 300s", true},
 		{"流空闲超时小写", "provider error: stream idle timeout", true},
 		{"流在完成前断开", "stream disconnected before completion: upstream closed", true},
+		{"agy 上游 502 网关错误", "agy turn failed: Error 502, Message: Bad Gateway: Failed to connect to backend API, Status: 502 Bad Gateway, Details: [] ... The model is currently unreachable.", true},
 		{"普通鉴权错误不重试", "invalid api key", false},
 	}
 	for _, tc := range cases {

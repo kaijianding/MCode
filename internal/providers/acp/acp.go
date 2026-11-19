@@ -66,6 +66,10 @@ const (
 // （如 OpenCode 的 SQLite）上撞锁，导致某轮对话开局即失败；单个启动不受影响。
 var launchSpacing = 1500 * time.Millisecond
 var agyCancelWait = 15 * time.Second
+var agyStepPollInterval = 30 * time.Second
+
+// 6 分钟长于 agy 内部约 5 分钟的静默重试，为成功重试留出窗口。
+var agyStepErrorStall = 6 * time.Minute
 var beforeAgyPromptSelect func()
 
 var launchGate struct {
@@ -1783,7 +1787,53 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		}
 		if agyPrompt {
 			stopCancelWatcher()
-			promptErr = conn.callAgyPrompt(ctx, params, &promptResult)
+			if agyDBPath != "" {
+				promptCtx, cancelPrompt := context.WithCancel(ctx)
+				pollStop := make(chan struct{})
+				pollDone := make(chan struct{})
+				stallErrCh := make(chan error, 1)
+				go func() {
+					defer close(pollDone)
+					ticker := time.NewTicker(agyStepPollInterval)
+					defer ticker.Stop()
+					var firstErrAt time.Time
+					for {
+						select {
+						case <-pollStop:
+							return
+						case <-promptCtx.Done():
+							return
+						case <-ticker.C:
+							if text, ok := agyNewStepError(agyDBPath, agyStepStart); ok {
+								now := time.Now()
+								if firstErrAt.IsZero() {
+									firstErrAt = now
+								}
+								if now.Sub(firstErrAt) >= agyStepErrorStall {
+									stallErrCh <- fmt.Errorf("agy turn failed: %s", text)
+									cancelPrompt()
+									return
+								}
+							} else {
+								firstErrAt = time.Time{}
+							}
+						}
+					}
+				}()
+				promptErr = conn.callAgyPrompt(promptCtx, params, &promptResult)
+				close(pollStop)
+				<-pollDone
+				cancelPrompt()
+				select {
+				case detectedStallErr := <-stallErrCh:
+					if ctx.Err() == nil && detectedStallErr != nil {
+						promptErr = detectedStallErr
+					}
+				default:
+				}
+			} else {
+				promptErr = conn.callAgyPrompt(ctx, params, &promptResult)
+			}
 		} else {
 			promptErr = conn.Call(ctx, "session/prompt", params, &promptResult)
 		}
