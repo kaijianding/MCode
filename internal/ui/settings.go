@@ -144,7 +144,7 @@ type SettingsState struct {
 	highlightItemID    string
 	highlightStartedAt time.Time
 
-	cfg             config.Config
+	cfg config.Config
 	// saveConfigFn 仅供测试替换 config.Update 落盘逻辑（默认 nil 走 config.Update）。
 	saveConfigFn    func(dataDir string, fn func(*config.Config) error) error
 	stewardLabelMu  sync.Mutex

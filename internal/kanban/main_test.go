@@ -128,4 +128,3 @@ func TestKanbanTemplateRepoAndTimeoutIsolation(t *testing.T) {
 		t.Fatalf("运行后默认实例超时被污染: cmd=%s total=%s", cmdT, totalT)
 	}
 }
-
