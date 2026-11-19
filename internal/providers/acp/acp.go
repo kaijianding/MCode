@@ -53,6 +53,7 @@ type Options struct {
 // 同一瞬间批量启动多个 ACP agent（例如 Swarm 的多个 bee）会在 Agent 自身的本地存储
 // （如 OpenCode 的 SQLite）上撞锁，导致某轮对话开局即失败；单个启动不受影响。
 var launchSpacing = 1500 * time.Millisecond
+var agyCancelWait = 15 * time.Second
 
 var launchGate struct {
 	mu   sync.Mutex
@@ -418,6 +419,8 @@ func (h *Harness) startProcess(ctx context.Context, turn harness.Turn) (*acpProc
 	cancelProcess := func() {}
 	if h.opts.HoldBackgroundTasks {
 		processCtx, cancelProcess = context.WithCancel(context.Background())
+	} else if h.opts.Agent == AgentAgy {
+		processCtx, cancelProcess = context.WithCancel(context.WithoutCancel(ctx))
 	}
 	started := false
 	defer func() {
@@ -535,6 +538,91 @@ func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.
 	return h.runRound(ctx, turn, emit, p)
 }
 
+func (c *Conn) callAgyPrompt(ctx context.Context, params map[string]any, result any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id := c.nextID.Add(1)
+	idKey := strconv.FormatInt(id, 10)
+	call := &pendingCall{ch: make(chan *rpcResponse, 1), done: make(chan struct{})}
+	c.callsMu.Lock()
+	select {
+	case <-c.closed:
+		c.callsMu.Unlock()
+		return c.closedError()
+	default:
+		c.pendingCalls[idKey] = call
+		c.callsMu.Unlock()
+	}
+	defer func() {
+		c.callsMu.Lock()
+		delete(c.pendingCalls, idKey)
+		c.callsMu.Unlock()
+	}()
+
+	sendCancel := make(chan struct{})
+	stop := make(chan struct{})
+	defer close(stop)
+	written := make(chan error, 1)
+	go func() {
+		err := c.writeMessage(map[string]any{
+			"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": params,
+		})
+		if err == nil {
+			select {
+			case <-stop:
+				return
+			case <-sendCancel:
+				err = c.Notify("session/cancel", map[string]any{"sessionId": params["sessionId"]})
+			}
+		}
+		written <- err
+	}()
+
+	var response *rpcResponse
+	select {
+	case response = <-call.ch:
+		if ctx.Err() == nil || response == nil {
+			return c.finishCall(response, result)
+		}
+	case err := <-written:
+		return err
+	case <-c.closed:
+		select {
+		case response = <-call.ch:
+			return c.finishCall(response, result)
+		default:
+			return c.closedError()
+		}
+	case <-ctx.Done():
+	}
+
+	timer := time.NewTimer(agyCancelWait)
+	defer timer.Stop()
+	close(sendCancel)
+	select {
+	case err := <-written:
+		if err != nil {
+			return err
+		}
+	case <-c.closed:
+		return c.closedError()
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+	if response != nil {
+		return c.finishCall(response, result)
+	}
+	select {
+	case response := <-call.ch:
+		return c.finishCall(response, result)
+	case <-c.closed:
+		return c.closedError()
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+}
+
 // runRound 每轮重绑处理器；只有新进程执行 initialize 和会话建立。
 func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(harness.Event), p *acpProcess) error {
 	cmd, conn, stderrBuf, allArgs := p.cmd, p.conn, p.stderr, p.args
@@ -569,6 +657,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	startedTools := make(map[string]bool)
 	pendingOrder := make([]string, 0)
 	var toolStartOrder []startedTool
+	var planUpdateCount int
+	planTurnID := turn.ID
 	earlyReads := make(map[string]int)
 	servedReads := make(map[string]bool)
 	toolsFinished := false
@@ -932,6 +1022,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				Title         string          `json:"title"`
 				RawInput      json.RawMessage `json:"rawInput"`
 				Input         json.RawMessage `json:"input"`
+				Entries       json.RawMessage `json:"entries"`
 				Locations     []struct {
 					Path string `json:"path"`
 				} `json:"locations"`
@@ -959,6 +1050,26 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		}
 
 		switch u.SessionUpdate {
+		case "plan":
+			if len(u.Entries) == 0 {
+				return
+			}
+			input, err := json.Marshal(map[string]json.RawMessage{"plan": u.Entries})
+			if err != nil {
+				return
+			}
+			if planTurnID == "" {
+				planTurnID = uuid.NewString()
+			}
+			planUpdateCount++
+			toolID := fmt.Sprintf("plan-%s-%d", planTurnID, planUpdateCount)
+			_ = harness.Emit(emit, harness.Event{
+				Type: harness.EventToolStart, ToolID: toolID, ToolName: "update_plan", Input: input,
+			})
+			_ = harness.Emit(emit, harness.Event{
+				Type: harness.EventToolEnd, ToolID: toolID, ToolName: "update_plan",
+			})
+
 		case "agent_message_chunk":
 			var content struct {
 				Text string `json:"text"`
@@ -1139,12 +1250,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	// 监听 ctx 取消，发送 session/cancel 并优雅杀灭进程组
 	shutdownCh := make(chan struct{})
 	cancelDone := make(chan struct{})
-	defer func() {
+	stopCancelWatcher := sync.OnceFunc(func() {
 		close(shutdownCh)
-		if h.opts.HoldBackgroundTasks {
+		if h.opts.HoldBackgroundTasks || h.opts.Agent == AgentAgy {
 			<-cancelDone
 		}
-	}()
+	})
+	defer stopCancelWatcher()
 
 	go func() {
 		defer close(cancelDone)
@@ -1152,6 +1264,13 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		case <-shutdownCh:
 			return
 		case <-ctx.Done():
+			if h.opts.Agent == AgentAgy {
+				select {
+				case <-shutdownCh:
+					return
+				default:
+				}
+			}
 			// 1. 发送 session/cancel 通知
 			if currID := getSessionID(); currID != "" {
 				_ = conn.Notify("session/cancel", map[string]any{"sessionId": currID})
@@ -1201,6 +1320,16 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		}
 		p.initResp = initResp
 		p.initialized = true
+		if h.opts.Agent == AgentAgy && slices.ContainsFunc(initResp.AuthMethods, func(method acpAuthMethod) bool {
+			return method.ID == "oauth-personal" && method.Type != "terminal"
+		}) {
+			if err := conn.Call(ctx, "authenticate", map[string]any{"methodId": "oauth-personal"}, nil); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("acp authenticate failed: %w", err)
+			}
+		}
 	}
 
 	// Cline 没有推理强度的 ACP 配置项：开会话之前把强度写进它自己的 providers.json。
@@ -1531,18 +1660,26 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 		StopReason string         `json:"stopReason"`
 		Usage      acpPromptUsage `json:"usage"`
 	}
+	agyPrompt := h.opts.Agent == AgentAgy && !spontaneous && promptErr == nil
 	if spontaneous {
 		promptResult.StopReason = "end_turn"
 	} else if promptErr == nil {
-		promptErr = conn.Call(ctx, "session/prompt", map[string]any{
+		params := map[string]any{
 			"sessionId": sid,
 			"prompt":    promptItems,
-		}, &promptResult)
+		}
+		if agyPrompt {
+			stopCancelWatcher()
+			promptErr = conn.callAgyPrompt(ctx, params, &promptResult)
+		} else {
+			promptErr = conn.Call(ctx, "session/prompt", params, &promptResult)
+		}
 	}
 	detach()
 
+	agyCancelled := h.opts.Agent == AgentAgy && ctx.Err() != nil
 	var agyErr error
-	if h.opts.Agent == AgentAgy && promptErr == nil {
+	if h.opts.Agent == AgentAgy && promptErr == nil && !agyCancelled {
 		if spontaneous {
 			agyErr = agyTurnFailure(agyDBPath, agyStepStart, "")
 			if agyErr == nil {
@@ -1580,7 +1717,7 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil {
 		h.reconcileRoundTasks(p, turn.ThreadID, emit)
 	}
-	if promptErr == nil && agyErr == nil {
+	if promptErr == nil && agyErr == nil && (h.opts.Agent != AgentAgy || ctx.Err() == nil) {
 		u := promptResult.Usage
 		if u.InputTokens != 0 || u.OutputTokens != 0 || u.ThoughtTokens != 0 || u.CachedReadTokens != 0 {
 			_ = harness.Emit(emit, harness.Event{Type: harness.EventUsage, Usage: &harness.Usage{
@@ -1588,18 +1725,37 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				ContextTokens: contextUsed.Load(), ContextWindow: contextSize.Load(),
 			}})
 		}
-		_ = harness.Emit(emit, harness.Event{
-			Type:       harness.EventDone,
-			StopReason: promptResult.StopReason,
-		})
+		if h.opts.Agent != AgentAgy || ctx.Err() == nil {
+			_ = harness.Emit(emit, harness.Event{
+				Type:       harness.EventDone,
+				StopReason: promptResult.StopReason,
+			})
+		}
 	}
 
-	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil && ctx.Err() == nil && h.holdProcess(p, turn.ThreadID) {
+	cancelledPrompt := agyPrompt && ctx.Err() != nil
+	if h.opts.HoldBackgroundTasks && promptErr == nil && agyErr == nil &&
+		(cancelledPrompt || ctx.Err() == nil) && h.holdProcess(p, turn.ThreadID, cancelledPrompt) {
 		p.transcriptPath, p.transcriptSize = agyTranscriptPosition(p, sid)
 		if h.opts.Agent == AgentAgy {
 			p.agyStepStart, p.agyStepStartOK = agyStepIndex(agySessionDB(agyGeminiDir(allArgs, cmd.Env), sid))
 		}
+		if h.opts.Agent == AgentAgy {
+			return ctx.Err()
+		}
 		return nil
+	}
+	if cancelledPrompt {
+		if promptErr != nil {
+			h.stopAgyProcess(p)
+			return ctx.Err()
+		}
+		select {
+		case <-conn.closed:
+			h.stopAgyProcess(p)
+			return ctx.Err()
+		default:
+		}
 	}
 	if h.opts.HoldBackgroundTasks {
 		h.residentMu.Lock()

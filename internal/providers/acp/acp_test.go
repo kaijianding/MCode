@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -713,6 +714,17 @@ func runFakeACPFeatures(mode string) {
 			}
 			caps["sessionCapabilities"] = sessionCaps
 			result["agentCapabilities"] = caps
+			switch mode {
+			case "feature_agy_auth", "feature_agy_auth_error", "feature_agy_cancel":
+				result["authMethods"] = []map[string]any{{"id": "other"}, {"id": "oauth-personal"}}
+			case "feature_agy_no_personal_auth":
+				result["authMethods"] = []map[string]any{{"id": "other"}}
+			}
+		case "authenticate":
+			if mode == "feature_agy_auth_error" {
+				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": -32603, "message": "authentication failed"}})
+				continue
+			}
 		case "session/new", "session/load", "session/resume":
 			if mode == "feature_resume_missing" && msg["method"] == "session/resume" {
 				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "error": map[string]any{"code": -32603, "message": "Failed to read session X; retry, or load it with session/load"}})
@@ -746,6 +758,47 @@ func runFakeACPFeatures(mode string) {
 			result["configOptions"] = options
 		case "session/prompt":
 			promptCount++
+			if promptCount == 1 && mode == "feature_agy_cancel" {
+				write(map[string]any{"jsonrpc": "2.0", "id": 9010, "method": "session/request_permission", "params": map[string]any{
+					"toolCall": map[string]any{"toolCallId": "cancel-test", "name": "run_command"},
+					"options":  []map[string]any{{"optionId": "allow", "kind": "allow_once"}},
+				}})
+				var cancelled, permissionReplied bool
+				for !cancelled || !permissionReplied {
+					reply := read()
+					if reply == nil {
+						return
+					}
+					cancelled = cancelled || reply["method"] == "session/cancel"
+					permissionReplied = permissionReplied || reply["id"] == float64(9010)
+				}
+				write(map[string]any{"jsonrpc": "2.0", "id": msg["id"], "result": map[string]any{"stopReason": "cancelled"}})
+				continue
+			}
+			if mode == "feature_agy_cancel_timeout" || mode == "feature_agy_cancel_exit" {
+				if mode == "feature_agy_cancel_timeout" {
+					signal.Ignore(syscall.SIGTERM)
+				}
+				write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "pending"}}}})
+				for incoming := read(); incoming != nil; incoming = read() {
+					if mode == "feature_agy_cancel_exit" && incoming["method"] == "session/cancel" {
+						return
+					}
+				}
+				time.Sleep(30 * time.Second)
+				return
+			}
+			if mode == "feature_plan" {
+				entries := []map[string]any{
+					{"content": "Draft", "status": "completed", "priority": "high"},
+					{"content": "Check", "status": "in_progress", "priority": "medium"},
+					{"content": "Send", "status": "pending", "priority": "low"},
+				}
+				for _, status := range []string{"in_progress", "completed"} {
+					entries[1]["status"] = status
+					write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "plan", "entries": entries}}})
+				}
+			}
 			if strings.HasPrefix(mode, "feature_hold") {
 				items, _ := params["prompt"].([]any)
 				item, _ := items[0].(map[string]any)
@@ -1714,6 +1767,183 @@ func TestAgyFullAccessPermission(t *testing.T) {
 				t.Fatalf("approver called = %v, want %v", approver.called, tc.wantApprover)
 			}
 		})
+	}
+}
+
+type agyCancelApprover struct{ cancel context.CancelFunc }
+
+func (a agyCancelApprover) Approve(ctx context.Context, _ harness.ApprovalRequest) (harness.Decision, error) {
+	a.cancel()
+	return harness.DecisionDeny, ctx.Err()
+}
+
+func TestAgyCancelWaitsForPrompt(t *testing.T) {
+	for _, resident := range []bool{true, false} {
+		t.Run(fmt.Sprintf("resident=%t", resident), func(t *testing.T) {
+			f := newACPHoldFixture(t, "feature_agy_cancel")
+			f.h.opts.HoldBackgroundTasks = resident
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			turn := f.turn
+			turn.Mode = harness.ModeSupervised
+			turn.Approver = agyCancelApprover{cancel: cancel}
+			var pid int
+			var done bool
+			err := f.h.Run(ctx, turn, func(event harness.Event) {
+				if event.Type == harness.EventSession {
+					pid = f.h.ProcessRootPIDs(turn.ThreadID)[0]
+				}
+				done = done || event.Type == harness.EventDone
+			})
+			if !errors.Is(err, context.Canceled) || done {
+				t.Fatalf("Run = %v, emitted done = %t", err, done)
+			}
+			messages := f.messages(t)
+			if cancels := featureParams(messages, "session/cancel"); len(cancels) != 1 || cancels[0]["sessionId"] != "feature-session" {
+				t.Fatalf("session/cancel = %v", cancels)
+			}
+			if outcome := permissionReply(t, messages); outcome["outcome"] != "cancelled" {
+				t.Fatalf("permission outcome = %v", outcome)
+			}
+			if !resident {
+				if len(f.h.ProcessRootPIDs(turn.ThreadID)) != 0 || syscall.Kill(pid, 0) == nil {
+					t.Fatal("non-resident process leaked")
+				}
+				return
+			}
+			if !f.h.HasResidentProcess(turn.ThreadID) || !reflect.DeepEqual(f.h.ProcessRootPIDs(turn.ThreadID), []int{pid}) {
+				t.Fatal("cancelled prompt lost the resident process")
+			}
+			turn.SessionID = "feature-session"
+			reuseCtx, cancelReuse := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancelReuse()
+			reused, err := f.h.RunResident(reuseCtx, turn, func(event harness.Event) {
+				if event.Type == harness.EventSession && !reflect.DeepEqual(f.h.ProcessRootPIDs(turn.ThreadID), []int{pid}) {
+					t.Error("next prompt used a different process")
+				}
+			})
+			if !reused || err != nil {
+				t.Fatalf("RunResident = %t, %v", reused, err)
+			}
+			messages = f.messages(t)
+			prompts := featureParams(messages, "session/prompt")
+			if len(prompts) != 2 || prompts[0]["sessionId"] != prompts[1]["sessionId"] ||
+				len(featureParams(messages, "initialize")) != 1 || len(featureParams(messages, "authenticate")) != 1 ||
+				len(featureParams(messages, "session/new")) != 1 || len(featureParams(messages, "session/resume")) != 0 {
+				t.Fatalf("process or session not reused: %v", messages)
+			}
+		})
+	}
+}
+
+func TestAgyCancelKillsAfterTimeout(t *testing.T) {
+	previous := agyCancelWait
+	agyCancelWait = 200 * time.Millisecond
+	t.Cleanup(func() { agyCancelWait = previous })
+	for _, mode := range []string{"feature_agy_cancel_timeout", "feature_agy_cancel_exit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newACPHoldFixture(t, mode)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var pid int
+			var cancelAt time.Time
+			err := f.h.Run(ctx, f.turn, func(event harness.Event) {
+				switch event.Type {
+				case harness.EventSession:
+					pid = f.h.ProcessRootPIDs(f.turn.ThreadID)[0]
+				case harness.EventText:
+					cancelAt = time.Now()
+					cancel()
+				case harness.EventDone:
+					t.Error("emitted done for a cancelled prompt")
+				}
+			})
+			if !errors.Is(err, context.Canceled) || cancelAt.IsZero() || time.Since(cancelAt) > 8*time.Second {
+				t.Fatalf("Run = %v, time since cancellation = %s", err, time.Since(cancelAt))
+			}
+			if mode == "feature_agy_cancel_timeout" && time.Since(cancelAt) < agyCancelWait {
+				t.Fatal("process shut down before the cancellation timeout")
+			}
+			if len(featureParams(f.messages(t), "session/cancel")) != 1 {
+				t.Fatal("agent did not receive exactly one session/cancel")
+			}
+			if f.h.HasResidentProcess(f.turn.ThreadID) || len(f.h.ProcessRootPIDs(f.turn.ThreadID)) != 0 || syscall.Kill(pid, 0) == nil {
+				t.Fatal("agent process was not reaped")
+			}
+		})
+	}
+}
+
+func TestAgyEagerAuthenticate(t *testing.T) {
+	for _, test := range []struct {
+		mode, sessionID, setupMethod string
+		wantsAuth, wantsError        bool
+	}{
+		{mode: "feature_agy_auth", setupMethod: "session/new", wantsAuth: true},
+		{mode: "feature_agy_auth", sessionID: "resumed", setupMethod: "session/resume", wantsAuth: true},
+		{mode: "feature_agy_no_personal_auth", setupMethod: "session/new"},
+		{mode: "feature_agy_auth_error", wantsAuth: true, wantsError: true},
+	} {
+		t.Run(test.mode+test.setupMethod, func(t *testing.T) {
+			messages, _, err := runACPFeature(t, test.mode, AgentAgy, harness.Turn{SessionID: test.sessionID})
+			if (err != nil) != test.wantsError || test.wantsError && !strings.Contains(err.Error(), "acp authenticate failed") {
+				t.Fatalf("Run = %v", err)
+			}
+			var methods []string
+			for _, message := range messages {
+				method, _ := message["method"].(string)
+				switch method {
+				case "initialize", "authenticate", "session/new", "session/resume":
+					methods = append(methods, method)
+				}
+			}
+			want := []string{"initialize"}
+			if test.wantsAuth {
+				want = append(want, "authenticate")
+				if auth := featureParams(messages, "authenticate"); len(auth) != 1 || auth[0]["methodId"] != "oauth-personal" {
+					t.Fatalf("authenticate = %v", auth)
+				}
+			}
+			if test.setupMethod != "" {
+				want = append(want, test.setupMethod)
+			}
+			if !reflect.DeepEqual(methods, want) {
+				t.Fatalf("setup calls = %v, want %v", methods, want)
+			}
+		})
+	}
+}
+
+func TestACPPlanUpdateEmitsUpdatePlan(t *testing.T) {
+	_, events, err := runACPFeature(t, "feature_plan", AgentOpenCode, harness.Turn{ID: "test-turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []harness.Event
+	for _, event := range events {
+		if event.ToolName == "update_plan" {
+			tools = append(tools, event)
+		}
+	}
+	if len(tools) != 4 || tools[0].ToolID == tools[2].ToolID {
+		t.Fatalf("plan tools = %v", tools)
+	}
+	type entry struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	}
+	for index, status := range []string{"in_progress", "completed"} {
+		start, end := tools[index*2], tools[index*2+1]
+		if start.Type != harness.EventToolStart || start.ToolID == "" || end.Type != harness.EventToolEnd || end.ToolID != start.ToolID {
+			t.Fatalf("plan tool pair = %v, %v", start, end)
+		}
+		var input struct {
+			Plan []entry `json:"plan"`
+		}
+		want := []entry{{"Draft", "completed"}, {"Check", status}, {"Send", "pending"}}
+		if err := json.Unmarshal(start.Input, &input); err != nil || !reflect.DeepEqual(input.Plan, want) {
+			t.Fatalf("plan input = %s, err = %v", start.Input, err)
+		}
 	}
 }
 

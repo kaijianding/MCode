@@ -167,7 +167,11 @@ func (h *Harness) runHeld(ctx context.Context, turn harness.Turn, emit func(harn
 
 	err := h.runRound(ctx, turn, emit, p)
 	h.residentMu.Lock()
-	keep := err == nil && ctx.Err() == nil && p.keep && !p.dead && !h.closed
+	turnErr := ctx.Err()
+	if h.opts.Agent == AgentAgy && err == nil {
+		err = turnErr
+	}
+	keep := p.keep && !p.dead && !h.closed && (err == nil && turnErr == nil || h.opts.Agent == AgentAgy && err == turnErr)
 	if keep {
 		p.busy = false
 	} else {
@@ -175,6 +179,11 @@ func (h *Harness) runHeld(ctx context.Context, turn harness.Turn, emit func(harn
 	}
 	h.residentMu.Unlock()
 	if !keep {
+		select {
+		case <-p.done:
+			return true, err
+		default:
+		}
 		if err != nil && p.sessionID != "" {
 			_ = p.conn.Notify("session/cancel", map[string]any{"sessionId": p.sessionID})
 		}
@@ -185,6 +194,37 @@ func (h *Harness) runHeld(ctx context.Context, turn harness.Turn, emit func(harn
 		p.watchOnce.Do(func() { go h.watchBackgroundTasks(turn.ThreadID, p) })
 	}
 	return true, err
+}
+
+func (h *Harness) stopAgyProcess(p *acpProcess) {
+	if p.resident {
+		h.residentMu.Lock()
+		p.expectedExit = true
+		dead := p.dead
+		h.residentMu.Unlock()
+		if dead {
+			<-p.done
+			return
+		}
+	}
+	_ = killProcessGroup(p.cmd, syscall.SIGTERM)
+	_ = p.conn.Close()
+	done := p.done
+	if !p.resident {
+		go func() {
+			_ = p.wait()
+			_ = killProcessGroup(p.cmd, syscall.SIGKILL)
+			close(done)
+		}()
+	}
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		_ = killProcessGroup(p.cmd, syscall.SIGKILL)
+		<-done
+	}
 }
 
 func (h *Harness) waitResident(threadID string, p *acpProcess) {
@@ -344,12 +384,21 @@ func (h *Harness) backgroundTaskStarts(p *acpProcess, toolID string, outputs []s
 	return started
 }
 
-func (h *Harness) holdProcess(p *acpProcess, threadID string) bool {
+func (h *Harness) holdProcess(p *acpProcess, threadID string, cancelled bool) bool {
 	h.residentMu.Lock()
 	defer h.residentMu.Unlock()
 	if h.closed {
 		p.keep = false
 		return false
+	}
+	if cancelled {
+		select {
+		case <-p.conn.closed:
+			return false
+		default:
+			p.keep = true
+			return true
+		}
 	}
 	p.keep = len(h.finishedTasks[threadID]) > 0
 	for _, status := range p.tasks {
