@@ -293,18 +293,19 @@ func TestAgyACPVersionCache(t *testing.T) {
 }
 
 type acpRetryRouter struct {
-	mu       sync.Mutex
-	router   *multiaccount.Router
-	config   multiaccount.Config
-	accounts []multiaccount.AccountState
-	routes   []string
-	excludes [][]string
-	bindings [][2]string
-	limited  [][2]string
-	resetAt  time.Time
-	uses     []string
-	ends     []string
-	onRoute  func()
+	mu        sync.Mutex
+	router    *multiaccount.Router
+	config    multiaccount.Config
+	accounts  []multiaccount.AccountState
+	geminiDir string
+	routes    []string
+	excludes  [][]string
+	bindings  [][2]string
+	limited   [][2]string
+	resetAt   time.Time
+	uses      []string
+	ends      []string
+	onRoute   func()
 }
 
 func newACPRetryRouter(affinity multiaccount.Affinity) *acpRetryRouter {
@@ -334,7 +335,11 @@ func (r *acpRetryRouter) Route(session, _ string, exclude []string) (string, []s
 	if id == "account-0" {
 		env = append(env, "MCODE_TEST_ACP_FIRST_ONLY=first-account")
 	}
-	return id, env, []string{"--gemini_dir", id}, nil
+	dir := id
+	if r.geminiDir != "" {
+		dir = filepath.Join(r.geminiDir, id)
+	}
+	return id, env, []string{"--gemini_dir", dir}, nil
 }
 
 func (r *acpRetryRouter) Bind(session, account string) {
@@ -635,5 +640,105 @@ func TestRunACPResidentDoesNotRetry(t *testing.T) {
 	defer router.mu.Unlock()
 	if router.routes != 1 || router.uses != 2 || router.ends != 2 {
 		t.Fatalf("复用轮重新路由或遗漏额度统计: routes=%d, uses=%d, ends=%d", router.routes, router.uses, router.ends)
+	}
+}
+
+func TestRunACPAttachRateLimitReturnsError(t *testing.T) {
+	h, router := newACPRetryHarness(t, multiaccount.AffinitySession)
+	geminiDir := t.TempDir()
+	router.geminiDir = geminiDir
+	const threadID = "attach-rate-limit"
+	t.Cleanup(func() { h.EvictThread(threadID) })
+
+	unsolicitedCh := make(chan string, 4)
+	exitCh := make(chan string, 4)
+	h.SetUnsolicitedTurnHandler(func(id string) { unsolicitedCh <- id })
+	h.SetProcessExitHandler(func(id string, _ time.Time) { exitCh <- id })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	turn1 := harness.Turn{
+		ThreadID: threadID, Prompt: "start", WorkDir: t.TempDir(),
+		Env: []string{fakeAgyEnv + "=acp_transport", "MCODE_TEST_ACP_HOLD=1", "MCODE_TEST_ROUTED_ACCOUNT=original"},
+	}
+	if err := h.runACP(ctx, turn1, func(harness.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	pids := h.ProcessRootPIDs(threadID)
+	if len(pids) != 1 {
+		t.Fatalf("round 1 roots = %v", pids)
+	}
+
+	messagesDir := filepath.Join(geminiDir, "account-0", "antigravity-cli", "brain", "new-session", ".system_generated", "messages")
+	if err := os.MkdirAll(messagesDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	msgData, err := json.Marshal(map[string]any{
+		"content":   `Task id "12345678-1234-1234-1234-123456789abc/task-1" finished with result:` + "\nok",
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(messagesDir, "1.json"), msgData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-unsolicitedCh:
+		if got != threadID {
+			t.Fatalf("unsolicited thread = %s", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("等待后台任务完成通知超时")
+	}
+	if !h.HasUnsolicitedOutput(threadID) {
+		t.Fatal("应存在待上报的后台任务")
+	}
+
+	proc, err := os.FindProcess(pids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-exitCh:
+		if got != threadID {
+			t.Fatalf("exit thread = %s", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("等待常驻进程退出通知超时")
+	}
+	if h.acp.HasResidentProcess(threadID) || len(h.ProcessRootPIDs(threadID)) != 0 || !h.HasUnsolicitedOutput(threadID) {
+		t.Fatalf("前置状态不符合预期: resident=%v roots=%v unsolicited=%v", h.acp.HasResidentProcess(threadID), h.ProcessRootPIDs(threadID), h.HasUnsolicitedOutput(threadID))
+	}
+
+	attachTurn := harness.Turn{
+		ThreadID: threadID, SessionID: "new-session", Attach: true, WorkDir: turn1.WorkDir,
+		Env: []string{fakeAgyEnv + "=acp_transport", "MCODE_TEST_ACP_FAILURE=before_stream", "MCODE_TEST_ROUTED_ACCOUNT=original"},
+	}
+	var replayedEnded int
+	err = h.runACP(ctx, attachTurn, func(event harness.Event) {
+		if event.Type == harness.EventBackgroundTaskEnd {
+			replayedEnded++
+		}
+	})
+	if err == nil || !strings.Contains(err.Error(), acpRateLimitError) || strings.Contains(err.Error(), "严格绑定") {
+		t.Fatalf("Attach 限流错误 = %v", err)
+	}
+	if replayedEnded != 1 {
+		t.Fatalf("replayedEnded = %d, want 1", replayedEnded)
+	}
+	if !reflect.DeepEqual(router.routes, []string{"thread:" + threadID, "new-session"}) ||
+		!reflect.DeepEqual(router.excludes, [][]string{nil, nil}) ||
+		!reflect.DeepEqual(router.uses, []string{"account-0", "account-0"}) ||
+		!reflect.DeepEqual(router.limited, [][2]string{{"new-session", "account-0"}}) {
+		t.Fatalf("Attach 限流不应换号重试: routes=%v excludes=%v uses=%v limited=%v", router.routes, router.excludes, router.uses, router.limited)
+	}
+	if h.HasUnsolicitedOutput(threadID) || len(h.ProcessRootPIDs(threadID)) != 0 {
+		t.Fatalf("Attach 失败后状态异常: unsolicited=%v roots=%v", h.HasUnsolicitedOutput(threadID), h.ProcessRootPIDs(threadID))
 	}
 }

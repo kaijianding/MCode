@@ -178,7 +178,8 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 			}
 			return fmt.Errorf("agy: 当前会话绑定的账号已限流，严格绑定模式下不会换号%s：%w", resetInfo, err)
 		}
-		if streamed || retryCount >= maxRetries {
+		// Attach 回合已回放后台任务结果，换号重试会变成空 Attach 吞掉错误。
+		if streamed || turn.Attach || retryCount >= maxRetries {
 			return err
 		}
 		exclude = append(exclude, accountID)
