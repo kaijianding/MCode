@@ -1789,6 +1789,39 @@ func TestAgyFullAccessPermission(t *testing.T) {
 	}
 }
 
+func TestAgyPlanTurnFullAccessPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		planExitMode harness.PermissionMode
+		wanted       string
+		wantApprover bool
+	}{
+		{name: "full access", planExitMode: harness.ModeFullAccess, wanted: "once"},
+		{name: "supervised", planExitMode: harness.ModeSupervised, wanted: "deny", wantApprover: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			approver := &mockApprover{decision: harness.DecisionDeny}
+			messages, _, err := runACPFeature(t, "feature_permission_command", AgentAgy, harness.Turn{
+				Mode:            harness.ModeReadOnly,
+				InteractionMode: "plan",
+				PlanExitMode:    tc.planExitMode,
+				Approver:        approver,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reply := permissionReply(t, messages); reply["outcome"] != "selected" || reply["optionId"] != tc.wanted {
+				t.Fatalf("approval reply = %v, want %s", reply, tc.wanted)
+			}
+			approver.mu.Lock()
+			defer approver.mu.Unlock()
+			if approver.called != tc.wantApprover {
+				t.Fatalf("approver called = %v, want %v", approver.called, tc.wantApprover)
+			}
+		})
+	}
+}
+
 type agyCancelApprover struct{ cancel context.CancelFunc }
 
 func (a agyCancelApprover) Approve(ctx context.Context, _ harness.ApprovalRequest) (harness.Decision, error) {

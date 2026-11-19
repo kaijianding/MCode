@@ -852,7 +852,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			var approveReq harness.ApprovalRequest
 			var approveErr error
 			lockedCommand := isCommandCall && turn.HardLocked && strings.TrimSpace(turn.HardLockOverride) == ""
-			autoApproveAgy := h.opts.Agent == AgentAgy && turn.Mode == harness.ModeFullAccess && !lockedCommand
+			// plan 回合的 Mode 会被改成只读，用户选的档位存放在 PlanExitMode 里，需要一并判断。
+			autoApproveAgy := h.opts.Agent == AgentAgy && (turn.Mode == harness.ModeFullAccess || turn.PlanExitMode == harness.ModeFullAccess) && !lockedCommand
 			useApprover := turn.Approver != nil && !autoApproveAgy
 			if useApprover {
 				approveReq = harness.ApprovalRequest{
@@ -889,6 +890,8 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				} else {
 					decision = dec
 				}
+			} else if autoApproveAgy && turn.Approver != nil {
+				decision = harness.DecisionAllow
 			} else {
 				decision = harness.DecisionDeny
 				if turn.Mode == harness.ModeFullAccess {
