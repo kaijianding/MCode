@@ -173,6 +173,11 @@ func (a *threadApprover) Interact(ctx context.Context, req harness.ApprovalReque
 	if kind == "" {
 		kind = inferRequestKind(req.ToolName)
 	}
+	// lead 名下仍有在跑的 bee 时，这一轮的计划没有依据：静默拒绝（反馈留空）让本次 Run 直接结束，
+	// 由 bee 报告驱动下一回合，等 bee 都结束后再在那一轮照常弹计划审批。
+	if kind == harness.RequestKindPlan && a.b.hasWorkingSwarmBees(a.threadID) {
+		return deny, nil
+	}
 	// 计划与提问必须由用户逐次答复，不受始终允许名单影响
 	interactive := kind == harness.RequestKindPlan || kind == harness.RequestKindQuestion
 

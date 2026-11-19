@@ -776,6 +776,98 @@ func TestApprovals_PlanDenyWithFeedback(t *testing.T) {
 	}
 }
 
+// lead 名下仍有在跑的 bee 时，计划审批应静默跳过：返回空反馈的拒绝让本次 Run 结束，
+// 不产生待批准卡片，也不切换交互模式，等 bee 报告驱动下一回合再弹计划审批。
+func TestApprovals_PlanSkippedWhileSwarmBeesWorking(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		working bool
+	}{
+		{"bees working", true},
+		{"no bees working", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			threadID := newUUID()
+			hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+			t.Cleanup(hub.Close)
+
+			backend := NewMemoryBackend(hub)
+			t.Cleanup(func() { backend.Close() })
+			backend.SetSwarmQueueHooks(func(string) bool { return tc.working }, nil)
+
+			ctx := context.Background()
+			backend.AddThread(wire.ThreadSummary{ID: threadID, Title: "Swarm Plan Thread", InteractionMode: "plan"}, nil)
+
+			results := make(chan interactResult, 1)
+			mock := &mockHarness{
+				runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+					ia, ok := turn.Approver.(harness.Interactor)
+					if !ok {
+						return errors.New("approver does not implement Interactor")
+					}
+					resp, err := ia.Interact(ctx, harness.ApprovalRequest{
+						ToolName: "ExitPlanMode",
+						Kind:     harness.RequestKindPlan,
+						Plan:     "# 已派发 bee",
+						Summary:  "ExitPlanMode {}",
+					})
+					results <- interactResult{resp: resp, err: err}
+					return nil
+				},
+			}
+			backend.SetHarness(mock, "/workspace", harness.ModeAgent)
+			if _, err := backend.SendMessage(ctx, wire.SendMessageParams{
+				ThreadID: threadID,
+				Text:     "已派发只读 bee",
+				ActionID: newUUID(),
+			}); err != nil {
+				t.Fatalf("SendMessage failed: %v", err)
+			}
+
+			if !tc.working {
+				// 对照：没有在跑的 bee 时计划审批照常挂起，等用户答复。
+				req := waitPendingRequest(t, backend, threadID)
+				optAllow := "allow"
+				if _, err := backend.RespondRequest(ctx, wire.RequestsRespondParams{
+					ThreadID:  threadID,
+					RunID:     req.RunID,
+					RequestID: req.RequestID,
+					OptionID:  &optAllow,
+				}); err != nil {
+					t.Fatalf("RespondRequest failed: %v", err)
+				}
+				r := waitInteract(t, results)
+				if r.err != nil || r.resp.Decision != harness.DecisionAllow {
+					t.Fatalf("无在跑 bee 时应照常挂起并等待答复，实际 %+v", r)
+				}
+				return
+			}
+
+			r := waitInteract(t, results)
+			if r.err != nil {
+				t.Fatalf("Interact failed: %v", r.err)
+			}
+			if r.resp.Decision != harness.DecisionDeny || r.resp.Feedback != "" {
+				t.Fatalf("bee 运行中应以空反馈拒绝计划，实际 %+v", r)
+			}
+			list, err := backend.ListRequests(ctx, threadID)
+			if err != nil {
+				t.Fatalf("ListRequests failed: %v", err)
+			}
+			if len(list.Requests) != 0 {
+				t.Fatalf("bee 运行中不得产生待批准卡片，实际 %d 张", len(list.Requests))
+			}
+			th, err := backend.GetThread(ctx, threadID)
+			if err != nil {
+				t.Fatalf("GetThread failed: %v", err)
+			}
+			if th.InteractionMode != "plan" {
+				t.Fatalf("跳过审批不得切换交互模式，实际 %q", th.InteractionMode)
+			}
+		})
+	}
+}
+
 // waitPendingRequest 轮询等待会话出现首个待处理请求。
 func waitPendingRequest(t *testing.T, backend *MemoryBackend, threadID string) wire.RemoteRequest {
 	t.Helper()
