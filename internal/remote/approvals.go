@@ -216,9 +216,7 @@ func (a *threadApprover) Interact(ctx context.Context, req harness.ApprovalReque
 	// 只读类请求（ReadOnly）、只读 shell 命令（ls、grep、wc 等）与 mcode 自带只读 MCP 工具不改动任何东西，非敏感时直接放行。
 	// 判定必须用输入里的真实命令：Summary 是 provider 拼接出的展示串（如 `Bash {"command":…}`），取首词必然判否。
 	if (td.isHelper || td.parentThreadID != "") && td.summary.RuntimeMode == string(harness.ModeReadOnly) {
-		if req.Sensitive == "" && (req.ReadOnly ||
-			(kind == harness.RequestKindCommand && isSafeReadOnlyCommand(approvalCommand(req))) ||
-			(kind == harness.RequestKindTool && mcp.ReadOnlyTool(req.ToolName, req.Input))) {
+		if readOnlyAutoAllow(kind, req) {
 			a.b.mu.Unlock()
 			return harness.ApprovalResponse{Decision: harness.DecisionAllow}, nil
 		}
@@ -229,6 +227,12 @@ func (a *threadApprover) Interact(ctx context.Context, req harness.ApprovalReque
 				Feedback: "只读档子代理不允许写操作",
 			}, nil
 		}
+	}
+
+	// plan 回合只调研不实施，只读操作不打断用户；agy 在 plan 下仍会为只读命令发审批。
+	if normalizeInteractionMode(td.summary.InteractionMode) == "plan" && readOnlyAutoAllow(kind, req) {
+		a.b.mu.Unlock()
+		return harness.ApprovalResponse{Decision: harness.DecisionAllow}, nil
 	}
 
 	// 子代理（Swarm bee）无人值守：审批请求挂起会永久卡住本轮，前端也不会有人来答复。
@@ -697,6 +701,13 @@ func mcpToolAutoApproved(dataDir, toolName string) bool {
 // isSafeReadOnlyCommand 判断命令是否仅由安全只读指令或有范围的 go 检查组成，供只读档直接放行。
 func isSafeReadOnlyCommand(cmd string) bool {
 	return gate.OnlyReadsOrGoChecks(cmd)
+}
+
+// readOnlyAutoAllow 判断非敏感请求是否只读取信息：只读标记、只读 shell 命令与 mcode 自带只读 MCP 工具都不改动任何东西。
+func readOnlyAutoAllow(kind harness.RequestKind, req harness.ApprovalRequest) bool {
+	return req.Sensitive == "" && (req.ReadOnly ||
+		(kind == harness.RequestKindCommand && isSafeReadOnlyCommand(approvalCommand(req))) ||
+		(kind == harness.RequestKindTool && mcp.ReadOnlyTool(req.ToolName, req.Input)))
 }
 
 // approvalCommand 取出命令类请求的真实命令文本：优先输入里的 command 字段，

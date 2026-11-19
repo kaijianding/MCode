@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -2393,7 +2394,14 @@ type approvalProbe struct {
 
 func probeApproval(t *testing.T, backend *MemoryBackend, threadID string, mode harness.PermissionMode, req harness.ApprovalRequest, timeout time.Duration) approvalProbe {
 	t.Helper()
+	return probeApprovalSummary(t, backend, wire.ThreadSummary{ID: threadID, Title: "审批"}, mode, req, timeout)
+}
+
+// probeApprovalSummary 用给定会话摘要跑一轮，观察审批是被自动放行还是分发成待审批卡。
+func probeApprovalSummary(t *testing.T, backend *MemoryBackend, summary wire.ThreadSummary, mode harness.PermissionMode, req harness.ApprovalRequest, timeout time.Duration) approvalProbe {
+	t.Helper()
 	ctx := context.Background()
+	threadID := summary.ID
 	var probe approvalProbe
 	backend.SetHarness(&mockHarness{runFunc: func(runCtx context.Context, turn harness.Turn, emit func(harness.Event)) error {
 		approveCtx, cancel := context.WithTimeout(runCtx, timeout)
@@ -2413,7 +2421,7 @@ func probeApproval(t *testing.T, backend *MemoryBackend, threadID string, mode h
 		<-done
 		return nil
 	}}, "/workspace", mode)
-	backend.AddThread(wire.ThreadSummary{ID: threadID, Title: "审批"}, nil)
+	backend.AddThread(summary, nil)
 	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{ThreadID: threadID, Text: "测试", ActionID: newUUID()}); err != nil {
 		t.Fatalf("SendMessage failed: %v", err)
 	}
@@ -2441,6 +2449,59 @@ func TestApprovals_OrdinaryThreadStillPromptsInAutoMode(t *testing.T) {
 	}
 	if !probe.pendingSeen {
 		t.Fatal("普通线程的命令审批应仍然分发到前端")
+	}
+}
+
+// TestThreadApproverPlanReadOnlyAutoAllow 覆盖 plan 回合的只读自动放行：
+// 只读命令与只读工具不弹卡，写命令照旧弹卡，build 模式行为不变。
+func TestThreadApproverPlanReadOnlyAutoAllow(t *testing.T) {
+	gitLog := harness.ApprovalRequest{
+		Kind:     harness.RequestKindCommand,
+		ToolName: "run_command",
+		Input:    json.RawMessage(`{"CommandLine":"git log -n 16 --stat"}`),
+		Summary:  `run_command {"CommandLine":"git log -n 16 --stat"}`,
+	}
+	cases := []struct {
+		name            string
+		interactionMode string
+		req             harness.ApprovalRequest
+		wantAllow       bool
+	}{
+		{"agy 只读命令", "plan", gitLog, true},
+		{"ReadOnly 工具", "plan", harness.ApprovalRequest{
+			ToolName: "read_file",
+			ReadOnly: true,
+			Input:    json.RawMessage(`{"file_path":"/workspace/internal/swarm/delegation.go"}`),
+		}, true},
+		{"写命令不自动放行", "plan", harness.ApprovalRequest{
+			Kind:     harness.RequestKindCommand,
+			ToolName: "run_command",
+			Input:    json.RawMessage(`{"CommandLine":"rm -rf build"}`),
+		}, false},
+		{"build 模式行为不变", "build", gitLog, false},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+			defer hub.Close()
+			backend := NewMemoryBackend(hub)
+			defer backend.Close()
+
+			threadID := fmt.Sprintf("00000000-0000-0000-0000-0000000001%02d", i)
+			probe := probeApprovalSummary(t, backend, wire.ThreadSummary{
+				ID:              threadID,
+				Title:           tc.name,
+				InteractionMode: tc.interactionMode,
+				RuntimeMode:     string(harness.ModeSupervised),
+			}, harness.ModeSupervised, tc.req, 150*time.Millisecond)
+
+			if gotAllow := probe.decision == harness.DecisionAllow; gotAllow != tc.wantAllow {
+				t.Errorf("自动放行 = %v，期望 %v（决策 %v）", gotAllow, tc.wantAllow, probe.decision)
+			}
+			if gotPending := probe.pendingSeen; gotPending == tc.wantAllow {
+				t.Errorf("生成待审批卡 = %v，期望 %v", gotPending, !tc.wantAllow)
+			}
+		})
 	}
 }
 
@@ -2562,6 +2623,30 @@ func TestIsSafeReadOnlyCommand(t *testing.T) {
 	for _, cmd := range blocked {
 		if isSafeReadOnlyCommand(cmd) {
 			t.Errorf("不应判定为安全只读命令: %q", cmd)
+		}
+	}
+}
+
+// TestPlanReadOnlyRealCommands 记录真实命令在当前只读规则下的判定结果，防止后续改动悄悄收紧或放宽。
+func TestPlanReadOnlyRealCommands(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{`git log -n 20 --oneline && echo "---" && git status -s`, true},
+		{`git log -n 16 --stat`, true},
+		{`wc -l internal/providers/acp/*.go internal/providers/agy/*.go`, true},
+		{`git diff 92c2c27c..HEAD -- internal/providers/agy/agy.go`, true},
+		{`git log -n 20 --name-only --pretty=format:"%h %s"`, true},
+		{`go test -timeout 60s ./internal/providers/acp/...`, true},
+		{`rg -n "AgentAgy|agy\.New" internal/`, true},
+		{`rg -n -C 15 "feature_hold_cancel" internal/providers/acp/acp_test.go`, true},
+		{`ls -la internal/providers/acp/`, true},
+		{`rm -rf build`, false},
+	}
+	for _, tc := range cases {
+		if got := isSafeReadOnlyCommand(tc.cmd); got != tc.want {
+			t.Errorf("isSafeReadOnlyCommand(%q) = %v，期望 %v", tc.cmd, got, tc.want)
 		}
 	}
 }
