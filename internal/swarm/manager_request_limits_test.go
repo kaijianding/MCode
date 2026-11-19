@@ -7,13 +7,11 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"mcode/internal/testenv"
 )
 
 // 总时长预算：超时后 DispatchSingleEntry 拒绝派发并返回 ErrRequestTimeout，不启动 bee、不增加轮次。
 func TestDispatchSingleEntry_RequestTimeout(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 	clock := newTestClock()
@@ -67,7 +65,7 @@ func TestDispatchSingleEntry_RequestTimeout(t *testing.T) {
 
 // 总时长预算：Settings.RequestTimeoutMinutes 生效于 Tick 看门狗。
 func TestTick_RequestTimeoutFromSettings(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 	clock := newTestClock()
@@ -124,7 +122,7 @@ func TestTick_RequestTimeoutFromSettings(t *testing.T) {
 
 // RequestLimits 汇总本次请求的轮次、并发、bee 预算与时长上限。
 func TestRequestLimitsSnapshot(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	clock := newTestClock()
 	mgr := NewManager(Options{
 		Now:            clock.Now,

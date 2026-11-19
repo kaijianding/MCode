@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 type fakePersisterWithDelete struct {
@@ -22,7 +20,7 @@ func (p *fakePersisterWithDelete) DeleteLead(ctx context.Context, leadThreadID s
 
 // 验证删除 running bee 会被标记为 StatusStopped，FinishedAt 不为空，摘要为空，且 Lead 能收到结算汇报；非 bee 的 threadID 调用时不报错、状态不变。
 func TestManager_BeeThreadDeleted_RunningBee(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 
@@ -120,7 +118,7 @@ func TestManager_BeeThreadDeleted_RunningBee(t *testing.T) {
 
 // 验证当 threadID 为 Lead 时，停止其所有 running bee 并移除 lead 状态与持久化记录。
 func TestManager_BeeThreadDeleted_LeadThread(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 

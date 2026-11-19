@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"mcode/internal/git"
-	"mcode/internal/testenv"
 )
 
 // reclaimFixture 搭一个用真实 git 仓库与注入时钟的 Manager，副本一律建在 WorktreeDir 之下。
@@ -29,7 +28,6 @@ type reclaimFixture struct {
 
 func newReclaimFixture(t *testing.T) *reclaimFixture {
 	t.Helper()
-	testenv.TempHome(t)
 	clock := newTestClock()
 	runner, repoDir := initTestRepo(t)
 	wtRoot := t.TempDir()
@@ -97,6 +95,7 @@ func (f *reclaimFixture) assertCopyGone(t *testing.T, path, branch string) {
 
 // 已合并且有落地补丁存档的 bee，静置超过 10 分钟后副本被回收：目录与分支消失，WorktreePath/Branch 清空。
 func TestManager_ReclaimBeeCopies_MergedWithLandedPatch(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, _ := f.addCopy(t, "lead-reclaim-0", "mcode/test-reclaim/0")
 
@@ -131,6 +130,7 @@ func TestManager_ReclaimBeeCopies_MergedWithLandedPatch(t *testing.T) {
 
 // 刚结束 5 分钟的 bee 副本保留，静置满 10 分钟后才回收。
 func TestManager_ReclaimBeeCopies_SkipsRecentlyFinished(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, _ := f.addCopy(t, "lead-reclaim-0", "mcode/test-reclaim/0")
 
@@ -160,6 +160,7 @@ func TestManager_ReclaimBeeCopies_SkipsRecentlyFinished(t *testing.T) {
 
 // 各种「成果可能还没落地」的状态都不回收副本。
 func TestManager_ReclaimBeeCopies_SkipsUnsafeBees(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.setBees()
 
@@ -201,6 +202,7 @@ func TestManager_ReclaimBeeCopies_SkipsUnsafeBees(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_ArchivesStaleUnmerged(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		bee        Bee
@@ -285,10 +287,12 @@ func TestManager_ReclaimBeeCopies_ArchivesStaleUnmerged(t *testing.T) {
 }
 
 func TestReclaimExpiresPendingMerge(t *testing.T) {
+	t.Parallel()
 	testReclaimExpires(t, Bee{Status: StatusCompleted, PendingMerge: true})
 }
 
 func TestReclaimExpiresInterrupted(t *testing.T) {
+	t.Parallel()
 	testReclaimExpires(t, Bee{Status: StatusStopped, Interrupted: true})
 }
 
@@ -358,6 +362,7 @@ func testReclaimExpires(t *testing.T, bee Bee) {
 }
 
 func TestManager_ReclaimBeeCopies_StaleActiveBeesKept(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.setBees()
 	for i, h := range []Bee{
@@ -382,6 +387,7 @@ func TestManager_ReclaimBeeCopies_StaleActiveBeesKept(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_InvalidGitMetadata(t *testing.T) {
+	t.Parallel()
 	for _, changed := range []bool{false, true} {
 		for _, relative := range []bool{false, true} {
 			t.Run(fmt.Sprintf("changed=%t/relative=%t", changed, relative), func(t *testing.T) {
@@ -431,6 +437,7 @@ func TestManager_ReclaimBeeCopies_InvalidGitMetadata(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_StaleArchiveFailureKeepsCopy(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"add", "diff", "save"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newReclaimFixture(t)
@@ -459,6 +466,7 @@ func TestManager_ReclaimBeeCopies_StaleArchiveFailureKeepsCopy(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_StaleEmptyPatch(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, base := f.addCopy(t, "lead-empty-0", "mcode/test-empty/0")
 	f.setBees(Bee{ThreadID: "bee-empty", Status: StatusStopped, WorktreePath: path, BaseCommit: base, Branch: "mcode/test-empty/0", FinishedAt: f.finishedAtAgo(24 * time.Hour)})
@@ -470,6 +478,7 @@ func TestManager_ReclaimBeeCopies_StaleEmptyPatch(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_RechecksAfterMergeLock(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, base := f.addCopy(t, "lead-resumed-0", "mcode/test-resumed/0")
 	f.setBees(Bee{ThreadID: "bee-resumed", Status: StatusStopped, WorktreePath: path, BaseCommit: base, FinishedAt: f.finishedAtAgo(24 * time.Hour)})
@@ -511,6 +520,7 @@ func TestManager_ReclaimBeeCopies_RechecksAfterMergeLock(t *testing.T) {
 
 // 只读且没有任何改动的 bee 即使没有合并标记，也可以回收副本。
 func TestManager_ReclaimBeeCopies_ReadOnlyWithoutChanges(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, _ := f.addCopy(t, "lead-readonly-0", "mcode/test-readonly/0")
 
@@ -533,6 +543,7 @@ func TestManager_ReclaimBeeCopies_ReadOnlyWithoutChanges(t *testing.T) {
 
 // 不在 WorktreeDir 之下的路径不回收，避免误删主工作区或用户的目录。
 func TestManager_ReclaimBeeCopies_SkipsPathOutsideWorktreeDir(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path := filepath.Join(t.TempDir(), "lead-outside-0")
 	if err := f.runner.WorktreeAdd(context.Background(), f.repoDir, path, "mcode/test-outside/0", "HEAD"); err != nil {
@@ -560,6 +571,7 @@ func TestManager_ReclaimBeeCopies_SkipsPathOutsideWorktreeDir(t *testing.T) {
 
 // 回收限流：一分钟内连续两次调用只真正跑一次。
 func TestManager_ReclaimBeeCopies_ThrottledToOneRunPerMinute(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	first, _ := f.addCopy(t, "lead-throttle-0", "mcode/test-throttle/0")
 
@@ -600,7 +612,7 @@ func TestManager_ReclaimBeeCopies_ThrottledToOneRunPerMinute(t *testing.T) {
 
 // 审查模式下结果还没汇报给用户的 bee 不回收，汇报后才回收。
 func TestManager_ReclaimBeeCopies_ReviewModeWaitsForReport(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	clock := newTestClock()
 	runner, repoDir := initTestRepo(t)
 	wtRoot := t.TempDir()
@@ -653,7 +665,7 @@ func TestManager_ReclaimBeeCopies_ReviewModeWaitsForReport(t *testing.T) {
 
 // 审查模式下用户放弃合并后，bee 副本可以回收：目录与分支消失，MergeDiscarded 保留；尚未汇报的仍不回收。
 func TestManager_ReclaimBeeCopies_DiscardedReviewBee(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	clock := newTestClock()
 	runner, repoDir := initTestRepo(t)
 	wtRoot := t.TempDir()
@@ -745,7 +757,7 @@ func TestManager_ReclaimBeeCopies_DiscardedReviewBee(t *testing.T) {
 
 // 审查未通过的 bee 汇报后按放弃的规则回收副本，补丁仍可查 diff。
 func TestManager_ReclaimBeeCopies_RejectedReviewBee(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	clock := newTestClock()
 	runner, repoDir := initTestRepo(t)
 	wtRoot := t.TempDir()
@@ -835,6 +847,7 @@ func TestManager_ReclaimBeeCopies_RejectedReviewBee(t *testing.T) {
 
 // 副本回收之后，已合并的 bee 仍能通过 LandedPatchPath 查看 diff。
 func TestManager_MergeDiff_UsesLandedPatchAfterReclaim(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, _ := f.addCopy(t, "lead-diff-0", "mcode/test-diff/0")
 
@@ -873,6 +886,7 @@ func TestManager_MergeDiff_UsesLandedPatchAfterReclaim(t *testing.T) {
 }
 
 func TestManager_MergeDiff_FallsBackToArchivedPatch(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	archivedPath := filepath.Join(t.TempDir(), "archived.patch")
 	const content = "diff --git a/new.txt b/new.txt\n+archived\n"
@@ -899,6 +913,7 @@ func TestManager_MergeDiff_FallsBackToArchivedPatch(t *testing.T) {
 
 // 删除 lead 时一并回收 bee 副本：已合并的直接删，未落地的先把改动存档到 swarm-patches 再删。
 func TestManager_BeeThreadDeleted_ReclaimsBeeCopies(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 
 	mergedPath, _ := f.addCopy(t, "lead-delete-0", "mcode/test-delete/0")
@@ -946,6 +961,7 @@ func TestManager_BeeThreadDeleted_ReclaimsBeeCopies(t *testing.T) {
 
 // 删除 lead 时仍未合并的 bee，即使 ChangedFiles 还没更新为空，也要先采集 worktree 里的真实改动存档，再删副本。
 func TestManager_BeeThreadDeleted_ArchivesUnmergedBeeWithStaleChangedFiles(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 
 	stalePath, staleBase := f.addCopy(t, "lead-stale-0", "mcode/test-stale/0")
@@ -1000,6 +1016,7 @@ func TestManager_RemoveBeeCopy_LogsGitErrors(t *testing.T) {
 }
 
 func TestManager_ReclaimBeeCopies_ResumingInterrupted(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	path, base := f.addCopy(t, "lead-resuming-0", "")
 	f.setBees(Bee{ThreadID: "bee-resuming", Status: StatusStopped, Interrupted: true,

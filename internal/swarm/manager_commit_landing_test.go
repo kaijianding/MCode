@@ -24,8 +24,24 @@ func TestMain(m *testing.M) {
 	if cfg, ok := gitWrapperConfigPath(); ok {
 		os.Exit(runGitWrapperHelper(cfg))
 	}
+	home, err := os.MkdirTemp("", "mcode-swarm-test-home-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create test home: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Setenv("HOME", home); err != nil {
+		_ = os.RemoveAll(home)
+		fmt.Fprintf(os.Stderr, "set HOME: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Setenv("USERPROFILE", home); err != nil {
+		_ = os.RemoveAll(home)
+		fmt.Fprintf(os.Stderr, "set USERPROFILE: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	cleanupTestRepoTemplate()
+	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
 

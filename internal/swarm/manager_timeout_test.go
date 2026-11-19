@@ -10,7 +10,6 @@ import (
 
 	"mcode/internal/config"
 	"mcode/internal/kanban"
-	"mcode/internal/testenv"
 )
 
 // TestSwarmBeeTimeoutConfigDefaults 验证配置默认值，以及缺少该字段的旧配置使用默认值。
@@ -77,7 +76,7 @@ func TestSwarmManager_SetBeeTimeout(t *testing.T) {
 
 // TestWatchdog_DynamicTimeoutApplied 验证看门狗按 SetBeeTimeout 的新值判定熔断。
 func TestWatchdog_DynamicTimeoutApplied(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 	clock := newTestClock()
@@ -145,7 +144,7 @@ func TestWatchdog_DynamicTimeoutApplied(t *testing.T) {
 
 // TestWatchdog_RunTimeoutWithProgress 验证持续有输出的 bee 在运行时长达到超时上限后也会被停止，且等待用户的时间不计入。
 func TestWatchdog_RunTimeoutWithProgress(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 	clock := newTestClock()

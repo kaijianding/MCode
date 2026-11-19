@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"mcode/internal/testenv"
 )
 
 const maxRoundsReply = "计划如下：\n```swarm\n" + `[{"task": "first", "prompt": "first"}]` + "\n```"
 
 // 派发轮次上限：该 Lead 已派发轮次达到 Settings.MaxRounds 后，DispatchFromReply 不再派发并返回 ErrMaxRounds。
 func TestDispatchFromReply_MaxRounds(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 
@@ -53,7 +51,7 @@ func TestDispatchFromReply_MaxRounds(t *testing.T) {
 
 // MaxRounds 为 0 表示不限制：轮次继续累计也不阻止派发。
 func TestDispatchFromReply_MaxRoundsUnlimited(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 
@@ -84,7 +82,7 @@ func TestDispatchFromReply_MaxRoundsUnlimited(t *testing.T) {
 
 // 流式路径在派发前先记轮次：上限内的条目照常派出，超出上限的那一轮返回 ErrMaxRounds。
 func TestDispatchSingleEntry_MaxRounds(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, dir := initTestRepo(t)
 	ctx := context.Background()
 

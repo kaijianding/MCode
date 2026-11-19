@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"mcode/internal/git"
-	"mcode/internal/testenv"
 )
 
 func TestSweepDeletesUnreferencedSwarmBranches(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 	runner, repo := initTestRepo(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -73,7 +72,7 @@ func TestSweepDeletesUnreferencedSwarmBranches(t *testing.T) {
 
 // 被 bee 引用的 worktree 保留，未被引用的孤儿副本经 git worktree remove 清理。
 func TestManager_SweepOrphanCopies(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	runner, repoDir := initTestRepo(t)
 	wtRoot := t.TempDir()
@@ -113,7 +112,7 @@ func TestManager_SweepOrphanCopies(t *testing.T) {
 
 // 非 git worktree 的孤儿目录直接删除；startingWorkDirs 中登记的目录保留。
 func TestManager_SweepOrphanCopies_PlainDirectory(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	wtRoot := t.TempDir()
 	mgr := NewManager(Options{Git: git.NewRunner("git", 4), WorktreeDir: wtRoot})
@@ -148,7 +147,7 @@ func TestManager_SweepOrphanCopies_PlainDirectory(t *testing.T) {
 
 // WorktreeDir 为空或不存在时返回 nil, nil。
 func TestManager_SweepOrphanCopies_MissingWorktreeDir(t *testing.T) {
-	testenv.TempHome(t)
+	t.Parallel()
 
 	mgr := NewManager(Options{WorktreeDir: filepath.Join(t.TempDir(), "missing")})
 	removed, err := mgr.SweepOrphanCopies(context.Background())
