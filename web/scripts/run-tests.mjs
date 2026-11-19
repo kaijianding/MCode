@@ -1,7 +1,7 @@
-// web 测试运行器：web/src 下的测试不使用测试框架，这里用 esbuild 逐个打包后直接执行。
+// web 测试运行器：web/src 下的测试不使用测试框架，这里用 esbuild 批量打包后并发执行。
 // 用法：node scripts/run-tests.mjs（或 npm test）。
 import { build } from 'esbuild';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,29 +41,44 @@ function expandGlob(pattern) {
 }
 
 // Vite 的 import.meta.glob 由 Vite 编译，esbuild 不认；这里把它展开成静态对象。
+// 多入口打包不能全局 define import.meta.url，这里在同一个 onLoad 里按 args.path 各自替换，避免多个 onLoad 短路。
 const importMetaGlobPlugin = {
   name: 'import-meta-glob',
   setup(buildContext) {
     buildContext.onLoad({ filter: /\.(ts|tsx)$/ }, async (args) => {
       let contents = await fs.promises.readFile(args.path, 'utf8');
-      if (!contents.includes('import.meta.glob')) return undefined;
-      const sourceDir = path.dirname(args.path);
+      const hasGlob = contents.includes('import.meta.glob');
+      const hasUrl = contents.includes('import.meta.url');
+      if (!hasGlob && !hasUrl) return undefined;
+
       let replaced = false;
-      contents = contents.replace(
-        /import\.meta\.glob(?:<[^>]*>)?\(\s*(['"])([^'"]+)\1\s*(?:,\s*\{[^}]*\})?\s*\)/g,
-        (_match, _quote, pattern) => {
+      if (hasGlob) {
+        const sourceDir = path.dirname(args.path);
+        contents = contents.replace(
+          /import\.meta\.glob(?:<[^>]*>)?\(\s*(['"])([^'"]+)\1\s*(?:,\s*\{[^}]*\})?\s*\)/g,
+          (_match, _quote, pattern) => {
+            replaced = true;
+            const entries = expandGlob(path.resolve(sourceDir, pattern)).map((file) => {
+              let key = path.relative(sourceDir, file).split(path.sep).join('/');
+              if (!key.startsWith('.')) key = `./${key}`;
+              // query: '?url' 的返回值；测试只关心图标名与来源，不解析真实资源。
+              const url = `/${path.relative(webDir, file).split(path.sep).join('/')}`;
+              return `${JSON.stringify(key)}: ${JSON.stringify(url)}`;
+            });
+            return `{ ${entries.join(', ')} }`;
+          }
+        );
+      }
+
+      if (hasUrl) {
+        const fileUrlLiteral = JSON.stringify(pathToFileURL(args.path).href);
+        contents = contents.replace(/\bimport\.meta\.url\b/g, () => {
           replaced = true;
-          const entries = expandGlob(path.resolve(sourceDir, pattern)).map((file) => {
-            let key = path.relative(sourceDir, file).split(path.sep).join('/');
-            if (!key.startsWith('.')) key = `./${key}`;
-            // query: '?url' 的返回值；测试只关心图标名与来源，不解析真实资源。
-            const url = `/${path.relative(webDir, file).split(path.sep).join('/')}`;
-            return `${JSON.stringify(key)}: ${JSON.stringify(url)}`;
-          });
-          return `{ ${entries.join(', ')} }`;
-        }
-      );
-      // 只有注释里提到 import.meta.glob 的文件不需要改写。
+          return fileUrlLiteral;
+        });
+      }
+
+      // 只有注释或其它形式里未实际匹配到的文件不需要改写。
       if (!replaced) return undefined;
       return { contents, loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts' };
     });
@@ -87,10 +102,35 @@ if (typeof globalThis.requestAnimationFrame === 'undefined') {
 }
 `;
 
-async function bundleTest(testFile, outfile) {
+const TEST_TIMEOUT_MS = 30_000;
+
+function resolveConcurrency() {
+  const raw = process.env.MCODE_WEB_TEST_CONCURRENCY;
+  if (raw !== undefined && raw !== '') {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return parsed;
+    }
+  }
+  return Math.max(1, Math.min(os.cpus().length, 8));
+}
+
+async function bundleTests(tests, tmpDir) {
+  const entryPoints = {};
+  const entries = tests.map((testFile) => {
+    const label = path.relative(webDir, testFile);
+    const relFromSrc = path.relative(srcDir, testFile).split(path.sep).join('/');
+    entryPoints[relFromSrc] = testFile;
+    return {
+      label,
+      outfile: path.join(tmpDir, `${relFromSrc}.mjs`)
+    };
+  });
+
   await build({
-    entryPoints: [testFile],
-    outfile,
+    entryPoints,
+    outdir: tmpDir,
+    outExtension: { '.js': '.mjs' },
     bundle: true,
     platform: 'node',
     format: 'esm',
@@ -99,7 +139,6 @@ async function bundleTest(testFile, outfile) {
     logLevel: 'silent',
     banner: { js: browserStubBanner },
     define: {
-      'import.meta.url': JSON.stringify(pathToFileURL(testFile).href),
       'import.meta.env.BASE_URL': JSON.stringify('/')
     },
     // CSS 与图片只被打包进依赖图，测试本身不读取它们。
@@ -117,6 +156,61 @@ async function bundleTest(testFile, outfile) {
     },
     plugins: [importMetaGlobPlugin]
   });
+
+  return entries;
+}
+
+function runTestProcess(outfile) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const child = spawn(process.execPath, [outfile], {
+      cwd: webDir,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    let timedOut = false;
+    let spawnError = null;
+    let settled = false;
+    let killEscalationTimer = null;
+
+    child.stdout?.on('data', (chunk) => stdoutChunks.push(chunk));
+    child.stderr?.on('data', (chunk) => stderrChunks.push(chunk));
+
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      killEscalationTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, 1000);
+      killEscalationTimer.unref?.();
+    }, TEST_TIMEOUT_MS);
+    timeoutTimer.unref?.();
+
+    const finish = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (killEscalationTimer) clearTimeout(killEscalationTimer);
+      resolve({
+        elapsed: Date.now() - startedAt,
+        code,
+        signal,
+        timedOut,
+        error: spawnError,
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.concat(stderrChunks)
+      });
+    };
+
+    child.on('error', (error) => {
+      spawnError = error;
+      finish(null, null);
+    });
+    child.on('close', (code, signal) => {
+      finish(code, signal);
+    });
+  });
 }
 
 async function run() {
@@ -127,44 +221,55 @@ async function run() {
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcode-web-tests-'));
-  const failed = [];
-  let index = 0;
+  const failuresByIndex = new Array(tests.length);
 
   try {
-    for (const testFile of tests) {
-      index += 1;
-      const label = path.relative(webDir, testFile);
-      const outfile = path.join(tmpDir, `${index}-${path.basename(testFile).replace(/\.tsx?$/, '')}.mjs`);
-      const startedAt = Date.now();
-      try {
-        await bundleTest(testFile, outfile);
-      } catch (error) {
-        failed.push({ label, reason: `打包失败：${error instanceof Error ? error.message : String(error)}` });
-        console.log(`✗ ${label}（打包失败）`);
-        continue;
-      }
+    let entries;
+    try {
+      entries = await bundleTests(tests, tmpDir);
+    } catch (error) {
+      console.error(`web 测试打包失败：${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+      return;
+    }
 
-      const result = spawnSync(process.execPath, [outfile], {
-        stdio: 'inherit',
-        timeout: 30_000
-      });
-      const elapsed = Date.now() - startedAt;
+    const concurrency = Math.min(resolveConcurrency(), entries.length);
+    let nextIndex = 0;
 
-      if (result.error) {
-        const reason = result.error.code === 'ETIMEDOUT' ? '执行超时' : `执行失败：${result.error.message}`;
-        failed.push({ label, reason });
-        console.log(`✗ ${label}（${reason}，${elapsed}ms）`);
-      } else if (result.status !== 0) {
-        failed.push({ label, reason: `退出码 ${result.status ?? result.signal}` });
-        console.log(`✗ ${label}（${elapsed}ms）`);
-      } else {
-        console.log(`✓ ${label}（${elapsed}ms）`);
+    async function worker() {
+      while (nextIndex < entries.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const { label, outfile } = entries[currentIndex];
+        const result = await runTestProcess(outfile);
+
+        if (result.stdout.length > 0) process.stdout.write(result.stdout);
+        if (result.stderr.length > 0) process.stderr.write(result.stderr);
+
+        if (result.timedOut) {
+          const reason = '执行超时';
+          failuresByIndex[currentIndex] = { label, reason };
+          console.log(`✗ ${label}（${reason}，${result.elapsed}ms）`);
+        } else if (result.error) {
+          const reason = `执行失败：${result.error.message}`;
+          failuresByIndex[currentIndex] = { label, reason };
+          console.log(`✗ ${label}（${reason}，${result.elapsed}ms）`);
+        } else if (result.code !== 0) {
+          const reason = `退出码 ${result.code ?? result.signal}`;
+          failuresByIndex[currentIndex] = { label, reason };
+          console.log(`✗ ${label}（${result.elapsed}ms）`);
+        } else {
+          console.log(`✓ ${label}（${result.elapsed}ms）`);
+        }
       }
     }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  const failed = failuresByIndex.filter(Boolean);
   const passed = tests.length - failed.length;
   console.log(`\nweb 测试：${passed} 通过，${failed.length} 失败，共 ${tests.length} 个`);
   if (failed.length > 0) {
