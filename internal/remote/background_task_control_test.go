@@ -157,6 +157,28 @@ func TestBackgroundTaskEndIncludesOutput(t *testing.T) {
 	}
 }
 
+func TestBackgroundTaskEndUsesEventOutput(t *testing.T) {
+	threadID := "00000000-0000-0000-0000-0000000000f1"
+	backend, ctx := newBackgroundTestBackend(t, threadID)
+	const input = `{"command":"make build"}`
+	backend.SetHarness(&mockHarness{runFunc: func(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
+		emit(harness.Event{Type: harness.EventToolStart, ToolID: "tool-1", ToolName: "Bash", Input: []byte(input)})
+		emit(harness.Event{Type: harness.EventToolEnd, ToolID: "tool-1", Output: "Command running in background with ID: task-1"})
+		emit(harness.Event{Type: harness.EventBackgroundTaskStart, ToolID: "tool-1", TaskID: "task-1"})
+		emit(harness.Event{Type: harness.EventBackgroundTaskEnd, ToolID: "tool-1", TaskID: "task-1", TaskStatus: "completed", Output: "BUILD SUCCESSFUL"})
+		emit(harness.Event{Type: harness.EventDone})
+		return nil
+	}}, t.TempDir(), harness.ModeAgent)
+	if _, err := backend.SendMessage(ctx, wire.SendMessageParams{ThreadID: threadID, Text: "启动", ActionID: "00000000-0000-0000-0000-0000000000f3"}); err != nil {
+		t.Fatal(err)
+	}
+	waitThreadIdle(t, backend, ctx, threadID)
+	msg := waitToolStatus(t, backend, ctx, threadID, "Bash", "completed")
+	if want := "Bash " + input + "\nBUILD SUCCESSFUL"; msg.Text != want {
+		t.Fatalf("任务结束后的正文 = %q，期望 %q", msg.Text, want)
+	}
+}
+
 type backgroundControlHarness struct {
 	*mockHarness
 	threadID string

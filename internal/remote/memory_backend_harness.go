@@ -1003,6 +1003,10 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 				text := td.messages[idx].Text
 				b.mu.Unlock()
 				output, available, readErr := readBackgroundTaskOutput(text)
+				// 没有可读的任务日志时（如 ACP provider），用事件自带的输出兜底。
+				if (readErr != nil || !available || output == "") && e.Output != "" {
+					output, available, readErr = e.Output, true, nil
+				}
 				b.mu.Lock()
 				td, ok = b.threads[threadID]
 				if !ok || td.sessionEpoch != attemptEpoch || td.runTurnID != turnID {
