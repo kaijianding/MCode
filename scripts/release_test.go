@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -160,6 +161,23 @@ func TestReleaseAIDryRun(t *testing.T) {
 	}
 }
 
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestReleaseConfirmCountdown(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("仅在 macOS 上使用 script 测试终端")
@@ -179,6 +197,7 @@ func TestReleaseConfirmCountdown(t *testing.T) {
 		{name: "EOF 取消", seconds: "30", input: "\x04", want: []string{"已取消"}, absent: []string{"已自动确认", "git tag -a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir, _ := releaseRepo(t)
 			ai := fakeReleaseAI(t, "printf '%s\\n' '- AI 生成的说明'")
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -196,20 +215,43 @@ func TestReleaseConfirmCountdown(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer stdin.Close()
-			var out bytes.Buffer
+			var out syncBuffer
 			cmd.Stdout = &out
 			cmd.Stderr = &out
 			start := time.Now()
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
+			waitCh := make(chan error, 1)
+			go func() {
+				waitCh <- cmd.Wait()
+			}()
 			if tc.input != "" {
-				time.Sleep(time.Second)
+				deadline := time.NewTimer(15 * time.Second)
+				ticker := time.NewTicker(10 * time.Millisecond)
+			waitPrompt:
+				for {
+					if strings.Contains(out.String(), "确认使用？") {
+						break waitPrompt
+					}
+					select {
+					case err := <-waitCh:
+						deadline.Stop()
+						ticker.Stop()
+						t.Fatalf("未等到确认提示进程已退出: %v\n%s", err, out.String())
+					case <-deadline.C:
+						ticker.Stop()
+						t.Fatalf("等待确认提示超时:\n%s", out.String())
+					case <-ticker.C:
+					}
+				}
+				deadline.Stop()
+				ticker.Stop()
 				if _, err := stdin.Write([]byte(tc.input)); err != nil {
 					t.Errorf("输入失败: %v", err)
 				}
 			}
-			if err := cmd.Wait(); err != nil {
+			if err := <-waitCh; err != nil {
 				t.Fatalf("试运行失败: %v\n%s", err, out.String())
 			}
 			if tc.input != "" && time.Since(start) >= 15*time.Second {

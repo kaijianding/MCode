@@ -14,7 +14,11 @@ import (
 const fakeGo = `#!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CHECK_LOG"
 if [[ "${1:-}" == "list" ]]; then
-    printf 'mcode/internal/a\nmcode/internal/ui\nmcode/build.noindex/stage0/seed\nmcode/dist/darwin-arm64/mcode.app/Contents/Resources\n'
+    if [[ "$*" == *"-f "* ]]; then
+        printf 'mcode/internal/a 1\nmcode/internal/ui 1\nmcode/scripts 0\nmcode/build.noindex/stage0/seed 1\nmcode/dist/darwin-arm64/mcode.app/Contents/Resources 1\n'
+    else
+        printf 'mcode/internal/a\nmcode/internal/ui\nmcode/build.noindex/stage0/seed\nmcode/dist/darwin-arm64/mcode.app/Contents/Resources\n'
+    fi
     exit 0
 fi
 if [[ "${1:-}" == "test" ]]; then
@@ -191,16 +195,26 @@ func TestCheckScriptExcludesBuildOutput(t *testing.T) {
 	}
 
 	var sawBuild, sawVet, sawTest bool
+	listCalls := 0
 	for _, line := range lines {
+		if strings.HasPrefix(line, "go list ") {
+			listCalls++
+		}
 		if strings.HasPrefix(line, "go build") && strings.Contains(line, "mcode/internal/a") {
+			if strings.Contains(line, "mcode/scripts") {
+				t.Fatalf("仅含测试文件的包不应传入 go build: %s", line)
+			}
 			sawBuild = true
 		}
-		if strings.HasPrefix(line, "go vet") && strings.Contains(line, "mcode/internal/a") {
+		if strings.HasPrefix(line, "go vet") && strings.Contains(line, "mcode/internal/a") && strings.Contains(line, "mcode/scripts") {
 			sawVet = true
 		}
-		if strings.HasPrefix(line, "go test") && strings.Contains(line, "mcode/internal/a") {
+		if strings.HasPrefix(line, "go test") && strings.Contains(line, "mcode/internal/a") && strings.Contains(line, "mcode/scripts") {
 			sawTest = true
 		}
+	}
+	if listCalls != 1 {
+		t.Fatalf("预期仅调用 1 次 go list，实际 %d:\n%s", listCalls, strings.Join(lines, "\n"))
 	}
 	if !sawBuild || !sawVet || !sawTest {
 		t.Fatalf("缺少 go build、go vet 或 go test 调用:\n%s", strings.Join(lines, "\n"))
@@ -272,7 +286,7 @@ func TestCheckScriptGoTestTimeout(t *testing.T) {
 
 func TestCheckScriptShardsUITests(t *testing.T) {
 	f := newCheckFixture(t)
-	output, lines, err := f.run(t, nil)
+	output, lines, err := f.run(t, map[string]string{"MCODE_UI_SHARDS": "4"})
 	if err != nil {
 		t.Fatalf("check.sh 应当成功退出: %v\n%s\n%s", err, output, strings.Join(lines, "\n"))
 	}
@@ -325,11 +339,56 @@ func TestCheckScriptShardsUITests(t *testing.T) {
 	}
 
 	fFail := newCheckFixture(t)
-	failOut, _, failErr := fFail.run(t, map[string]string{"CHECK_UI_FAIL": "TestBeta"})
+	failOut, _, failErr := fFail.run(t, map[string]string{"MCODE_UI_SHARDS": "4", "CHECK_UI_FAIL": "TestBeta"})
 	if failErr == nil {
 		t.Fatalf("设置 CHECK_UI_FAIL 时 check.sh 应当非零退出:\n%s", failOut)
 	}
 	if !strings.Contains(failOut, "FAIL: TestBeta") {
 		t.Fatalf("失败时应打印失败分片日志:\n%s", failOut)
+	}
+}
+
+func TestCheckScriptRaceSkipsNonRaceAndShardsUI(t *testing.T) {
+	f := newCheckFixture(t)
+	f.envvs = []string{"--race"}
+	output, lines, err := f.run(t, map[string]string{"MCODE_UI_SHARDS": "4"})
+	if err != nil {
+		t.Fatalf("check.sh --race 应当成功退出: %v\n%s\n%s", err, output, strings.Join(lines, "\n"))
+	}
+
+	var goTestLines []string
+	var goCompileLines []string
+	var shardPatterns []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "go test ") {
+			if strings.Contains(line, " -c ") {
+				goCompileLines = append(goCompileLines, line)
+			} else {
+				goTestLines = append(goTestLines, line)
+			}
+		}
+		if strings.HasPrefix(line, "ui.test ") {
+			idx := strings.Index(line, "-test.run ")
+			if idx == -1 {
+				t.Fatalf("ui.test 调用缺少 -test.run: %s", line)
+			}
+			shardPatterns = append(shardPatterns, strings.TrimSpace(line[idx+len("-test.run "):]))
+		}
+	}
+
+	if len(goTestLines) != 1 {
+		t.Fatalf("--race 模式预期只跑 1 轮非 UI 包 go test，实际 %d: %v", len(goTestLines), goTestLines)
+	}
+	if !strings.Contains(goTestLines[0], "-race") || !strings.Contains(goTestLines[0], "mcode/internal/a") || strings.Contains(goTestLines[0], "mcode/internal/ui") {
+		t.Fatalf("--race 模式下非 UI 包 go test 参数异常: %s", goTestLines[0])
+	}
+	if len(goCompileLines) != 1 || !strings.Contains(goCompileLines[0], "-race") || !strings.Contains(goCompileLines[0], "./internal/ui") {
+		t.Fatalf("--race 模式下 UI 编译命令异常: %v", goCompileLines)
+	}
+	if len(shardPatterns) != 4 {
+		t.Fatalf("--race 模式下预期 4 个 UI 分片，实际 %d: %v", len(shardPatterns), shardPatterns)
+	}
+	if !strings.Contains(output, "ok  \tmcode/internal/ui (4 shards, 5 tests)") {
+		t.Fatalf("输出缺少 UI 分片汇总行:\n%s", output)
 	}
 }

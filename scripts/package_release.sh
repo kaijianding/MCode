@@ -143,7 +143,7 @@ fi
 
 echo "==> 刷新 macOS bundle 元数据与 LaunchServices 注册..."
 touch "$APP_BUNDLE"
-if [[ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]]; then
+if [[ "${MCODE_SKIP_LSREGISTER:-0}" != 1 ]] && [[ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]]; then
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null || true
 fi
 

@@ -11,6 +11,7 @@ set -euo pipefail
 
 LOG="${MCODE_RELAUNCH_LOG:-${TMPDIR:-/tmp}/mcode-relaunch.log}"
 QUIT_TIMEOUT="${MCODE_RELAUNCH_QUIT_TIMEOUT:-300}"
+TERM_TIMEOUT="${MCODE_RELAUNCH_TERM_TIMEOUT:-10}"
 CALLER_TIMEOUT="${MCODE_RELAUNCH_CALLER_TIMEOUT:-2}"
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$1" >>"$LOG"; }
@@ -113,7 +114,7 @@ if [[ ${#PIDS[@]} -gt 0 ]]; then
         log "等待 ${QUIT_TIMEOUT} 秒后仍未退出（PID ${LEFT}），发送 SIGTERM"
         # shellcheck disable=SC2086
         kill -TERM $LEFT 2>/dev/null || true
-        LEFT="$(wait_gone 10 $LEFT)"
+        LEFT="$(wait_gone "$TERM_TIMEOUT" $LEFT)"
     fi
     if [[ -n "$LEFT" ]]; then
         log "错误: 进程无法退出（PID ${LEFT}），放弃重启，否则只会激活旧实例"

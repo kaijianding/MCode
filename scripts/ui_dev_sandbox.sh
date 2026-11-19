@@ -48,7 +48,11 @@ cd "$root"
 seed_args=(-data "$data")
 if $showcase; then seed_args+=(-showcase); fi
 if [[ -n "$theme" ]]; then seed_args+=(-theme "$theme"); fi
-data="$(go run ./scripts/ui_dev_seed "${seed_args[@]}")"
+if [[ -n "${MCODE_UI_DEV_SEED_BIN:-}" && -x "$MCODE_UI_DEV_SEED_BIN" ]]; then
+  data="$("$MCODE_UI_DEV_SEED_BIN" "${seed_args[@]}")"
+else
+  data="$(go run ./scripts/ui_dev_seed "${seed_args[@]}")"
+fi
 if $seed_only; then
   printf '%s\n' "$data"
   exit 0

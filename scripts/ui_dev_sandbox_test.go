@@ -3,22 +3,67 @@ package scripts_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"mcode/internal/store"
 	"mcode/internal/swarm"
 )
 
+var (
+	seedBinOnce sync.Once
+	seedBinPath string
+	seedBinDir  string
+	seedBinErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if seedBinDir != "" {
+		_ = os.RemoveAll(seedBinDir)
+	}
+	os.Exit(code)
+}
+
+func prebuiltSeedBin(t *testing.T) string {
+	t.Helper()
+	seedBinOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "mcode-ui-dev-seed-")
+		if err != nil {
+			seedBinErr = err
+			return
+		}
+		seedBinDir = dir
+		binName := "ui_dev_seed"
+		if runtime.GOOS == "windows" {
+			binName += ".exe"
+		}
+		bin := filepath.Join(dir, binName)
+		cmd := exec.Command("go", "build", "-o", bin, "./ui_dev_seed")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			seedBinErr = fmt.Errorf("编译 ui_dev_seed 失败: %v\n%s", err, out)
+			return
+		}
+		seedBinPath = bin
+	})
+	if seedBinErr != nil {
+		t.Fatal(seedBinErr)
+	}
+	return seedBinPath
+}
+
 func TestUISandboxSeedIsIdle(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+prebuiltSeedBin(t))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("灌数据失败: %v\n%s", err, out)
 	}
@@ -71,10 +116,12 @@ func TestUISandboxSeedIsIdle(t *testing.T) {
 }
 
 func TestUISandboxShowcaseSeed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
+	seedBin := prebuiltSeedBin(t)
 	for i := 0; i < 2; i++ {
 		cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--showcase", "--seed-only")
-		cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+		cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+seedBin)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("第 %d 次灌展示数据失败: %v\n%s", i+1, err, out)
 		}
@@ -246,9 +293,11 @@ func TestUISandboxShowcaseSeed(t *testing.T) {
 }
 
 func TestUISandboxShowcaseTheme(t *testing.T) {
+	t.Parallel()
+	seedBin := prebuiltSeedBin(t)
 	dir := t.TempDir()
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--showcase", "--theme", "light", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+seedBin)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("灌数据失败: %v\n%s", err, out)
 	}
@@ -268,13 +317,14 @@ func TestUISandboxShowcaseTheme(t *testing.T) {
 		t.Fatalf("主题=%q，期望 light", cfg.Appearance.Theme)
 	}
 	cmd = exec.Command("bash", "ui_dev_sandbox.sh", "--theme", "bogus", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+t.TempDir(), "MCODE_UI_DEV_SEED_BIN="+seedBin)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("非法主题应失败: %s", out)
 	}
 }
 
 func TestUISandboxAllowsSystemTemp(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 没有 /tmp")
 	}
@@ -284,7 +334,7 @@ func TestUISandboxAllowsSystemTemp(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+prebuiltSeedBin(t))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("在 /tmp 下灌数据失败: %v\n%s", err, out)
 	}
@@ -294,6 +344,7 @@ func TestUISandboxAllowsSystemTemp(t *testing.T) {
 }
 
 func TestUISandboxRejectsUnknownArgument(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--unknown")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -305,20 +356,24 @@ func TestUISandboxRejectsUnknownArgument(t *testing.T) {
 }
 
 func TestUISandboxBackgroundFlag(t *testing.T) {
+	t.Parallel()
+	seedBin := prebuiltSeedBin(t)
 	dir := t.TempDir()
 	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--background", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+seedBin)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("--background 参数解析失败: %v\n%s", err, out)
 	}
 	cmd = exec.Command("bash", "ui_dev_sandbox.sh", "--background", "--background", "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+t.TempDir(), "MCODE_UI_DEV_SEED_BIN="+seedBin)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("重复 --background 应失败: %s", out)
 	}
 }
 
 func TestUISandbox(t *testing.T) {
+	t.Parallel()
+	seedBin := prebuiltSeedBin(t)
 	script, err := filepath.Abs("ui_dev_sandbox.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +393,7 @@ func TestUISandbox(t *testing.T) {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
 			before, statErr := os.Stat(dir)
 			cmd := exec.Command("bash", script, "--seed-only")
-			cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+			cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+seedBin)
 			if out, err := cmd.CombinedOutput(); err == nil {
 				t.Fatalf("应拒绝目录 %s: %s", dir, out)
 			}
@@ -353,7 +408,7 @@ func TestUISandbox(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cmd := exec.Command("bash", script, "--seed-only")
-	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir)
+	cmd.Env = append(os.Environ(), "MCODE_UI_SANDBOX_DIR="+dir, "MCODE_UI_DEV_SEED_BIN="+seedBin)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("灌数据失败: %v", err)
@@ -369,8 +424,57 @@ func TestUISandbox(t *testing.T) {
 		t.Fatalf("缺少数据库: %v", err)
 	}
 
-	cmd = exec.Command("go", "run", "./ui_dev_seed", "-data", outside)
+	cmd = exec.Command(seedBin, "-data", outside)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("种子程序应拒绝非临时目录: %s", out)
+	}
+}
+
+func TestUIDevSandboxReusesPrebuiltSeed(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goLog := filepath.Join(tmp, "go.log")
+	fakeGo := filepath.Join(binDir, "go")
+	if err := os.WriteFile(fakeGo, []byte("#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$TEST_GO_LOG\"\nexit 99\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	argsLog := filepath.Join(tmp, "seed.args")
+	fakeSeed := filepath.Join(tmp, "fake-seed")
+	if err := os.WriteFile(fakeSeed, []byte("#!/bin/bash\nprintf '%s\\n' \"$*\" > \"$TEST_SEED_ARGS\"\nprintf '%s\\n' \"$TEST_SEED_OUT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sandboxDir := filepath.Join(tmp, "sandbox")
+	cmd := exec.Command("bash", "ui_dev_sandbox.sh", "--showcase", "--theme", "light", "--seed-only")
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"MCODE_UI_SANDBOX_DIR="+sandboxDir,
+		"MCODE_UI_DEV_SEED_BIN="+fakeSeed,
+		"TEST_GO_LOG="+goLog,
+		"TEST_SEED_ARGS="+argsLog,
+		"TEST_SEED_OUT="+sandboxDir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("使用预编译二进制应当成功且不回退 go run: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != sandboxDir {
+		t.Fatalf("输出目录 = %q，期望 %q", out, sandboxDir)
+	}
+	if _, err := os.Stat(goLog); !os.IsNotExist(err) {
+		data, _ := os.ReadFile(goLog)
+		t.Fatalf("不应调用 go run，但收到调用:\n%s", data)
+	}
+	gotArgs, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := "-data " + sandboxDir + " -showcase -theme light"
+	if strings.TrimSpace(string(gotArgs)) != wantArgs {
+		t.Fatalf("种子参数 = %q，期望 %q", strings.TrimSpace(string(gotArgs)), wantArgs)
 	}
 }

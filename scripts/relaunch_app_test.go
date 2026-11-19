@@ -145,6 +145,7 @@ func (f *relaunchFixture) env(extra map[string]string) []string {
 		// 进程内环境可能来自另一个刚启动的重启进程，这里显式关掉脱离标记与超时覆盖。
 		"MCODE_RELAUNCH_DETACHED=0",
 		"MCODE_RELAUNCH_QUIT_TIMEOUT=",
+		"MCODE_RELAUNCH_TERM_TIMEOUT=",
 		"MCODE_RELAUNCH_CALLER_TIMEOUT=",
 	)
 	for key, value := range extra {
@@ -259,6 +260,7 @@ func TestRelaunchAppQuitTimeout(t *testing.T) {
 		"TEST_APP_PID":                pid,
 		"TEST_QUIT_PID":               pid,
 		"MCODE_RELAUNCH_QUIT_TIMEOUT": "1",
+		"MCODE_RELAUNCH_TERM_TIMEOUT": "1",
 	})
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("前台阶段应当成功返回: %v\n%s", err, output)
@@ -267,8 +269,8 @@ func TestRelaunchAppQuitTimeout(t *testing.T) {
 		data, _ := os.ReadFile(f.relaunchLog)
 		t.Fatalf("超时后应当写错误日志，日志:\n%s", data)
 	}
-	// 再等一会，确认失败后确实没有打开应用。
-	time.Sleep(2 * time.Second)
+	// 短暂等待后再确认失败后确实没有打开应用。
+	time.Sleep(50 * time.Millisecond)
 	if data, err := os.ReadFile(f.commandLog); err == nil && strings.Contains(string(data), "open "+f.appPath) {
 		t.Fatalf("进程退不掉时不应打开应用:\n%s", data)
 	}

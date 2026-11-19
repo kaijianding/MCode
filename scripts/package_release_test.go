@@ -36,6 +36,7 @@ func TestPackageRelease(t *testing.T) {
 		{name: "missing output", args: []string{"--out"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
 			out := filepath.Join(dir, "output with spaces")
@@ -86,6 +87,7 @@ esac
 				// 测试不得联网，也不得改写受版本控制的 internal/modelsdev/snapshot.json：
 				// 默认已不刷新快照，这里再显式关掉，避免调用方环境把它打开。
 				"MCODE_REFRESH_SNAPSHOT": "0",
+				"MCODE_SKIP_LSREGISTER":  "1",
 			} {
 				// 后出现的环境变量覆盖继承值，避免使用真实证书或私钥。
 				cmd.Env = append(cmd.Env, key+"="+value)
