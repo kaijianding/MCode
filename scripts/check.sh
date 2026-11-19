@@ -19,7 +19,7 @@ for arg in "$@"; do
     esac
 done
 
-# 解析 internal/ui 分片数：显式指定 MCODE_UI_SHARDS 时校验正整数，否则按 CPU 核数在 [4, 8] 间取整。
+# 解析 internal/ui 分片数：显式指定 MCODE_UI_SHARDS 时校验正整数，否则按 ncpu/2 并在 [4, 6] 间钳制（避免与非 UI 测试、Web 检查三路并发时过度超卖 CPU）。
 resolve_ui_shards() {
     if [[ -n "${MCODE_UI_SHARDS:-}" ]]; then
         if ! [[ "$MCODE_UI_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
@@ -37,14 +37,15 @@ resolve_ui_shards() {
         cpu_count="$(nproc 2>/dev/null || true)"
     fi
     if ! [[ "$cpu_count" =~ ^[1-9][0-9]*$ ]]; then
-        cpu_count=4
-    fi
-    if (( cpu_count < 4 )); then
-        cpu_count=4
-    elif (( cpu_count > 8 )); then
         cpu_count=8
     fi
-    printf '%s' "$cpu_count"
+    local shards=$(( cpu_count / 2 ))
+    if (( shards < 4 )); then
+        shards=4
+    elif (( shards > 6 )); then
+        shards=6
+    fi
+    printf '%s' "$shards"
 }
 
 UI_SHARD_COUNT="$(resolve_ui_shards)"

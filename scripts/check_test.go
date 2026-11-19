@@ -392,3 +392,63 @@ func TestCheckScriptRaceSkipsNonRaceAndShardsUI(t *testing.T) {
 		t.Fatalf("输出缺少 UI 分片汇总行:\n%s", output)
 	}
 }
+
+func TestCheckScriptDefaultUIShardClamp(t *testing.T) {
+	data, err := os.ReadFile("check.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	start := strings.Index(src, "resolve_ui_shards()")
+	if start == -1 {
+		t.Fatal("check.sh 缺少 resolve_ui_shards 函数")
+	}
+	end := strings.Index(src[start:], "\nUI_SHARD_COUNT=")
+	if end == -1 {
+		t.Fatal("check.sh 缺少 UI_SHARD_COUNT 赋值")
+	}
+	fnBody := src[start : start+end]
+	for _, want := range []string{
+		`MCODE_UI_SHARDS`,
+		`cpu_count / 2`,
+		`(( shards < 4 ))`,
+		`(( shards > 6 ))`,
+	} {
+		if !strings.Contains(fnBody, want) {
+			t.Fatalf("resolve_ui_shards 缺少预期逻辑 %q:\n%s", want, fnBody)
+		}
+	}
+
+	cases := []struct {
+		name      string
+		ncpu      string
+		override  string
+		wantShard string
+	}{
+		{name: "low_ncpu_clamped_to_4", ncpu: "6", wantShard: "4 shards"},
+		{name: "8_ncpu_gives_4", ncpu: "8", wantShard: "4 shards"},
+		{name: "10_ncpu_gives_5", ncpu: "10", wantShard: "5 shards"},
+		{name: "16_ncpu_clamped_to_6", ncpu: "16", wantShard: "6 shards"},
+		{name: "env_override_preserved", ncpu: "16", override: "3", wantShard: "3 shards"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCheckFixture(t)
+			fakeSysctl := "#!/usr/bin/env bash\nprintf '%s\\n' \"${CHECK_FAKE_NCPU:-8}\"\n"
+			if err := os.WriteFile(filepath.Join(f.bin, "sysctl"), []byte(fakeSysctl), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			output, lines, err := f.run(t, map[string]string{
+				"CHECK_FAKE_NCPU": tc.ncpu,
+				"MCODE_UI_SHARDS": tc.override,
+			})
+			if err != nil {
+				t.Fatalf("check.sh 应当成功退出: %v\n%s\n%s", err, output, strings.Join(lines, "\n"))
+			}
+			wantLine := "ok  \tmcode/internal/ui (" + tc.wantShard + ", 5 tests)"
+			if !strings.Contains(output, wantLine) {
+				t.Fatalf("预期输出包含 %q，实际:\n%s", wantLine, output)
+			}
+		})
+	}
+}
