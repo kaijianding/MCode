@@ -2886,6 +2886,30 @@ func TestTimelineRows_HostEventStillProducesItem(t *testing.T) {
 	}
 }
 
+// TestHostEventCardStripsNoticePrefix 验证宿主转来的卡片正文去掉「[编排] 」这类内部前缀。
+func TestHostEventCardStripsNoticePrefix(t *testing.T) {
+	const body = "后台任务已结束，模型继续处理。"
+	fake := NewFakeClient()
+	fake.SetMessages("t1", []Message{{
+		ID:        "m-host-prefix",
+		Role:      "user",
+		Kind:      hostEventKind,
+		Text:      swarmNoticePrefix + body,
+		CreatedAt: time.Now().Add(-time.Minute).Format(time.RFC3339),
+	}})
+	state, root := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(root, 1000, 700)
+
+	waitFor(t, tt, func() bool { return tt.HasText("宿主转来") })
+	if !tt.HasText(body) {
+		t.Fatalf("卡片应显示去掉前缀的事件正文，当前文本: %q", tt.Texts())
+	}
+	if joined := strings.Join(tt.Texts(), "\n"); strings.Contains(joined, "[编排]") {
+		t.Fatalf("卡片不应显示内部前缀，当前文本: %q", tt.Texts())
+	}
+}
+
 // turnWorkSplitSessionMessages 造一段真实历史：第一轮有思考与两条命令（满足折叠条件），
 // 一轮结束后后端追加分割线，TurnIndex 取的仍是上一轮，后面才是新的提问。
 func turnWorkSplitSessionMessages() []Message {

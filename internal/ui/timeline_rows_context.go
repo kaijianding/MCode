@@ -850,7 +850,7 @@ func renderHostEventCard(c *ui.Context, s *chatState, m Message) ui.Element {
 				}
 			})
 			// 正文与普通消息一致：同样的字号、行高与可选中，只是没有气泡底色。
-			ui.Text(c, m.Text).
+			ui.Text(c, swarmStripNoticePrefix(m.Text)).
 				FillWidth().
 				Selectable().
 				FontSize(scaledFont(TypeBody)).
