@@ -487,15 +487,118 @@ type resultPayload struct {
 	} `json:"denied_actions"`
 }
 
-// Run 执行一个 agy 对话轮次。
+// Run 执行 agy 对话，并在计划审批后续跑。
 func (h *Harness) Run(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	interactor, _ := turn.Approver.(harness.Interactor)
+	var pendingApproval *harness.ApprovalRequest
+	for {
+		reqToAck := pendingApproval
+		var ackOnce sync.Once
+		ackPending := func(err error) {
+			if reqToAck != nil {
+				ackOnce.Do(func() { harness.AckDelivery(turn.Approver, *reqToAck, err) })
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			ackPending(err)
+			return err
+		}
+
+		var mu sync.Mutex
+		var plan string
+		sessionID := turn.SessionID
+		collectPlan := turn.InteractionMode == "plan" && interactor != nil
+		roundEmit := emit
+		if collectPlan || reqToAck != nil {
+			roundEmit = func(event harness.Event) {
+				if collectPlan {
+					mu.Lock()
+					switch {
+					case event.Type == harness.EventSession && event.SessionID != "":
+						sessionID = event.SessionID
+					case event.Type == harness.EventToolStart && event.ToolName == "write_file":
+						if content, ok := planArtifactContent(event.Input); ok {
+							plan = content
+						}
+					}
+					mu.Unlock()
+				}
+				if event.Type == harness.EventSession {
+					ackPending(nil)
+				}
+				if emit != nil {
+					emit(event)
+				}
+			}
+		}
+		err := h.runRound(ctx, turn, roundEmit)
+		if err == nil {
+			err = ctx.Err()
+		}
+		ackPending(err)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		body, resolvedSessionID := plan, sessionID
+		mu.Unlock()
+		if !collectPlan || strings.TrimSpace(body) == "" {
+			return nil
+		}
+
+		req := harness.ApprovalRequest{
+			ToolID: "exit_plan_mode", ToolName: "exit_plan_mode",
+			Kind: harness.RequestKindPlan, Summary: "Implement this plan", Plan: body,
+		}
+		resp, err := interactor.Interact(ctx, req)
+		if err == nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			harness.AckDelivery(turn.Approver, req, err)
+			return fmt.Errorf("agy: plan approval failed: %w", err)
+		}
+		if resp.Decision == harness.DecisionAllow {
+			if turn.PlanExitMode != "" {
+				turn.Mode = turn.PlanExitMode
+			}
+			turn.InteractionMode = ""
+			turn.Prompt = "Implement the plan."
+		} else if strings.TrimSpace(resp.Feedback) != "" {
+			turn.Prompt = resp.Feedback
+		} else {
+			harness.AckDelivery(turn.Approver, req, nil)
+			return nil
+		}
+		turn.SessionID = resolvedSessionID
+		turn.Images = nil
+		turn.Attach = false
+		pendingApproval = &req
 	}
-	if err := h.runRound(ctx, turn, emit); err != nil {
-		return err
+}
+
+func planArtifactContent(input json.RawMessage) (string, bool) {
+	var artifact struct {
+		Path             string
+		Content          string
+		ArtifactMetadata json.RawMessage
 	}
-	return ctx.Err()
+	if err := json.Unmarshal(input, &artifact); err != nil || filepath.Base(artifact.Path) != "implementation_plan.md" {
+		return "", false
+	}
+	metadata := artifact.ArtifactMetadata
+	if len(metadata) > 0 && metadata[0] == '"' {
+		var encoded string
+		if err := json.Unmarshal(metadata, &encoded); err != nil {
+			return "", false
+		}
+		metadata = json.RawMessage(encoded)
+	}
+	var fields struct{ RequestFeedback bool }
+	if err := json.Unmarshal(metadata, &fields); err != nil || !fields.RequestFeedback {
+		return "", false
+	}
+	return artifact.Content, true
 }
 
 func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(harness.Event)) error {
