@@ -2682,6 +2682,9 @@ func (m *Manager) Tick(ctx context.Context) {
 				bee.Status = StatusFailed
 				bee.FinishedAt = &now
 				bee.Summary = stopMessage
+				if err == nil && strings.TrimSpace(st.LastAssistantText) != "" {
+					bee.Summary = stopMessage + "\n\n" + st.LastAssistantText
+				}
 				bee.MergeError = stopMessage
 				bee.Merged = false
 				bee.ThinkingMinutes = 0
@@ -3050,8 +3053,24 @@ func (m *Manager) Tick(ctx context.Context) {
 	m.processQueue(ctx)
 }
 
-// detectReactivatedBees 识别「已结束并汇报过、但会话又被续跑起来」的 bee，把它重新置为运行中，
-// 让后续 tick 的完成流程再次落地与汇报这一轮的新改动。连续两次探测（按
+// isReactivateCandidate 判断 bee 是否允许纳入续跑探测：
+// 已汇报的已结束 bee 与之前一致；未汇报时仅放开已完成且不在待审、待合、待验收、驳回或已丢弃状态的 bee，
+// 避免误激活失败、停止、中断或仍在审查/验收流程里的 bee。
+func isReactivateCandidate(h Bee) bool {
+	if h.Status == StatusRunning || h.PendingMerge || h.WorktreePath == "" {
+		return false
+	}
+	if h.Reported {
+		return true
+	}
+	return h.Status == StatusCompleted &&
+		!h.MergeDiscarded &&
+		!h.Interrupted &&
+		(h.ReviewState == ReviewNone || h.ReviewState == ReviewApproved)
+}
+
+// detectReactivatedBees 识别「已结束（已汇报或已完成待整批汇报）、但会话又被续跑起来」的 bee，
+// 把它重新置为运行中，让后续 tick 的完成流程再次落地与汇报这一轮的新改动。连续两次探测（按
 // reactivateProbeInterval 限流）都看到会话在运行才算续跑，避免 StopBee 刚发出、中断还没生效时误判。
 func (m *Manager) detectReactivatedBees(ctx context.Context) {
 	if m.opts.Driver == nil {
@@ -3067,7 +3086,7 @@ func (m *Manager) detectReactivatedBees(ctx context.Context) {
 	m.mu.Lock()
 	for leadID, lead := range m.leads {
 		for _, h := range lead.bees {
-			if h.Status == StatusRunning || !h.Reported || h.PendingMerge || h.WorktreePath == "" {
+			if !isReactivateCandidate(h) {
 				continue
 			}
 			live[h.ThreadID] = true
@@ -3129,8 +3148,8 @@ func (m *Manager) detectReactivatedBees(ctx context.Context) {
 				break
 			}
 		}
-		// 解锁期间状态可能已被 stopBee/clearFinished 改变，以锁内最新状态为准。
-		if bee == nil || bee.Status == StatusRunning || !bee.Reported || bee.WorktreePath == "" {
+		// 解锁期间状态可能已被 stopBee/clearFinished/review 改变，以锁内最新状态为准。
+		if bee == nil || !isReactivateCandidate(*bee) || bee.Merged != c.bee.Merged {
 			m.mu.Unlock()
 			continue
 		}
@@ -3140,7 +3159,13 @@ func (m *Manager) detectReactivatedBees(ctx context.Context) {
 		bee.MergeError = ""
 		bee.LandMessage = ""
 		bee.Delivered = false
-		// 上一轮的合并进度属于已落地的旧成果，续跑后要重新走流水线。
+		bee.Credibility = nil
+		// 上一轮的合并与审查进度属于旧成果，续跑后要重新走流水线。
+		bee.ReviewState = ReviewNone
+		bee.ReviewStage = ""
+		bee.ReviewLayer = ""
+		bee.ReviewReason = ""
+		bee.ReviewConcerns = nil
 		bee.AutoMergeState = AutoMergeNone
 		bee.AutoMergeSHA = ""
 		bee.AutoMergeStage = ""
