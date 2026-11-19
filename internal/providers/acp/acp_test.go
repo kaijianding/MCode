@@ -1148,7 +1148,7 @@ func TestACPElicitationForm(t *testing.T) {
 				t.Fatalf("content = %#v, want %#v", reply["content"], want)
 			}
 			init := featureParams(messages, "initialize")[0]
-			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--extra", "--gemini_dir", "routed-account"}) {
+			if got := messages[0]["args"]; !reflect.DeepEqual(got, []any{"acp", "--process-per-session", "--extra", "--gemini_dir", "routed-account"}) {
 				t.Fatalf("args order = %v", got)
 			}
 			caps := init["clientCapabilities"].(map[string]any)
