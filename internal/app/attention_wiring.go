@@ -28,8 +28,6 @@ const (
 	attentionScanTimeout = 30 * time.Second
 	// attentionStalledInterval 是卡住巡检间隔；阈值每次巡检现读配置，改设置后无需重启。
 	attentionStalledInterval = 60 * time.Second
-	// attentionKanbanDebounce 是看板变更的合并窗口，避免一次批量移动触发多次全量扫描。
-	attentionKanbanDebounce = time.Second
 	// automationNoticeSummaryLimit 是自动化完成通知正文的最大字数，系统通知展示不了长文本。
 	automationNoticeSummaryLimit = 120
 	// hostNoticeTitleMaxRunes 是宿主自拼通知标题的最大字数：通知是 IM 式短消息，
@@ -38,6 +36,9 @@ const (
 	// hostNoticeBodyMaxRunes 是宿主自拼通知正文的最大字数，避免报错详情把整条通知撑成一大段。
 	hostNoticeBodyMaxRunes = 200
 )
+
+// attentionKanbanDebounce 是看板变更的合并窗口，避免一次批量移动触发多次全量扫描；包级变量便于单元测试覆盖。
+var attentionKanbanDebounce = time.Second
 
 // attentionWiringOptions 是接线的构造参数；Hub、Kanban、Swarm、Client 为空时跳过对应事件源。
 type attentionWiringOptions struct {

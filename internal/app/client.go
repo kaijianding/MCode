@@ -181,8 +181,8 @@ func NewClient(b *remote.MemoryBackend) *Client {
 
 // swarmNotifyDelay 是 Swarm 变更通知的合并窗口：同一主会话在窗口内的多次变更只向监听者
 // 推送一次，推的仍是窗口结束时的最新状态。子代理多时状态变更很密集，逐次推送会让界面
-// 每次变更都拉一次全量状态，拖慢会话消息流。
-const swarmNotifyDelay = 150 * time.Millisecond
+// 每次变更都拉一次全量状态，拖慢会话消息流。包级变量便于单元测试缩短等待。
+var swarmNotifyDelay = 150 * time.Millisecond
 
 // swarmBeeProgress 是已结束 bee 的进度快照，字段含义与响应里的对应字段一致。
 type swarmBeeProgress struct {

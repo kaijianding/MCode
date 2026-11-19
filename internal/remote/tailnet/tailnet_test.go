@@ -320,7 +320,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("等待运行中超时，最后状态 %+v", st)
 		}
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	ln, err := m.Listener()

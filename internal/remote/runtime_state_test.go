@@ -212,6 +212,8 @@ func TestRuntimeState_InterruptWatchdog_IgnoresCtx(t *testing.T) {
 
 	backend := NewMemoryBackend(hub)
 	defer backend.Close()
+	releaseCh := make(chan struct{})
+	defer close(releaseCh)
 
 	var watchdogMu sync.Mutex
 	var watchdogCallback func()
@@ -230,8 +232,8 @@ func TestRuntimeState_InterruptWatchdog_IgnoresCtx(t *testing.T) {
 			emit(harness.Event{Type: harness.EventText, Text: "first response chunk"})
 			lateEmit = emit
 			startedCh <- struct{}{}
-			// 模拟忽略 ctx 取消，持续阻塞
-			time.Sleep(1 * time.Second)
+			// 模拟忽略 ctx 取消，持续阻塞直至测试结束释放
+			<-releaseCh
 			return nil
 		},
 	}

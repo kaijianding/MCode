@@ -676,7 +676,7 @@ func TestNowledgeScheduleDebounces(t *testing.T) {
 
 // 立即同步会取消待触发的定时器，不会重复导入。
 func TestNowledgeSyncCancelsScheduledTimer(t *testing.T) {
-	setNowledgeIdleDelay(t, 200*time.Millisecond)
+	setNowledgeIdleDelay(t, 40*time.Millisecond)
 	fake := newNmemFake(t, "mcode")
 	b, s := newNmemTestBackend(t, t.TempDir())
 	seedThread(t, s, "t1", []store.Message{
@@ -694,7 +694,7 @@ func TestNowledgeSyncCancelsScheduledTimer(t *testing.T) {
 	if b.cancelNowledgeSyncTimer("t1") {
 		t.Fatal("立即同步后不应还有待触发的定时器")
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
 	if n := fake.count("/threads/import"); n != 1 {
 		t.Fatalf("定时器已被取消，不应再导入，实际 %d 次", n)
 	}

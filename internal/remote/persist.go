@@ -647,8 +647,11 @@ func (b *MemoryBackend) finalizeOrphanTurns(ctx context.Context, s *store.Store,
 	}
 }
 
+// persistWriteTimeout 是单次持久化写库上下文的超时上限，包级变量便于单元测试覆盖。
+var persistWriteTimeout = 5 * time.Second
+
 func persistCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 5*time.Second)
+	return context.WithTimeout(context.Background(), persistWriteTimeout)
 }
 
 // finalizeBackgroundToolMessages 把落库的 background 工具消息收敛为 failed，

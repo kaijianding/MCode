@@ -276,14 +276,20 @@ func TestWebPushService_SendAndGoneRemoval(t *testing.T) {
 	var receivedHeaders http.Header
 	var receivedBodyLen int
 	statusCode := http.StatusCreated
+	sentCh := make(chan struct{}, 4)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		defer mu.Unlock()
 		receivedHeaders = r.Header.Clone()
 		body, _ := io.ReadAll(r.Body)
 		receivedBodyLen = len(body)
-		w.WriteHeader(statusCode)
+		code := statusCode
+		mu.Unlock()
+		w.WriteHeader(code)
+		select {
+		case sentCh <- struct{}{}:
+		default:
+		}
 	}))
 	defer server.Close()
 
@@ -329,8 +335,12 @@ func TestWebPushService_SendAndGoneRemoval(t *testing.T) {
 		ThreadID: "t-1",
 	})
 
-	// 等待异步 goroutine 完成
-	time.Sleep(100 * time.Millisecond)
+	// 等待异步 goroutine 投递完成
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for push request")
+	}
 
 	mu.Lock()
 	if !strings.HasPrefix(receivedHeaders.Get("Authorization"), "vapid t=") {
@@ -364,10 +374,17 @@ func TestWebPushService_SendAndGoneRemoval(t *testing.T) {
 		ThreadID: "t-1",
 	})
 
-	time.Sleep(100 * time.Millisecond)
-
-	if len(store.AllPushSubscriptions()) != 0 {
-		t.Fatalf("expected subscription to be removed on 410 Gone")
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for 410 Gone push request")
+	}
+	goneDeadline := time.Now().Add(2 * time.Second)
+	for len(store.AllPushSubscriptions()) != 0 {
+		if time.Now().After(goneDeadline) {
+			t.Fatalf("expected subscription to be removed on 410 Gone")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

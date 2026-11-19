@@ -282,12 +282,16 @@ func TestCustomEndpoints_TestCustomEndpoint(t *testing.T) {
 
 	// 4. 超时
 	origTimeout := customEndpointTestTimeout
-	customEndpointTestTimeout = 40 * time.Millisecond
+	customEndpointTestTimeout = 10 * time.Millisecond
 	defer func() { customEndpointTestTimeout = origTimeout }()
 
 	sleepServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(100 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(30 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+		}
 	}))
 	defer sleepServer.Close()
 

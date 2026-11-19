@@ -270,8 +270,14 @@ func TestAttentionWiringIgnoresThread(t *testing.T) {
 
 	rig.hub.Notify(threadID, "thread.summary", wire.ThreadSummary{ID: threadID, Title: "总管", IsRunning: true})
 	rig.hub.Notify(threadID, "thread.summary", wire.ThreadSummary{ID: threadID, Title: "总管", Attention: "failed"})
-	// 观察者只入队，给 worker 留出处理时间后确认没有任何事件。
-	time.Sleep(200 * time.Millisecond)
+	// 观察者同步入队；通过屏障任务确认 worker 已处理完之前所有入队任务。
+	flushed := make(chan struct{})
+	rig.wiring.push(func() { close(flushed) })
+	select {
+	case <-flushed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("attention worker 未在预期时间内排空队列")
+	}
 
 	count, err := rig.svc.UnresolvedCount(context.Background())
 	if err != nil {

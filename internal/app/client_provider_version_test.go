@@ -25,17 +25,52 @@ func writeFakeProvider(t *testing.T, dir, name, version string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o755); err != nil {
-		t.Fatal(err)
+	if err := os.Link(executable, path); err != nil {
+		data, readErr := os.ReadFile(executable)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if writeErr := os.WriteFile(path, data, 0o755); writeErr != nil {
+			t.Fatal(writeErr)
+		}
 	}
 	if err := os.WriteFile(path+".version", []byte(version+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestWriteFakeProviderHardLink(t *testing.T) {
+	binDir := t.TempDir()
+	path := writeFakeProvider(t, binDir, "claude", "2.3.4")
+
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		t.Fatalf("执行生成的假 provider 失败: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "2.3.4" {
+		t.Fatalf("假 provider 输出 = %q，期望 2.3.4", got)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exeInfo, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := filepath.Join(binDir, "hardlink-probe")
+	if linkErr := os.Link(exe, probe); linkErr == nil {
+		_ = os.Remove(probe)
+		if !os.SameFile(exeInfo, outInfo) {
+			t.Fatalf("支持硬链接的平台上 %s 应与 %s 复用同一 inode", path, exe)
+		}
+	}
 }
 
 func runFakeProvider() bool {

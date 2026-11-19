@@ -932,13 +932,41 @@ func TestPersist_RetryDoesNotLoadMissingMessages(t *testing.T) {
 	}
 }
 
+func TestPersistTimeoutOverride(t *testing.T) {
+	if persistWriteTimeout != 5*time.Second {
+		t.Fatalf("persistWriteTimeout 默认值 = %v，期望 5s", persistWriteTimeout)
+	}
+	origTimeout := persistWriteTimeout
+	persistWriteTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { persistWriteTimeout = origTimeout })
+
+	ctx, cancel := persistCtx()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("persistCtx 应返回带截止时间的上下文")
+	}
+	if rem := time.Until(deadline); rem <= 0 || rem > 100*time.Millisecond {
+		t.Fatalf("覆盖后的剩余超时异常：%v", rem)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("覆盖后的 persistWriteTimeout 未在预期时间内触发超时")
+	}
+}
+
 func TestPersist_EachWriteGetsFreshContext(t *testing.T) {
+	origTimeout := persistWriteTimeout
+	persistWriteTimeout = 80 * time.Millisecond
+	t.Cleanup(func() { persistWriteTimeout = origTimeout })
+
 	for _, operation := range []string{"UPDATE", "INSERT"} {
 		t.Run(operation, func(t *testing.T) {
 			// 让首条 SQL 越过 persistCtx 的期限，验证后续写入没有复用过期上下文。
 			fn := fmt.Sprintf("persist_pause_%d", time.Now().UnixNano())
 			if err := sqlite.RegisterScalarFunction(fn, 0, func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
-				time.Sleep(5100 * time.Millisecond)
+				time.Sleep(120 * time.Millisecond)
 				return int64(1), nil
 			}); err != nil {
 				t.Fatal(err)

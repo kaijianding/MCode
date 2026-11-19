@@ -558,7 +558,7 @@ func TestTLSManager_WatchIPSyncsCloudflareARecord(t *testing.T) {
 		CloudflareToken:   "dummy-token",
 		CloudflareAPIBase: srv.URL,
 		HTTPClient:        srv.Client(),
-		IPWatchInterval:   20 * time.Millisecond,
+		IPWatchInterval:   10 * time.Millisecond,
 		LANIPs:            ipsFn,
 	})
 	if err != nil {
@@ -585,7 +585,7 @@ func TestTLSManager_WatchIPSyncsCloudflareARecord(t *testing.T) {
 	}
 
 	// (b) IP 未变化时多个 tick 内不再产生新的 PATCH
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(45 * time.Millisecond)
 	if n, _ := fake.snapshot(); n != 1 {
 		t.Fatalf("expected no extra patch when ip unchanged, got %d", n)
 	}

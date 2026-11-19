@@ -203,7 +203,7 @@ func TestUnsolicitedTurn_RetryWhileThreadRunning(t *testing.T) {
 	waitTurns(t, h, 1)
 	h.notify(id)
 	h.notify(id)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	if turns := h.turnsSeen(); len(turns) != 1 {
 		t.Fatalf("线程运行中不该为自发输出再开一轮，实际 %d 轮", len(turns))
 	}

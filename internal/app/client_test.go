@@ -113,6 +113,7 @@ func TestClient(t *testing.T) {
 	var mu sync.Mutex
 	var isStopped bool
 	var updatesAfterStop int
+	var firstFinalID string
 	finalCh := make(chan struct{}, 1)
 
 	stop := client.Watch(newThreadID, func(u mcodeui.ThreadUpdate) {
@@ -123,6 +124,9 @@ func TestClient(t *testing.T) {
 		}
 		for _, msg := range u.Messages {
 			if msg.Role == "assistant" && msg.IsFinal {
+				if firstFinalID == "" {
+					firstFinalID = msg.ID
+				}
 				select {
 				case finalCh <- struct{}{}:
 				default:
@@ -145,15 +149,36 @@ func TestClient(t *testing.T) {
 	// 4. stop 之后再次 Send 不会触发回调
 	mu.Lock()
 	isStopped = true
+	seenFinalID := firstFinalID
 	mu.Unlock()
 
 	stop()
 
+	// 注册第二个观察者等待第二条回复落定，避免用固定睡眠等异步回合结束。
+	secondFinalCh := make(chan struct{}, 1)
+	stop2 := client.Watch(newThreadID, func(u mcodeui.ThreadUpdate) {
+		for _, msg := range u.Messages {
+			if msg.Role == "assistant" && msg.IsFinal && msg.ID != seenFinalID {
+				select {
+				case secondFinalCh <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}, nil)
+
 	if _, err := client.Send(ctx, newThreadID, "another message"); err != nil {
+		stop2()
 		t.Fatalf("client.Send after stop failed: %v", err)
 	}
 
-	time.Sleep(1 * time.Second)
+	select {
+	case <-secondFinalCh:
+	case <-time.After(5 * time.Second):
+		stop2()
+		t.Fatalf("timed out waiting for second assistant final message")
+	}
+	stop2()
 
 	mu.Lock()
 	count := updatesAfterStop
@@ -1179,6 +1204,10 @@ func TestClient_Swarm_NilManager(t *testing.T) {
 }
 
 func TestClient_Swarm_WithManager(t *testing.T) {
+	origDelay := swarmNotifyDelay
+	swarmNotifyDelay = 15 * time.Millisecond
+	t.Cleanup(func() { swarmNotifyDelay = origDelay })
+
 	c := NewClient(nil)
 	ctx := context.Background()
 
@@ -1240,13 +1269,17 @@ func waitForSwarmNotify(t *testing.T, done func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal("Swarm 变更通知未在合并窗口内送达")
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 
 // TestClient_SwarmNotifyCoalesced 验证同一主会话在合并窗口内的多次变更只推送一次，
 // 且最后一次变更一定送达。
 func TestClient_SwarmNotifyCoalesced(t *testing.T) {
+	origDelay := swarmNotifyDelay
+	swarmNotifyDelay = 20 * time.Millisecond
+	t.Cleanup(func() { swarmNotifyDelay = origDelay })
+
 	c := NewClient(nil)
 	var mu sync.Mutex
 	var leads []string

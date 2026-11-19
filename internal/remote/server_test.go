@@ -618,12 +618,12 @@ func TestServer_WebSocketRoundtripAndNotify(t *testing.T) {
 }
 
 func TestServer_UnauthenticatedTimeout(t *testing.T) {
-	// 使用可注入的极短超时测试（50ms）
+	// 使用可注入的极短超时测试（20ms）
 	server := NewServer(ServerOptions{
 		Assets:        testAssets,
 		Entry:         EntryLAN,
 		AllowedHosts:  []string{"127.0.0.1", "localhost"},
-		UnauthTimeout: 50 * time.Millisecond,
+		UnauthTimeout: 20 * time.Millisecond,
 	})
 	ts := httptest.NewServer(server)
 	defer ts.Close()
@@ -638,10 +638,7 @@ func TestServer_UnauthenticatedTimeout(t *testing.T) {
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	// 不调用 MarkAuthenticated，等待 100ms 超时触发关闭
-	time.Sleep(100 * time.Millisecond)
-
-	// 此时连接应当已被服务端断开，读取会返回错误
+	// 不调用 MarkAuthenticated，等待服务端因未认证超时主动断开连接
 	_, _, err = c.Read(ctx)
 	if err == nil {
 		t.Fatalf("expected connection to be closed by unauthenticated timeout")
@@ -812,8 +809,8 @@ func TestServer_PingKeepsHealthyConnection(t *testing.T) {
 		Assets:        testAssets,
 		Entry:         EntryLAN,
 		AllowedHosts:  []string{"127.0.0.1", "localhost"},
-		PingInterval:  40 * time.Millisecond,
-		PongTimeout:   60 * time.Millisecond,
+		PingInterval:  15 * time.Millisecond,
+		PongTimeout:   40 * time.Millisecond,
 		UnauthTimeout: 5 * time.Second,
 	})
 	ts := httptest.NewServer(server)
@@ -844,7 +841,7 @@ func TestServer_PingKeepsHealthyConnection(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	target := waitForServerConn(t, ctx, server)
-	time.Sleep(300 * time.Millisecond) // 跨过至少两轮 ping
+	time.Sleep(60 * time.Millisecond) // 跨过至少两轮 ping
 
 	if err := target.Notify("threads.event", map[string]string{"state": "running"}); err != nil {
 		t.Fatalf("healthy connection should survive ping rounds, got %v", err)
@@ -864,8 +861,8 @@ func TestServer_PingClosesUnresponsiveConnection(t *testing.T) {
 		Assets:        testAssets,
 		Entry:         EntryLAN,
 		AllowedHosts:  []string{"127.0.0.1", "localhost"},
-		PingInterval:  40 * time.Millisecond,
-		PongTimeout:   60 * time.Millisecond,
+		PingInterval:  15 * time.Millisecond,
+		PongTimeout:   20 * time.Millisecond,
 		UnauthTimeout: 5 * time.Second,
 	})
 	ts := httptest.NewServer(server)
@@ -881,8 +878,10 @@ func TestServer_PingClosesUnresponsiveConnection(t *testing.T) {
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	// 客户端不读取也就不会回 pong（半开连接），连续两轮错过 pong 后服务端应主动断开
-	time.Sleep(400 * time.Millisecond)
+	waitForServerConn(t, ctx, server)
+	// 客户端不读取也就不会回 pong（半开连接），等待两轮 ping 超时窗口后服务端发起 Close 帧，
+	// 再由客户端读取感知断开，避免在 Read 之前等待 conn 摘除导致 5s 关闭握手阻塞。
+	time.Sleep(90 * time.Millisecond)
 	if _, _, err := c.Read(ctx); err == nil {
 		t.Fatalf("expected server to close connection that never answers ping")
 	}
