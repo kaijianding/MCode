@@ -629,13 +629,13 @@ func renderPreviewAnnotateDrawer(c *ui.Context, s *chatState, snap previewSnapsh
 					if label == "" {
 						label = item.Name
 					}
-					ui.Text(c, previewClipRunes(label, 60)).FontSize(codeFontSize()).Font("monospace").TextColor(ThemeSecondaryText(c)).Tooltip(item.Selector)
+					ui.Text(c, previewClipRunes(label, 60)).FontSize(codeFontSize()).Font("monospace").TextColor(ThemeSecondaryText(c)).SingleLine().MinWidth(0).Shrink(1).Ellipsis("…").Tooltip(item.Selector)
 					input := ui.TextInput(c.Key(fmt.Sprintf("preview-annotate-comment-%d", item.id)), &items[idx].Comment).
-						Label(fmt.Sprintf("标注 %d 备注", number)).Placeholder("备注").Disabled(snap.annotSending).FontSize(uiFont(TypeCaption)).Grow(1)
+						Label(fmt.Sprintf("标注 %d 备注", number)).Placeholder("备注").Disabled(snap.annotSending).FontSize(uiFont(TypeCaption)).MinWidth(0).Grow(1)
 					if snap.annotFocus == item.id && !snap.annotSending {
 						input.Focus()
 					}
-					remove := ui.ButtonBase(c.Key(fmt.Sprintf("preview-annotate-remove-%d", item.id))).Label("删除").Tooltip("删除这条标注").Disabled(snap.annotSending).Radius(RadiusXS).Padding(Space0, Space1)
+					remove := ui.ButtonBase(c.Key(fmt.Sprintf("preview-annotate-remove-%d", item.id))).Label("删除").Tooltip("删除这条标注").Disabled(snap.annotSending).Radius(RadiusXS).Padding(Space0, Space1).Shrink(0)
 					scale := motionPressScale(c, remove, "button-press-scale", remove.Pressed())
 					remove.Scale(scale, scale)
 					if remove.Hovered() {
