@@ -205,7 +205,6 @@ func (commitInstructionsControl) renderDisabled(c *ui.Context, st *SettingsState
 		Multiline:   true,
 		MinLines:    3,
 		MaxLines:    8,
-		MinWidth:    420,
 		FillWidth:   true,
 		Disabled:    disabled,
 		OnChange: func(text string) {

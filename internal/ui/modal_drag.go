@@ -160,7 +160,9 @@ func modalResizeSize(key string, defW, defH, minW, minH, winW, winH float32) (w,
 		}
 	}
 	modalDragMu.Unlock()
-	return max(minW, min(w, winW-modalDragPanelInset)), max(minH, min(h, winH-modalDragPanelInset))
+	maxW := max(0, winW-modalDragPanelInset)
+	maxH := max(0, winH-modalDragPanelInset)
+	return min(maxW, max(minW, min(w, maxW))), min(maxH, max(minH, min(h, maxH)))
 }
 
 // modalResizeUserHeight 判断用户是否手动调整过高度，供随内容取高的面板保留用户尺寸。

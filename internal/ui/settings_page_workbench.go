@@ -238,7 +238,7 @@ func (globalInstructionsControl) renderDisabled(c *ui.Context, st *SettingsState
 	old := st.globalInstructions.value
 	TextField(c, TextFieldProps{
 		Key: s.ID + "-area", Value: &st.globalInstructions.value, Label: s.Title,
-		Multiline: true, MinLines: 3, MaxLines: 12, MinWidth: 420, FillWidth: true, Disabled: disabled,
+		Multiline: true, MinLines: 3, MaxLines: 12, FillWidth: true, Disabled: disabled,
 		OnChange: func(string) { st.globalInstructions.dirty = true; st.noteTextEdit() },
 	})
 	if !disabled && st.globalInstructions.value != old {
@@ -382,6 +382,9 @@ func (t terminalShellControl) renderDisabled(c *ui.Context, st *SettingsState, s
 	sel := ui.Select(c.Key(s.ID+"-select"), &current, options).
 		Label(s.Title).
 		Width(settingsSidePanelWidth).
+		MinWidth(96).
+		MaxWidth(settingsSidePanelWidth).
+		Shrink(1).
 		Disabled(disabled)
 	if disabled || (current == old && !sel.Changed()) {
 		return

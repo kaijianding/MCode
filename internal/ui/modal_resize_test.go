@@ -36,4 +36,12 @@ func TestModalResizeSize(t *testing.T) {
 	if w != 560 || h != 460 {
 		t.Fatalf("clamped = %v, %v", w, h)
 	}
+	w, h = modalResizeSize(key, 720, 640, 720, 240, 640, 700)
+	if w != 600 || h != 640 {
+		t.Fatalf("clamped below minW = %v, %v", w, h)
+	}
+	w, h = modalResizeSize(key, 720, 640, 720, 240, 20, 20)
+	if w != 0 || h != 0 {
+		t.Fatalf("tiny window = %v, %v", w, h)
+	}
 }

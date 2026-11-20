@@ -207,6 +207,9 @@ func (ch choiceControl) renderDisabled(c *ui.Context, st *SettingsState, s setti
 	pick := ui.Select(c.Key(s.ID+"-select"), &sel, labels).
 		Label(s.Title).
 		Width(160).
+		MinWidth(96).
+		MaxWidth(160).
+		Shrink(1).
 		Height(RowHeight).
 		Disabled(disabled)
 	if disabled || (sel == oldSel && !pick.Changed()) {

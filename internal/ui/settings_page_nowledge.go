@@ -350,25 +350,29 @@ func renderNowledgeSpaceRow(c *ui.Context, st *SettingsState, ps *nowledgeSpaceP
 		Children(func() {
 			ui.Column(c.Key(key + "-left")).
 				Grow(1).
-				MinWidth(settingsFieldMediumWidth).
+				MinWidth(0).
 				Gap(settingsBadgePadY).
 				Children(func() {
 					ui.Text(c, p.Name).
 						FontSize(uiFont(TypeProse)).
 						FontWeight(500).
-						TextColor(ThemePrimaryText(c)).
-						SingleLine()
+						TextColor(ThemePrimaryText(c))
 					ui.Text(c, subtitle).
 						FontSize(uiFont(TypeFootnote)).
 						TextColor(ThemeSecondaryText(c))
 				})
 			ui.Row(c.Key(key + "-right")).
+				MinWidth(0).
+				Shrink(1).
 				AlignItems(ui.Center).
 				Children(func() {
 					initial := current
 					sel := ui.Select(c.Key(fmt.Sprintf("sel-rgfwhs-tmoxl-%d", index)), &current, options).
 						Label(p.Name).
-						Width(settingsFieldMediumWidth)
+						Width(settingsFieldMediumWidth).
+						MinWidth(96).
+						MaxWidth(settingsFieldMediumWidth).
+						Shrink(1)
 					if sel.Changed() && current != initial {
 						st.setProjectSpaceOverride(p.Path, current)
 						// 解析结果要按新的覆盖重算：清掉加载标记，下一帧重新拉空间与解析结果。

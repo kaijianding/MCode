@@ -34,12 +34,12 @@ func settingRow(c *ui.Context, key, title string, stacked bool, decorate func(ui
 }
 
 func settingRowContent(c *ui.Context, key, title string, control func()) {
-	ui.Column(c.Key(key + "-left")).MinWidth(settingsRowTitleMinWidth).Grow(1).Gap(Space1).Children(func() {
-		ui.Text(c, title).FontSize(uiFont(TypeBody)).FontWeight(400).TextColor(ThemePrimaryText(c)).SingleLine()
+	ui.Column(c.Key(key + "-left")).MinWidth(0).Grow(1).Gap(Space1).Children(func() {
+		ui.Text(c, title).FontSize(uiFont(TypeBody)).FontWeight(400).TextColor(ThemePrimaryText(c))
 	})
 	settingRowRight(c, key+"-right", control)
 }
 
 func settingRowRight(c *ui.Context, key string, control func()) {
-	ui.Row(c.Key(key)).Shrink(0).AlignItems(ui.Center).Gap(Space3).Children(control)
+	ui.Row(c.Key(key)).MinWidth(0).Shrink(1).AlignItems(ui.Center).Gap(Space3).Children(control)
 }
