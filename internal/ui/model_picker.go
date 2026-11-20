@@ -1566,39 +1566,19 @@ func renderModelPickerMaxBeesCapsule(c *ui.Context, p ModelPickerProps, state *M
 			for _, opt := range options {
 				o := opt
 				isSel := (curVal == o.val)
-				optBtn := ui.ButtonBase(c.Key(fmt.Sprintf("%smax-bees-opt-%d", p.KeyPrefix, o.val))).
-					Label(o.label).
-					Padding(Space1, Space3).
-					Radius(RadiusXS).
-					Grow(1)
-				if isSel {
-					optBtn.Background(ThemeAccentSubtle(c))
-				} else if optBtn.Hovered() {
-					optBtn.Background(ColorHoverDark)
-				} else {
-					optBtn.Background(ui.Transparent)
-				}
-				optBtn.OnClick(func() {
-					state.MaxBeesOpen = false
-					if p.OnSetMaxBees != nil {
-						p.OnSetMaxBees(o.val)
-					}
-					modelPickerInvalidate(p)
-				})
-				optBtn.Children(func() {
-					ui.Row(c.Key(fmt.Sprintf("%smax-bees-opt-row-%d", p.KeyPrefix, o.val))).
-						AlignItems(ui.Center).
-						Justify(ui.SpaceBetween).
-						Children(func() {
-							txtColor := ColorTextPrimaryDark
-							if isSel {
-								txtColor = ThemeAccent(c)
-							}
-							ui.Text(c, o.label).FontSize(uiFont(TypeCaption)).TextColor(txtColor)
-							if isSel {
-								ui.Icon(c, IconCheck()).Size(11, 11).TextColor(ThemeAccent(c))
-							}
-						})
+				menuRow(c, menuRowProps{
+					Key:         fmt.Sprintf("%smax-bees-opt-%d", p.KeyPrefix, o.val),
+					Label:       o.label,
+					Title:       o.label,
+					Checked:     isSel,
+					Highlighted: isSel,
+					OnClick: func() {
+						state.MaxBeesOpen = false
+						if p.OnSetMaxBees != nil {
+							p.OnSetMaxBees(o.val)
+						}
+						modelPickerInvalidate(p)
+					},
 				})
 			}
 		})

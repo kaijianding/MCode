@@ -2480,3 +2480,39 @@ func TestModelPickerSearchHeaderNotClickableButton(t *testing.T) {
 		t.Fatalf("清空搜索词后分组标题应恢复为可折叠按钮: %v", tt.AccessAll())
 	}
 }
+
+func TestMaxBeesMenuSelection(t *testing.T) {
+	state := &ModelPickerState{}
+	got := -1
+	props := ModelPickerProps{
+		KeyPrefix: "max-bees-test-",
+		ScopeKey:  "max-bees-test",
+		State:     state,
+		MaxBees:   4,
+		OnSetMaxBees: func(n int) {
+			got = n
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c.Key("max-bees-test-wrap")).Width(320).Padding(Space4).Children(func() {
+			renderModelPickerMaxBeesCapsule(c, props, state)
+		})
+	}, 360, 400)
+	settleModelPickerPage(tt)
+
+	if err := tt.Click("最多 4 个"); err != nil {
+		t.Fatalf("打开并发上限菜单失败: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		return tt.HasText("自动（每个主代理最多 8 个）") && tt.HasText("最多 6 个")
+	})
+	clickWhenSettled(t, tt, "最多 6 个")
+	tt.Frame()
+
+	if got != 6 {
+		t.Fatalf("选中「最多 6 个」后 OnSetMaxBees = %d，期望 6", got)
+	}
+	if state.MaxBeesOpen {
+		t.Fatal("选中并发上限后应关闭菜单")
+	}
+}

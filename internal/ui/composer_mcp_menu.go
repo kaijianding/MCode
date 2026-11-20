@@ -226,51 +226,21 @@ func renderAttachMenuPanel(c *ui.Context, s *chatState, threadID string, onClose
 func renderMCPMenuEntry(c *ui.Context, s *chatState, threadID string) {
 	supported := s.threadSupportsThreadMCP(threadID)
 	tooltip := "选择本会话启用的 MCP 服务器"
+	trailing := "›"
 	if !supported {
 		tooltip = "当前 Agent 不支持外部 MCP，仅内置端点生效"
+		trailing = "不支持"
 	}
-	row := ui.ButtonBase(c.Key("composer-mcp-menu-entry")).
-		Label("MCP 服务器").
-		Tooltip(tooltip).
-		FillWidth().
-		Height(ControlLG).
-		Radius(RadiusMD).
-		Padding(0, Space3).
-		Background(ThemeSurface(c)).
-		Border(1, ThemeBorder(c)).
-		Disabled(!supported).
-		OnClick(func() {
+	menuRow(c, menuRowProps{
+		Key:      "composer-mcp-menu-entry",
+		Label:    "MCP 服务器",
+		Title:    "MCP 服务器",
+		Trailing: trailing,
+		Disabled: !supported,
+		OnClick: func() {
 			s.openThreadMCPMenu(threadID)
-		})
-	row.Children(func() {
-		ui.Row(c.Key("composer-mcp-menu-entry-content")).
-			FillWidth().
-			AlignItems(ui.Center).
-			Gap(Space3).
-			Children(func() {
-				ui.Text(c, "MCP 服务器").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(mcpMenuTextColor(c, supported))
-				ui.Spacer(c)
-				if !supported {
-					ui.Text(c, "不支持").
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c))
-				} else {
-					ui.Text(c, "›").
-						FontSize(uiFont(TypeFootnote)).
-						TextColor(ThemeSecondaryText(c))
-				}
-			})
-	})
-}
-
-// mcpMenuTextColor 返回入口/行的文字颜色：不可用时用次要色，避免看起来可点。
-func mcpMenuTextColor(c *ui.Context, enabled bool) ui.Color {
-	if enabled {
-		return ThemePrimaryText(c)
-	}
-	return ThemeSecondaryText(c)
+		},
+	}).Tooltip(tooltip)
 }
 
 // renderMCPSelectionPanel 渲染 MCP 逐会话选择页：顶部返回、中间服务器开关列表、底部「应用」。
@@ -404,16 +374,15 @@ func renderMCPSelectionRow(c *ui.Context, s *chatState, srv agentconf.MCPServer)
 		enabled = false
 	}
 
-	row := ui.ButtonBase(c.Key("composer-mcp-row-"+key)).
-		Label(mcpServerRowLabel(srv)).
-		Tooltip(mcpServerRowTooltip(srv, reason)).
-		FillWidth().
-		Height(ControlLG).
-		Radius(RadiusSM).
-		Padding(0, Space3).
-		Background(ui.Transparent).
-		Disabled(locked).
-		OnClick(func() {
+	label := mcpServerRowLabel(srv)
+	menuRow(c, menuRowProps{
+		Key:      "composer-mcp-row-" + key,
+		Label:    label,
+		Title:    label,
+		Trailing: reason,
+		Checked:  enabled,
+		Disabled: locked,
+		OnClick: func() {
 			if locked {
 				s.setToast(reason)
 				return
@@ -427,37 +396,8 @@ func renderMCPSelectionRow(c *ui.Context, s *chatState, srv agentconf.MCPServer)
 				delete(s.composerView.mcpPendingDisabled, key)
 			}
 			s.invalidate()
-		})
-
-	row.Children(func() {
-		ui.Row(c.Key("composer-mcp-row-content-" + key)).
-			FillWidth().
-			AlignItems(ui.Center).
-			Gap(Space3).
-			Children(func() {
-				// 勾选框：选中用强调色实心，未选中只留边框。
-				box := ui.Box(c.Key("composer-mcp-check-"+key)).Size(IconSM, IconSM).Radius(RadiusXS).Border(1, ThemeBorder(c))
-				if enabled {
-					box.Background(ThemeAccent(c))
-				}
-				if enabled {
-					ui.Text(c, "✓").
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeOnAccent(c))
-				}
-				ui.Text(c, mcpServerRowLabel(srv)).
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(mcpMenuTextColor(c, !locked)).
-					Grow(1).
-					MaxLines(1)
-				if locked {
-					ui.Text(c, reason).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c)).
-						MaxLines(1)
-				}
-			})
-	})
+		},
+	}).Tooltip(mcpServerRowTooltip(srv, reason))
 }
 
 // mcpServerLockReason 判断服务是否被全局设置锁住，并给出可读原因。

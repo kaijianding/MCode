@@ -911,37 +911,19 @@ func renderProjectChoicesPopover(c *ui.Context, s *chatState, currentProjectID s
 				Background(ThemeBorder(c)).
 				Margin(4, 4)
 
-			addBtn := ui.ButtonBase(c.Key("chat-new-thread-add-project-btn")).
-				Label("添加项目…").
-				Padding(Space2, Space3).
-				Radius(RadiusSM).
-				FillWidth()
-			{
-				scale := motionPressScale(c, addBtn, "button-press-scale", addBtn.Pressed())
-				addBtn.Scale(scale, scale)
-			}
-			if addBtn.Hovered() {
-				addBtn.Background(ThemeHover(c))
-			}
-			if addBtn.Clicked() {
-				closeAppFlyoutPopover(host, "chat-new-thread-project-popover")
-				if us := getChatUIState(s); us != nil {
-					us.projectPopoverOpen = false
-				}
-				s.promptAddProject()
-				host.Invalidate()
-			}
-			addBtn.Children(func() {
-				ui.Row(c.Key("chat-new-thread-add-project-row")).
-					Gap(Space3).
-					AlignItems(ui.Center).
-					Children(func() {
-						ui.Icon(c, IconPlus()).Size(14, 14).TextColor(ThemeSecondaryText(c))
-						ui.Text(c, "添加项目…").
-							FontSize(TypeBody).
-							TextColor(ThemePrimaryText(c)).
-							SingleLine()
-					})
+			menuRow(c, menuRowProps{
+				Key:   "chat-new-thread-add-project-btn",
+				Label: "添加项目…",
+				Icon:  IconPlus(),
+				Title: "添加项目…",
+				OnClick: func() {
+					closeAppFlyoutPopover(host, "chat-new-thread-project-popover")
+					if us := getChatUIState(s); us != nil {
+						us.projectPopoverOpen = false
+					}
+					s.promptAddProject()
+					host.Invalidate()
+				},
 			})
 
 			cloneBtn := ui.ButtonBase(c.Key("chat-new-thread-clone-github-btn")).

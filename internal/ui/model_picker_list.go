@@ -464,29 +464,20 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 // renderModelPickerFollowLeadRow 渲染执行侧列表顶部的「跟随主导模型」行。
 func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *ModelPickerState) {
 	selected := modelPickerSideInfo(p, ModelPickerSideBees).FollowsLead
-	btn := ui.ButtonBase(c.Key(p.KeyPrefix+"follow-lead-row")).
-		Label("跟随主导模型").
-		Tooltip("跟随主导模型").
-		Checked(selected).
-		Height(modelPickerRowHeight).
-		Padding(Space2, Space3).
-		Radius(RadiusMD).
-		FillWidth()
-	if p.Disabled || p.BeesDisabled {
-		btn.Disabled(true).
-			Opacity(0.45).
-			Background(ui.Transparent).
-			Tooltip(modelSideDisabledReason(p.Disabled, p.BeesDisabled))
-	} else {
-		switch {
-		case selected:
-			btn.Background(ColorSelectedDark)
-		case btn.Hovered():
-			btn.Background(ColorHoverSubtleDark)
-		default:
-			btn.Background(ui.Transparent)
-		}
-		btn.OnClick(func() {
+	disabled := p.Disabled || p.BeesDisabled
+	tip := "跟随主导模型"
+	if disabled {
+		tip = modelSideDisabledReason(p.Disabled, p.BeesDisabled)
+	}
+	row := menuRow(c, menuRowProps{
+		Key:         p.KeyPrefix + "follow-lead-row",
+		Label:       "跟随主导模型",
+		Icon:        IconByName("merge"),
+		Title:       "跟随主导模型",
+		Checked:     selected,
+		Disabled:    disabled,
+		Highlighted: !disabled && selected,
+		OnClick: func() {
 			state.setListOpen(p.ScopeKey, ModelPickerSideBees, false)
 			state.searchQuery = ""
 			state.openCard = ""
@@ -495,36 +486,11 @@ func renderModelPickerFollowLeadRow(c *ui.Context, p ModelPickerProps, state *Mo
 				p.OnFollowLead()
 			}
 			modelPickerInvalidate(p)
-		})
+		},
+	}).Tooltip(tip)
+	if disabled {
+		row.Opacity(0.45)
 	}
-	btn.Children(func() {
-		ui.Row(c.Key(p.KeyPrefix + "follow-lead-row-content")).
-			AlignItems(ui.Center).
-			Gap(Space2).
-			FillWidth().
-			Children(func() {
-				ui.Box(c.Key(p.KeyPrefix+"follow-lead-row-icon-slot")).
-					Size(IconSM, IconSM).
-					Center().
-					Shrink(0).
-					Children(func() {
-						ui.Icon(c, IconByName("merge")).
-							Size(IconSM, IconSM).
-							TextColor(modelPickerTextSecondary)
-					})
-				ui.Text(c, "跟随主导模型").
-					FontSize(uiFont(TypeBody)).
-					TextColor(modelPickerTextPrimary).
-					SingleLine().
-					Shrink(0)
-				ui.Row(c.Key(p.KeyPrefix + "follow-lead-row-gap")).Grow(1)
-				if selected {
-					ui.Icon(c, IconCheck()).
-						Size(IconSM, IconSM).
-						TextColor(modelPickerTextPrimary)
-				}
-			})
-	})
 }
 
 // renderModelPickerPairsSection 渲染主导侧列表顶部的 Swarm 配对分组：
