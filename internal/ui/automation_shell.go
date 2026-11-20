@@ -220,30 +220,52 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 						requestNewAutomation(s, p.ScopeID, func(onChosen func(string)) {
 							as.pendingProjectChoice = onChosen
 							as.chooseProjectOpen = true
+							as.projectListState().reset()
 						})
 					}})
 					background := ThemeSurfacePopover(c)
 					native := flyoutHostWindow(c.Services()) != nil
 					host := c.Services()
-					appFlyoutPopover(c, "automation-choose-project", button, &as.chooseProjectOpen, nil, appFlyoutProps{Width: 200, Background: &background}, func(c *ui.Context) {
+					appFlyoutPopover(c, "automation-choose-project", button, &as.chooseProjectOpen, nil, appFlyoutProps{Width: 320, Background: &background}, func(c *ui.Context) {
+						items := make([]searchListItem, 0, len(s.projects))
+						for _, project := range s.projects {
+							items = append(items, searchListItem{ID: project.ID, Title: project.Name})
+						}
 						card := ui.Column(c.Key("automation-project-menu"))
 						if !native {
 							card = popoverCard(c, card)
 						}
-						card.Padding(Space2, Space2).Children(func() {
-							for _, project := range s.projects {
-								Button(c.Key("automation-project-"+project.ID), ButtonOpts{Text: project.Name, Variant: ButtonGhost, OnClick: func() {
-									choose := as.pendingProjectChoice
-									as.pendingProjectChoice = nil
-									as.chooseProjectOpen = false
-									closeAppFlyoutPopover(host, "automation-choose-project")
-									host.Invalidate()
-									if choose != nil {
-										choose(project.ID)
-									}
-								}})
-							}
-						})
+						card.
+							Width(320).
+							Padding(Space2).
+							Gap(Space1).
+							Children(func() {
+								searchList(c, searchListProps{
+									Key:         "automation-choose-project",
+									Label:       "搜索项目",
+									Placeholder: "选择项目…",
+									Empty:       "无匹配项目",
+									Items:       items,
+									State:       as.projectListState(),
+									OnSelect: func(id string) {
+										choose := as.pendingProjectChoice
+										as.pendingProjectChoice = nil
+										as.chooseProjectOpen = false
+										closeAppFlyoutPopover(host, "automation-choose-project")
+										host.Invalidate()
+										if choose != nil {
+											choose(id)
+										}
+									},
+									OnDismiss: func() {
+										as.chooseProjectOpen = false
+										as.pendingProjectChoice = nil
+										closeAppFlyoutPopover(host, "automation-choose-project")
+										host.Invalidate()
+									},
+									Invalidate: host.Invalidate,
+								})
+							})
 					})
 				}
 			})

@@ -797,6 +797,9 @@ func renderNewThreadPrompt(c *ui.Context, s *chatState, selectedID string) {
 					})
 					if trigger.Clicked() {
 						us.projectPopoverOpen = !us.projectPopoverOpen
+						if us.projectPopoverOpen {
+							us.projectPopoverList.reset()
+						}
 						s.invalidate()
 					}
 					background := ThemeSurfacePopover(c)
@@ -804,7 +807,7 @@ func renderNewThreadPrompt(c *ui.Context, s *chatState, selectedID string) {
 					host := c.Services()
 					appFlyoutPopover(c, "chat-new-thread-project-popover", trigger, &us.projectPopoverOpen, func() {
 						us.projectPopoverOpen = false
-					}, appFlyoutProps{Width: 200, Background: &background}, func(c *ui.Context) {
+					}, appFlyoutProps{Width: 320, Background: &background}, func(c *ui.Context) {
 						renderProjectChoicesPopover(c, s, projectID, native, host)
 					})
 
@@ -858,53 +861,50 @@ func renderProjectChoicesPopover(c *ui.Context, s *chatState, currentProjectID s
 	// 总管主目录与内置对话项目不在切换项目浮层里露出；只过滤局部副本。
 	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 
+	items := make([]searchListItem, 0, len(projects))
+	for _, p := range projects {
+		items = append(items, searchListItem{
+			ID:      p.ID,
+			Title:   p.Name,
+			Checked: p.ID == currentProjectID,
+		})
+	}
+	us := getChatUIState(s)
+	var listState *searchListState
+	if us != nil {
+		listState = &us.projectPopoverList
+	}
+
 	card := ui.Column(c.Key("chat-new-thread-project-menu"))
 	if !native {
 		card = popoverCard(c, card)
 	}
 	card.
-		Gap(Space0).
-		Padding(Space1).
-		MinWidth(200).
+		Width(320).
+		Padding(Space2).
+		Gap(Space1).
 		Children(func() {
-			ui.Text(c, "项目").
-				FontSize(TypeCaption).
-				TextColor(ThemeSecondaryText(c)).
-				Padding(Space1, Space3)
-
-			for _, p := range projects {
-				project := p
-				item := ui.ButtonBase(c.Key("chat-new-thread-project-item-"+project.ID)).
-					Label("切换到项目 "+project.Name).
-					Padding(Space2, Space3).
-					Radius(RadiusSM).
-					FillWidth()
-				if item.Hovered() {
-					item.Background(ThemeHover(c))
-				}
-				if item.Clicked() {
+			searchList(c, searchListProps{
+				Key:         "chat-new-thread-project",
+				Label:       "搜索项目",
+				Placeholder: "选择项目…",
+				Empty:       "无匹配项目",
+				Items:       items,
+				State:       listState,
+				OnSelect: func(id string) {
 					closeAppFlyoutPopover(host, "chat-new-thread-project-popover")
-					switchEmptyThreadProject(s, project.ID)
+					switchEmptyThreadProject(s, id)
 					host.Invalidate()
-				}
-				item.Children(func() {
-					ui.Row(c.Key("chat-new-thread-project-item-row-" + project.ID)).
-						Gap(Space3).
-						AlignItems(ui.Center).
-						Grow(1).
-						Children(func() {
-							if project.ID == currentProjectID {
-								ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-							} else {
-								ui.Box(c.Key("chat-new-thread-project-item-check-"+project.ID)).Size(14, 14)
-							}
-							ui.Text(c, project.Name).
-								FontSize(TypeBody).
-								TextColor(ThemePrimaryText(c)).
-								SingleLine()
-						})
-				})
-			}
+				},
+				OnDismiss: func() {
+					closeAppFlyoutPopover(host, "chat-new-thread-project-popover")
+					if us != nil {
+						us.projectPopoverOpen = false
+					}
+					host.Invalidate()
+				},
+				Invalidate: host.Invalidate,
+			})
 
 			ui.Box(c.Key("chat-new-thread-project-divider")).
 				Height(DividerWidth).

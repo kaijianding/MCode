@@ -1273,6 +1273,8 @@ type chatUIState struct {
 	sidebarSlide float32
 	// projectPopoverOpen 是新会话空态项目切换浮层的展开状态。
 	projectPopoverOpen bool
+	// projectPopoverList 保存新会话空态项目切换浮层的搜索与选择状态。
+	projectPopoverList searchListState
 	// compactDismissed 记录已忽略压缩建议的会话，本会话不再提示。
 	compactDismissed map[string]bool
 	// forwardSuggestDismissed 记录已忽略转发到新会话建议的会话，本会话不再提示。

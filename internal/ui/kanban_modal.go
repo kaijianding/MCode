@@ -317,22 +317,43 @@ func renderTasksAutomationCreate(c *ui.Context, s *chatState, scopeID string) {
 		requestNewAutomation(s, scopeID, func(onChosen func(string)) {
 			as.pendingProjectChoice = onChosen
 			as.chooseProjectOpen = true
+			as.projectListState().reset()
 		})
 	}})
+	host := c.Services()
 	appPopover(c, button, &as.chooseProjectOpen, nil, func() {
-		popoverCard(c, ui.Column(c.Key("tasks-automation-project-menu"))).Padding(Space2, Space2).Children(func() {
-			for _, project := range s.projects {
-				project := project
-				Button(c.Key("tasks-automation-project-"+project.ID), ButtonOpts{Text: project.Name, Label: "选择项目 " + project.Name, Variant: ButtonGhost, OnClick: func() {
-					choose := as.pendingProjectChoice
-					as.pendingProjectChoice = nil
-					as.chooseProjectOpen = false
-					if choose != nil {
-						choose(project.ID)
-					}
-				}})
-			}
-		})
+		items := make([]searchListItem, 0, len(s.projects))
+		for _, project := range s.projects {
+			items = append(items, searchListItem{ID: project.ID, Title: project.Name})
+		}
+		popoverCard(c, ui.Column(c.Key("tasks-automation-project-menu"))).
+			Width(320).
+			Padding(Space2).
+			Gap(Space1).
+			Children(func() {
+				searchList(c, searchListProps{
+					Key:         "tasks-automation-project",
+					Label:       "搜索项目",
+					Placeholder: "选择项目…",
+					Empty:       "无匹配项目",
+					Items:       items,
+					State:       as.projectListState(),
+					OnSelect: func(id string) {
+						choose := as.pendingProjectChoice
+						as.pendingProjectChoice = nil
+						as.chooseProjectOpen = false
+						if choose != nil {
+							choose(id)
+						}
+					},
+					OnDismiss: func() {
+						as.chooseProjectOpen = false
+						as.pendingProjectChoice = nil
+						host.Invalidate()
+					},
+					Invalidate: host.Invalidate,
+				})
+			})
 	})
 }
 

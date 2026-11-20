@@ -149,3 +149,84 @@ func TestAutomationVisualEmptyStates(t *testing.T) {
 		})
 	}
 }
+
+// TestAutomationProjectPickerSearch 验证自动化顶栏与空态的项目选择浮层均支持搜索过滤与回车选中。
+func TestAutomationProjectPickerSearch(t *testing.T) {
+	t.Run("top_bar", func(t *testing.T) {
+		t.Setenv("MCODE_DATA", t.TempDir())
+		s, view := buildTasksRoot(nil, WithTasksWindowMode("automations"))
+		defer s.close()
+		s.projects = []Project{{ID: "p1", Name: "项目一"}, {ID: "p2", Name: "项目二"}}
+		as := getAutomationState(s)
+		as.initialized = true
+		as.autos = []Automation{{ID: "a1", ProjectID: "p1", Name: "已有自动化"}}
+		tt := ui.NewTester(view, 1140, 720)
+		tt.Frame()
+
+		if err := tt.Click("新建自动化"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if !as.chooseProjectOpen {
+			t.Fatal("未打开项目选择浮层")
+		}
+		if !tt.Focused("搜索项目") {
+			t.Fatal("顶栏项目选择浮层应聚焦搜索框")
+		}
+		tt.Type("二")
+		tt.Frame()
+		hasPopoverProject := func(name string) bool {
+			for _, a := range tt.AccessAll() {
+				if a.Role == ui.RoleButton && a.Name == name && a.Bounds.X >= TasksSidebarWidth {
+					return true
+				}
+			}
+			return false
+		}
+		if hasPopoverProject("项目一") {
+			t.Fatal("输入搜索词后不应再显示项目一")
+		}
+		if !hasPopoverProject("项目二") {
+			t.Fatal("输入搜索词后应保留项目二")
+		}
+		tt.Key(0, ui.KeyEnter)
+		tt.Frame()
+		if as.chooseProjectOpen || !as.editorOpen || as.editorProjectID != "p2" {
+			t.Fatalf("回车后未选中项目二或未关闭浮层: open=%v editor=%v project=%q", as.chooseProjectOpen, as.editorOpen, as.editorProjectID)
+		}
+	})
+
+	t.Run("empty_state", func(t *testing.T) {
+		s := &chatState{projects: []Project{{ID: "p1", Name: "项目一"}, {ID: "p2", Name: "项目二"}}}
+		as := getAutomationState(s)
+		as.initialized = true
+		tt := ui.NewTester(func(c *ui.Context) {
+			renderAutomationScopedBody(c, s, automationWorkspaceProps{})
+		}, 1140, 720)
+		tt.Frame()
+
+		if err := tt.Click("新建自动化"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if !as.chooseProjectOpen {
+			t.Fatal("未打开项目选择浮层")
+		}
+		if !tt.Focused("搜索项目") {
+			t.Fatal("空态项目选择浮层应聚焦搜索框")
+		}
+		tt.Type("二")
+		tt.Frame()
+		if _, ok := tt.AccessByRole(ui.RoleButton, "项目一"); ok {
+			t.Fatal("输入搜索词后不应再显示项目一")
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "项目二"); !ok {
+			t.Fatal("输入搜索词后应保留项目二")
+		}
+		tt.Key(0, ui.KeyEnter)
+		tt.Frame()
+		if as.chooseProjectOpen || !as.editorOpen || as.editorProjectID != "p2" {
+			t.Fatalf("回车后未选中项目二或未关闭浮层: open=%v editor=%v project=%q", as.chooseProjectOpen, as.editorOpen, as.editorProjectID)
+		}
+	})
+}

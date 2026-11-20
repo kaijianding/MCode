@@ -138,9 +138,18 @@ func TestTasksAcceptanceSearchScopeAndCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.Click("选择项目 项目二"); err != nil {
-		t.Fatal(err)
+	var projectBtn *ui.AccessInfo
+	for _, a := range tt.AccessAll() {
+		if a.Role == ui.RoleButton && a.Name == "项目二" && a.Bounds.X >= TasksSidebarWidth {
+			info := a
+			projectBtn = &info
+			break
+		}
 	}
+	if projectBtn == nil {
+		t.Fatalf("未找到项目二选项: %v", tt.Texts())
+	}
+	tt.ClickAt(projectBtn.Bounds.X+projectBtn.Bounds.W/2, projectBtn.Bounds.Y+projectBtn.Bounds.H/2)
 	tt.Frame()
 	if !as.editorOpen || as.editorProjectID != "p2" || ks.scopeID != "" {
 		t.Fatalf("选择项目后状态错误: %v %q %q", as.editorOpen, as.editorProjectID, ks.scopeID)

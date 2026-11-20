@@ -689,7 +689,7 @@ func TestFlyoutAutomationProject(t *testing.T) {
 	if len(capture.options) != 1 || capture.options[0].Parent != entry.win || capture.options[0].Content == nil {
 		t.Fatal("未创建任务窗口项目浮层")
 	}
-	menu := ui.NewTester(popoverTestView(t, entry.services, "automation-choose-project"), 200, 300)
+	menu := ui.NewTester(popoverTestView(t, entry.services, "automation-choose-project"), 320, 300)
 	if !menu.HasText("项目二") {
 		t.Fatalf("缺少项目: %v", menu.Texts())
 	}
@@ -754,11 +754,11 @@ func TestFlyoutNewThreadProjectMenu(t *testing.T) {
 	if len(capture.options) != 1 {
 		t.Fatalf("窗口数: %d", len(capture.options))
 	}
-	menu := ui.NewTester(popoverTestView(t, entry.services, "chat-new-thread-project-popover"), 200, 300)
+	menu := ui.NewTester(popoverTestView(t, entry.services, "chat-new-thread-project-popover"), 320, 300)
 	if !menu.HasText("项目Beta") {
 		t.Fatalf("缺少项目: %v", menu.Texts())
 	}
-	if err := menu.Click("切换到项目 项目Beta"); err != nil {
+	if err := menu.Click("项目Beta"); err != nil {
 		t.Fatal(err)
 	}
 	if len(capture.destroyedWindows) != 1 {

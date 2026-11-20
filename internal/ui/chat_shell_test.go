@@ -172,14 +172,64 @@ func TestChatEmptyStatePromptAndProjectSwitch(t *testing.T) {
 		t.Fatalf("项目切换浮层缺少入口: %q", tt.Texts())
 	}
 
-	// 选择另一个项目后切换到该项目最近的会话
-	if err := tt.Click("切换到项目 项目Beta"); err != nil {
-		t.Fatalf("点击项目 Beta 失败: %v", err)
+	// 选择另一个项目后切换到该项目最近的会话（按 RoleButton 定位浮层项，避开侧边栏同名文本）
+	betaBtn, ok := tt.AccessByRole(ui.RoleButton, "项目Beta")
+	if !ok {
+		t.Fatalf("未找到项目 Beta 选项: %q", tt.Texts())
 	}
+	tt.ClickAt(betaBtn.Bounds.X+betaBtn.Bounds.W/2, betaBtn.Bounds.Y+betaBtn.Bounds.H/2)
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
 		return state.selectedThreadID == "t2"
+	})
+}
+
+// TestNewThreadProjectPickerSearch 验证新会话空态项目切换浮层支持搜索过滤与回车选中。
+func TestNewThreadProjectPickerSearch(t *testing.T) {
+	t.Setenv("MCODE_DATA", t.TempDir())
+	t.Cleanup(waitUIStateWrites)
+	fake := NewFakeClient()
+	now := time.Now()
+	fake.SetProjectsAndThreads([]Project{
+		{ID: "p1", Name: "项目Alpha", Path: "/path/to/alpha"},
+		{ID: "p2", Name: "项目Beta", Path: "/path/to/beta"},
+	}, map[string][]Thread{
+		"p1": {{ID: "t1", ProjectID: "p1", Title: "空会话", UpdatedAt: now}},
+		"p2": {{ID: "t2", ProjectID: "p2", Title: "已有会话", UpdatedAt: now}},
+	})
+
+	state, view := buildRoot(fake, WithInitialThread("t1"))
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1200, 800)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText(" 中构建什么？") && tt.HasText("项目Alpha")
+	})
+
+	if err := tt.Click("切换项目"); err != nil {
+		t.Fatalf("点击项目名失败: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		return tt.Focused("搜索项目")
+	})
+
+	tt.Type("Beta")
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleButton, "项目Alpha"); ok {
+		t.Fatal("输入搜索词后不应再显示项目Alpha")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "项目Beta"); !ok {
+		t.Fatal("输入搜索词后应保留项目Beta")
+	}
+
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool {
+		state.mu.Lock()
+		selected := state.selectedThreadID
+		state.mu.Unlock()
+		us := getChatUIState(state)
+		return selected == "t2" && us != nil && !us.projectPopoverOpen
 	})
 }
 

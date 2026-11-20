@@ -123,6 +123,7 @@ type automationState struct {
 	pendingLeave         func()
 	pendingProjectChoice func(string)
 	chooseProjectOpen    bool
+	chooseProjectList    *searchListState
 	focusEditorTrigger   bool
 	detailTab            int
 	filter               int
@@ -156,6 +157,13 @@ func getAutomationState(s *chatState) *automationState {
 		automationStates[s] = st
 	}
 	return st
+}
+
+func (as *automationState) projectListState() *searchListState {
+	if as.chooseProjectList == nil {
+		as.chooseProjectList = &searchListState{}
+	}
+	return as.chooseProjectList
 }
 
 // loadAutomations 异步获取自动化列表。
