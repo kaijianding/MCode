@@ -176,7 +176,7 @@ func renderChat(c *ui.Context, s *chatState) {
 		return
 	}
 
-	boardGroups := stewardBoardGroups(s.stewardBoardTasks(), time.Now())
+	boardGroups := s.stewardBoardGroupsCached()
 	showBoard := stewardSelected(s, selectedID) && stewardBoardWide(chatAreaWidth(c, s)) && stewardBoardCount(boardGroups) > 0
 	if showBoard {
 		setChatPaneWidth(s, chatAreaWidth(c, s)-stewardBoardWidth)

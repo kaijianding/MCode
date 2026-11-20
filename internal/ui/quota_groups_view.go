@@ -384,9 +384,10 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 											continue
 										}
 										warning := "即将用尽"
-										if !win.resetsAt.IsZero() {
-											warning += " · 重置于 " + win.resetsAt.Local().Format("15:04")
+										if win.UsedPercent >= 100 {
+											warning = "已用尽"
 										}
+										warning = trayQuotaLabeledText(win.ShortLabel, warning)
 										ui.Row(c.Key(fmt.Sprintf("%s-warning-%d", accKey, wIdx))).FillWidth().Children(func() {
 											ui.Box(c.Key(fmt.Sprintf("%s-warning-indent-%d", accKey, wIdx))).Width(rowIndent)
 											ui.Text(c, warning).FontSize(uiFont(TypeFootnote)).TextColor(quotaLevelColor(c, win.UsedPercent)).SingleLine()

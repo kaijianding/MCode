@@ -206,10 +206,11 @@ func renderStewardTaskDot(c *ui.Context, key string, task KanbanTask) {
 func renderStewardTaskCard(c *ui.Context, s *chatState, key string, task KanbanTask) {
 	card := ui.Column(c.Key(key)).FillWidth().MaxWidth(timelineContentMaxWidth(s)).AlignSelf(ui.Center).
 		Padding(Space3, Space3).Gap(Space1).Radius(RadiusSM).BorderWidth(1, 1, 1, 1).BorderColor(ThemeBorder(c)).
-		Focusable().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
+		Focusable().KeepFocus().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
 	if card.Hovered() {
 		card.Background(ThemeHover(c))
 	}
+	focusRing(c, card)
 	if card.Clicked() {
 		stewardTaskOpen(s, task)
 	}
@@ -235,10 +236,11 @@ func renderStewardTaskCard(c *ui.Context, s *chatState, key string, task KanbanT
 func renderStewardTaskChip(c *ui.Context, s *chatState, key string, task KanbanTask) {
 	chip := ui.Row(c.Key(key)).MaxWidth(240).MinWidth(0).AlignItems(ui.Center).Gap(Space2).
 		Padding(Space1, Space3).Radius(RadiusPill).BorderWidth(1, 1, 1, 1).BorderColor(ThemeBorder(c)).
-		Focusable().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
+		Focusable().KeepFocus().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
 	if chip.Hovered() {
 		chip.Background(ThemeHover(c))
 	}
+	focusRing(c, chip)
 	if chip.Clicked() {
 		stewardTaskOpen(s, task)
 	}

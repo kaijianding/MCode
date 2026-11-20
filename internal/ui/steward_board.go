@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -22,11 +23,17 @@ type stewardBoardState struct {
 	rev              uint64
 	indexRev         uint64
 	index            stewardTaskIndex
+	groupsValid      bool
+	groupsRev        uint64
+	groupsMinute     time.Time
+	groups           stewardGroups
 	stop             func()
 	loading, pending bool
 	tasks            []KanbanTask
 	open, doneOpen   bool
 }
+
+var stewardBoardGroupsBuildCount atomic.Int64
 
 type stewardGroups [3][]KanbanTask
 
@@ -78,6 +85,24 @@ func (s *chatState) stewardBoardRev() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stewardBoard.rev
+}
+
+func (s *chatState) stewardBoardGroupsCached() stewardGroups {
+	if s == nil {
+		return stewardGroups{}
+	}
+	minute := time.Now().Truncate(time.Minute)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := &s.stewardBoard
+	if !b.groupsValid || b.groupsRev != b.rev || !b.groupsMinute.Equal(minute) {
+		b.groups = stewardBoardGroups(b.tasks, minute)
+		b.groupsRev = b.rev
+		b.groupsMinute = minute
+		b.groupsValid = true
+		stewardBoardGroupsBuildCount.Add(1)
+	}
+	return b.groups
 }
 
 func stopStewardBoardWatch(s *chatState) {
@@ -206,7 +231,8 @@ func renderStewardBoardList(c *ui.Context, s *chatState, groups stewardGroups) {
 				ui.Column(c.Key("steward-board-group-" + strconv.Itoa(group))).FillWidth().Children(func() {
 					header := ui.Row(c.Key("steward-board-title-"+strconv.Itoa(group))).FillWidth().AlignItems(ui.Center).Gap(Space2).Padding(Space2, Space2)
 					if group == 2 {
-						header.Focusable().Label(name).Cursor(ui.CursorPointer)
+						header.Radius(RadiusSM).Focusable().KeepFocus().Label(name).Cursor(ui.CursorPointer)
+						focusRing(c, header)
 						if header.Clicked() {
 							s.stewardBoard.doneOpen = !s.stewardBoard.doneOpen
 						}
@@ -220,10 +246,11 @@ func renderStewardBoardList(c *ui.Context, s *chatState, groups stewardGroups) {
 					}
 					for _, task := range tasks {
 						task := task
-						row := ui.Column(c.Key("steward-board-task-"+task.ID)).FillWidth().MinWidth(0).Padding(Space2, Space2).Gap(Space1).Radius(RadiusSM).Focusable().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
+						row := ui.Column(c.Key("steward-board-task-"+task.ID)).FillWidth().MinWidth(0).Padding(Space2, Space2).Gap(Space1).Radius(RadiusSM).Focusable().KeepFocus().Label(task.Title).Cursor(ui.CursorPointer).Transition(motionListItem(c))
 						if row.Hovered() {
 							row.Background(ThemeHover(c))
 						}
+						focusRing(c, row)
 						if row.Clicked() {
 							stewardTaskOpen(s, task)
 						}
@@ -247,7 +274,7 @@ func renderStewardBoardList(c *ui.Context, s *chatState, groups stewardGroups) {
 }
 
 func renderStewardBoardBadge(c *ui.Context, s *chatState) {
-	groups := stewardBoardGroups(s.stewardBoardTasks(), time.Now())
+	groups := s.stewardBoardGroupsCached()
 	if stewardBoardCount(groups) == 0 {
 		return
 	}

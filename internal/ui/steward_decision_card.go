@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -137,16 +138,56 @@ func lastInteractiveStewardDecision(messages []Message) string {
 	return ""
 }
 
+type stewardDecisionCachedResult struct {
+	text     string
+	remote   bool
+	answered bool
+}
+
+var stewardDecisionResultBuildCount atomic.Int64
+
+func (s *chatState) stewardDecisionState(decision stewardDecision) (res stewardDecisionCachedResult, lastInteractiveID string, draftEmpty bool) {
+	if s == nil {
+		return stewardDecisionCachedResult{}, "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	draftEmpty = strings.TrimSpace(s.draft) == ""
+	if !s.stewardDecisionValid || s.stewardDecisionRev != s.messagesRev {
+		s.stewardDecisionRev = s.messagesRev
+		s.stewardDecisionValid = true
+		s.stewardDecisionResults = nil
+		s.stewardDecisionLastID = ""
+		s.stewardDecisionLastIDValid = false
+	}
+	if s.stewardDecisionResults == nil {
+		s.stewardDecisionResults = make(map[string]stewardDecisionCachedResult)
+	}
+	var ok bool
+	res, ok = s.stewardDecisionResults[decision.ID]
+	if !ok {
+		text, remote, answered := stewardDecisionResult(decision, s.messages)
+		res = stewardDecisionCachedResult{text: text, remote: remote, answered: answered}
+		s.stewardDecisionResults[decision.ID] = res
+		stewardDecisionResultBuildCount.Add(1)
+	}
+	if !res.answered && draftEmpty {
+		if !s.stewardDecisionLastIDValid {
+			s.stewardDecisionLastID = lastInteractiveStewardDecision(s.messages)
+			s.stewardDecisionLastIDValid = true
+		}
+		lastInteractiveID = s.stewardDecisionLastID
+	}
+	return res, lastInteractiveID, draftEmpty
+}
+
 func renderStewardDecisionCard(c *ui.Context, s *chatState, m Message) ui.Element {
 	decision, ok := parseStewardDecision(m.Text)
 	if !ok {
 		return renderStewardReply(c, s, m)
 	}
-	s.mu.Lock()
-	messages := append([]Message(nil), s.messages...)
-	draftEmpty := strings.TrimSpace(s.draft) == ""
-	s.mu.Unlock()
-	result, remote, answered := stewardDecisionResult(decision, messages)
+	res, lastInteractiveID, draftEmpty := s.stewardDecisionState(decision)
+	result, remote, answered := res.text, res.remote, res.answered
 	st := getStewardOpenState(s)
 	st.mu.Lock()
 	answerError := st.decisionErrors[decision.ID]
@@ -156,7 +197,7 @@ func renderStewardDecisionCard(c *ui.Context, s *chatState, m Message) ui.Elemen
 	if submitting {
 		answerError = ""
 	}
-	if !answered && !submitting && draftEmpty && lastInteractiveStewardDecision(messages) == m.ID {
+	if !answered && !submitting && draftEmpty && lastInteractiveID == m.ID {
 		for key := ui.Key1; key <= ui.Key9; key++ {
 			if answer, valid := stewardDecisionShortcut(key, decision.Options); valid && c.Shortcut(0, key) {
 				s.answerStewardDecision(decision.ID, answer)
@@ -206,7 +247,7 @@ func renderStewardDecisionCard(c *ui.Context, s *chatState, m Message) ui.Elemen
 			return
 		}
 		if answerError != "" {
-			ui.Text(c, answerError).FontSize(scaledFont(TypeBody)).TextColor(ThemeSecondaryText(c))
+			ui.Text(c, answerError).FontSize(scaledFont(TypeBody)).TextColor(ThemeDanger(c))
 		}
 		for _, option := range decision.Options {
 			option := option

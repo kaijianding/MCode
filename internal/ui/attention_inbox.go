@@ -535,11 +535,6 @@ func renderAttentionInboxPopover(c *ui.Context, s *chatState) {
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c)).
 						Grow(1)
-					if len(items) > 0 {
-						ui.Text(c, fmt.Sprintf("%d 条", len(items))).
-							FontSize(scaledFont(TypeCaption)).
-							TextColor(ThemeSecondaryText(c))
-					}
 					// 总管入口：只用于查看已存在的总管会话，还没有会话时不显示。
 					if s.stewardThreadID() != "" {
 						nickname, _ := s.stewardIdentity()
@@ -652,6 +647,7 @@ func renderAttentionInboxItem(c *ui.Context, s *chatState, item AttentionItem) {
 	row := ui.Row(c.Key("attention-item-"+item.ID)).
 		FillWidth().
 		Focusable().
+		KeepFocus().
 		Transition(motionListItem(c)).
 		Padding(Space1, Space2).
 		Radius(RadiusSM).
@@ -663,6 +659,7 @@ func renderAttentionInboxItem(c *ui.Context, s *chatState, item AttentionItem) {
 	if rowHovered {
 		row.Background(ThemeHover(c))
 	}
+	focusRing(c, row)
 	if row.Clicked() {
 		s.openAttentionItem(item)
 	}

@@ -349,6 +349,14 @@ type chatState struct {
 	planPillCache   planPillView
 	planPillValid   bool
 
+	// stewardDecisionRev/stewardDecisionResults/stewardDecisionLastID 缓存决策卡状态（按 messagesRev）：
+	// 命中时跳过每帧克隆消息及扫描全部消息。
+	stewardDecisionRev         uint64
+	stewardDecisionValid       bool
+	stewardDecisionResults     map[string]stewardDecisionCachedResult
+	stewardDecisionLastID      string
+	stewardDecisionLastIDValid bool
+
 	// threadsRuntimeRev 在会话运行态/待处理请求可能变化时递增（Watch 摘要、会话列表重载）；
 	// pendingReqIDs 是按它缓存的“有待处理请求”会话 ID 集合，pendingReqIDsRev 是建立时的版本号。
 	threadsRuntimeRev uint64
