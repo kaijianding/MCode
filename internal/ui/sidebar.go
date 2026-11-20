@@ -1336,6 +1336,14 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 	if len(o.bees) > 0 {
 		renderSidebarBeeSubRow(c, s, o)
 	}
+
+	ws := getWorktreeUIState(s)
+	ws.mu.Lock()
+	showMoveToProject := ws.moveToProjectOpen && ws.moveToProjectThreadID == thVal.ID
+	ws.mu.Unlock()
+	if showMoveToProject {
+		renderMoveToProjectPopover(c, s, thVal.ID, row)
+	}
 }
 
 // sidebarStatusSlot 是会话行尾状态位的展示类型。
@@ -1607,7 +1615,6 @@ func renderSidebarModals(c *ui.Context, s *chatState) {
 	renderRemoveProjectModal(c, s)
 	renderWorktreeManageModal(c, s)
 	renderWorktreeMoveModal(c, s)
-	renderMoveToProjectModal(c, s)
 }
 
 func renderRenameThreadModal(c *ui.Context, s *chatState) {
@@ -1920,6 +1927,8 @@ type worktreeUIState struct {
 
 	moveToProjectOpen     bool
 	moveToProjectThreadID string
+	moveToProjectQuery    string
+	moveToProjectSelected int
 	movingToProject       bool
 }
 
@@ -2378,6 +2387,8 @@ func (s *chatState) openMoveToProjectModal(threadID string) {
 	ws.mu.Lock()
 	ws.moveToProjectOpen = true
 	ws.moveToProjectThreadID = threadID
+	ws.moveToProjectQuery = ""
+	ws.moveToProjectSelected = 0
 	ws.movingToProject = false
 	ws.mu.Unlock()
 	s.invalidate()
@@ -2447,13 +2458,15 @@ func (s *chatState) submitMoveToProject(projectID string) {
 	}()
 }
 
-func renderMoveToProjectModal(c *ui.Context, s *chatState) {
+func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, anchor ui.Element) {
 	ws := getWorktreeUIState(s)
 	ws.mu.Lock()
-	open := ws.moveToProjectOpen
+	open := ws.moveToProjectOpen && ws.moveToProjectThreadID == threadID
+	query := ws.moveToProjectQuery
+	selected := ws.moveToProjectSelected
+	moving := ws.movingToProject
 	ws.mu.Unlock()
 	if !open {
-		modalDragReset(modalDragMoveToProject)
 		return
 	}
 
@@ -2463,42 +2476,108 @@ func renderMoveToProjectModal(c *ui.Context, s *chatState) {
 	s.mu.Unlock()
 	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 
-	modalDragModal(c, modalDragMoveToProject, &ws.moveToProjectOpen, func() {
-		if c.Shortcut(0, ui.KeyEscape) {
-			s.closeMoveToProjectModal()
-			return
+	filtered := make([]Project, 0, len(projects))
+	for _, p := range projects {
+		if branchMatches(p.Name, query) {
+			filtered = append(filtered, p)
 		}
+	}
+	if selected < 0 || selected >= len(filtered) {
+		selected = 0
+	}
 
-		ui.Column(c.Key("modal-move-to-project-card")).
-			Label("modal-move-to-project-card").
-			Width(280).
-			Background(ThemeSurface(c)).
-			BorderColor(ThemeBorder(c)).
-			BorderWidth(1).
-			Radius(RadiusLG).
+	appPopover(c.Key("move-to-project-popover-"+threadID), anchor, &open, s.closeMoveToProjectModal, func() {
+		popoverCard(c, ui.Column(c.Key("move-to-project-content"))).
+			Label("移到项目").
+			Width(320).
 			Padding(Space2).
-			Gap(Space0).
+			Gap(Space1).
 			Children(func() {
-				for _, p := range projects {
-					project := p
-					item := ui.ButtonBase(c.Key("modal-move-to-project-item-"+project.ID)).
-						Label(project.Name).
-						Padding(Space2, Space3).
-						Radius(RadiusSM).
-						FillWidth()
-					if item.Hovered() {
-						item.Background(ThemeHover(c))
-					}
-					if item.Clicked() {
-						s.submitMoveToProject(project.ID)
-					}
-					item.Children(func() {
-						ui.Text(c, project.Name).
-							FontSize(sidebarFont(TypeBody)).
-							TextColor(ThemePrimaryText(c)).
-							SingleLine()
+				SearchField(c, TextFieldProps{
+					Key:         "move-to-project-search",
+					Value:       &query,
+					Label:       "搜索项目",
+					Placeholder: "移到项目…",
+					FillWidth:   true,
+					AutoFocus:   true,
+					OnChange: func(v string) {
+						ws.mu.Lock()
+						ws.moveToProjectQuery = v
+						ws.moveToProjectSelected = 0
+						ws.mu.Unlock()
+						s.invalidate()
+					},
+					OnKeyDown: func(k ui.TextKey) bool {
+						switch k.Key {
+						case ui.KeyEscape:
+							open = false
+							s.closeMoveToProjectModal()
+							return true
+						case ui.KeyUp:
+							ws.mu.Lock()
+							if selected > 0 {
+								ws.moveToProjectSelected = selected - 1
+							} else {
+								ws.moveToProjectSelected = 0
+							}
+							ws.mu.Unlock()
+							s.invalidate()
+							return true
+						case ui.KeyDown:
+							ws.mu.Lock()
+							if selected+1 < len(filtered) {
+								ws.moveToProjectSelected = selected + 1
+							} else if len(filtered) > 0 {
+								ws.moveToProjectSelected = selected
+							}
+							ws.mu.Unlock()
+							s.invalidate()
+							return true
+						case ui.KeyEnter:
+							if len(filtered) > 0 && !moving {
+								s.submitMoveToProject(filtered[selected].ID)
+							}
+							return true
+						}
+						return false
+					},
+				})
+
+				ui.Scroll(c.Key("move-to-project-scroll")).FillWidth().MaxHeight(360).Children(func() {
+					ui.Column(c.Key("move-to-project-list")).FillWidth().Children(func() {
+						if len(filtered) == 0 {
+							ui.Row(c.Key("move-to-project-empty")).FillWidth().Padding(Space2, Space3).Children(func() {
+								ui.Text(c, "无匹配项目").
+									FontSize(sidebarFont(TypeBody)).
+									TextColor(ThemeSecondaryText(c)).
+									SingleLine()
+							})
+							return
+						}
+						for i, p := range filtered {
+							project := p
+							item := ui.ButtonBase(c.Key("move-to-project-item-"+project.ID)).
+								Label(project.Name).
+								Padding(Space2, Space3).
+								Radius(RadiusSM).
+								FillWidth().
+								Justify(ui.Start).
+								Disabled(moving)
+							if i == selected || item.Hovered() {
+								item.Background(ThemeHover(c))
+							}
+							if item.Clicked() {
+								s.submitMoveToProject(project.ID)
+							}
+							item.Children(func() {
+								ui.Text(c, project.Name).
+									FontSize(sidebarFont(TypeBody)).
+									TextColor(ThemePrimaryText(c)).
+									SingleLine()
+							})
+						}
 					})
-				}
+				})
 			})
 	})
 }

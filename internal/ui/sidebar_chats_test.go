@@ -509,6 +509,7 @@ func TestChatsMoveToProjectMenu(t *testing.T) {
 		[]Project{
 			{ID: "chats-builtin", Name: "对话"},
 			{ID: "p1", Name: "普通项目"},
+			{ID: "p2", Name: "其他项目"},
 		},
 		map[string][]Thread{
 			"chats-builtin": {{ID: "c1", ProjectID: "chats-builtin", Title: "对话会话", UpdatedAt: now}},
@@ -564,17 +565,26 @@ func TestChatsMoveToProjectMenu(t *testing.T) {
 		t.Fatalf("对话会话菜单应含「移到项目…」且不含「迁入 Worktree…」，实际: %v", chatsMenu)
 	}
 
-	// 3. 点击「移到项目…」打开弹窗，选择「普通项目」后移动并保持选中。
+	// 3. 点击「移到项目…」打开搜索浮层，输入关键词过滤并回车确认移动。
 	if err := tt.ChooseMenuItem("移到项目…"); err != nil {
 		t.Fatalf("ChooseMenuItem 移到项目… 失败: %v", err)
 	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("移到项目")
+		return ok && tt.Focused("搜索项目")
+	})
+	if _, ok := tt.AccessByRole(ui.RoleButton, "其他项目"); !ok {
+		t.Fatal("打开「移到项目」浮层后应显示「其他项目」")
+	}
+	tt.Type("普通")
 	tt.Frame()
-	if _, ok := tt.Find("modal-move-to-project-card"); !ok {
-		t.Fatal("点击「移到项目…」后应打开项目选择弹窗")
+	if _, ok := tt.AccessByRole(ui.RoleButton, "其他项目"); ok {
+		t.Fatal("搜索「普通」后「其他项目」不应再显示")
 	}
-	if err := tt.Click("普通项目"); err != nil {
-		t.Fatalf("点击目标项目失败: %v", err)
+	if _, ok := tt.AccessByRole(ui.RoleButton, "普通项目"); !ok {
+		t.Fatal("搜索「普通」后「普通项目」应仍显示")
 	}
+	tt.Key(0, ui.KeyEnter)
 	waitFor(t, tt, func() bool {
 		fake.mu.Lock()
 		calls := len(fake.moveThreadToProjectCalls)
@@ -596,6 +606,52 @@ func TestChatsMoveToProjectMenu(t *testing.T) {
 	state.mu.Unlock()
 	if selected != "c1" {
 		t.Fatalf("移动后应保持选中该会话 c1, got %q", selected)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("移到项目")
+		return !ok
+	})
+
+	// 4. 重新打开浮层后按 Esc，应关闭浮层且不触发移动。
+	fake2 := NewFakeClient()
+	fake2.SetChatsProjectID("chats-builtin")
+	fake2.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "对话"},
+			{ID: "p1", Name: "普通项目"},
+			{ID: "p2", Name: "其他项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {{ID: "c2", ProjectID: "chats-builtin", Title: "对话会话二", UpdatedAt: now}},
+		},
+	)
+	state2, view2 := buildRoot(fake2)
+	t.Cleanup(state2.close)
+	tt2 := ui.NewTester(view2, 1000, 700)
+	waitFor(t, tt2, func() bool {
+		return tt2.HasText("对话会话二")
+	})
+	if err := tt2.RightClick("对话会话二"); err != nil {
+		t.Fatalf("RightClick 对话会话二失败: %v", err)
+	}
+	tt2.Frame()
+	if err := tt2.ChooseMenuItem("移到项目…"); err != nil {
+		t.Fatalf("ChooseMenuItem 移到项目… 失败: %v", err)
+	}
+	waitFor(t, tt2, func() bool {
+		_, ok := tt2.Find("移到项目")
+		return ok && tt2.Focused("搜索项目")
+	})
+	tt2.Key(0, ui.KeyEscape)
+	waitFor(t, tt2, func() bool {
+		_, ok := tt2.Find("移到项目")
+		return !ok
+	})
+	fake2.mu.Lock()
+	escCalls := len(fake2.moveThreadToProjectCalls)
+	fake2.mu.Unlock()
+	if escCalls != 0 {
+		t.Fatalf("按 Esc 关闭浮层不应发生移动调用, got %d", escCalls)
 	}
 }
 
