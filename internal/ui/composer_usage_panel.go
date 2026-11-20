@@ -2206,6 +2206,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 				})
 			}
 			var accountSectionHeight float32
+			listOpts := quotaGroupListOptions{HideSingleGroupTitle: true}
 			if agyAccountSelectable(th, provider, windows) {
 				options := agyAccountOptions(provider, windows)
 				hasMessages, isRunning := composerAgyAccountLockInputs(s, th)
@@ -2220,6 +2221,49 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 				}
 				if targetThreadID == "" && s != nil {
 					targetThreadID = s.selectedThreadID
+				}
+				accountIDByName := make(map[string]string, len(options))
+				selectedAccountName := ""
+				for _, w := range windows {
+					id := strings.TrimSpace(w.AccountID)
+					if id == "" {
+						continue
+					}
+					name := strings.TrimSpace(w.Account)
+					if name == "" {
+						name, _ = quotaWindowAccount(w)
+					}
+					if name == "" {
+						continue
+					}
+					if _, exists := accountIDByName[name]; !exists {
+						accountIDByName[name] = id
+					}
+					if id == currentAccountID && selectedAccountName == "" {
+						selectedAccountName = name
+					}
+				}
+				disabledByID := make(map[string]bool, len(options))
+				for _, opt := range options {
+					disabledByID[opt.accountID] = opt.disabled || opt.fiveHourFull
+				}
+				listOpts.SelectedAccount = selectedAccountName
+				listOpts.AccountDisabled = func(account string) bool {
+					if locked {
+						return true
+					}
+					id := accountIDByName[account]
+					if id == "" {
+						return true
+					}
+					return disabledByID[id]
+				}
+				listOpts.OnSelectAccount = func(account string) {
+					id := accountIDByName[account]
+					if id == "" {
+						return
+					}
+					selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, id)
 				}
 				ui.Column(c.Key("composer-quota-account-section")).
 					FillWidth().
@@ -2240,19 +2284,6 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 										selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, "")
 									},
 								})
-								for _, opt := range options {
-									curOpt := opt
-									menuRow(c, menuRowProps{
-										Key:      "composer-quota-account-" + curOpt.accountID,
-										Title:    curOpt.displayName,
-										Trailing: curOpt.trailing,
-										Checked:  currentAccountID == curOpt.accountID,
-										Disabled: locked || curOpt.disabled || curOpt.fiveHourFull,
-										OnClick: func() {
-											selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, curOpt.accountID)
-										},
-									})
-								}
 							})
 						ui.Row(c.Key("composer-quota-account-divider-wrap")).
 							FillWidth().
@@ -2264,7 +2295,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 									Background(ThemeDivider(c))
 							})
 					})
-				rowCount := float32(1 + len(options))
+				const rowCount float32 = 1
 				accountSectionHeight = rowCount*(ControlLG+Space0) + Space3 + Hairline + Space4
 			}
 			// 标题行固定在面板顶部，账户列表放进滚动容器：窗口矮或供应商多时只滚列
@@ -2292,7 +2323,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 				list.MaxHeight(listMax)
 			}
 			list.Children(func() {
-				renderQuotaGroupList(c, "composer-quota-", groups, quotaGroupListOptions{HideSingleGroupTitle: true})
+				renderQuotaGroupList(c, "composer-quota-", groups, listOpts)
 			})
 			return
 		}

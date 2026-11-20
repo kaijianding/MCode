@@ -709,3 +709,107 @@ func TestGroupQuotaWindowsByProvider(t *testing.T) {
 		t.Fatalf("第 3 组应为 commandcode-plan，得到 %+v", groups[2])
 	}
 }
+
+func TestComposerQuotaPopoverAccountsMergedIntoList(t *testing.T) {
+	th := Thread{ID: "t1", ProjectID: "p1", Provider: "agy"}
+	fake, s := newAgyAccountTestState(t, th, agyAccountTestWindows(32))
+	s.composerView.quotaOpen = true
+	s.composerView.quotaPopoverProvider = "agy"
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderComposerQuotaPopover(c, s, currentTestThreadSnapshot(s, th.ID, th), "agy", 0)
+	}, 480, 480)
+
+	// 账号与额度列表合并后，每个账号只在「额度列表」内出现（ButtonBase.Label + 文本各 1 次，共 2 次），
+	// 「额度列表」之前的顶部区域只有「自动」行，不再有逐账号 menuRow。
+	texts := tt.Texts()
+	listIdx := -1
+	for i, txt := range texts {
+		if txt == "额度列表" {
+			listIdx = i
+			break
+		}
+	}
+	if listIdx < 0 {
+		t.Fatalf("未找到「额度列表」滚动容器，texts=%q", texts)
+	}
+	for _, accountName := range []string{"个人账号", "工作账号"} {
+		for _, txt := range texts[:listIdx] {
+			if txt == accountName {
+				t.Fatalf("「额度列表」之前不应再有逐账号菜单行 %q，texts=%q", accountName, texts)
+			}
+		}
+		count := 0
+		for _, txt := range texts {
+			if txt == accountName {
+				count++
+			}
+		}
+		if count != 2 {
+			t.Fatalf("账号 %q 应仅在合并后的额度块中出现（Label + 文本共 2 次），实际=%d，texts=%q", accountName, count, texts)
+		}
+	}
+	btnCounts := map[string]int{}
+	for _, node := range tt.AccessAll() {
+		if node.Role == ui.RoleButton {
+			btnCounts[node.Name]++
+		}
+	}
+	for _, label := range []string{"自动", "个人账号", "工作账号"} {
+		if btnCounts[label] != 1 {
+			t.Fatalf("按钮 %q 应恰好有 1 个，实际=%d", label, btnCounts[label])
+		}
+	}
+	workBtn, ok := tt.AccessByRole(ui.RoleButton, "工作账号")
+	if !ok || workBtn.Disabled || workBtn.Checked {
+		t.Fatalf("初始状态下「工作账号」额度块应可用且未选中: ok=%v node=%+v", ok, workBtn)
+	}
+	if workBtn.Bounds.H <= ControlLG {
+		t.Fatalf("「工作账号」按钮应包裹账号名与额度条整块，实际高度=%v", workBtn.Bounds.H)
+	}
+
+	// 点击额度块会选中对应 AccountID 并关闭弹层。
+	if err := tt.Click("工作账号"); err != nil {
+		t.Fatalf("点击「工作账号」额度块失败: %v", err)
+	}
+	if s.composerView.quotaOpen {
+		t.Fatal("点击额度块切换账号后应关闭弹层")
+	}
+	if got := currentTestThreadSnapshot(s, th.ID, th).Account; got != "acc-2" {
+		t.Fatalf("点击「工作账号」后线程 Account = %q, want %q", got, "acc-2")
+	}
+	waitFor(t, tt, func() bool {
+		calls := fake.SetThreadAccountCalls()
+		return len(calls) == 1 && calls[0].ThreadID == "t1" && calls[0].AccountID == "acc-2"
+	})
+
+	// 重新渲染已选中 acc-2 的弹层，验证勾选状态同步到额度块。
+	tt.Frame()
+	workBtn, ok = tt.AccessByRole(ui.RoleButton, "工作账号")
+	if !ok || !workBtn.Checked {
+		t.Fatalf("选中 acc-2 后「工作账号」额度块应为 Checked: ok=%v node=%+v", ok, workBtn)
+	}
+	if autoBtn, ok := tt.AccessByRole(ui.RoleButton, "自动"); !ok || autoBtn.Checked {
+		t.Fatalf("选中 acc-2 后「自动」不应为 Checked: ok=%v node=%+v", ok, autoBtn)
+	}
+
+	// locked 时（已有消息且当前账号可用）额度块禁用，点击无效。
+	s.mu.Lock()
+	s.messages = []Message{{ID: "m1", Role: "user", Text: "hello"}}
+	s.mu.Unlock()
+	tt.Frame()
+
+	personalBtn, ok := tt.AccessByRole(ui.RoleButton, "个人账号")
+	if !ok || !personalBtn.Disabled {
+		t.Fatalf("locked 时「个人账号」额度块应禁用: ok=%v node=%+v", ok, personalBtn)
+	}
+	if err := tt.Click("个人账号"); err != nil {
+		t.Fatalf("点击禁用额度块失败: %v", err)
+	}
+	if got := currentTestThreadSnapshot(s, th.ID, th).Account; got != "acc-2" {
+		t.Fatalf("locked 时点击不应修改线程 Account，实际=%q", got)
+	}
+	if calls := fake.SetThreadAccountCalls(); len(calls) != 1 {
+		t.Fatalf("locked 时点击不应发起新的 SetThreadAccount 请求，calls=%+v", calls)
+	}
+}

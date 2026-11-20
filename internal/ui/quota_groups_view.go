@@ -9,6 +9,9 @@ import (
 
 type quotaGroupListOptions struct {
 	HideSingleGroupTitle bool
+	SelectedAccount      string
+	OnSelectAccount      func(account string)
+	AccountDisabled      func(account string) bool
 }
 
 func quotaGroupTitleVisible(groupCount int, opts quotaGroupListOptions) bool {
@@ -16,33 +19,46 @@ func quotaGroupTitleVisible(groupCount int, opts quotaGroupListOptions) bool {
 }
 
 func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGroupModel, opts quotaGroupListOptions) {
+	selectable := opts.OnSelectAccount != nil
+	listPadX := Space4
+	groupGap := Space3
+	if selectable {
+		listPadX = Space1
+		groupGap = Space1
+	}
 	ui.Column(c.Key(keyPrefix+"list")).
 		FillWidth().
-		Padding(0, Space4).
+		Padding(0, listPadX).
 		Gap(Space5).
 		Children(func() {
 			for gIdx, g := range groups {
 				groupKey := fmt.Sprintf("%sg-%d", keyPrefix, gIdx)
 				if gIdx > 0 {
 					// 相邻供应商之间用细分割线隔开
-					ui.Row(c.Key(groupKey + "-divider")).
+					div := ui.Row(c.Key(groupKey + "-divider")).
 						FillWidth().
 						Height(Hairline).
 						Background(ThemeDivider(c))
+					if selectable {
+						div.Margin(0, Space3, 0, Space3)
+					}
 				}
 
 				ui.Column(c.Key(groupKey)).
 					FillWidth().
-					Gap(Space3).
+					Gap(groupGap).
 					Children(func() {
 						// 标题行：IconMD 图标 + 供应商名 + 套餐名，右侧是最早重置时间（有错误时改为错误文字）
 						if quotaGroupTitleVisible(len(groups), opts) {
-							ui.Row(c.Key(groupKey + "-title-row")).
+							titleRow := ui.Row(c.Key(groupKey + "-title-row")).
 								FillWidth().
 								Height(ControlSM).
 								AlignItems(ui.Center).
-								Gap(Space3).
-								Children(func() {
+								Gap(Space3)
+							if selectable {
+								titleRow.Padding(0, Space3)
+							}
+							titleRow.Children(func() {
 									ui.Box(c.Key(groupKey+"-icon-box")).
 										Size(IconMD, IconMD).
 										Center().
@@ -327,90 +343,119 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 									})
 							}
 
-							ui.Column(c.Key(accKey)).
-								FillWidth().
-								Gap(Space3).
-								Children(func() {
-									// 多账号时账号名单独一行（含状态圆点与套餐名），额度行统一缩进到供应商名。
-									if g.MultiAccount {
-										ui.Row(c.Key(accKey + "-namerow")).
-											FillWidth().
-											Height(ControlXS).
-											AlignItems(ui.Center).
-											Children(func() {
-												ui.Box(c.Key(accKey + "-name-indent")).
-													Width(rowIndent)
+							accDisabled := selectable && opts.AccountDisabled != nil && opts.AccountDisabled(curAcc.Account)
+							accSelected := selectable && opts.SelectedAccount != "" && curAcc.Account == opts.SelectedAccount
+							renderAccountBlock := func() {
+								ui.Column(c.Key(accKey)).
+									FillWidth().
+									Gap(Space3).
+									Children(func() {
+										// 多账号时账号名单独一行（含状态圆点与套餐名），额度行统一缩进到供应商名。
+										if g.MultiAccount {
+											ui.Row(c.Key(accKey + "-namerow")).
+												FillWidth().
+												Height(ControlXS).
+												AlignItems(ui.Center).
+												Children(func() {
+													ui.Box(c.Key(accKey + "-name-indent")).
+														Width(rowIndent)
 
-												ui.Row(c.Key(accKey + "-name")).
-													Grow(1).
-													AlignItems(ui.Center).
-													Gap(Space3).
-													Children(func() {
-														renderDot(0)
+													ui.Row(c.Key(accKey + "-name")).
+														Grow(1).
+														AlignItems(ui.Center).
+														Gap(Space3).
+														Children(func() {
+															renderDot(0)
 
-														ui.Text(c, curAcc.DisplayName).
-															FontSize(uiFont(TypeFootnote)).
-															TextColor(ThemePrimaryText(c)).
-															SingleLine().
-															Ellipsis("…").
-															Shrink(1).
-															MinWidth(0)
-
-														if curAcc.Plan != "" {
-															ui.Text(c, "· "+curAcc.Plan).
+															ui.Text(c, curAcc.DisplayName).
 																FontSize(uiFont(TypeFootnote)).
-																TextColor(ThemeSecondaryText(c)).
-																SingleLine()
-														}
+																TextColor(ThemePrimaryText(c)).
+																SingleLine().
+																Ellipsis("…").
+																Shrink(1).
+																MinWidth(0)
 
-														ui.Spacer(c)
-
-														if curAcc.HeadText != "" {
-															textColor := ThemeSecondaryText(c)
-															if curAcc.HeadWarn {
-																textColor = ThemeWarning(c)
+															if curAcc.Plan != "" {
+																ui.Text(c, "· "+curAcc.Plan).
+																	FontSize(uiFont(TypeFootnote)).
+																	TextColor(ThemeSecondaryText(c)).
+																	SingleLine()
 															}
-															ui.Text(c, curAcc.HeadText).
-																FontSize(uiFont(TypeFootnote)).
-																TextColor(textColor).
-																SingleLine()
-														}
-													})
+
+															ui.Spacer(c)
+
+															if curAcc.HeadText != "" {
+																textColor := ThemeSecondaryText(c)
+																if curAcc.HeadWarn {
+																	textColor = ThemeWarning(c)
+																}
+																ui.Text(c, curAcc.HeadText).
+																	FontSize(uiFont(TypeFootnote)).
+																	TextColor(textColor).
+																	SingleLine()
+															}
+
+															if accSelected {
+																ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
+															}
+														})
+												})
+										}
+
+										for wIdx, win := range curAcc.Windows {
+											if win.UsedPercent < 95 {
+												continue
+											}
+											warning := "即将用尽"
+											if win.UsedPercent >= 100 {
+												warning = "已用尽"
+											}
+											warning = trayQuotaLabeledText(win.ShortLabel, warning)
+											ui.Row(c.Key(fmt.Sprintf("%s-warning-%d", accKey, wIdx))).FillWidth().Children(func() {
+												ui.Box(c.Key(fmt.Sprintf("%s-warning-indent-%d", accKey, wIdx))).Width(rowIndent)
+												ui.Text(c, warning).FontSize(uiFont(TypeFootnote)).TextColor(quotaLevelColor(c, win.UsedPercent)).SingleLine()
 											})
-									}
+										}
 
-									for wIdx, win := range curAcc.Windows {
-										if win.UsedPercent < 95 {
-											continue
+										// 相邻画条窗口两两并排，宽窗口独占整行。
+										for wIdx := 0; wIdx < len(curAcc.Windows); wIdx++ {
+											win := curAcc.Windows[wIdx]
+											if win.Wide {
+												renderWindow(win, wIdx)
+												continue
+											}
+											secondIdx := -1
+											if wIdx+1 < len(curAcc.Windows) && !curAcc.Windows[wIdx+1].Wide {
+												secondIdx = wIdx + 1
+											}
+											renderPair(wIdx, secondIdx)
+											if secondIdx >= 0 {
+												wIdx++
+											}
 										}
-										warning := "即将用尽"
-										if win.UsedPercent >= 100 {
-											warning = "已用尽"
-										}
-										warning = trayQuotaLabeledText(win.ShortLabel, warning)
-										ui.Row(c.Key(fmt.Sprintf("%s-warning-%d", accKey, wIdx))).FillWidth().Children(func() {
-											ui.Box(c.Key(fmt.Sprintf("%s-warning-indent-%d", accKey, wIdx))).Width(rowIndent)
-											ui.Text(c, warning).FontSize(uiFont(TypeFootnote)).TextColor(quotaLevelColor(c, win.UsedPercent)).SingleLine()
-										})
-									}
-
-									// 相邻画条窗口两两并排，宽窗口独占整行。
-									for wIdx := 0; wIdx < len(curAcc.Windows); wIdx++ {
-										win := curAcc.Windows[wIdx]
-										if win.Wide {
-											renderWindow(win, wIdx)
-											continue
-										}
-										secondIdx := -1
-										if wIdx+1 < len(curAcc.Windows) && !curAcc.Windows[wIdx+1].Wide {
-											secondIdx = wIdx + 1
-										}
-										renderPair(wIdx, secondIdx)
-										if secondIdx >= 0 {
-											wIdx++
-										}
-									}
+									})
+							}
+							if !selectable {
+								renderAccountBlock()
+								continue
+							}
+							btn := ui.ButtonBase(c.Key(accKey+"-btn")).
+								Label(curAcc.DisplayName).
+								FillWidth().
+								Padding(Space2, Space3).
+								Radius(RadiusSM).
+								Checked(accSelected).
+								Disabled(accDisabled)
+							if !accDisabled {
+								if btn.Hovered() {
+									btn.Background(ThemeHover(c))
+								}
+								focusRing(c, btn)
+								btn.OnClick(func() {
+									opts.OnSelectAccount(curAcc.Account)
 								})
+							}
+							btn.Children(renderAccountBlock)
 						}
 					})
 			}
