@@ -520,8 +520,11 @@ type chatState struct {
 	newThreadProvider    string
 	// sidebarFilter/sidebarFilterOpen 是侧栏会话过滤条件与下拉框开合状态（入口在「对话」段标题行，
 	// 但条件作用于整个侧栏会话列表）。只在 UI 线程读写：渲染时直接读取，点击回调里写入后 invalidate。
-	sidebarFilter        sidebarThreadFilter
-	sidebarFilterOpen    bool
+	sidebarFilter     sidebarThreadFilter
+	sidebarFilterOpen bool
+	// 缓存以此为失效信号，直接改字段而不调 invalidate 的代码看不到更新。
+	invalidateGen atomic.Uint64
+	sidebarSnap   *sidebarSnapshot
 	creatingThread       bool // 创建请求进行中，防止重复点击；受 s.mu 保护
 	provisionalWorktrees map[string]bool
 	provisionalRetains   map[string]*provisionalRetain
@@ -738,8 +741,9 @@ func (s *chatState) startQueueWatch() {
 }
 
 // invalidate 通知 MyGo 主循环调度重新绘制。
-// 可能在已持有 s.mu 时被调用，所以只能碰 servicesMu 保护的那份服务句柄。
+// 可能在已持有 s.mu 时被调用，所以只能碰 atomic 与 servicesMu 保护的那份服务句柄。
 func (s *chatState) invalidate() {
+	s.invalidateGen.Add(1)
 	s.uiServices().Invalidate()
 }
 

@@ -164,26 +164,25 @@ func (s *chatState) filterSidebarThreads(threads []Thread, filter sidebarThreadF
 
 // renderSidebarChatsSection 渲染侧栏顶部的「对话」段：段标题与右侧过滤、「+」按钮，
 // 下方按最近活动平铺该项目的顶层会话；threadsFilter 非 nil 时只列传入的会话（搜索态过滤结果），
-// 为 nil 时取全部对话会话；没有会话时仅显示段标题，chatsProjectID 为空时整段不渲染。
-func renderSidebarChatsSection(c *ui.Context, s *chatState, threadsFilter []Thread) {
+// 为 nil 时直接复用侧栏快照里算好的对话会话；没有会话时仅显示段标题，chatsProjectID 为空时整段不渲染。
+func renderSidebarChatsSection(c *ui.Context, s *chatState, snap *sidebarSnapshot, selectedID string, threadsFilter []Thread) {
 	chatsProjID := s.chatsProjectID()
 	if chatsProjID == "" {
 		return
 	}
 
-	s.mu.Lock()
-	providers := append([]ProviderInfo(nil), s.providers...)
-	var rawThreads []Thread
+	providers := snap.providers
+	var topThs []Thread
+	var beesByParent map[string][]Thread
 	if threadsFilter != nil {
-		rawThreads = withoutProvisional(threadsFilter)
+		rawThreads := withoutProvisional(threadsFilter)
+		rawThreads = s.filterSidebarThreads(rawThreads, s.sidebarFilter, time.Now(), s.threadStillBusy)
+		topThs, beesByParent = GroupThreadsByParent(rawThreads)
+		topThs = SortThreads(topThs)
 	} else {
-		rawThreads = withoutProvisional(s.threadsByProj[chatsProjID])
+		topThs = snap.chatsTopThreads
+		beesByParent = snap.chatsBeesByParent
 	}
-	selectedID := s.selectedThreadID
-	s.mu.Unlock()
-
-	filter := s.sidebarFilter
-	rawThreads = s.filterSidebarThreads(rawThreads, filter, time.Now(), s.threadStillBusy)
 
 	m := currentSidebarMetrics(c, s)
 
@@ -222,10 +221,6 @@ func renderSidebarChatsSection(c *ui.Context, s *chatState, threadsFilter []Thre
 			},
 		})
 	})
-
-	// 按最近活动平铺顶层会话，子代理仍通过 GroupThreadsByParent 挂载到父会话行下。
-	topThs, beesByParent := GroupThreadsByParent(rawThreads)
-	topThs = SortThreads(topThs)
 
 	for _, th := range topThs {
 		renderSidebarThreadRow(c, s, sidebarThreadRowOptions{

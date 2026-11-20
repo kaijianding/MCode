@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -295,6 +297,167 @@ func currentSidebarMetrics(c *ui.Context, s *chatState) sidebarMetrics {
 	return m
 }
 
+// sidebarSnapshotBuilds 仅用于测试观测侧栏快照构建次数。
+var sidebarSnapshotBuilds atomic.Uint64
+
+type sidebarSnapshotKey struct {
+	invalidateGen uint64
+	filter        sidebarThreadFilter
+	projectOrder  []string
+	stewardThread string
+	chatsProjID   string
+	nowMinute     time.Time
+}
+
+func (k sidebarSnapshotKey) equal(other sidebarSnapshotKey) bool {
+	return k.invalidateGen == other.invalidateGen &&
+		k.filter == other.filter &&
+		k.stewardThread == other.stewardThread &&
+		k.chatsProjID == other.chatsProjID &&
+		k.nowMinute.Equal(other.nowMinute) &&
+		slices.Equal(k.projectOrder, other.projectOrder)
+}
+
+// sidebarSnapshot 缓存侧栏每帧共用的只读派生数据；仅在 invalidateGen 或关键维度变化时重建。
+// 切片与 map 均为只读快照，渲染代码不得原地修改。
+type sidebarSnapshot struct {
+	key               sidebarSnapshotKey
+	projects          []Project
+	missingPaths      map[string]bool
+	providers         []ProviderInfo
+	threads           []Thread
+	threadsByProj     map[string][]Thread
+	bulkThreadsByProj map[string][]Thread
+	collapsed         map[string]bool
+	projectNames      map[string]string
+	chatsTopThreads   []Thread
+	chatsBeesByParent map[string][]Thread
+	activityGroups    []activityGroup
+	activityMinute    time.Time
+	activityCached    bool
+}
+
+func (snap *sidebarSnapshot) ensureActivityGroups(now time.Time) []activityGroup {
+	if snap == nil {
+		return nil
+	}
+	minute := now.Truncate(time.Minute)
+	if snap.activityCached && snap.activityMinute.Equal(minute) {
+		return snap.activityGroups
+	}
+	snap.activityGroups = groupThreadsByActivity(snap.threads, now)
+	snap.activityMinute = minute
+	snap.activityCached = true
+	return snap.activityGroups
+}
+
+func (s *chatState) currentSidebarSnapshotKey(now time.Time) sidebarSnapshotKey {
+	filter := s.sidebarFilter
+	var nowMinute time.Time
+	if sidebarFilterActiveWindow(filter) > 0 {
+		nowMinute = now.Truncate(time.Minute)
+	}
+	return sidebarSnapshotKey{
+		invalidateGen: s.invalidateGen.Load(),
+		filter:        filter,
+		projectOrder:  sidebarProjectOrder(s),
+		stewardThread: s.stewardThreadID(),
+		chatsProjID:   s.chatsProjectID(),
+		nowMinute:     nowMinute,
+	}
+}
+
+func (s *chatState) sidebarSnapshotForFrame(now time.Time) *sidebarSnapshot {
+	key := s.currentSidebarSnapshotKey(now)
+	if s.sidebarSnap != nil && s.sidebarSnap.key.equal(key) {
+		return s.sidebarSnap
+	}
+	snap := s.buildSidebarSnapshot(key, now)
+	s.sidebarSnap = snap
+	return snap
+}
+
+func (s *chatState) buildSidebarSnapshot(key sidebarSnapshotKey, now time.Time) *sidebarSnapshot {
+	sidebarSnapshotBuilds.Add(1)
+
+	s.mu.Lock()
+	projects := make([]Project, len(s.projects))
+	copy(projects, s.projects)
+	missingPaths := make(map[string]bool, len(s.projectPathsMissing))
+	for id, missing := range s.projectPathsMissing {
+		missingPaths[id] = missing
+	}
+
+	providers := make([]ProviderInfo, len(s.providers))
+	copy(providers, s.providers)
+
+	threads := withoutProvisional(s.threads)
+
+	threadsByProj := make(map[string][]Thread, len(s.threadsByProj))
+	for pid, list := range s.threadsByProj {
+		threadsByProj[pid] = withoutProvisional(list)
+	}
+
+	collapsed := make(map[string]bool, len(s.collapsedProj))
+	for pid, col := range s.collapsedProj {
+		collapsed[pid] = col
+	}
+	s.mu.Unlock()
+
+	// 总管 feed 已经在侧栏顶部单独成段：它的会话与所在项目不再在项目树、动态视图里重复出现。
+	// 内置对话项目也已在侧栏顶部单独成段，不出现在项目树里。
+	// 这里只过滤本地副本，不改 s.projects / s.threads 本身。
+	if key.stewardThread != "" {
+		projects, threads, threadsByProj = withoutStewardThread(key.stewardThread, projects, threads, threadsByProj)
+	}
+	if key.chatsProjID != "" {
+		projects = withoutProjects(projects, key.chatsProjID)
+	}
+
+	// 「对话」段标题行的过滤条件作用于整个侧栏会话列表：普通项目、动态视图与搜索命中
+	// 都按同一个条件收窄，避免筛选器只影响一个常年为空的段。
+	// bulkThreadsByProj 保留过滤前的会话，项目右键菜单的批量操作仍覆盖项目全部会话。
+	bulkThreadsByProj := threadsByProj
+	if key.filter != sidebarFilterAll {
+		threads = s.filterSidebarThreads(threads, key.filter, now, s.threadStillBusy)
+		threadsByProj = make(map[string][]Thread, len(bulkThreadsByProj))
+		for pid, list := range bulkThreadsByProj {
+			threadsByProj[pid] = s.filterSidebarThreads(list, key.filter, now, s.threadStillBusy)
+		}
+	}
+
+	// 按保存的项目顺序渲染，未在顺序中的项目按原顺序追加到末尾。
+	projects = applyProjectOrder(projects, key.projectOrder)
+	// 项目按“内部会话的最后用户消息时间”倒序：手拖顺序只作为同活跃时间与空项目的稳定兜底，
+	// 不再主导项目的前后位置。
+	projects = SortProjectsByActivity(projects, threadsByProj)
+	projectNames := make(map[string]string, len(projects))
+	for _, p := range projects {
+		projectNames[p.ID] = p.Name
+	}
+
+	var chatsTopThreads []Thread
+	var chatsBeesByParent map[string][]Thread
+	if key.chatsProjID != "" {
+		chatsTopThreads, chatsBeesByParent = GroupThreadsByParent(threadsByProj[key.chatsProjID])
+		chatsTopThreads = SortThreads(chatsTopThreads)
+	}
+
+	return &sidebarSnapshot{
+		key:               key,
+		projects:          projects,
+		missingPaths:      missingPaths,
+		providers:         providers,
+		threads:           threads,
+		threadsByProj:     threadsByProj,
+		bulkThreadsByProj: bulkThreadsByProj,
+		collapsed:         collapsed,
+		projectNames:      projectNames,
+		chatsTopThreads:   chatsTopThreads,
+		chatsBeesByParent: chatsBeesByParent,
+	}
+}
+
 func renderSidebar(c *ui.Context, s *chatState) {
 	sidebarMu.Lock()
 	if state := sidebarSearch[s]; state != nil {
@@ -338,70 +501,24 @@ func renderSidebar(c *ui.Context, s *chatState) {
 	hoverBg := ThemeHover(c)
 
 	s.mu.Lock()
-	projects := make([]Project, len(s.projects))
-	copy(projects, s.projects)
-	missingPaths := make(map[string]bool, len(s.projectPathsMissing))
-	for id, missing := range s.projectPathsMissing {
-		missingPaths[id] = missing
-	}
-
-	providers := make([]ProviderInfo, len(s.providers))
-	copy(providers, s.providers)
-
-	threads := withoutProvisional(s.threads)
-
-	threadsByProj := make(map[string][]Thread, len(s.threadsByProj))
-	for pid, list := range s.threadsByProj {
-		cp := withoutProvisional(list)
-		threadsByProj[pid] = cp
-	}
-
-	collapsed := make(map[string]bool, len(s.collapsedProj))
-	for pid, col := range s.collapsedProj {
-		collapsed[pid] = col
-	}
 	selectedID := s.selectedThreadID
-
 	if s.newThreadProvider == "" {
 		s.newThreadProvider = defaultNewThreadProvider(s.providers, newThreadProviderContext{threads: s.threads, stewardThreadID: s.stewardThreadID()})
 	}
 	s.mu.Unlock()
 
-	// 总管 feed 已经在侧栏顶部单独成段：它的会话与所在项目不再在项目树、动态视图里重复出现。
-	// 内置对话项目也已在侧栏顶部单独成段，不出现在项目树里。
-	// 这里只过滤本地副本，不改 s.projects / s.threads 本身。
-	stewardThread := s.stewardThreadID()
-	if stewardThread != "" {
-		projects, threads, threadsByProj = withoutStewardThread(stewardThread, projects, threads, threadsByProj)
-	}
-	chatsProjID := s.chatsProjectID()
-	if chatsProjID != "" {
-		projects = withoutProjects(projects, chatsProjID)
-	}
-
-	// 「对话」段标题行的过滤条件作用于整个侧栏会话列表：普通项目、动态视图与搜索命中
-	// 都按同一个条件收窄，避免筛选器只影响一个常年为空的段。
-	// bulkThreadsByProj 保留过滤前的会话，项目右键菜单的批量操作仍覆盖项目全部会话。
-	bulkThreadsByProj := threadsByProj
-	filter := s.sidebarFilter
-	if filter != sidebarFilterAll {
-		nowFilter := time.Now()
-		threads = s.filterSidebarThreads(threads, filter, nowFilter, s.threadStillBusy)
-		threadsByProj = make(map[string][]Thread, len(bulkThreadsByProj))
-		for pid, list := range bulkThreadsByProj {
-			threadsByProj[pid] = s.filterSidebarThreads(list, filter, nowFilter, s.threadStillBusy)
-		}
-	}
-
-	// 按保存的项目顺序渲染，未在顺序中的项目按原顺序追加到末尾。
-	projects = applyProjectOrder(projects, sidebarProjectOrder(s))
-	// 项目按“内部会话的最后用户消息时间”倒序：手拖顺序只作为同活跃时间与空项目的稳定兜底，
-	// 不再主导项目的前后位置。
-	projects = SortProjectsByActivity(projects, threadsByProj)
-	projectNames := make(map[string]string, len(projects))
-	for _, p := range projects {
-		projectNames[p.ID] = p.Name
-	}
+	now := time.Now()
+	snap := s.sidebarSnapshotForFrame(now)
+	projects := snap.projects
+	missingPaths := snap.missingPaths
+	providers := snap.providers
+	threads := snap.threads
+	threadsByProj := snap.threadsByProj
+	bulkThreadsByProj := snap.bulkThreadsByProj
+	collapsed := snap.collapsed
+	projectNames := snap.projectNames
+	chatsProjID := snap.key.chatsProjID
+	filter := snap.key.filter
 
 	searchQueryPtr := getSearchQuery(s)
 	searchQuery := ""
@@ -582,6 +699,8 @@ func renderSidebar(c *ui.Context, s *chatState) {
 				}
 				renderActivityThreadList(c, s, sidebarActivityListOptions{
 					threads:         threads,
+					groups:          snap.ensureActivityGroups(now),
+					groupsCached:    true,
 					projectNames:    projectNames,
 					providers:       providers,
 					selectedID:      selectedID,
@@ -597,9 +716,9 @@ func renderSidebar(c *ui.Context, s *chatState) {
 			}
 
 			if lowerQuery == "" {
-				renderSidebarChatsSection(c, s, nil)
+				renderSidebarChatsSection(c, s, snap, selectedID, nil)
 			} else if len(chatsMatches) > 0 {
-				renderSidebarChatsSection(c, s, chatsMatches)
+				renderSidebarChatsSection(c, s, snap, selectedID, chatsMatches)
 			}
 
 			if len(projects) == 0 {

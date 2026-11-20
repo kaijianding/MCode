@@ -171,6 +171,8 @@ func renderSidebarNoResultsCard(c *ui.Context) {
 // sidebarActivityListOptions 是动态视图列表渲染所需的快照（renderSidebar 传入）。
 type sidebarActivityListOptions struct {
 	threads         []Thread // 全部会话快照（s.threads）
+	groups          []activityGroup
+	groupsCached    bool
 	projectNames    map[string]string
 	providers       []ProviderInfo
 	selectedID      string
@@ -186,14 +188,19 @@ type sidebarActivityListOptions struct {
 // renderActivityThreadList 渲染动态视图列表：按活跃时间分组，每组一个小节标题，
 // 行内附带所属项目名；搜索词非空时按会话标题过滤，过滤后为空则显示「无结果」卡片。
 func renderActivityThreadList(c *ui.Context, s *chatState, o sidebarActivityListOptions) {
-	var filtered []Thread
-	for _, th := range o.threads {
-		if o.query != "" && !strings.Contains(strings.ToLower(th.Title), o.query) {
-			continue
+	var groups []activityGroup
+	if o.query == "" && o.groupsCached {
+		groups = o.groups
+	} else {
+		var filtered []Thread
+		for _, th := range o.threads {
+			if o.query != "" && !strings.Contains(strings.ToLower(th.Title), o.query) {
+				continue
+			}
+			filtered = append(filtered, th)
 		}
-		filtered = append(filtered, th)
+		groups = groupThreadsByActivity(filtered, time.Now())
 	}
-	groups := groupThreadsByActivity(filtered, time.Now())
 	if len(groups) == 0 {
 		if o.query != "" {
 			renderSidebarNoResultsCard(c)
