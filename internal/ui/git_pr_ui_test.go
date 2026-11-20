@@ -1183,3 +1183,25 @@ func TestGitPRStaleThreadCallback(t *testing.T) {
 		}
 	})
 }
+
+func TestGitPRActionTip(t *testing.T) {
+	cases := []struct {
+		name               string
+		busy, self, reason string
+		want               string
+	}{
+		{"busy为其他操作", "approve", "merge", "原因", "正在执行其他操作，请稍候"},
+		{"busy为其他操作且self为空", "approve", "", "", "正在执行其他操作，请稍候"},
+		{"busy为自己且无原因", "merge", "merge", "", ""},
+		{"busy为自己且保留原因", "comment", "comment", "先在上方输入评论内容", "先在上方输入评论内容"},
+		{"不busy且有原因", "", "comment", "先在上方输入评论内容", "先在上方输入评论内容"},
+		{"不busy且无原因", "", "approve", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := gitPRActionTip(tc.busy, tc.self, tc.reason); got != tc.want {
+				t.Errorf("gitPRActionTip(%q, %q, %q) = %q, want %q", tc.busy, tc.self, tc.reason, got, tc.want)
+			}
+		})
+	}
+}

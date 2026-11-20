@@ -179,67 +179,85 @@ func renderButton(c *ui.Context, p ButtonOpts, iconOnly, active bool) ui.Element
 	if label == "" {
 		label = p.Text
 	}
-	// 布局尺寸等于视觉尺寸：底框自身就是绘制矩形，也不再撑大所在行。
-	// mygo 没有不占布局的扩展命中区，所以命中区只能等于 Size。
-	b := ui.ButtonBase(ctx).Height(size).Radius(radius).Gap(Space2).Label(label)
-	if iconOnly {
-		b.Width(size)
-	} else {
-		b.Padding(0, pad)
-	}
-	if p.Tooltip != "" {
-		b.Tooltip(p.Tooltip)
-	} else if iconOnly {
-		b.Tooltip(label)
-	}
-	disabled := p.Disabled || p.Loading
-	if disabled {
-		b.Disabled(true)
-	} else if p.OnClick != nil {
-		b.OnClick(p.OnClick)
-	}
+	wrapDisabledTooltip := p.Disabled && p.Tooltip != ""
+	buildButton := func(btnCtx *ui.Context) ui.Element {
+		// 布局尺寸等于视觉尺寸：底框自身就是绘制矩形，也不再撑大所在行。
+		// mygo 没有不占布局的扩展命中区，所以命中区只能等于 Size。
+		b := ui.ButtonBase(btnCtx).Height(size).Radius(radius).Gap(Space2).Label(label)
+		if iconOnly {
+			b.Width(size)
+		} else {
+			b.Padding(0, pad)
+		}
+		switch {
+		case wrapDisabledTooltip:
+			b.Description(p.Tooltip)
+		case p.Tooltip != "":
+			b.Tooltip(p.Tooltip)
+		case iconOnly:
+			b.Tooltip(label)
+		}
+		disabled := p.Disabled || p.Loading
+		if disabled {
+			b.Disabled(true)
+		} else if p.OnClick != nil {
+			b.OnClick(p.OnClick)
+		}
 
-	fg := ThemePrimaryText(c)
-	switch p.Variant {
-	case ButtonPrimary:
-		fg = ThemeOnAccent(c)
-	case ButtonDanger:
-		fg = ThemeDanger(c)
-	}
-	hoverTarget, pressTarget := float32(0), float32(0)
-	if !disabled && b.Hovered() {
-		hoverTarget = 1
-	}
-	if !disabled && b.Pressed() {
-		pressTarget = 1
-	}
-	hover := b.AnimateTo("button-hover", hoverTarget, ui.Animation{Duration: animateDuration(c, DurSnap), Ease: EaseSnap})
-	press := b.AnimateTo("button-press", pressTarget, ui.Animation{Duration: animateDuration(c, DurFast), Ease: EaseSnap})
-	bg := buttonBackground(p.Variant, active, windowActiveFor(c), hover, press, buttonColors{
-		accent: ThemeAccent(c), accentHover: ThemeAccentHover(c), accentPressed: ThemeAccentPressed(c),
-		tertiary: ThemeTertiaryText(c), overlaySelected: ThemeOverlaySelected(c),
-		overlayHover: ThemeOverlayHover(c), overlayPressed: ThemeOverlayPressed(c), danger: ThemeDanger(c),
-	})
-	if p.Disabled {
-		fg = ThemeTertiaryText(c)
-	}
-	b.Background(bg)
-	if p.Variant == ButtonSecondary {
-		b.Border(1, ThemeBorder(c))
-	}
-	if b.FocusVisible() {
-		b.Shadow(0, 0, 0, 2, ThemeAccent(c)).Shadow(0, 0, 0, 1, ThemeSurfaceCard(c))
-	}
-	scale := motionPressScale(c, b, "button-press-scale", !disabled && b.Pressed())
-	b.Scale(scale, scale).Children(func() {
-		if p.Loading {
-			LoadingIndicator(c, nil, "", iconSize, fg)
-		} else if p.Icon != nil {
-			ui.Icon(c, p.Icon).Size(iconSize, iconSize).TextColor(fg)
+		fg := ThemePrimaryText(c)
+		switch p.Variant {
+		case ButtonPrimary:
+			fg = ThemeOnAccent(c)
+		case ButtonDanger:
+			fg = ThemeDanger(c)
 		}
-		if p.Text != "" {
-			ui.Text(c, p.Text).FontSize(font).TextColor(fg)
+		hoverTarget, pressTarget := float32(0), float32(0)
+		if !disabled && b.Hovered() {
+			hoverTarget = 1
 		}
+		if !disabled && b.Pressed() {
+			pressTarget = 1
+		}
+		hover := b.AnimateTo("button-hover", hoverTarget, ui.Animation{Duration: animateDuration(c, DurSnap), Ease: EaseSnap})
+		press := b.AnimateTo("button-press", pressTarget, ui.Animation{Duration: animateDuration(c, DurFast), Ease: EaseSnap})
+		bg := buttonBackground(p.Variant, active, windowActiveFor(c), hover, press, buttonColors{
+			accent: ThemeAccent(c), accentHover: ThemeAccentHover(c), accentPressed: ThemeAccentPressed(c),
+			tertiary: ThemeTertiaryText(c), overlaySelected: ThemeOverlaySelected(c),
+			overlayHover: ThemeOverlayHover(c), overlayPressed: ThemeOverlayPressed(c), danger: ThemeDanger(c),
+		})
+		if p.Disabled {
+			fg = ThemeTertiaryText(c)
+		}
+		b.Background(bg)
+		if p.Variant == ButtonSecondary {
+			b.Border(1, ThemeBorder(c))
+		}
+		if b.FocusVisible() {
+			b.Shadow(0, 0, 0, 2, ThemeAccent(c)).Shadow(0, 0, 0, 1, ThemeSurfaceCard(c))
+		}
+		scale := motionPressScale(c, b, "button-press-scale", !disabled && b.Pressed())
+		b.Scale(scale, scale).Children(func() {
+			if p.Loading {
+				LoadingIndicator(c, nil, "", iconSize, fg)
+			} else if p.Icon != nil {
+				ui.Icon(c, p.Icon).Size(iconSize, iconSize).TextColor(fg)
+			}
+			if p.Text != "" {
+				ui.Text(c, p.Text).FontSize(font).TextColor(fg)
+			}
+		})
+		return b
+	}
+	if !wrapDisabledTooltip {
+		return buildButton(ctx)
+	}
+	// mygo 的 Tooltip 会跳过带 flagDisabled 的元素；包一层未禁用容器承载 Tooltip，布局尺寸仍跟随按钮。
+	wrap := ui.Box(ctx).Shrink(0).Tooltip(p.Tooltip)
+	if iconOnly {
+		wrap.Width(size)
+	}
+	wrap.Children(func() {
+		buildButton(c)
 	})
-	return b
+	return wrap
 }

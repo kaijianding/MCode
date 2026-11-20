@@ -1064,6 +1064,13 @@ func openReviewPR(s *chatState, number int) {
 	s.loadDiff(tid, "")
 }
 
+func gitPRActionTip(busy, self, reason string) string {
+	if busy != "" && busy != self {
+		return "正在执行其他操作，请稍候"
+	}
+	return reason
+}
+
 func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 	st := getGitPRDialogState(s)
 	st.mu.Lock()
@@ -1076,22 +1083,27 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 	if detail.CrossRepo {
 		checkoutTip = "来自 fork 的 PR 无法检出"
 	}
+	commentEmpty := strings.TrimSpace(body) == ""
+	commentTip := ""
+	if commentEmpty {
+		commentTip = "先在上方输入评论内容"
+	}
 	ui.Row(c.Key("modal-git-pr-review-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
 		if confirm != "" {
 			ui.Text(c, fmt.Sprintf("合并 #%d？", detail.Number)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 			ui.Spacer(c)
-			Button(c, ButtonOpts{Key: "modal-git-pr-merge-confirm", Text: "确认", Variant: ButtonPrimary, Loading: busy == "merge", Disabled: busy != "" && busy != "merge", OnClick: func() { s.runGitPRAction("merge", confirm) }})
-			Button(c, ButtonOpts{Key: "modal-git-pr-merge-cancel", Text: "取消", Variant: ButtonSecondary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeConfirm = ""; st.mu.Unlock(); s.invalidate() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-merge-confirm", Text: "确认", Variant: ButtonPrimary, Loading: busy == "merge", Disabled: busy != "" && busy != "merge", Tooltip: gitPRActionTip(busy, "merge", ""), OnClick: func() { s.runGitPRAction("merge", confirm) }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-merge-cancel", Text: "取消", Variant: ButtonSecondary, Disabled: busy != "", Tooltip: gitPRActionTip(busy, "", ""), OnClick: func() { st.mu.Lock(); st.mergeConfirm = ""; st.mu.Unlock(); s.invalidate() }})
 			return
 		}
 		if canCheckout {
-			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Loading: busy == "ai-review", Disabled: (busy != "" && busy != "ai-review") || detail.CrossRepo, Tooltip: checkoutTip, OnClick: func() { s.runGitPRAIReview() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Loading: busy == "ai-review", Disabled: (busy != "" && busy != "ai-review") || detail.CrossRepo, Tooltip: gitPRActionTip(busy, "ai-review", checkoutTip), OnClick: func() { s.runGitPRAIReview() }})
 		}
-		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", OnClick: func() { s.runGitPRAction("approve", "") }})
-		Button(c, ButtonOpts{Key: "modal-git-pr-comment", Text: "评论", Variant: ButtonSecondary, Loading: busy == "comment", Disabled: (busy != "" && busy != "comment") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("comment", "") }})
-		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || strings.TrimSpace(body) == "", OnClick: func() { s.runGitPRAction("request-changes", "") }})
+		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", Tooltip: gitPRActionTip(busy, "approve", ""), OnClick: func() { s.runGitPRAction("approve", "") }})
+		Button(c, ButtonOpts{Key: "modal-git-pr-comment", Text: "评论", Variant: ButtonSecondary, Loading: busy == "comment", Disabled: (busy != "" && busy != "comment") || commentEmpty, Tooltip: gitPRActionTip(busy, "comment", commentTip), OnClick: func() { s.runGitPRAction("comment", "") }})
+		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || commentEmpty, Tooltip: gitPRActionTip(busy, "request-changes", commentTip), OnClick: func() { s.runGitPRAction("request-changes", "") }})
 		if canCheckout {
-			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: (busy != "" && busy != "checkout") || detail.CrossRepo, Tooltip: checkoutTip, OnClick: func() { s.runGitPRCheckout() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: (busy != "" && busy != "checkout") || detail.CrossRepo, Tooltip: gitPRActionTip(busy, "checkout", checkoutTip), OnClick: func() { s.runGitPRCheckout() }})
 		}
 		ui.Spacer(c)
 		if gitPRMergeBlocked(detail) {
@@ -1099,9 +1111,9 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 			if detail.CrossRepo {
 				resolveTip = "来自 fork 的 PR 无法推回，请在网页上解决"
 			}
-			Button(c, ButtonOpts{Key: "modal-git-pr-resolve", Text: "解决冲突", Variant: ButtonPrimary, Loading: busy == "resolve", Disabled: (busy != "" && busy != "resolve") || detail.CrossRepo, Tooltip: resolveTip, OnClick: func() { s.runGitPRResolve() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-resolve", Text: "解决冲突", Variant: ButtonPrimary, Loading: busy == "resolve", Disabled: (busy != "" && busy != "resolve") || detail.CrossRepo, Tooltip: gitPRActionTip(busy, "resolve", resolveTip), OnClick: func() { s.runGitPRResolve() }})
 		} else {
-			trigger := Button(c, ButtonOpts{Key: "modal-git-pr-merge", Text: "合并 ▾", Variant: ButtonPrimary, Disabled: busy != "", OnClick: func() { st.mu.Lock(); st.mergeMenuOpen = true; st.mu.Unlock(); s.invalidate() }})
+			trigger := Button(c, ButtonOpts{Key: "modal-git-pr-merge", Text: "合并 ▾", Variant: ButtonPrimary, Disabled: busy != "", Tooltip: gitPRActionTip(busy, "", ""), OnClick: func() { st.mu.Lock(); st.mergeMenuOpen = true; st.mu.Unlock(); s.invalidate() }})
 			appPopover(c.Key("modal-git-pr-merge-popover"), trigger, &menuOpen, func() { st.mu.Lock(); st.mergeMenuOpen = false; st.mu.Unlock(); s.invalidate() }, func() {
 				popoverCard(c, ui.Column(c.Key("modal-git-pr-merge-menu"))).Padding(Space1).Gap(Space0).Children(func() {
 					for _, item := range []struct{ label, method string }{{"Squash 合并", "squash"}, {"合并提交", "merge"}, {"变基合并", "rebase"}} {

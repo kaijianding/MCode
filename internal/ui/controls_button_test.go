@@ -3,6 +3,7 @@ package mcodeui
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -145,4 +146,34 @@ func TestInactiveAccent(t *testing.T) {
 			t.Errorf("没有窗口状态时应保持强调色：%v", got)
 		}
 	}, 100, 100)
+}
+
+func TestButtonDisabledTooltip(t *testing.T) {
+	clicked := false
+	tester := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Children(func() {
+			Button(c, ButtonOpts{
+				Key:      "disabled-tip-btn",
+				Text:     "禁用按钮",
+				Disabled: true,
+				Tooltip:  "先完成前置操作",
+				OnClick:  func() { clicked = true },
+			})
+		})
+	}, 300, 200)
+	bounds, ok := tester.Find("禁用按钮")
+	if !ok {
+		t.Fatal("未找到禁用按钮")
+	}
+	tester.Move(bounds.X+bounds.W/2, bounds.Y+bounds.H/2)
+	tester.Advance(time.Second)
+	if !tester.HasText("先完成前置操作") {
+		t.Fatalf("悬停后未显示禁用原因提示：%v", tester.Texts())
+	}
+	if err := tester.Click("禁用按钮"); err != nil {
+		t.Fatal(err)
+	}
+	if clicked {
+		t.Fatal("禁用按钮触发了点击")
+	}
 }
