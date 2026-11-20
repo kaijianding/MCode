@@ -687,10 +687,12 @@ func newChatState(client Client) *chatState {
 		})
 	}
 	s.mdOpts.Code = map[string]func(c *ui.Context, b *markdown.CodeBlockView){
-		"html": htmlCodeRenderer,
+		"html":      htmlCodeRenderer,
+		"pr-review": func(c *ui.Context, b *markdown.CodeBlockView) { renderPRReviewCard(c, s, b) },
 	}
 	s.mdStaticOpts.Code = map[string]func(c *ui.Context, b *markdown.CodeBlockView){
-		"html": htmlCodeRenderer,
+		"html":      htmlCodeRenderer,
+		"pr-review": func(c *ui.Context, b *markdown.CodeBlockView) { renderPRReviewCard(c, s, b) },
 	}
 	// 选择与右键菜单交给消息容器，避免 Markdown 的内置菜单拦截消息操作。
 	s.mdOpts.ShareSelection = true
