@@ -554,6 +554,11 @@ func TestPaletteOpenStewardUsesNickname(t *testing.T) {
 	fake := newStewardFakeClient("t1")
 	fake.name = "小明"
 	state := newChatState(fake)
+	state.stewardIdentity()
+	pollCondition(t, func() bool {
+		nick, _ := state.stewardIdentity()
+		return nick == "小明"
+	}, "总管昵称异步缓存刷新")
 
 	item := paletteItemByID(buildPaletteItems(state), "cmd-open-steward")
 	if item == nil {
