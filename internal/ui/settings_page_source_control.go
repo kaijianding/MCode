@@ -192,10 +192,14 @@ func (commitInstructionsControl) render(c *ui.Context, st *SettingsState, s sett
 }
 
 func (commitInstructionsControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
-	old := st.cfg.SourceControl.CommitInstructions
+	st.mu.Lock()
+	st.cfgMu.Lock()
+	draft := st.cfg.SourceControl.CommitInstructions
+	st.cfgMu.Unlock()
+	st.mu.Unlock()
 	TextField(c, TextFieldProps{
 		Key:         s.ID + "-area",
-		Value:       &st.cfg.SourceControl.CommitInstructions,
+		Value:       &draft,
 		Label:       s.Title,
 		Placeholder: "Conventional Commits",
 		Multiline:   true,
@@ -204,14 +208,15 @@ func (commitInstructionsControl) renderDisabled(c *ui.Context, st *SettingsState
 		MinWidth:    420,
 		FillWidth:   true,
 		Disabled:    disabled,
-		OnChange: func(string) {
+		OnChange: func(text string) {
+			st.mu.Lock()
+			st.cfgMu.Lock()
+			st.cfg.SourceControl.CommitInstructions = text
+			st.cfgMu.Unlock()
+			st.mu.Unlock()
 			st.noteTextEdit()
 		},
 	})
-	// 直接把值绑到配置字段：非输入路径（如重置）改了字段时同样要标脏。
-	if !disabled && st.cfg.SourceControl.CommitInstructions != old {
-		st.noteTextEdit()
-	}
 }
 
 func (commitInstructionsControl) reset(cfg *config.Config) {

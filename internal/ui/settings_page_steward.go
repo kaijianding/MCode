@@ -32,19 +32,20 @@ func stewardQuietClockOptions(current string) []string {
 
 // renderStewardQuietClock 渲染安静时段的一个时刻选择框；选到与另一端相同的时刻时不保存，
 // 配置归一化会把首尾相等的时段清空，界面表现为开关自己关掉。
-func renderStewardQuietClock(c *ui.Context, st *SettingsState, key, label string, value *string, other string) {
-	current := *value
+func renderStewardQuietClock(c *ui.Context, st *SettingsState, key, label, initial, other string, write func(*config.Config, string)) {
+	current := initial
 	sel := ui.Select(c.Key(key), &current, stewardQuietClockOptions(current)).
 		Label(label).Width(settingsFieldNarrowWidth)
-	if !sel.Changed() || current == *value {
+	if !sel.Changed() || current == initial {
 		return
 	}
 	if current == other {
 		st.noteError("安静时段的开始和结束不能相同")
 		return
 	}
-	*value = current
-	st.save()
+	commitSettingsControl(st, func(cfg *config.Config) {
+		write(cfg, current)
+	})
 }
 
 // stewardQuietOn 判断安静时段是否开启：首尾都为空的时段算关闭。
@@ -144,17 +145,19 @@ func renderStewardTaskModelControl(c *ui.Context, st *SettingsState) {
 		Gap(Space1).
 		Children(func() {
 			props := swarmModelCapsuleProps(st, "steward-task-model", "steward-task-model", sel, "自动", "选择任务模型", func(next ModelSelection) {
-				st.cfg.Orchestration.Steward.TaskProvider = next.Provider
-				st.cfg.Orchestration.Steward.TaskModel = next.Model
-				st.cfg.Orchestration.Steward.TaskPairID = ""
-				st.save()
+				commitSettingsControl(st, func(cfg *config.Config) {
+					cfg.Orchestration.Steward.TaskProvider = next.Provider
+					cfg.Orchestration.Steward.TaskModel = next.Model
+					cfg.Orchestration.Steward.TaskPairID = ""
+				})
 			}, catalog, true)
 			props.Pairs = pairs
 			props.OnApplyPair = func(next SwarmPair) {
-				st.cfg.Orchestration.Steward.TaskProvider = ""
-				st.cfg.Orchestration.Steward.TaskModel = ""
-				st.cfg.Orchestration.Steward.TaskPairID = next.ID
-				st.save()
+				commitSettingsControl(st, func(cfg *config.Config) {
+					cfg.Orchestration.Steward.TaskProvider = ""
+					cfg.Orchestration.Steward.TaskModel = ""
+					cfg.Orchestration.Steward.TaskPairID = next.ID
+				})
 			}
 			if hasPair {
 				props.PairID = pair.ID
@@ -177,10 +180,11 @@ func renderStewardTaskModelControl(c *ui.Context, st *SettingsState) {
 					btnClear.Background(ThemeHover(c))
 				}
 				if btnClear.Clicked() {
-					st.cfg.Orchestration.Steward.TaskProvider = ""
-					st.cfg.Orchestration.Steward.TaskModel = ""
-					st.cfg.Orchestration.Steward.TaskPairID = ""
-					st.save()
+					commitSettingsControl(st, func(cfg *config.Config) {
+						cfg.Orchestration.Steward.TaskProvider = ""
+						cfg.Orchestration.Steward.TaskModel = ""
+						cfg.Orchestration.Steward.TaskPairID = ""
+					})
 				}
 				btnClear.Children(func() {
 					ui.Text(c, "自动").
@@ -200,9 +204,10 @@ func renderStewardModelControl(c *ui.Context, st *SettingsState) {
 		Gap(Space1).
 		Children(func() {
 			renderSwarmModelCapsuleCatalog(c, st, "steward-model", "steward-model", sel, st.stewardAutoLabel(catalog, sel), "选择前台模型", func(next ModelSelection) {
-				st.cfg.Orchestration.Steward.Provider = next.Provider
-				st.cfg.Orchestration.Steward.Model = next.Model
-				st.save()
+				commitSettingsControl(st, func(cfg *config.Config) {
+					cfg.Orchestration.Steward.Provider = next.Provider
+					cfg.Orchestration.Steward.Model = next.Model
+				})
 			}, catalog, true)
 
 			// 选过模型后可以退回自动选择。
@@ -220,9 +225,10 @@ func renderStewardModelControl(c *ui.Context, st *SettingsState) {
 					btnClear.Background(ThemeHover(c))
 				}
 				if btnClear.Clicked() {
-					st.cfg.Orchestration.Steward.Provider = ""
-					st.cfg.Orchestration.Steward.Model = ""
-					st.save()
+					commitSettingsControl(st, func(cfg *config.Config) {
+						cfg.Orchestration.Steward.Provider = ""
+						cfg.Orchestration.Steward.Model = ""
+					})
 				}
 				btnClear.Children(func() {
 					ui.Text(c, "自动").
@@ -283,25 +289,36 @@ func renderStewardNoProgress(c *ui.Context, st *SettingsState) {
 		return
 	}
 	if current == "关闭" {
-		st.cfg.Orchestration.Steward.NoProgressOff = true
+		commitSettingsControl(st, func(cfg *config.Config) {
+			cfg.Orchestration.Steward.NoProgressOff = true
+		})
 	} else if n, err := strconv.Atoi(strings.TrimSuffix(current, " 分钟")); err == nil && n > 0 {
-		st.cfg.Orchestration.Steward.NoProgressOff = false
-		st.cfg.Orchestration.Steward.NoProgressMinutes = n
-	} else {
-		return
+		commitSettingsControl(st, func(cfg *config.Config) {
+			cfg.Orchestration.Steward.NoProgressOff = false
+			cfg.Orchestration.Steward.NoProgressMinutes = n
+		})
 	}
-	st.save()
 }
 
 // renderStewardQuietRange 画安静时段的起止时刻。
 func renderStewardQuietRange(c *ui.Context, st *SettingsState) {
+	st.mu.Lock()
+	st.cfgMu.Lock()
+	quietStart := st.cfg.Orchestration.Steward.QuietStart
+	quietEnd := st.cfg.Orchestration.Steward.QuietEnd
+	st.cfgMu.Unlock()
+	st.mu.Unlock()
 	ui.Row(c.Key("wrap-steward-quiet-range")).
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Children(func() {
-			renderStewardQuietClock(c, st, "sel-steward-quiet-start", "安静时段开始", &st.cfg.Orchestration.Steward.QuietStart, st.cfg.Orchestration.Steward.QuietEnd)
+			renderStewardQuietClock(c, st, "sel-steward-quiet-start", "安静时段开始", quietStart, quietEnd, func(cfg *config.Config, v string) {
+				cfg.Orchestration.Steward.QuietStart = v
+			})
 			ui.Text(c, "至").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
-			renderStewardQuietClock(c, st, "sel-steward-quiet-end", "安静时段结束", &st.cfg.Orchestration.Steward.QuietEnd, st.cfg.Orchestration.Steward.QuietStart)
+			renderStewardQuietClock(c, st, "sel-steward-quiet-end", "安静时段结束", quietEnd, quietStart, func(cfg *config.Config, v string) {
+				cfg.Orchestration.Steward.QuietEnd = v
+			})
 		})
 }
 

@@ -361,7 +361,9 @@ func addSwarmPreset(st *SettingsState, r swarmPreset) config.SwarmPair {
 	}
 
 	st.mu.Lock()
+	st.cfgMu.Lock()
 	added := st.cfg.Orchestration.AddPair(pair)
+	st.cfgMu.Unlock()
 	st.save()
 	st.mu.Unlock()
 

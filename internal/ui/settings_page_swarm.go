@@ -63,6 +63,8 @@ func swarmPairSave(st *SettingsState, draft config.SwarmPair, isNew bool) config
 		return draft
 	}
 	var res config.SwarmPair
+	st.mu.Lock()
+	st.cfgMu.Lock()
 	if isNew {
 		res = st.cfg.Orchestration.AddPair(draft)
 	} else {
@@ -72,6 +74,8 @@ func swarmPairSave(st *SettingsState, draft config.SwarmPair, isNew bool) config
 			res = st.cfg.Orchestration.AddPair(draft)
 		}
 	}
+	st.cfgMu.Unlock()
+	st.mu.Unlock()
 	st.save()
 	return res
 }
@@ -81,7 +85,11 @@ func swarmPairDelete(st *SettingsState, id string) bool {
 	if st == nil {
 		return false
 	}
+	st.mu.Lock()
+	st.cfgMu.Lock()
 	ok := st.cfg.Orchestration.RemovePair(id)
+	st.cfgMu.Unlock()
+	st.mu.Unlock()
 	if ok {
 		st.save()
 	}
@@ -931,8 +939,9 @@ func renderSwarmTiersBody(c *ui.Context, st *SettingsState) {
 					if selDefault.Changed() {
 						newID := tierNameToID[curDefaultName]
 						if newID != "" && newID != st.cfg.Orchestration.DefaultTier {
-							st.cfg.Orchestration.DefaultTier = newID
-							st.save()
+							commitSettingsControl(st, func(cfg *config.Config) {
+								cfg.Orchestration.DefaultTier = newID
+							})
 						}
 					}
 

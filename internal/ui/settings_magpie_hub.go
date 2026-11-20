@@ -92,6 +92,12 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 	if len(modes) > 0 {
 		mode = modes[0]
 	}
+	st.mu.Lock()
+	nameDraft := st.endpoints.editName
+	baseURLDraft := st.endpoints.editBaseURL
+	modelDraft := st.endpoints.editModel
+	personaRulesDraft := st.endpoints.editPersonaRules
+	st.mu.Unlock()
 	if mode == "hub" {
 		renderSettingsDivider(c, "div-hub-form")
 
@@ -114,10 +120,15 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 			renderSettingRow(c, "row-magpie-gateway-name", "名称", func() {
 				TextField(c, TextFieldProps{
 					Key:         "input-hub-name",
-					Value:       &st.endpoints.editName,
+					Value:       &nameDraft,
 					Label:       "网关名称",
 					Placeholder: "Magpie",
 					Width:       settingsTextFieldWidth,
+					OnChange: func(text string) {
+						st.mu.Lock()
+						st.endpoints.editName = text
+						st.mu.Unlock()
+					},
 				})
 			})
 
@@ -127,7 +138,7 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 		if mode != "persona" {
 			renderSettingRow(c, "row-magpie-gateway-baseurl", "接口地址（BaseURL）", func() {
 				textFunc(
-					func(*SettingsState) (string, bool) { return st.endpoints.editBaseURL, false },
+					func(*SettingsState) (string, bool) { return baseURLDraft, false },
 					func(st *SettingsState, v string) {
 						st.mu.Lock()
 						st.endpoints.editBaseURL = v
@@ -142,7 +153,7 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 			if mode != "connect" {
 				renderSettingRow(c, "row-magpie-gateway-model", "默认模型", func() {
 					textFunc(
-						func(*SettingsState) (string, bool) { return st.endpoints.editModel, false },
+						func(*SettingsState) (string, bool) { return modelDraft, false },
 						func(st *SettingsState, v string) {
 							st.mu.Lock()
 							st.endpoints.editModel = v
@@ -187,7 +198,7 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 			}
 			renderSettingRow(c, "row-magpie-persona-weburl", "人设管理地址", func() {
 				textFunc(
-					func(*SettingsState) (string, bool) { return st.endpoints.editPersonaWebURL, false },
+					func(*SettingsState) (string, bool) { return personaURLDraft, false },
 					func(st *SettingsState, v string) {
 						st.mu.Lock()
 						st.endpoints.editPersonaWebURL = v
@@ -245,7 +256,12 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 
 			renderSettingsDivider(c, "div-hub-persona-rules")
 			renderStackedSettingRow(c, "row-magpie-persona-rules", "人设规则", func() {
-				ui.Checkbox(c.Key("input-hub-persona-rules"), &st.endpoints.editPersonaRules, "已在 magpie 部署 persona-rules").Tooltip("手动列表才生效")
+				cb := ui.Checkbox(c.Key("input-hub-persona-rules"), &personaRulesDraft, "已在 magpie 部署 persona-rules").Tooltip("手动列表才生效")
+				if cb.Changed() {
+					st.mu.Lock()
+					st.endpoints.editPersonaRules = personaRulesDraft
+					st.mu.Unlock()
+				}
 			})
 
 			renderSettingsDivider(c, "div-hub-persona-test")

@@ -76,7 +76,7 @@ func TestUIReview16_MagpieMatrixCacheAndSingleLoading(t *testing.T) {
 }
 
 // TestUIReview16_RemotePortValidationError 验证：
-// (b) HTTP 与 TLS 端口输入 "0" 或 "abc" 时显示「端口需为 1–65535」，且不修改配置。
+// (b) HTTP 端口输入 "0"、"80" 或 "abc"，以及 TLS 端口输入 "0" 或 "abc" 时显示「端口需为 1024–65535」，且不修改配置。
 func TestUIReview16_RemotePortValidationError(t *testing.T) {
 	fake := NewFakeClient()
 	fake.mu.Lock()
@@ -96,12 +96,12 @@ func TestUIReview16_RemotePortValidationError(t *testing.T) {
 	tt.SetSize(1000, 4000)
 	waitFor(t, tt, func() bool { return tt.HasText("监听端口") && tt.HasText("HTTPS 端口") })
 
-	for _, bad := range []string{"0", "abc"} {
+	for _, bad := range []string{"0", "80", "abc"} {
 		clickRemoteSettingsLabel(t, tt, "编辑监听端口")
 		tt.Command("selectAll")
 		tt.Type(bad)
 		tt.Frame()
-		if !tt.HasText("端口需为 1–65535") {
+		if !tt.HasText("端口需为 1024–65535") {
 			t.Fatalf("HTTP 端口输入 %q 后未出现错误提示: %v", bad, tt.Texts())
 		}
 		st.mu.Lock()
@@ -119,12 +119,14 @@ func TestUIReview16_RemotePortValidationError(t *testing.T) {
 		tt.Command("selectAll")
 		tt.Type("43117")
 		tt.Frame()
+	}
 
+	for _, bad := range []string{"0", "abc"} {
 		clickRemoteSettingsLabel(t, tt, "编辑HTTPS 端口")
 		tt.Command("selectAll")
 		tt.Type(bad)
 		tt.Frame()
-		if !tt.HasText("端口需为 1–65535") {
+		if !tt.HasText("端口需为 1024–65535") {
 			t.Fatalf("TLS 端口输入 %q 后未出现错误提示: %v", bad, tt.Texts())
 		}
 		st.mu.Lock()
@@ -133,7 +135,7 @@ func TestUIReview16_RemotePortValidationError(t *testing.T) {
 		if tlsListen != "0.0.0.0:8443" {
 			t.Fatalf("TLS 端口输入 %q 不应改内存配置，实际 %q", bad, tlsListen)
 		}
-		loaded, err = config.Load(dataDir)
+		loaded, err := config.Load(dataDir)
 		if err != nil || loaded.Remote.TLSListen != "0.0.0.0:8443" {
 			t.Fatalf("TLS 端口输入 %q 不应落盘，实际 %q (err=%v)", bad, loaded.Remote.TLSListen, err)
 		}

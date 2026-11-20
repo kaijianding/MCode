@@ -1200,14 +1200,14 @@ func (remotePortControl) render(c *ui.Context, st *SettingsState, s setting) {
 	remotePortControl{}.renderDisabled(c, st, s, false)
 }
 
-// remotePortErrorText 校验端口文本是否为 1–65535 的整数；未初始化的空草稿不报错。
+// remotePortErrorText 校验端口文本是否为 1024–65535 的整数；未初始化的空草稿不报错。
 func remotePortErrorText(text string, initialized bool) string {
 	if !initialized && text == "" {
 		return ""
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(text))
-	if err != nil || port < 1 || port > 65535 {
-		return "端口需为 1–65535"
+	if err != nil || port < 1024 || port > 65535 {
+		return "端口需为 1024–65535"
 	}
 	return ""
 }
@@ -1234,7 +1234,7 @@ func (remotePortControl) renderDisabled(c *ui.Context, st *SettingsState, s sett
 					st.remote.portInit = true
 					st.mu.Unlock()
 					port, err := strconv.Atoi(strings.TrimSpace(text))
-					if err != nil || port < 1 || port > 65535 {
+					if err != nil || port < 1024 || port > 65535 {
 						return
 					}
 					commitSettingsControl(st, func(cfg *config.Config) {
@@ -1290,25 +1290,34 @@ func (remotePushToggleControl) render(c *ui.Context, st *SettingsState, s settin
 	toggleFunc(
 		func(st *SettingsState) (bool, bool) {
 			st.mu.Lock()
-			defer st.mu.Unlock()
-			return st.cfg.Remote.PushEnabled(), false
+			st.cfgMu.Lock()
+			pushOn := st.cfg.Remote.PushEnabled()
+			st.cfgMu.Unlock()
+			st.mu.Unlock()
+			return pushOn, false
 		},
 		func(st *SettingsState, on bool) {
 			// nil 表示默认开启，所以关闭时才写入显式的 false。
 			persisted := on
 			st.mu.Lock()
+			st.cfgMu.Lock()
 			oldVal := st.cfg.Remote.PushEnabled()
 			st.cfg.Remote.PushOn = &persisted
+			st.cfgMu.Unlock()
 			st.save()
+			// st.errorMessage 与 cfg 共用 cfgMu，失败判断与回滚写入都要在它下面做。
+			st.cfgMu.Lock()
 			pushErr := st.errorMessage
-			st.mu.Unlock()
 			if pushErr != "" {
-				st.mu.Lock()
 				st.cfg.Remote.PushOn = &oldVal
+			}
+			st.cfgMu.Unlock()
+			if pushErr != "" {
 				st.remote.pushErr = pushErr
 				st.mu.Unlock()
 				return
 			}
+			st.mu.Unlock()
 			restartRemoteAfterPushChange(st)
 		},
 	).render(c, st, s)

@@ -739,8 +739,9 @@ func renderAutoDormantControl(c *ui.Context, st *SettingsState) {
 			fmt.Sscanf(curOpt, "%d", &val)
 		}
 		if val != days {
-			st.cfg.Archive.SidebarAutoDormantDays = &val
-			st.save()
+			commitSettingsControl(st, func(cfg *config.Config) {
+				cfg.Archive.SidebarAutoDormantDays = &val
+			})
 		}
 	}
 }

@@ -2151,30 +2151,54 @@ func renderProviderAccountsSection(c *ui.Context, st *SettingsState, id string) 
 // row key、输入框 key 与 Label 保持不变。
 func renderNativeProviderBinRow(c *ui.Context, st *SettingsState, id string) {
 	locked := st.isLocked(id + "-bin")
+	st.mu.Lock()
+	st.cfgMu.Lock()
+	var bin string
+	switch id {
+	case "claude":
+		bin = st.cfg.Providers.Claude.Bin
+	case "codex":
+		bin = st.cfg.Providers.Codex.Bin
+	}
+	st.cfgMu.Unlock()
+	st.mu.Unlock()
 	switch id {
 	case "claude":
 		renderSettingRow(c, "row-claude-bin", "Claude 可执行文件路径", func() {
-			renderNativeProviderBinInput(c, st, &st.cfg.Providers.Claude.Bin, "input-claude-bin", "可执行文件路径 Claude", locked)
+			renderNativeProviderBinInput(c, bin, "input-claude-bin", "可执行文件路径 Claude", locked, func(text string) {
+				st.mu.Lock()
+				st.cfgMu.Lock()
+				st.cfg.Providers.Claude.Bin = text
+				st.cfgMu.Unlock()
+				st.mu.Unlock()
+				st.save()
+			})
 		})
 	case "codex":
 		renderSettingRow(c, "row-codex-bin", "Codex 可执行文件路径", func() {
-			renderNativeProviderBinInput(c, st, &st.cfg.Providers.Codex.Bin, "input-codex-bin", "可执行文件路径 Codex", locked)
+			renderNativeProviderBinInput(c, bin, "input-codex-bin", "可执行文件路径 Codex", locked, func(text string) {
+				st.mu.Lock()
+				st.cfgMu.Lock()
+				st.cfg.Providers.Codex.Bin = text
+				st.cfgMu.Unlock()
+				st.mu.Unlock()
+				st.save()
+			})
 		})
 	}
 }
 
-func renderNativeProviderBinInput(c *ui.Context, st *SettingsState, bin *string, key, label string, locked bool) {
+func renderNativeProviderBinInput(c *ui.Context, bin, key, label string, locked bool, onChange func(string)) {
+	draft := bin
 	TextField(c, TextFieldProps{
 		Key:         key,
-		Value:       bin,
+		Value:       &draft,
 		Label:       label,
 		Placeholder: "留空表示从 PATH 查找",
 		Width:       280,
 		Disabled:    locked,
 		ReadOnly:    locked,
-		OnChange: func(string) {
-			st.save()
-		},
+		OnChange:    onChange,
 	})
 }
 
