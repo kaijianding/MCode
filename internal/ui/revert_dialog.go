@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// revertPreviewTimeout 是加载撤销预览的超时时间（测试中可调小）。
+var revertPreviewTimeout = 15 * time.Second
 
 const (
 	// revertDialogSideMargin 是弹窗卡片左右两侧留白之和（每侧 40）。
@@ -68,7 +72,9 @@ func (s *chatState) openRevertPreview(threadID, turnID string) {
 	s.invalidate()
 
 	go func(tid, turn string) {
-		preview, err := s.client.PreviewRevert(context.Background(), tid, turn)
+		ctx, cancel := context.WithTimeout(context.Background(), revertPreviewTimeout)
+		defer cancel()
+		preview, err := s.client.PreviewRevert(ctx, tid, turn)
 		st.mu.Lock()
 		if st.seq != seq {
 			st.mu.Unlock()
@@ -186,7 +192,8 @@ func renderRevertDialog(c *ui.Context, s *chatState) {
 
 	winW, winH := c.Size()
 	width, height := modalResizeSize(modalDragRevert, 480, max(440, winH-120), 360, 240, winW, winH)
-	modalDragModal(c, modalDragRevert, &st.open, func() {
+	prevOpen := open
+	modalDragModal(c, modalDragRevert, &open, func() {
 		if c.Shortcut(0, ui.KeyEscape) {
 			s.closeRevertPreview()
 			return
@@ -234,6 +241,11 @@ func renderRevertDialog(c *ui.Context, s *chatState) {
 				modalResizeGrips(c, modalDragRevert, width, height)
 			})
 	})
+	if open != prevOpen {
+		st.mu.Lock()
+		st.open = open
+		st.mu.Unlock()
+	}
 }
 
 // renderRevertDialogActions 渲染弹窗底部：加载与错误态只提供关闭入口，其余展示统计与“取消 / 还原”。
@@ -331,23 +343,29 @@ func renderRevertFileRow(c *ui.Context, f RevertFile) {
 				FontSize(uiFont(TypeFootnote)).
 				TextColor(ThemePrimaryText(c)).
 				Grow(1).
-				SingleLine()
+				MinWidth(0).
+				Shrink(1).
+				SingleLine().
+				Ellipsis("…")
 			if f.Additions > 0 {
 				ui.Text(c, fmt.Sprintf("+%d", f.Additions)).
 					FontSize(uiFont(TypeFootnote)).
 					FontWeight(500).
-					TextColor(ThemeSuccess(c))
+					TextColor(ThemeSuccess(c)).
+					Shrink(0)
 			}
 			if f.Deletions > 0 {
 				ui.Text(c, fmt.Sprintf("-%d", f.Deletions)).
 					FontSize(uiFont(TypeFootnote)).
 					FontWeight(500).
-					TextColor(ThemeDanger(c))
+					TextColor(ThemeDanger(c)).
+					Shrink(0)
 			}
 			if f.IsKept {
-				ui.Text(c, "已保留（轮次结束后被修改过）").
+				ui.Text(c, "已保留").
 					FontSize(uiFont(TypeCaption)).
-					TextColor(ThemeSecondaryText(c))
+					TextColor(ThemeSecondaryText(c)).
+					Shrink(0)
 			}
 		})
 }

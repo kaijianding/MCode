@@ -433,8 +433,8 @@ func OpenMiniEditor(path string) *mygo.Window {
 				state.view(c)
 			}),
 		})
-		win.OnClosed(func() {
-			state.saveNow()
+		win.OnClose(func(e *mygo.CloseEvent) {
+			state.onClose(e)
 		})
 	})
 

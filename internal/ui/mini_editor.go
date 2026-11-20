@@ -217,6 +217,17 @@ func (st *miniEditorState) saveNow() {
 	st.saveIfUnchanged(text)
 }
 
+// onClose 在窗口关闭前同步落盘；保存失败时取消关闭，保留窗口与错误提示。
+func (st *miniEditorState) onClose(e *mygo.CloseEvent) {
+	st.saveNow()
+	st.mu.Lock()
+	saveErr := st.saveErr
+	st.mu.Unlock()
+	if saveErr != "" && e != nil {
+		e.PreventDefault()
+	}
+}
+
 // setSaveErr 记录保存错误并触发重绘。
 func (st *miniEditorState) setSaveErr(msg string) {
 	st.mu.Lock()
@@ -295,11 +306,15 @@ func (st *miniEditorState) view(c *ui.Context) {
 					FontSize(uiFont(TypeFootnote)).
 					TextColor(ThemePrimaryText(c)).
 					Grow(1).
-					SingleLine()
+					MinWidth(0).
+					Shrink(1).
+					SingleLine().
+					Ellipsis("…")
 
 				ui.Text(c, miniEditorStatusText(st)).
 					FontSize(uiFont(TypeCaption)).
-					TextColor(ThemeSecondaryText(c))
+					TextColor(ThemeSecondaryText(c)).
+					Shrink(0)
 
 				if isMarkdownPath(path) {
 					label := "预览"
@@ -315,7 +330,7 @@ func (st *miniEditorState) view(c *ui.Context) {
 							st.mu.Unlock()
 							st.invalidate()
 						},
-					})
+					}).Shrink(0)
 				}
 			})
 
@@ -395,7 +410,8 @@ func (st *miniEditorState) view(c *ui.Context) {
 					})
 
 				// 多行编辑区
-				area := ui.TextArea(c.Key("mini-editor-textarea"), &st.text).
+				prevText := text
+				area := ui.TextArea(c.Key("mini-editor-textarea"), &text).
 					Lines(24, 400).
 					Font("monospace").
 					FontSize(fontSize).
@@ -408,6 +424,11 @@ func (st *miniEditorState) view(c *ui.Context) {
 					FillWidth()
 				if loadErr != "" {
 					area.ReadOnly(true)
+				}
+				if text != prevText {
+					st.mu.Lock()
+					st.text = text
+					st.mu.Unlock()
 				}
 			})
 		})
