@@ -1925,15 +1925,10 @@ type worktreeUIState struct {
 	moveTransfer bool
 	moving       bool
 
-	moveToProjectOpen      bool
-	moveToProjectThreadID  string
-	moveToProjectQuery     string
-	moveToProjectSelected  int
-	moveToProjectScroll    bool
-	moveToProjectPointerOn bool
-	moveToProjectPointerX  float32
-	moveToProjectPointerY  float32
-	movingToProject        bool
+	moveToProjectOpen     bool
+	moveToProjectThreadID string
+	moveToProjectList     searchListState
+	movingToProject       bool
 }
 
 var (
@@ -2391,14 +2386,9 @@ func (s *chatState) openMoveToProjectModal(threadID string) {
 	ws.mu.Lock()
 	ws.moveToProjectOpen = true
 	ws.moveToProjectThreadID = threadID
-	ws.moveToProjectQuery = ""
-	ws.moveToProjectSelected = 0
-	ws.moveToProjectScroll = false
-	ws.moveToProjectPointerOn = false
-	ws.moveToProjectPointerX = 0
-	ws.moveToProjectPointerY = 0
 	ws.movingToProject = false
 	ws.mu.Unlock()
+	ws.moveToProjectList.reset()
 	s.invalidate()
 }
 
@@ -2470,12 +2460,6 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 	ws := getWorktreeUIState(s)
 	ws.mu.Lock()
 	open := ws.moveToProjectOpen && ws.moveToProjectThreadID == threadID
-	query := ws.moveToProjectQuery
-	selected := ws.moveToProjectSelected
-	scrollSelected := ws.moveToProjectScroll
-	prevPointerOn := ws.moveToProjectPointerOn
-	prevPointerX := ws.moveToProjectPointerX
-	prevPointerY := ws.moveToProjectPointerY
 	moving := ws.movingToProject
 	ws.mu.Unlock()
 	if !open {
@@ -2488,14 +2472,9 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 	s.mu.Unlock()
 	projects = withoutProjects(projects, s.stewardProjectID(), s.chatsProjectID())
 
-	filtered := make([]Project, 0, len(projects))
+	items := make([]searchListItem, 0, len(projects))
 	for _, p := range projects {
-		if branchMatches(p.Name, query) {
-			filtered = append(filtered, p)
-		}
-	}
-	if selected < 0 || selected >= len(filtered) {
-		selected = 0
+		items = append(items, searchListItem{ID: p.ID, Title: p.Name})
 	}
 
 	appPopover(c.Key("move-to-project-popover-"+threadID), anchor, &open, s.closeMoveToProjectModal, func() {
@@ -2505,138 +2484,17 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 			Padding(Space2).
 			Gap(Space1).
 			Children(func() {
-				SearchField(c, TextFieldProps{
-					Key:         "move-to-project-search",
-					Value:       &query,
+				searchList(c, searchListProps{
+					Key:         "move-to-project",
 					Label:       "搜索项目",
 					Placeholder: "移到项目…",
-					FillWidth:   true,
-					AutoFocus:   true,
-					OnChange: func(v string) {
-						ws.mu.Lock()
-						ws.moveToProjectQuery = v
-						ws.moveToProjectSelected = 0
-						ws.moveToProjectScroll = false
-						ws.mu.Unlock()
-						s.invalidate()
-					},
-					OnKeyDown: func(k ui.TextKey) bool {
-						switch k.Key {
-						case ui.KeyEscape:
-							open = false
-							s.closeMoveToProjectModal()
-							return true
-						case ui.KeyUp:
-							ws.mu.Lock()
-							if selected > 0 {
-								ws.moveToProjectSelected = selected - 1
-							} else {
-								ws.moveToProjectSelected = 0
-							}
-							ws.moveToProjectScroll = true
-							ws.mu.Unlock()
-							s.invalidate()
-							return true
-						case ui.KeyDown:
-							ws.mu.Lock()
-							if selected+1 < len(filtered) {
-								ws.moveToProjectSelected = selected + 1
-							} else if len(filtered) > 0 {
-								ws.moveToProjectSelected = selected
-							}
-							ws.moveToProjectScroll = true
-							ws.mu.Unlock()
-							s.invalidate()
-							return true
-						case ui.KeyEnter:
-							if len(filtered) > 0 && !moving {
-								ws.mu.Lock()
-								idx := ws.moveToProjectSelected
-								ws.mu.Unlock()
-								if idx < 0 || idx >= len(filtered) {
-									idx = selected
-								}
-								s.submitMoveToProject(filtered[idx].ID)
-							}
-							return true
-						}
-						return false
-					},
-				})
-
-				scrollEl := ui.Scroll(c.Key("move-to-project-scroll")).FillWidth().MaxHeight(360)
-				px, py, pointerOver := scrollEl.PointerPosition()
-				pointerMoved := pointerOver && (!prevPointerOn || px != prevPointerX || py != prevPointerY)
-				scrollEl.Children(func() {
-					ui.Column(c.Key("move-to-project-list")).FillWidth().Children(func() {
-						if len(filtered) == 0 {
-							if pointerOver != prevPointerOn || pointerMoved || scrollSelected {
-								ws.mu.Lock()
-								ws.moveToProjectPointerOn = pointerOver
-								ws.moveToProjectPointerX = px
-								ws.moveToProjectPointerY = py
-								if scrollSelected && ws.moveToProjectSelected == selected {
-									ws.moveToProjectScroll = false
-								}
-								ws.mu.Unlock()
-							}
-							ui.Row(c.Key("move-to-project-empty")).FillWidth().Padding(Space2, Space3).Children(func() {
-								ui.Text(c, "无匹配项目").
-									FontSize(sidebarFont(TypeBody)).
-									TextColor(ThemeSecondaryText(c)).
-									SingleLine()
-							})
-							return
-						}
-						hoveredIdx := -1
-						for i, p := range filtered {
-							project := p
-							item := ui.ButtonBase(c.Key("move-to-project-item-"+project.ID)).
-								Label(project.Name).
-								Padding(Space2, Space3).
-								Radius(RadiusSM).
-								FillWidth().
-								Justify(ui.Start).
-								Disabled(moving)
-							if item.Hovered() {
-								hoveredIdx = i
-							}
-							if i == selected {
-								item.Background(ThemeHover(c))
-								if scrollSelected {
-									item.ScrollIntoView()
-								}
-							}
-							if item.Clicked() {
-								s.submitMoveToProject(project.ID)
-							}
-							item.Children(func() {
-								ui.Text(c, project.Name).
-									FontSize(sidebarFont(TypeBody)).
-									TextColor(ThemePrimaryText(c)).
-									SingleLine()
-							})
-						}
-						if pointerOver != prevPointerOn || pointerMoved || scrollSelected {
-							needInvalidate := false
-							ws.mu.Lock()
-							ws.moveToProjectPointerOn = pointerOver
-							ws.moveToProjectPointerX = px
-							ws.moveToProjectPointerY = py
-							// 仅在指针实际进入或移动时按悬停切换选中，防止静止悬停在滚动或键盘导航时抢回选中。
-							if pointerMoved && hoveredIdx >= 0 && hoveredIdx != ws.moveToProjectSelected {
-								ws.moveToProjectSelected = hoveredIdx
-								ws.moveToProjectScroll = false
-								needInvalidate = true
-							} else if scrollSelected && ws.moveToProjectSelected == selected {
-								ws.moveToProjectScroll = false
-							}
-							ws.mu.Unlock()
-							if needInvalidate {
-								s.invalidate()
-							}
-						}
-					})
+					Empty:       "无匹配项目",
+					Items:       items,
+					State:       &ws.moveToProjectList,
+					Disabled:    moving,
+					OnSelect:    s.submitMoveToProject,
+					OnDismiss:   s.closeMoveToProjectModal,
+					Invalidate:  s.invalidate,
 				})
 			})
 	})
