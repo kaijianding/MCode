@@ -825,7 +825,7 @@ func renderOpenOriginalThreadButton(c *ui.Context, s *chatState, key, targetThre
 	})
 }
 
-// renderHostEventCard 渲染宿主转来的事件消息：这类消息以 Role user 落库，但不是用户自己说的话，
+// renderHostEventCard 渲染宿主事件消息：这类消息以 Role user 落库，但不是用户自己说的话，
 // 所以不套用户气泡，也不给编辑、重发、回退等操作，而是一张整宽卡片。
 func renderHostEventCard(c *ui.Context, s *chatState, m Message) ui.Element {
 	return ui.Column(c.Key("msg-host-event-"+m.ID)).
@@ -842,13 +842,7 @@ func renderHostEventCard(c *ui.Context, s *chatState, m Message) ui.Element {
 		Children(func() {
 			ui.Row(c.Key("msg-host-event-meta-" + m.ID)).Gap(Space2).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, IconSparkles()).Size(11, 11).TextColor(ThemeSecondaryText(c).Alpha(0.7))
-				ui.Text(c, "宿主转来").
-					FontSize(scaledFont(FontSizeRelativeTime)).
-					TextColor(ThemeSecondaryText(c).Alpha(0.85))
 				if at, ok := messageTime(m); ok {
-					ui.Text(c, "·").
-						FontSize(scaledFont(FontSizeRelativeTime)).
-						TextColor(ThemeSecondaryText(c).Alpha(0.5))
 					ui.Text(c, formatRelativeTime(at)).
 						FontSize(scaledFont(FontSizeRelativeTime)).
 						TextColor(ThemeSecondaryText(c).Alpha(0.85))

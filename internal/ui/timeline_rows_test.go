@@ -2901,12 +2901,21 @@ func TestHostEventCardStripsNoticePrefix(t *testing.T) {
 	t.Cleanup(state.close)
 	tt := ui.NewTester(root, 1000, 700)
 
-	waitFor(t, tt, func() bool { return tt.HasText("宿主转来") })
+	waitFor(t, tt, func() bool { return tt.HasText(body) })
 	if !tt.HasText(body) {
 		t.Fatalf("卡片应显示去掉前缀的事件正文，当前文本: %q", tt.Texts())
 	}
-	if joined := strings.Join(tt.Texts(), "\n"); strings.Contains(joined, "[编排]") {
+	joined := strings.Join(tt.Texts(), "\n")
+	if strings.Contains(joined, "[编排]") {
 		t.Fatalf("卡片不应显示内部前缀，当前文本: %q", tt.Texts())
+	}
+	if strings.Contains(joined, "宿主转来") {
+		t.Fatalf("卡片不应再显示「宿主转来」标签，当前文本: %q", tt.Texts())
+	}
+	for _, txt := range tt.Texts() {
+		if txt == "·" {
+			t.Fatalf("卡片表头不应再显示单独的分隔点「·」，当前文本: %q", tt.Texts())
+		}
 	}
 }
 
