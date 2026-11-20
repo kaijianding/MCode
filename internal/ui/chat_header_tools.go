@@ -123,62 +123,74 @@ func renderHeaderScriptsMenuButton(c *ui.Context, s *chatState, threadID string)
 		hs.scriptsMenuOpen = false
 	}, func() {
 		popoverCard(c, ui.Column(c.Key("chat-header-scripts-menu-unified"))).
+			Label("chat-header-scripts-menu-unified").
 			Gap(Space0).
 			Padding(Space1).
 			MinWidth(220).
 			MaxWidth(320).
 			Children(func() {
-				ui.Text(c, "执行命令").
-					FontSize(uiFont(TypeCaption)).
-					Bold().
-					TextColor(ThemeSecondaryText(c)).
-					Padding(Space1, Space3, Space0, Space3)
-				if loaded && len(scripts) == 0 {
-					ui.Text(c, "暂无可用脚本").
-						FontSize(uiFont(TypeFootnote)).
-						TextColor(ThemeSecondaryText(c)).
-						Padding(Space1, Space3)
-				}
-				visible := scripts
-				if len(scripts) > headerScriptsCollapseThreshold && !mn.expanded {
-					visible = scripts[:headerScriptsCollapseThreshold]
-				}
-				for _, sc := range visible {
-					script := sc
-					key := "chat-header-script-" + script.Name
-					if script.ID != "" {
-						key = "chat-header-script-" + script.ID
-					}
-					headerGitMenuOption(c, key, script.Name, script.Name, script.Command, IconTerminal(), func() {
-						hs.scriptsMenuOpen = false
-						s.runScriptInTerminal(script)
-						s.invalidate()
+				ui.Scroll(c.Key("chat-header-scripts-scroll")).
+					Label("chat-header-scripts-scroll").
+					FillWidth().
+					MaxHeight(360).
+					Children(func() {
+						ui.Column(c.Key("chat-header-scripts-menu-list")).
+							Gap(Space0).
+							FillWidth().
+							Children(func() {
+								ui.Text(c, "执行命令").
+									FontSize(uiFont(TypeCaption)).
+									Bold().
+									TextColor(ThemeSecondaryText(c)).
+									Padding(Space1, Space3, Space0, Space3)
+								if loaded && len(scripts) == 0 {
+									ui.Text(c, "暂无可用脚本").
+										FontSize(uiFont(TypeFootnote)).
+										TextColor(ThemeSecondaryText(c)).
+										Padding(Space1, Space3)
+								}
+								visible := scripts
+								if len(scripts) > headerScriptsCollapseThreshold && !mn.expanded {
+									visible = scripts[:headerScriptsCollapseThreshold]
+								}
+								for _, sc := range visible {
+									script := sc
+									key := "chat-header-script-" + script.Name
+									if script.ID != "" {
+										key = "chat-header-script-" + script.ID
+									}
+									headerGitMenuOption(c, key, script.Name, script.Name, script.Command, IconTerminal(), func() {
+										hs.scriptsMenuOpen = false
+										s.runScriptInTerminal(script)
+										s.invalidate()
+									})
+								}
+								if len(scripts) > headerScriptsCollapseThreshold {
+									renderHeaderScriptsExpandRow(c, s, mn, len(scripts))
+								}
+
+								if len(scripts) > 0 {
+									ui.Box(c.Key("chat-header-scripts-divider")).
+										FillWidth().
+										Height(Hairline).
+										Background(ThemeDivider(c)).
+										Margin(4, 4, 4, 4)
+								}
+
+								// 只有项目脚本能在弹窗里编辑，package.json 脚本只读展示。
+								label := "添加脚本…"
+								for _, sc := range scripts {
+									if sc.Kind == "project" {
+										label = "编辑脚本…"
+										break
+									}
+								}
+								headerGitMenuOption(c, "chat-header-scripts-edit", label, label, "", IconPencilLine(), func() {
+									hs.scriptsMenuOpen = false
+									openScriptsSheet(s, threadID)
+								})
+							})
 					})
-				}
-				if len(scripts) > headerScriptsCollapseThreshold {
-					renderHeaderScriptsExpandRow(c, s, mn, len(scripts))
-				}
-
-				if len(scripts) > 0 {
-					ui.Box(c.Key("chat-header-scripts-divider")).
-						FillWidth().
-						Height(Hairline).
-						Background(ThemeDivider(c)).
-						Margin(4, 4, 4, 4)
-				}
-
-				// 只有项目脚本能在弹窗里编辑，package.json 脚本只读展示。
-				label := "添加脚本…"
-				for _, sc := range scripts {
-					if sc.Kind == "project" {
-						label = "编辑脚本…"
-						break
-					}
-				}
-				headerGitMenuOption(c, "chat-header-scripts-edit", label, label, "", IconPencilLine(), func() {
-					hs.scriptsMenuOpen = false
-					openScriptsSheet(s, threadID)
-				})
 			})
 	})
 }

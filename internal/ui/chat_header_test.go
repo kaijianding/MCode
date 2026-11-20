@@ -928,6 +928,70 @@ func TestChatHeaderScriptsMenu(t *testing.T) {
 	}
 }
 
+func TestChatHeaderScriptsMenuScroll(t *testing.T) {
+	testenv.TempHome(t)
+
+	fake := newGitFakeClient()
+	scripts := make([]Script, 30)
+	for i := range scripts {
+		name := fmt.Sprintf("script-%02d", i)
+		scripts[i] = Script{Name: name, Command: "echo " + name, Runner: "npm"}
+	}
+	fake.SetScripts(scripts)
+
+	s, root := buildRoot(fake)
+	tt := ui.NewTesterWith(root, 1000, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	waitFor(t, tt, func() bool { return tt.HasText("feature/login") })
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("运行项目脚本")
+		return ok
+	})
+
+	s.loadHeaderScripts("t1")
+	waitFor(t, tt, func() bool {
+		chatHeaderMu.Lock()
+		defer chatHeaderMu.Unlock()
+		hs := chatHeaderStates[s]
+		return hs != nil && len(hs.scripts["t1"]) == 30
+	})
+
+	if err := tt.Click("运行项目脚本"); err != nil {
+		t.Fatalf("打开脚本菜单失败: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("执行命令") })
+
+	if err := tt.Click("全部脚本（30）"); err != nil {
+		t.Fatalf("展开全部脚本失败: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("script-29") })
+
+	scrollRect, ok := tt.Find("chat-header-scripts-scroll")
+	if !ok {
+		t.Fatal("缺少脚本菜单滚动区 chat-header-scripts-scroll")
+	}
+	if scrollRect.H <= 0 || scrollRect.H > 360 {
+		t.Fatalf("滚动区高度 = %v，期望在 (0, 360] 内", scrollRect.H)
+	}
+	cardRect, ok := tt.Find("chat-header-scripts-menu-unified")
+	if !ok {
+		t.Fatal("找不到脚本菜单卡片")
+	}
+	maxCardHeight := 360 + 2*Space1 + 2*Hairline
+	if cardRect.H <= 0 || cardRect.H > maxCardHeight {
+		t.Fatalf("浮层高度 = %v，超过上限 %v", cardRect.H, maxCardHeight)
+	}
+
+	if err := tt.Click("script-29"); err == nil {
+		t.Fatal("未滚动前最后一个脚本不应可直接点击")
+	}
+	tt.Scroll(scrollRect.X+scrollRect.W/2, scrollRect.Y+scrollRect.H/2, 0, 10000)
+	tt.Frame()
+	lastRect, ok := tt.Find("script-29")
+	if !ok || lastRect.H <= 0 {
+		t.Fatalf("滚动到底后最后一个脚本不可见: ok=%v rect=%+v", ok, lastRect)
+	}
+}
+
 // 项目动作组的分隔线只在两组都非空且相邻时出现：只有 Git 一组时不画线。
 // 规则本身集中在 headerRenderDividerBetween 的渲染计数里，这里直接校验计数逻辑。
 func TestChatHeaderActionGroupDivider(t *testing.T) {

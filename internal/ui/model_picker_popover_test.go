@@ -260,3 +260,47 @@ func TestModelPicker_PopoverClosesOnEscapeAndOutsideClick(t *testing.T) {
 	clickWhenSettled(t, tt, "添加收藏")
 	waitFor(t, tt, closed)
 }
+
+func TestModelPickerPopoverScroll(t *testing.T) {
+	testenv.TempHome(t)
+	entry, _ := setupPopoverFlyoutTest(t)
+	st := NewSettingsState(settingsTestDir(t), nil, nil)
+	ps := newModelsPageState()
+	items := make([]modelPickerItem, 40)
+	for i := range items {
+		name := fmt.Sprintf("Model %02d", i)
+		items[i] = modelPickerItem{Key: name, Name: name, ID: name}
+	}
+	host := ui.NewTesterWith(func(c *ui.Context) {
+		entry.services = c.Services()
+		anchor := renderModelPickerAddButton(c, st, &ps, "scroll-picker", "打开模型")
+		renderModelPickerPopover(c, st, &ps, "scroll-picker", anchor, items, "空", func(_ modelPickerItem, _ bool) {}, modelPickerCustom{})
+	}, 600, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	if err := host.Click("打开模型"); err != nil {
+		t.Fatal(err)
+	}
+	menu := ui.NewTesterWith(popoverTestView(t, entry.services, "popover-scroll-picker"), 420, 1200, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	menu.Frame()
+
+	scrollRect, ok := menu.Find("scroll-picker-scroll")
+	if !ok {
+		t.Fatal("缺少模型选择滚动区 scroll-picker-scroll")
+	}
+	if scrollRect.H <= 0 || scrollRect.H > 360 {
+		t.Fatalf("滚动区高度 = %v，期望在 (0, 360] 内", scrollRect.H)
+	}
+	searchRect, ok := menu.Find("input-provider-models-search-scroll-picker")
+	if !ok || searchRect.H <= 0 || searchRect.Y+searchRect.H > scrollRect.Y {
+		t.Fatalf("搜索框应留在滚动区上方且可见: ok=%v search=%+v scroll=%+v", ok, searchRect, scrollRect)
+	}
+
+	if err := menu.Click("Model 39"); err == nil {
+		t.Fatal("未滚动前最后一个模型不应可直接点击")
+	}
+	menu.Scroll(scrollRect.X+scrollRect.W/2, scrollRect.Y+scrollRect.H/2, 0, 10000)
+	menu.Frame()
+	lastRect, ok := menu.Find("Model 39")
+	if !ok || lastRect.H <= 0 {
+		t.Fatalf("滚动到底后最后一个模型不可见: ok=%v rect=%+v", ok, lastRect)
+	}
+}

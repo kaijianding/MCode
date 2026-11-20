@@ -215,61 +215,67 @@ func renderDownloadsPanel(c *ui.Context, s *chatState, onDone func()) {
 				TextColor(ThemeSecondaryText(c)).
 				Padding(Space4, 0, Space4, 0)
 		} else {
-			ui.Column(c.Key("composer-downloads-list")).
+			ui.Scroll(c.Key("composer-downloads-scroll")).
+				Label("composer-downloads-scroll").
 				FillWidth().
-				Gap(Space0).
+				MaxHeight(360).
 				Children(func() {
-					for i, entry := range items {
-						idx := i
-						item := entry
-						rowKey := fmt.Sprintf("composer-download-row-%d", idx)
+					ui.Column(c.Key("composer-downloads-list")).
+						FillWidth().
+						Gap(Space0).
+						Children(func() {
+							for i, entry := range items {
+								idx := i
+								item := entry
+								rowKey := fmt.Sprintf("composer-download-row-%d", idx)
 
-						rowBtn := ui.ButtonBase(c.Key(rowKey)).
-							FillWidth().
-							Height(ControlLG).
-							Radius(RadiusSM).
-							Padding(0, Space3).
-							Background(ui.Transparent).
-							OnClick(func() {
-								if s != nil {
-									s.addAttachmentFiles([]string{item.Path})
+								rowBtn := ui.ButtonBase(c.Key(rowKey)).
+									FillWidth().
+									Height(ControlLG).
+									Radius(RadiusSM).
+									Padding(0, Space3).
+									Background(ui.Transparent).
+									OnClick(func() {
+										if s != nil {
+											s.addAttachmentFiles([]string{item.Path})
+										}
+										if onDone != nil {
+											onDone()
+										}
+									})
+
+								if rowBtn.Hovered() {
+									composerHoverBg(c, rowBtn, true)
 								}
-								if onDone != nil {
-									onDone()
-								}
-							})
 
-						if rowBtn.Hovered() {
-							composerHoverBg(c, rowBtn, true)
-						}
+								rowBtn.Children(func() {
+									ui.Row(c.Key(rowKey + "-content")).
+										FillWidth().
+										Height(ControlLG).
+										AlignItems(ui.Center).
+										Gap(Space3).
+										Children(func() {
+											ui.Icon(c, IconFile()).
+												Size(IconMD, IconMD).
+												TextColor(ThemeSecondaryText(c)).
+												Shrink(0)
 
-						rowBtn.Children(func() {
-							ui.Row(c.Key(rowKey + "-content")).
-								FillWidth().
-								Height(ControlLG).
-								AlignItems(ui.Center).
-								Gap(Space3).
-								Children(func() {
-									ui.Icon(c, IconFile()).
-										Size(IconMD, IconMD).
-										TextColor(ThemeSecondaryText(c)).
-										Shrink(0)
+											ui.Text(c, item.Name).
+												FontSize(uiFont(TypeBody)).
+												TextColor(ThemePrimaryText(c)).
+												SingleLine().
+												TruncateMiddle().
+												Grow(1).
+												MinWidth(0)
 
-									ui.Text(c, item.Name).
-										FontSize(uiFont(TypeBody)).
-										TextColor(ThemePrimaryText(c)).
-										SingleLine().
-										TruncateMiddle().
-										Grow(1).
-										MinWidth(0)
-
-									ui.Text(c, formatFileSize(item.Size)).
-										FontSize(uiFont(TypeCaption)).
-										TextColor(ThemeSecondaryText(c)).
-										Shrink(0)
+											ui.Text(c, formatFileSize(item.Size)).
+												FontSize(uiFont(TypeCaption)).
+												TextColor(ThemeSecondaryText(c)).
+												Shrink(0)
+										})
 								})
+							}
 						})
-					}
 				})
 		}
 

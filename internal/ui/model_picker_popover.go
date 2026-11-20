@@ -124,9 +124,15 @@ func renderModelPickerPopoverWithNotice(c *ui.Context, st *SettingsState, ps *mo
 						TextColor(ThemeSecondaryText(c)).
 						Padding(0, Space1)
 				}
-				ui.Column(c.Key(popoverKey + "-list")).FillWidth().Children(func() {
-					renderModelPickerSections(c, st, ps, popoverKey, items, strings.TrimSpace(*query), emptyHint, onToggle)
-				})
+				ui.Scroll(c.Key(popoverKey + "-scroll")).
+					Label(popoverKey + "-scroll").
+					FillWidth().
+					MaxHeight(360).
+					Children(func() {
+						ui.Column(c.Key(popoverKey + "-list")).FillWidth().Children(func() {
+							renderModelPickerSections(c, st, ps, popoverKey, items, strings.TrimSpace(*query), emptyHint, onToggle)
+						})
+					})
 			})
 	})
 }

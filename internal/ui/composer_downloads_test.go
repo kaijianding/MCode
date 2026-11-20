@@ -288,3 +288,57 @@ func TestRecentDownloads_IncompleteDownloadSkip(t *testing.T) {
 		t.Fatalf("expected done.txt, got %s", entries[0].Name)
 	}
 }
+
+func TestDownloadsPanelScroll(t *testing.T) {
+	temp := t.TempDir()
+	testenv.SetHome(t, temp)
+	clearDownloadsCache()
+
+	dir := filepath.Join(temp, "Downloads")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("创建下载目录失败: %v", err)
+	}
+	base := time.Now()
+	for i := 0; i < 15; i++ {
+		name := fmt.Sprintf("download_%02d.txt", i)
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("hello"), 0644); err != nil {
+			t.Fatalf("写入测试文件 %s 失败: %v", name, err)
+		}
+		mt := base.Add(-time.Duration(i) * time.Minute)
+		_ = os.Chtimes(p, mt, mt)
+	}
+
+	s := newChatState(NewFakeClient())
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		renderDownloadsPanel(c, s, nil)
+	}, 400, 600, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	tt.Frame()
+
+	scrollRect, ok := tt.Find("composer-downloads-scroll")
+	if !ok {
+		t.Fatal("缺少最近下载滚动区 composer-downloads-scroll")
+	}
+	if scrollRect.H <= 0 || scrollRect.H > 360 {
+		t.Fatalf("滚动区高度 = %v，期望在 (0, 360] 内", scrollRect.H)
+	}
+
+	finderRect, ok := tt.Find(revealInFileManagerLabel())
+	if !ok || finderRect.H <= 0 || finderRect.Y < scrollRect.Y+scrollRect.H {
+		t.Fatalf("底部按钮 %q 应留在滚动区下方且可见: ok=%v rect=%+v scroll=%+v", revealInFileManagerLabel(), ok, finderRect, scrollRect)
+	}
+	chooseRect, ok := tt.Find("选择文件…")
+	if !ok || chooseRect.H <= 0 || chooseRect.Y < scrollRect.Y+scrollRect.H {
+		t.Fatalf("底部按钮「选择文件…」应留在滚动区下方且可见: ok=%v rect=%+v scroll=%+v", ok, chooseRect, scrollRect)
+	}
+
+	if err := tt.Click("download_14.txt"); err == nil {
+		t.Fatal("未滚动前最后一项不应可直接点击")
+	}
+	tt.Scroll(scrollRect.X+scrollRect.W/2, scrollRect.Y+scrollRect.H/2, 0, 10000)
+	tt.Frame()
+	lastRect, ok := tt.Find("download_14.txt")
+	if !ok || lastRect.H <= 0 {
+		t.Fatalf("滚动到底后最后一项不可见: ok=%v rect=%+v", ok, lastRect)
+	}
+}

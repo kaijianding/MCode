@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -1085,5 +1086,102 @@ func TestSettleSwarmFloatForcedKeepsManualEmptyPanel(t *testing.T) {
 	}
 	if !swarmFloatForcedFor(leadID) {
 		t.Fatal("从未有子代理时强制显示标记应保留")
+	}
+}
+
+// TestBeesMenuScroll 验证子代理数量较多时菜单卡片高度受限于 360，且滚动到底后最后一个子代理行可点击。
+func TestBeesMenuScroll(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	const leadID = "lead-menu-scroll"
+	s.selectedThreadID = leadID
+	bees := make([]SwarmBee, 20)
+	seen := make(map[string]bool, len(bees))
+	for i := range bees {
+		id := fmt.Sprintf("h-scroll-%02d", i)
+		bees[i] = SwarmBee{
+			ThreadID: id,
+			Name:     fmt.Sprintf("Bee %02d", i),
+			Task:     "执行任务",
+			Status:   "completed",
+		}
+		seen[id] = true
+	}
+	hp := getSwarmPanelState(s)
+	swarmPanelMu.Lock()
+	hp.loadedFor = leadID
+	hp.setStateLocked(SwarmState{
+		Available:    true,
+		Enabled:      true,
+		LeadThreadID: leadID,
+		Bees:         bees,
+	})
+	swarmPanelMu.Unlock()
+
+	reset := func() {
+		swarmFloatMu.Lock()
+		delete(swarmFloatPanelDismissed, leadID)
+		delete(swarmFloatDismissedBees, leadID)
+		delete(swarmBeeDoneSince, leadID)
+		delete(swarmBeeAutoHideHandled, leadID)
+		delete(swarmBeeSeenActive, leadID)
+		delete(swarmBeeKeptOpen, leadID)
+		delete(swarmMenuOpen, leadID+"|"+string(teamPanelID))
+		delete(swarmSelectedBeeID, leadID)
+		swarmFloatMu.Unlock()
+	}
+	reset()
+	swarmFloatMu.Lock()
+	swarmBeeSeenActive[leadID] = seen
+	swarmFloatMu.Unlock()
+	t.Cleanup(func() {
+		closeEmbeddedBees(s)
+		reset()
+	})
+
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		renderSwarmBeeFloats(c, s)
+	}, 1600, 900, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	tt.Frame()
+
+	if err := tt.Click("子代理列表，共 20 个"); err != nil {
+		t.Fatalf("打开子代理菜单失败: %v", err)
+	}
+	tt.Frame()
+
+	scrollRect, ok := tt.Find("swarm-bees-menu-scroll")
+	if !ok {
+		t.Fatal("缺少子代理菜单滚动区 swarm-bees-menu-scroll")
+	}
+	menuRect, ok := tt.Find("swarm-bees-menu-" + leadID + "|" + string(teamPanelID))
+	if !ok {
+		t.Fatal("找不到子代理菜单面板")
+	}
+	if menuRect.H <= 0 || menuRect.H > 360 {
+		t.Fatalf("菜单卡片高度 = %v，期望在 (0, 360] 内", menuRect.H)
+	}
+	if clearRect, ok := tt.Find("清理已结束的子代理"); !ok || clearRect.H <= 0 {
+		t.Fatalf("底部操作按钮应保持可见: ok=%v rect=%+v", ok, clearRect)
+	}
+
+	lastLabel := "查看 Bee 19，状态：已完成"
+	if err := tt.Click(lastLabel); err == nil {
+		t.Fatal("未滚动前最后一个子代理行不应可直接点击")
+	}
+
+	tt.Scroll(scrollRect.X+scrollRect.W/2, scrollRect.Y+scrollRect.H/2, 0, 10000)
+	tt.Frame()
+
+	lastRect, ok := tt.Find(lastLabel)
+	if !ok || lastRect.H <= 0 {
+		t.Fatalf("滚动到底后最后一个子代理行不可见: ok=%v rect=%+v", ok, lastRect)
+	}
+	if err := tt.Click(lastLabel); err != nil {
+		t.Fatalf("滚动到底后点击最后一个子代理行失败: %v", err)
+	}
+	swarmFloatMu.Lock()
+	selected := swarmSelectedBeeID[leadID]
+	swarmFloatMu.Unlock()
+	if selected != "h-scroll-19" {
+		t.Fatalf("点击后选中子代理 = %q，期望 h-scroll-19", selected)
 	}
 }
