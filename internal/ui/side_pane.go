@@ -479,7 +479,10 @@ func renderInspectorBody(c *ui.Context, s *chatState, width float32, topAligned 
 		return
 	}
 	renderInspectorHeader(c, s, st, topAligned)
-	if !st.Open {
+	s.mu.Lock()
+	open := st.Open
+	s.mu.Unlock()
+	if !open {
 		return
 	}
 	fileManagerMu.Lock()

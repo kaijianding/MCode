@@ -447,7 +447,8 @@ func (s *chatState) toolDiffKeysLocked(threadID string, m Message) []string {
 
 // loadToolDiff 优先按消息的 TurnID 取 diff；旧消息没有 ID 时才查询轮次摘要。
 func (s *chatState) loadToolDiff(threadID string, turnIndex int, turnID string, generation uint64) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	idxKey := threadID + "|#" + strconv.Itoa(turnIndex)
 	entry := &toolDiffEntry{generation: generation}
 	resolved := ""
