@@ -856,19 +856,6 @@ func truncateAttachmentName(name string, maxLen int) string {
 	return string(runes[:baseLen]) + "..." + ext
 }
 
-// formatAttachmentSize 格式化附件文件字节大小展示。
-func formatAttachmentSize(size int) string {
-	if size < 1024 {
-		return fmt.Sprintf("%dB", size)
-	}
-	if size < 1024*1024 {
-		kb := float64(size) / 1024.0
-		return fmt.Sprintf("%.1fKB", kb)
-	}
-	mb := float64(size) / (1024.0 * 1024.0)
-	return fmt.Sprintf("%.1fMB", mb)
-}
-
 // attachmentTokenCache 按附件 localID 缓存 token 估算值，避免每帧渲染重复解码图片。
 var attachmentTokenCache sync.Map // map[string]int
 
@@ -983,7 +970,7 @@ func attachmentTokenNotice(attTokens, usedTokens, limitTokens int64) string {
 		return ""
 	}
 	return fmt.Sprintf("附件约 %s tokens，超过剩余上下文（%s）的 80%%，可能被截断或导致上下文溢出",
-		formatTokens(attTokens), formatTokens(remaining))
+		formatTokenCount(attTokens), formatTokenCount(remaining))
 }
 
 type attCategory int
@@ -1379,7 +1366,7 @@ func renderAttachments(c *ui.Context, s *chatState) {
 
 								// 显示文件大小
 								if a.Size > 0 && a.InspectorRef == nil {
-									ui.Text(c, formatAttachmentSize(a.Size)).
+									ui.Text(c, formatFileSize(int64(a.Size))).
 										FontSize(uiFont(TypeCaption)).
 										TextColor(ThemeSecondaryText(c))
 								}

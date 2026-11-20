@@ -20,7 +20,7 @@ func TestAcceptanceProgressText(t *testing.T) {
 	}
 	b.AcceptanceStep = 2
 	text, ok := acceptanceProgressText(b, 65*time.Second)
-	if !ok || !strings.Contains(text, "验收 2/4") || !strings.Contains(text, b.Acceptance[1]) || !strings.Contains(text, "1m05s") {
+	if !ok || !strings.Contains(text, "验收 2/4") || !strings.Contains(text, b.Acceptance[1]) || !strings.Contains(text, "1m 05s") {
 		t.Fatalf("验收文案不符: %q, %v", text, ok)
 	}
 }

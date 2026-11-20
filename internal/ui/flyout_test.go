@@ -570,13 +570,13 @@ func TestFlyoutSessionStatsTicksAndStopsNative(t *testing.T) {
 		}
 		view(c)
 	}, 330, 400)
-	if !hasExactText(menu, "1m5s") {
+	if !hasExactText(menu, "1m 05s") {
 		t.Fatalf("总用时应含历史累计与当前轮: %v", menu.Texts())
 	}
 	for secs := 6; secs <= 7; secs++ {
 		menu.Advance(time.Second)
-		if !hasExactText(menu, fmt.Sprintf("1m%ds", secs)) {
-			t.Fatalf("宿主无新帧时内容窗口应自行读秒到 1m%ds: %v", secs, menu.Texts())
+		if !hasExactText(menu, fmt.Sprintf("1m %02ds", secs)) {
+			t.Fatalf("宿主无新帧时内容窗口应自行读秒到 1m %02ds: %v", secs, menu.Texts())
 		}
 	}
 	// 主轮完成：统计冻结，不再续帧（用渲染计数观察，FramePending 不含 After 定时器）。
@@ -586,15 +586,15 @@ func TestFlyoutSessionStatsTicksAndStopsNative(t *testing.T) {
 	s.messages[6].TurnCompletedAt = done.Format(time.RFC3339Nano)
 	s.mu.Unlock()
 	menu.Frame()
-	if !hasExactText(menu, "1m6s") {
-		t.Fatalf("主轮完成后应冻结在 1m6s: %v", menu.Texts())
+	if !hasExactText(menu, "1m 06s") {
+		t.Fatalf("主轮完成后应冻结在 1m 06s: %v", menu.Texts())
 	}
 	before := renders
 	menu.Advance(2 * time.Second)
 	if renders != before || menu.FramePending() {
 		t.Fatalf("终态不应再续帧: %d -> %d", before, renders)
 	}
-	if !hasExactText(menu, "1m6s") {
+	if !hasExactText(menu, "1m 06s") {
 		t.Fatalf("终态不应再读秒: %v", menu.Texts())
 	}
 	// 关闭浮层：宿主帧销毁窗口；强制再渲染一帧，内容被 active 守卫拦住，不再调度。

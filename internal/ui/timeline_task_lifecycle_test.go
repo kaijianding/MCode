@@ -143,12 +143,12 @@ func TestTaskLifecycleTurnHeaderRunningLabel(t *testing.T) {
 		{0, "已处理 0s"},
 		{16*time.Second + 900*time.Millisecond, "已处理 16s"},
 		{59*time.Second + 900*time.Millisecond, "已处理 59s"},
-		{60 * time.Second, "已处理 1m"},
-		{179 * time.Second, "已处理 2m59s"},
-		{180 * time.Second, "已处理 3m"},
-		{293 * time.Second, "已处理 4m53s"},
-		{3600 * time.Second, "已处理 1h"},
-		{3723 * time.Second, "已处理 1h2m3s"},
+		{60 * time.Second, "已处理 1m 00s"},
+		{179 * time.Second, "已处理 2m 59s"},
+		{180 * time.Second, "已处理 3m 00s"},
+		{293 * time.Second, "已处理 4m 53s"},
+		{3600 * time.Second, "已处理 1h 00m"},
+		{3723 * time.Second, "已处理 1h 02m"},
 	}
 	for _, tc := range cases {
 		if got := turnHeaderRunningLabel(tc.elapsed); got != tc.want {
@@ -184,8 +184,8 @@ func TestTaskLifecycleOriginIndex(t *testing.T) {
 	if !ok || entry.lastReportTurn != 21 || !entry.span.ok {
 		t.Fatalf("第二份报告应覆盖并给出有效跨度: %+v", index)
 	}
-	if d := entry.span.end.Sub(entry.span.start); formatLiveStatsDuration(d) != "30m16s" {
-		t.Fatalf("任务总跨度 = %v (%s), want 30m16s", d, formatLiveStatsDuration(d))
+	if d := entry.span.end.Sub(entry.span.start); formatLiveStatsDuration(d) != "30m 16s" {
+		t.Fatalf("任务总跨度 = %v (%s), want 30m 16s", d, formatLiveStatsDuration(d))
 	}
 	if len(index) != 1 {
 		t.Fatalf("同一任务只应有一条索引: %+v", index)
@@ -225,8 +225,8 @@ func TestTaskLifecycleFoldKeepsRootHeader(t *testing.T) {
 		t.Fatalf("等待子代理时头应是原请求头: %+v", header)
 	}
 	shot := taskLifecycleStamp(t, "2026-11-15T06:07:59Z")
-	if got := runningTurnHeaderLabel(header, shot); got != "已处理 13m58s" {
-		t.Fatalf("06:07:59 应从原起点读秒 = %q, want 已处理 13m58s", got)
+	if got := runningTurnHeaderLabel(header, shot); got != "已处理 13m 58s" {
+		t.Fatalf("06:07:59 应从原起点读秒 = %q, want 已处理 13m 58s", got)
 	}
 	assertRootAnswer := func(items []timelineItem, wantSuppressed bool) {
 		t.Helper()
@@ -274,7 +274,7 @@ func TestTaskLifecycleFoldKeepsRootHeader(t *testing.T) {
 		if header.id != turnWorkFoldID("u19") || !header.workStartedAt.Equal(rootStart) {
 			t.Fatalf("[%s] 原头 ID/起点变了: %+v", stage.name, header)
 		}
-		if got := runningTurnHeaderLabel(header, shot); got != "已处理 13m58s" {
+		if got := runningTurnHeaderLabel(header, shot); got != "已处理 13m 58s" {
 			t.Fatalf("[%s] 计时 = %q", stage.name, got)
 		}
 		assertRootAnswer(items, true)
@@ -336,7 +336,7 @@ func taskLifecycleAssertTick(t *testing.T, tt *ui.Tester, label string) {
 		t.Fatalf("应显示 %q: %v", label, tt.Texts())
 	}
 	for _, text := range tt.Texts() {
-		if strings.Contains(text, "已完成") && strings.Contains(text, "1m59s") {
+		if strings.Contains(text, "已完成") && strings.Contains(text, "1m 59s") {
 			t.Fatalf("原 root 不应出现提前的完成摘要: %v", tt.Texts())
 		}
 	}
@@ -358,14 +358,14 @@ func TestTaskLifecycleChatRunningTicks(t *testing.T) {
 				}
 				renderChat(c, s)
 			}, 1100, 800, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: reduced, TextScale: 1}})
-			taskLifecycleAssertTick(t, tt, "已处理 13m58s")
+			taskLifecycleAssertTick(t, tt, "已处理 13m 58s")
 			// settle 可能停在扫光帧上（比重建帧晚 16ms）：先补一帧让计时文字落地，
 			// 余数 <100ms，后续整秒 Advance 的读数不受影响。
 			tt.Frame()
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 13m59s")
+			taskLifecycleAssertTick(t, tt, "已处理 13m 59s")
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 00s")
 
 			// 报告 20 到达并续跑：status-only 切换后原头仍在，从原起点继续。
 			reportStart := origin.Add(840 * time.Second)
@@ -374,18 +374,18 @@ func TestTaskLifecycleChatRunningTicks(t *testing.T) {
 			taskLifecycleSetFlags(s, true, false)
 			// 新行入场动画会逐帧推进：用 Advance 落地重建帧，不用 Frame（settle 会停在中间帧）。
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m1s")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 01s")
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m2s")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 02s")
 
 			// 报告 20 完成端点落地（只更新完成元数据，不追加消息），随后再次等待子代理。
 			done := append(taskLifecycleRootMsgs(origin), taskLifecycleReport1Msgs(reportStart, reportStart.Add(165*time.Second))...)
 			taskLifecycleSetMessages(s, done)
 			taskLifecycleSetFlags(s, false, true)
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m3s")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 03s")
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m4s")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 04s")
 
 			// 报告 21 续跑同样从原起点读秒。
 			r2Start := origin.Add(850 * time.Second)
@@ -393,7 +393,7 @@ func TestTaskLifecycleChatRunningTicks(t *testing.T) {
 			taskLifecycleSetMessages(s, all)
 			taskLifecycleSetFlags(s, true, false)
 			tt.Advance(time.Second)
-			taskLifecycleAssertTick(t, tt, "已处理 14m5s")
+			taskLifecycleAssertTick(t, tt, "已处理 14m 05s")
 		})
 	}
 }
@@ -416,12 +416,12 @@ func TestTaskLifecycleChatCompletedFreezes(t *testing.T) {
 		}
 		renderChat(c, s)
 	}, 1100, 800, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
-	taskLifecycleAssertTick(t, tt, "已处理 13m58s")
+	taskLifecycleAssertTick(t, tt, "已处理 13m 58s")
 
 	taskLifecycleSetFlags(s, false, false)
 	tt.Frame()
-	if !hasExactText(tt, "任务用时 30m16s") {
-		t.Fatalf("完成后原头应显示任务用时 30m16s: %v", tt.Texts())
+	if !hasExactText(tt, "任务用时 30m 16s") {
+		t.Fatalf("完成后原头应显示任务用时 30m 16s: %v", tt.Texts())
 	}
 	for _, it := range s.timelineCacheItems {
 		if it.kind == timelineItemTurnWork && it.workRunning {
@@ -429,16 +429,16 @@ func TestTaskLifecycleChatCompletedFreezes(t *testing.T) {
 		}
 	}
 	tt.Advance(3 * time.Second)
-	if !hasExactText(tt, "任务用时 30m16s") || hasExactText(tt, "任务用时 30m19s") {
+	if !hasExactText(tt, "任务用时 30m 16s") || hasExactText(tt, "任务用时 30m 19s") {
 		t.Fatalf("完成后不应继续读秒: %v", tt.Texts())
 	}
 
 	// 展开后尾部详情与头同源：任务用时 + 任务结束时钟；速度分母仍是本轮 119s（1000/119≈8 t/s）。
-	clickText(t, tt, "任务用时 30m16s")
+	clickText(t, tt, "任务用时 30m 16s")
 	wantEnd := report2End.Local().Format("01-02 15:04:05")
 	found := false
 	for _, text := range tt.Texts() {
-		if strings.Contains(text, "已完成") && strings.Contains(text, "任务用时 30m16s") && strings.Contains(text, "结束 "+wantEnd) {
+		if strings.Contains(text, "已完成") && strings.Contains(text, "任务用时 30m 16s") && strings.Contains(text, "结束 "+wantEnd) {
 			found = true
 			if !strings.Contains(text, "8 t/s") {
 				t.Fatalf("速度应按本轮 119s 计: %q", text)
@@ -465,10 +465,10 @@ func TestTaskLifecycleReloadAndNewUser(t *testing.T) {
 		t.Helper()
 		for _, it := range items {
 			if it.kind == timelineItemTurnWork && it.id == turnWorkFoldID("u19") {
-				if !it.workTaskSpan.ok || formatLiveStatsDuration(it.workTaskSpan.end.Sub(it.workTaskSpan.start)) != "30m16s" {
-					t.Fatalf("[%s] 旧 root 任务跨度应稳定为 30m16s: %+v", label, it.workTaskSpan)
+				if !it.workTaskSpan.ok || formatLiveStatsDuration(it.workTaskSpan.end.Sub(it.workTaskSpan.start)) != "30m 16s" {
+					t.Fatalf("[%s] 旧 root 任务跨度应稳定为 30m 16s: %+v", label, it.workTaskSpan)
 				}
-				if got := turnWorkHeaderLabel(it, toolGroupCounts{}); got != "任务用时 30m16s" {
+				if got := turnWorkHeaderLabel(it, toolGroupCounts{}); got != "任务用时 30m 16s" {
 					t.Fatalf("[%s] 旧 root 头 = %q", label, got)
 				}
 				return
@@ -542,8 +542,8 @@ func TestTaskLifecycleBeeWindowOwnStart(t *testing.T) {
 		secs int
 		want string
 	}{
-		{"Aspen", "h-aspen", 179, "已处理 2m59s"},
-		{"Birch", "h-birch", 180, "已处理 3m"},
+		{"Aspen", "h-aspen", 179, "已处理 2m 59s"},
+		{"Birch", "h-birch", 180, "已处理 3m 00s"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var s *chatState
@@ -593,29 +593,29 @@ func TestTaskLifecycleHeaderFooterHourFormatter(t *testing.T) {
 			fold = it
 		}
 	}
-	if got := turnWorkHeaderLabel(fold, toolGroupCounts{}); got != "任务用时 1h2m3s" {
-		t.Fatalf("小时任务头 = %q, want 任务用时 1h2m3s", got)
+	if got := turnWorkHeaderLabel(fold, toolGroupCounts{}); got != "任务用时 1h 02m" {
+		t.Fatalf("小时任务头 = %q, want 任务用时 1h 02m", got)
 	}
-	if got := turnWorkHeaderAccessLabel(fold, false); got != "工具调用，任务用时 1h2m3s，点按展开" {
+	if got := turnWorkHeaderAccessLabel(fold, false); got != "工具调用，任务用时 1h 02m，点按展开" {
 		t.Fatalf("读屏名称 = %q", got)
 	}
 	usage := TokenUsage{Output: 1000}
 	wantEnd := reportEnd.Local().Format("01-02 15:04:05")
-	wantFooter := "已完成 · 任务用时 1h2m3s · 工具 1 · 输出 1.0k · 8 t/s · 结束 " + wantEnd
+	wantFooter := "已完成 · 任务用时 1h 02m · 工具 1 · 输出 1k · 8 t/s · 结束 " + wantEnd
 	if got := turnWorkFooterText(s, 19, usage, fold.workTaskSpan); got != wantFooter {
 		t.Fatalf("展开尾部 = %q, want %q", got, wantFooter)
 	}
 	// 任务 formatter：小时、整时、整分与不足 1s 的口径。
-	if got := taskFinishedSummary("", turnToolStats{}, usage, 3723*time.Second); got != "已完成 · 任务用时 1h2m3s · 输出 1.0k" {
+	if got := taskFinishedSummary("", turnToolStats{}, usage, 3723*time.Second); got != "已完成 · 任务用时 1h 02m · 输出 1k" {
 		t.Fatalf("任务 formatter 小时文本 = %q", got)
 	}
-	if got := taskFinishedSummary("", turnToolStats{}, usage, 3600*time.Second); got != "已完成 · 任务用时 1h · 输出 1.0k" {
+	if got := taskFinishedSummary("", turnToolStats{}, usage, 3600*time.Second); got != "已完成 · 任务用时 1h 00m · 输出 1k" {
 		t.Fatalf("整时任务文本 = %q", got)
 	}
-	if got := taskFinishedSummary("", turnToolStats{}, usage, 180*time.Second); got != "已完成 · 任务用时 3m · 输出 1.0k" {
+	if got := taskFinishedSummary("", turnToolStats{}, usage, 180*time.Second); got != "已完成 · 任务用时 3m 00s · 输出 1k" {
 		t.Fatalf("整分任务文本 = %q", got)
 	}
-	if got := taskFinishedSummary("", turnToolStats{}, usage, 500*time.Millisecond); got != "已完成 · 输出 1.0k" {
+	if got := taskFinishedSummary("", turnToolStats{}, usage, 500*time.Millisecond); got != "已完成 · 输出 1k" {
 		t.Fatalf("不足 1s 不应造用时段 = %q", got)
 	}
 	// 无 usage：任务的起止详情也不能完全丢失。

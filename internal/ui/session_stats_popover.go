@@ -378,40 +378,17 @@ func estimateThreadCost(u TokenUsage, cost ModelCost) (float64, bool) {
 	return total, true
 }
 
-// formatStatsDuration 把时长格式化为紧凑可读文本：不足 1 小时沿用 formatShortDuration，
-// 更长时用「1h5m」这样的时分形式。非正时长返回空串。
+// formatStatsDuration 把时长格式化为紧凑可读文本，非正时长返回空串。
 func formatStatsDuration(d time.Duration) string {
 	if d <= 0 {
 		return ""
 	}
-	if d < time.Hour {
-		return formatShortDuration(d)
-	}
-	hours := int(d / time.Hour)
-	minutes := int((d % time.Hour) / time.Minute)
-	if minutes == 0 {
-		return fmt.Sprintf("%dh", hours)
-	}
-	return fmt.Sprintf("%dh%dm", hours, minutes)
+	return formatDuration(d)
 }
 
-// formatLiveStatsDuration 把实时总用时格式化为整秒文本（「59s」「1m」「1h2m3s」），
-// 整分整时省略零秒位，不足一分钟仍每秒可见变化。负值按 0s。
+// formatLiveStatsDuration 把实时总用时格式化为统一紧凑文本，负值按 0s。
 func formatLiveStatsDuration(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	secs := int(d / time.Second)
-	if secs < 60 {
-		return fmt.Sprintf("%ds", secs)
-	}
-	if secs%60 == 0 {
-		return formatStatsDuration(d)
-	}
-	if secs < 3600 {
-		return fmt.Sprintf("%dm%ds", secs/60, secs%60)
-	}
-	return fmt.Sprintf("%dh%dm%ds", secs/3600, (secs%3600)/60, secs%60)
+	return formatDuration(d)
 }
 
 // renderSessionStatsPopover 渲染会话统计浮层内容：Token、活动、常用工具、时间、改动、
@@ -428,14 +405,14 @@ func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string
 	total := st.usage.Total
 	if total.Input > 0 || total.Output > 0 || total.Cached > 0 {
 		tokenRows = append(tokenRows,
-			[2]string{"输入", formatTokens(total.Input)},
-			[2]string{"输出", formatTokens(total.Output)},
-			[2]string{"缓存", formatTokens(total.Cached)},
+			[2]string{"输入", formatTokenCount(total.Input)},
+			[2]string{"输出", formatTokenCount(total.Output)},
+			[2]string{"缓存", formatTokenCount(total.Cached)},
 		)
 		if st.cacheHit != "" {
 			tokenRows = append(tokenRows, [2]string{"缓存命中率", st.cacheHit})
 		}
-		tokenRows = append(tokenRows, [2]string{"合计", formatTokens(total.Input+total.Output) + " tokens"})
+		tokenRows = append(tokenRows, [2]string{"合计", formatTokenCount(total.Input+total.Output) + " tokens"})
 	}
 	if st.turns > 0 {
 		activityRows = append(activityRows, [2]string{"回合", fmt.Sprintf("%d", st.turns)})
@@ -480,7 +457,7 @@ func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string
 			beeRows = append(beeRows, [2]string{"工具调用", fmt.Sprintf("%d", st.beeToolCalls)})
 		}
 		if st.beeTokens > 0 {
-			beeRows = append(beeRows, [2]string{"tokens", formatTokens(int64(st.beeTokens))})
+			beeRows = append(beeRows, [2]string{"tokens", formatTokenCount(int64(st.beeTokens))})
 		}
 	}
 

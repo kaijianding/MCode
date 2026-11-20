@@ -780,7 +780,7 @@ func TestComposerPasteImage(t *testing.T) {
 	if _, ok := tt.Find("pasted.png"); ok {
 		t.Fatal("image attachment should not render its file name")
 	}
-	if _, ok := tt.Find("3B"); ok {
+	if _, ok := tt.Find("3 B"); ok {
 		t.Fatal("image attachment should not render its size")
 	}
 	if err := tt.Click("删除附件 pasted.png"); err != nil {
@@ -871,7 +871,7 @@ func TestAttachmentTokenNotice(t *testing.T) {
 	if got == "" {
 		t.Fatalf("expected notice above 80%% threshold")
 	}
-	if !strings.Contains(got, "80%") || !strings.Contains(got, "10.0k") {
+	if !strings.Contains(got, "80%") || !strings.Contains(got, "10k") {
 		t.Fatalf("unexpected notice text: %q", got)
 	}
 	// 已用超过上限：剩余按 0 计，有附件 token 就提示

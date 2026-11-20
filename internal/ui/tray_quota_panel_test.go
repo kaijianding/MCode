@@ -364,16 +364,16 @@ func TestBuildTrayQuotaModel(t *testing.T) {
 			t.Errorf("m1: expected '刚刚更新' and IsStale=false, got %q, %v", m1.UpdatedText, m1.IsStale)
 		}
 
-		// 5 分钟前更新
+		// 5分钟前更新
 		m2 := buildTrayQuotaModel(nil, now.Add(-5*time.Minute), now, false)
-		if m2.UpdatedText != "5 分钟前更新" || m2.IsStale {
-			t.Errorf("m2: expected '5 分钟前更新' and IsStale=false, got %q, %v", m2.UpdatedText, m2.IsStale)
+		if m2.UpdatedText != "5分钟前更新" || m2.IsStale {
+			t.Errorf("m2: expected '5分钟前更新' and IsStale=false, got %q, %v", m2.UpdatedText, m2.IsStale)
 		}
 
 		// 超过 15 分钟（usageStaleAfter）判定过期
 		m3 := buildTrayQuotaModel(nil, now.Add(-20*time.Minute), now, false)
-		if m3.UpdatedText != "20 分钟前更新" || !m3.IsStale {
-			t.Errorf("m3: expected '20 分钟前更新' and IsStale=true, got %q, %v", m3.UpdatedText, m3.IsStale)
+		if m3.UpdatedText != "20分钟前更新" || !m3.IsStale {
+			t.Errorf("m3: expected '20分钟前更新' and IsStale=true, got %q, %v", m3.UpdatedText, m3.IsStale)
 		}
 	})
 

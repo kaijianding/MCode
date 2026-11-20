@@ -113,7 +113,7 @@ func backgroundTaskDisplayTitle(m Message) string {
 func backgroundBeeDisplayTitle(h SwarmBee) string { return swarmCapsuleName(h) }
 
 // backgroundTasksStatusText 拼出后台任务胶囊的实时状态文案，如「运行 ui 包全量测试 · 36s +1」：
-// 时长用 formatToolRunDuration；hasStart 为假时省略时长，more 为 0 时省略「+N」；
+// 时长用 formatDuration；hasStart 为假时省略时长，more 为 0 时省略「+N」；
 // 名字超过 24 个字符（按 rune 计）时截断并加「…」。
 func backgroundTasksStatusText(name string, elapsed time.Duration, hasStart bool, more int) string {
 	name = truncateRunes(strings.TrimSpace(name), 24)
@@ -122,7 +122,7 @@ func backgroundTasksStatusText(name string, elapsed time.Duration, hasStart bool
 	}
 	text := name
 	if hasStart {
-		text += " · " + formatToolRunDuration(elapsed)
+		text += " · " + formatDuration(elapsed)
 	}
 	if more > 0 {
 		text += fmt.Sprintf(" +%d", more)

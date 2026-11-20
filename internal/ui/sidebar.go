@@ -82,10 +82,15 @@ func getSearchQuery(s *chatState) *string {
 
 // formatRelativeTime 将时间格式化为中文短格式。
 func formatRelativeTime(t time.Time) string {
+	return formatRelativeTimeAt(t, time.Now())
+}
+
+// formatRelativeTimeAt 以指定当前时刻为基准，将时间格式化为中文短格式。
+func formatRelativeTimeAt(t, now time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	diff := time.Since(t)
+	diff := now.Sub(t)
 	if diff < time.Minute {
 		return "刚刚"
 	}

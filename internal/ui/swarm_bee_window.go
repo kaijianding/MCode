@@ -229,7 +229,7 @@ func acceptanceProgressText(b SwarmBee, elapsed time.Duration) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("验收 %d/%d · %s · %s", b.AcceptanceStep, len(b.Acceptance),
-		b.Acceptance[b.AcceptanceStep-1], formatToolRunDuration(elapsed)), true
+		b.Acceptance[b.AcceptanceStep-1], formatDuration(elapsed)), true
 }
 
 // renderAcceptanceProgress 复用后台等待条的扫光组件，验收结束后卸载计时与扫光。

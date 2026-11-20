@@ -263,21 +263,13 @@ func assistantMetaText(model string, duration time.Duration, at time.Time) strin
 	return strings.Join(parts, " · ")
 }
 
-// formatShortDuration 把耗时格式化为「12s」「1.2s」「2m30s」这类短文本。
+// formatShortDuration 把耗时格式化为「12s」「1.2s」「2m 30s」这类短文本；
+// 不足 10 秒保留一位小数，其余区间复用 formatDuration。
 func formatShortDuration(d time.Duration) string {
-	if d < time.Minute {
-		secs := d.Seconds()
-		if secs < 10 {
-			return fmt.Sprintf("%.1fs", secs)
-		}
-		return fmt.Sprintf("%ds", int(secs+0.5))
+	if d > 0 && d < 10*time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
-	mins := int(d / time.Minute)
-	secs := int((d % time.Minute) / time.Second)
-	if secs == 0 {
-		return fmt.Sprintf("%dm", mins)
-	}
-	return fmt.Sprintf("%dm%ds", mins, secs)
+	return formatDuration(d)
 }
 
 // assistantMetaSource 返回助手回复头部可用的元信息：供应商、模型名（缺省用供应商）与时间戳。

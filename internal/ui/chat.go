@@ -7,7 +7,6 @@ import (
 	"image"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -994,15 +993,6 @@ func toolSummary(text string) string {
 		return string(runes[:60]) + "..."
 	}
 	return text
-}
-
-// formatTokens 将 token 数量格式化为短字符串。
-// 数值达到或超过 1000 时用 k 表示并保留一位小数。
-func formatTokens(n int64) string {
-	if n >= 1000 || n <= -1000 {
-		return fmt.Sprintf("%.1fk", float64(n)/1000.0)
-	}
-	return strconv.FormatInt(n, 10)
 }
 
 // jumpToAdjacentUserMessage 根据视口顶部可见项定位上一个或下一个用户消息所在的 item，并用 ScrollTo 定位。

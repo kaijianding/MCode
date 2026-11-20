@@ -377,7 +377,7 @@ func TestBackgroundTasksStatusText(t *testing.T) {
 	}{
 		{"时长与剩余个数", "运行 ui 包全量测试", 36 * time.Second, true, 1, "运行 ui 包全量测试 · 36s +1"},
 		{"缺开始时间", "拉取依赖", time.Minute, false, 0, "拉取依赖"},
-		{"有时长无剩余", "拉取依赖", 3*time.Minute + 5*time.Second, true, 0, "拉取依赖 · 3m05s"},
+		{"有时长无剩余", "拉取依赖", 3*time.Minute + 5*time.Second, true, 0, "拉取依赖 · 3m 05s"},
 		{"负时长按 0", "拉取依赖", -time.Second, true, 0, "拉取依赖 · 0s"},
 		{
 			"超长截断",

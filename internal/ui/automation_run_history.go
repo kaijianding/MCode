@@ -10,20 +10,6 @@ import (
 
 var automationHistoryPopovers = make(map[*automationState]*struct{ filter, more bool })
 
-func formatRunDuration(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	seconds := int(d.Round(time.Second) / time.Second)
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	if seconds >= 3600 {
-		return fmt.Sprintf("%dh %02dm", seconds/3600, (seconds%3600)/60)
-	}
-	return fmt.Sprintf("%dm %02ds", seconds/60, seconds%60)
-}
-
 func automationRunStatus(status string) (string, string) {
 	switch status {
 	case "running":
@@ -81,7 +67,7 @@ func automationRunDuration(run AutomationRun) string {
 		}
 		return "—"
 	}
-	return formatRunDuration(run.FinishedAt.Sub(run.StartedAt))
+	return formatDuration(run.FinishedAt.Sub(run.StartedAt))
 }
 
 func openAutomationRun(as *automationState, runID string) {

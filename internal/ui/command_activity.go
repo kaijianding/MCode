@@ -550,7 +550,7 @@ func renderRunningCommandHeader(c *ui.Context, s *chatState, m Message, fontFam 
 						if elapsed < 0 {
 							elapsed = 0
 						}
-						ui.Text(c, formatToolRunDuration(elapsed)).FontSize(scaledFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).Shrink(0)
+						ui.Text(c, formatDuration(elapsed)).FontSize(scaledFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).Shrink(0)
 					}
 				})
 			}

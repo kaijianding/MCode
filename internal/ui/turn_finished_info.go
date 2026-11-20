@@ -311,7 +311,7 @@ func formatTurnFinishedSummary(model string, stats turnToolStats, usage TokenUsa
 		parts = append(parts, fmt.Sprintf("改动 %d 个文件", stats.changedFiles))
 	}
 	if usage.Output > 0 {
-		parts = append(parts, "输出 "+formatTokens(usage.Output))
+		parts = append(parts, "输出 "+formatTokenCount(usage.Output))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -355,13 +355,13 @@ func formatTurnFinishedTooltip(info turnFinishedInfo) string {
 	if u.Input > 0 || u.Output > 0 || u.Cached > 0 {
 		parts := make([]string, 0, 3)
 		if u.Input > 0 {
-			parts = append(parts, "输入 "+formatTokens(u.Input))
+			parts = append(parts, "输入 "+formatTokenCount(u.Input))
 		}
 		if u.Output > 0 {
-			parts = append(parts, "输出 "+formatTokens(u.Output))
+			parts = append(parts, "输出 "+formatTokenCount(u.Output))
 		}
 		if u.Cached > 0 {
-			parts = append(parts, "缓存 "+formatTokens(u.Cached))
+			parts = append(parts, "缓存 "+formatTokenCount(u.Cached))
 		}
 		lines = append(lines, strings.Join(parts, " · ")+" tokens")
 	}

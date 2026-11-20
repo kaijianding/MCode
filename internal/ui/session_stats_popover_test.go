@@ -100,10 +100,10 @@ func TestSessionStatsLiveTotalGrowsWithoutMessages(t *testing.T) {
 					t.Fatalf("平均响应/输出速度不应随实时值变化: %v", tt.Texts())
 				}
 			}
-			assert("1m5s")
+			assert("1m 05s")
 			for secs := 6; secs <= 8; secs++ {
 				tt.Advance(time.Second)
-				assert(fmt.Sprintf("1m%ds", secs))
+				assert(fmt.Sprintf("1m %02ds", secs))
 			}
 		})
 	}
@@ -149,17 +149,17 @@ func TestSessionStatsLiveFrozenWhenMainTurnDone(t *testing.T) {
 			done := now.Add(-2 * time.Second).Format(time.RFC3339Nano)
 			s.messages[6].TurnStatus = "completed"
 			s.messages[6].TurnCompletedAt = done
-		}, "1m3s"},
+		}, "1m 03s"},
 		{"主轮完成仅子代理等待", func(s *chatState, now time.Time) {
 			s.threads[0].IsRunning = false
 			s.threads[0].SwarmBusy = true
 			done := now.Add(-2 * time.Second).Format(time.RFC3339Nano)
 			s.messages[6].TurnStatus = "completed"
 			s.messages[6].TurnCompletedAt = done
-		}, "1m3s"},
+		}, "1m 03s"},
 		{"乐观运行不读秒", func(s *chatState, now time.Time) {
 			s.optimisticRunning = map[string]bool{"t1": true}
-		}, "1m"},
+		}, "1m 00s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,21 +291,21 @@ func TestFormatLiveStatsDuration(t *testing.T) {
 		{500 * time.Millisecond, "0s"},
 		{10 * time.Second, "10s"},
 		{59 * time.Second, "59s"},
-		{time.Minute, "1m"},
-		{time.Minute + 500*time.Millisecond, "1m"},
-		{time.Minute + time.Second, "1m1s"},
-		{time.Hour, "1h"},
-		{time.Hour + 500*time.Millisecond, "1h"},
-		{time.Hour + 2*time.Minute, "1h2m"},
-		{time.Hour + 3*time.Second, "1h0m3s"},
-		{time.Hour + 2*time.Minute + 3*time.Second, "1h2m3s"},
+		{time.Minute, "1m 00s"},
+		{time.Minute + 500*time.Millisecond, "1m 00s"},
+		{time.Minute + time.Second, "1m 01s"},
+		{time.Hour, "1h 00m"},
+		{time.Hour + 500*time.Millisecond, "1h 00m"},
+		{time.Hour + 2*time.Minute, "1h 02m"},
+		{time.Hour + 3*time.Second, "1h 00m"},
+		{time.Hour + 2*time.Minute + 3*time.Second, "1h 02m"},
 	}
 	for _, tc := range cases {
 		if got := formatLiveStatsDuration(tc.d); got != tc.want {
 			t.Fatalf("formatLiveStatsDuration(%v) = %q, want %q", tc.d, got, tc.want)
 		}
 	}
-	if formatStatsDuration(time.Minute) != "1m" {
+	if formatStatsDuration(time.Minute) != "1m 00s" {
 		t.Fatal("平均响应格式不应改变")
 	}
 }

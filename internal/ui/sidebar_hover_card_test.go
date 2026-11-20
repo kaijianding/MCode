@@ -126,7 +126,7 @@ func TestSidebarHoverCardAIDurationAndContext(t *testing.T) {
 	hoverRow(t, tt, "统计卡会话")
 	tt.Advance(700 * time.Millisecond)
 	tt.Frame()
-	for _, want := range []string{"AI 用时", "1m5s", "总用时", "1m20s", "上下文", "90k / 200k · 45%"} {
+	for _, want := range []string{"AI 用时", "1m 05s", "总用时", "1m 20s", "上下文", "90k / 200k · 45%"} {
 		if _, ok := tt.Find(want); !ok {
 			t.Fatalf("expected hover card to contain %q, texts: %q", want, tt.Texts())
 		}

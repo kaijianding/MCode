@@ -1643,16 +1643,7 @@ func formatSwarmShortDuration(started time.Time, finished *time.Time) string {
 	if finished != nil && !finished.IsZero() {
 		end = *finished
 	}
-	dur := end.Sub(started)
-	if dur < 0 {
-		dur = 0
-	}
-	mins := int(dur.Minutes())
-	secs := int(dur.Seconds()) % 60
-	if mins > 0 {
-		return fmt.Sprintf("%dm %ds", mins, secs)
-	}
-	return fmt.Sprintf("%ds", secs)
+	return formatDuration(end.Sub(started))
 }
 
 // renderSwarmGlyph 渲染 bee 的龙形标识或首字圆形头像。

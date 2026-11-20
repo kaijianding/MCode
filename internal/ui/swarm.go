@@ -1308,12 +1308,9 @@ func reviewLayerLabel(layer string) string {
 	return layer
 }
 
-// formatReviewTokenCount 格式化审查消耗的 token 数，上千时以 k 为单位保留一位小数。
+// formatReviewTokenCount 格式化审查消耗的 token 数。
 func formatReviewTokenCount(n int, estimated bool) string {
-	count := strconv.Itoa(n)
-	if n >= 1000 {
-		count = fmt.Sprintf("%.1fk", float64(n)/1000)
-	}
+	count := formatTokenCount(int64(n))
 	if estimated {
 		return "约 " + count + " tokens"
 	}
@@ -2235,7 +2232,7 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 					}
 
 					// tokens & toolCalls
-					usageText := fmt.Sprintf("%s tokens · %d 工具调用", formatTokens(int64(h.Tokens)), h.ToolCalls)
+					usageText := fmt.Sprintf("%s tokens · %d 工具调用", formatTokenCount(int64(h.Tokens)), h.ToolCalls)
 					ui.Text(c, usageText).
 						FontSize(uiFont(TypeCaption)).
 						TextColor(ThemeSecondaryText(c))

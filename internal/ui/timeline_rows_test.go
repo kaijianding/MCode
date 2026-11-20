@@ -1689,7 +1689,7 @@ func TestAssistantMetaText(t *testing.T) {
 		{"UTC 输入", "claude-opus-4", 12 * time.Second, at.UTC(), "claude-opus-4 · 12s · 09:05"},
 		{"非本地时区输入", "claude-opus-4", 12 * time.Second, at.In(otherZone), "claude-opus-4 · 12s · 09:05"},
 		{"亚秒耗时", "gpt-5", 1200 * time.Millisecond, time.Time{}, "gpt-5 · 1.2s"},
-		{"分钟耗时", "gpt-5", 150 * time.Second, time.Time{}, "gpt-5 · 2m30s"},
+		{"分钟耗时", "gpt-5", 150 * time.Second, time.Time{}, "gpt-5 · 2m 30s"},
 		{"只有模型", "gpt-5", 0, time.Time{}, "gpt-5"},
 		{"模型带空白", "  gpt-5  ", 0, time.Time{}, "gpt-5"},
 		{"全部为空", "", 0, time.Time{}, ""},
@@ -2294,7 +2294,7 @@ func TestTurnFinishedDurationUsesWallClock(t *testing.T) {
 		t.Fatalf("完成行用时 = %v, want 1m40s", got)
 	}
 	// 独立完成行：用时取墙钟，速度分母回退到 DurationMs。
-	wantBlock := "已完成 · 用时 1m40s · 输出 4.1k · 146 t/s"
+	wantBlock := "已完成 · 用时 1m 40s · 输出 4.1k · 146 t/s"
 	duration := turnFinishedDuration(s, endMsg, usage)
 	blockText := formatTurnFinishedSummary("", turnToolStats{}, usage, duration)
 	blockText = appendTurnOutputSpeed(blockText, usage, resolveTurnDuration(usage, duration))

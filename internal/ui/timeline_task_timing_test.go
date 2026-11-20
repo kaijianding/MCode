@@ -272,12 +272,12 @@ func TestTaskTimingRealRegression(t *testing.T) {
 	if d := got.end.Sub(got.start); d != 385319665*time.Microsecond {
 		t.Fatalf("任务总跨度 = %v, want 385.319665s", d)
 	}
-	if s := formatShortDuration(got.end.Sub(got.start)); s != "6m25s" {
-		t.Fatalf("任务用时文本 = %q, want 6m25s", s)
+	if s := formatShortDuration(got.end.Sub(got.start)); s != "6m 25s" {
+		t.Fatalf("任务用时文本 = %q, want 6m 25s", s)
 	}
 	round := stampForTaskTest(t, taskTimingReportEnd).Sub(stampForTaskTest(t, taskTimingReportAt))
-	if s := formatShortDuration(round); s != "1m39s" {
-		t.Fatalf("本轮用时文本 = %q, want 1m39s", s)
+	if s := formatShortDuration(round); s != "1m 39s" {
+		t.Fatalf("本轮用时文本 = %q, want 1m 39s", s)
 	}
 }
 
@@ -302,7 +302,7 @@ func taskTimingFixtureState() (*chatState, Message) {
 func TestTaskTimingFinishedBlockUI(t *testing.T) {
 	usage := TokenUsage{Output: 1000}
 	round := stampForTaskTest(t, taskTimingReportEnd).Sub(stampForTaskTest(t, taskTimingReportAt))
-	wantText := "已完成 · 任务用时 6m25s · 输出 1.0k · 10 t/s · 结束 " +
+	wantText := "已完成 · 任务用时 6m 25s · 输出 1k · 10 t/s · 结束 " +
 		stampForTaskTest(t, taskTimingReportEnd).Local().Format("01-02 15:04:05")
 	var s *chatState
 	var final Message
@@ -315,7 +315,7 @@ func TestTaskTimingFinishedBlockUI(t *testing.T) {
 	if !hasExactText(tt, wantText) {
 		t.Fatalf("完成行文本不符，want %q，got %v", wantText, tt.Texts())
 	}
-	if tt.HasText("用时 1m39s ·") {
+	if tt.HasText("用时 1m 39s ·") {
 		t.Fatalf("完成行不应再把本轮用时当任务用时: %v", tt.Texts())
 	}
 	// 悬停完成行，tooltip 应显示任务起止与本轮用时。
@@ -337,7 +337,7 @@ func TestTaskTimingFinishedBlockUI(t *testing.T) {
 	for _, want := range []string{
 		"开始 " + stampForTaskTest(t, taskTimingOriginAt).Local().Format("01-02 15:04:05"),
 		"结束 " + stampForTaskTest(t, taskTimingReportEnd).Local().Format("01-02 15:04:05"),
-		"本轮用时 1m39s",
+		"本轮用时 1m 39s",
 	} {
 		if !strings.Contains(tip, want) {
 			t.Fatalf("tooltip 缺少 %q:\n%s", want, tip)
@@ -361,7 +361,7 @@ func TestTaskTimingFinishedBlockOrdinary(t *testing.T) {
 	usage := TokenUsage{Output: 1000}
 	round := stampForTaskTest(t, taskTimingOriginEnd).Sub(stampForTaskTest(t, taskTimingOriginAt))
 	// 1000 tokens ÷ 119.307091s ≈ 8 t/s，速度分母仍是本轮。
-	wantText := "已完成 · 用时 1m59s · 输出 1.0k · 8 t/s · 结束 " +
+	wantText := "已完成 · 用时 1m 59s · 输出 1k · 8 t/s · 结束 " +
 		stampForTaskTest(t, taskTimingOriginEnd).Local().Format("01-02 15:04:05")
 	tt := ui.NewTester(func(c *ui.Context) {
 		renderTurnFinishedBlockWithDuration(c, s, final, usage, round)
@@ -399,7 +399,7 @@ func TestTaskTimingReportItemPath(t *testing.T) {
 	}
 	usage := TokenUsage{Output: 1000}
 	round := stampForTaskTest(t, taskTimingReportEnd).Sub(stampForTaskTest(t, taskTimingReportAt))
-	wantText := "已完成 · 任务用时 6m25s · 输出 1.0k · 10 t/s · 结束 " +
+	wantText := "已完成 · 任务用时 6m 25s · 输出 1k · 10 t/s · 结束 " +
 		stampForTaskTest(t, taskTimingReportEnd).Local().Format("01-02 15:04:05")
 	tt := ui.NewTester(func(c *ui.Context) {
 		renderMessageItem(c, s, finalItem.msg, "", "", true, true, usage, round, false)

@@ -30,7 +30,7 @@ func toolBackgroundRunDuration(c *ui.Context, m Message) (string, bool) {
 		elapsed = 0
 	}
 	afterNextSecond(c)
-	return formatToolRunDuration(elapsed), true
+	return formatDuration(elapsed), true
 }
 
 // toolBackgroundBadge 返回后台任务胶囊上的状态文本「后台 · 12s」；不是后台任务时 ok 为 false。
@@ -69,21 +69,6 @@ func isToolRunning(m Message) bool {
 // 消息里没有完成时间（ToolCompletedAt 为空），结束后状态会变回 completed / failed。
 func isToolBackground(m Message) bool {
 	return strings.EqualFold(strings.TrimSpace(m.ToolStatus), "background")
-}
-
-// formatToolRunDuration 把运行时长格式化为「12s」「3m05s」「1h02m」；负值按 0 处理。
-func formatToolRunDuration(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d/time.Second))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm%02ds", int(d/time.Minute), int((d%time.Minute)/time.Second))
-	default:
-		return fmt.Sprintf("%dh%02dm", int(d/time.Hour), int((d%time.Hour)/time.Minute))
-	}
 }
 
 // toolIsRunningCommand 判断工具消息是否是一条仍在运行的命令类工具：
@@ -184,12 +169,12 @@ func (s *chatState) runningCommandBadge(c *ui.Context, m Message) (text string, 
 	if isToolRunning(m) || s.threadIsBusy(selectedThreadIDSnapshot(s)) {
 		afterNextSecond(c)
 	}
-	text = formatToolRunDuration(elapsed)
+	text = formatDuration(elapsed)
 	if len(activity.steps) >= 2 && activity.maxStep > 0 {
 		text = fmt.Sprintf("%d/%d · %s", activity.maxStep, len(activity.steps), text)
 	}
 	if activity.estimateSet && activity.estimate > elapsed {
-		text += " / ~" + formatToolRunDuration(activity.estimate)
+		text += " / ~" + formatDuration(activity.estimate)
 	}
 	if activity.hasProcess {
 		if activity.sampleCount >= 2 && elapsed >= toolRunStallMinRun && idleFor >= toolRunStallAfter && now.Sub(activity.lastBusyAt) >= toolRunStallAfter {

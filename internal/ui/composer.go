@@ -2525,7 +2525,7 @@ func contextUsagePercent(used, limit int64) float64 {
 
 // contextUsageTooltip 生成上下文圆环悬停提示文本，格式为「已用 X / 上限 Y tokens」。
 func contextUsageTooltip(used, limit int64) string {
-	return fmt.Sprintf("已用 %s / 上限 %s tokens", formatTokens(used), formatTokens(limit))
+	return fmt.Sprintf("已用 %s / 上限 %s tokens", formatTokenCount(used), formatTokenCount(limit))
 }
 
 // makeContextMeterSVG 生成包含背景圆环与进度圆弧的矢量图。

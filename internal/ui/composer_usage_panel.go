@@ -592,28 +592,6 @@ func quotaRecentAccount(windows []ProviderQuotaWindow) string {
 	return anyAccount
 }
 
-// formatTokenCount 将 Token 数量格式化为紧凑字符串（如 '76k', '1.2M', '950'）。
-func formatTokenCount(n int64) string {
-	if n < 0 {
-		return "-" + formatTokenCount(-n)
-	}
-	compact := func(val float64, suffix string) string {
-		s := fmt.Sprintf("%.1f", val)
-		s = strings.TrimSuffix(s, ".0")
-		return s + suffix
-	}
-	if n >= 1_000_000_000 {
-		return compact(float64(n)/1_000_000_000.0, "B")
-	}
-	if n >= 1_000_000 {
-		return compact(float64(n)/1_000_000.0, "M")
-	}
-	if n >= 1_000 {
-		return compact(float64(n)/1_000.0, "k")
-	}
-	return strconv.FormatInt(n, 10)
-}
-
 // quotaGroupPlan 返回账户组里第一个非空的套餐名。
 func quotaGroupPlan(windows []ProviderQuotaWindow) string {
 	for _, w := range windows {

@@ -119,25 +119,6 @@ func getCachedDownloads(s *chatState) ([]downloadEntry, error) {
 	return items, err
 }
 
-// formatFileSize 将字节数格式化为易读的文件大小字符串。
-func formatFileSize(bytes int64) string {
-	if bytes < 1024 {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	units := []string{"KB", "MB", "GB", "TB"}
-	v := float64(bytes) / 1024.0
-	for _, u := range units {
-		if v < 1024.0 || u == "TB" {
-			if v >= 100 || v == float64(int(v)) {
-				return fmt.Sprintf("%.0f %s", v, u)
-			}
-			return fmt.Sprintf("%.1f %s", v, u)
-		}
-		v /= 1024.0
-	}
-	return fmt.Sprintf("%d B", bytes)
-}
-
 var pickFilesDialog func() ([]string, bool, error) = defaultPickFiles
 
 func defaultPickFiles() ([]string, bool, error) {

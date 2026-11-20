@@ -1287,7 +1287,7 @@ func TestFormatReviewTokenCount(t *testing.T) {
 		want      string
 	}{
 		{999, false, "999 tokens"},
-		{1000, false, "1.0k tokens"},
+		{1000, false, "1k tokens"},
 		{3200, true, "约 3.2k tokens"},
 		{420, true, "约 420 tokens"},
 	}

@@ -460,11 +460,7 @@ func buildTrayQuotaModel(groups []TrayQuotaGroup, refreshedAt, now time.Time, lo
 		if diff > usageStaleAfter {
 			m.IsStale = true
 		}
-		if diff < time.Minute {
-			m.UpdatedText = "刚刚更新"
-		} else {
-			m.UpdatedText = fmt.Sprintf("%d 分钟前更新", int(diff.Minutes()))
-		}
+		m.UpdatedText = formatRelativeTimeAt(refreshedAt, now) + "更新"
 	}
 
 	for _, g := range groups {

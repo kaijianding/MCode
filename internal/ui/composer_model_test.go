@@ -614,8 +614,8 @@ func TestContextUsageCalculation(t *testing.T) {
 	}
 
 	tooltip := contextUsageTooltip(500, 2000)
-	if tooltip != "已用 500 / 上限 2.0k tokens" {
-		t.Errorf("contextUsageTooltip(500, 2000) = %q, want %q", tooltip, "已用 500 / 上限 2.0k tokens")
+	if tooltip != "已用 500 / 上限 2k tokens" {
+		t.Errorf("contextUsageTooltip(500, 2000) = %q, want %q", tooltip, "已用 500 / 上限 2k tokens")
 	}
 }
 

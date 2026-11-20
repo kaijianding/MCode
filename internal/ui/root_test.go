@@ -505,29 +505,6 @@ func TestRootMultiProvidersSelectionAndDisplay(t *testing.T) {
 	})
 }
 
-func TestFormatTokens(t *testing.T) {
-	tests := []struct {
-		input int64
-		want  string
-	}{
-		{0, "0"},
-		{356, "356"},
-		{999, "999"},
-		{1000, "1.0k"},
-		{1200, "1.2k"},
-		{8400, "8.4k"},
-		{12300, "12.3k"},
-		{12345, "12.3k"},
-	}
-
-	for _, tc := range tests {
-		got := formatTokens(tc.input)
-		if got != tc.want {
-			t.Errorf("formatTokens(%d) = %q, want %q", tc.input, got, tc.want)
-		}
-	}
-}
-
 func TestRootThreadUsageDisplay(t *testing.T) {
 	fake := NewFakeClient()
 	fake.messages["t1"] = []Message{
