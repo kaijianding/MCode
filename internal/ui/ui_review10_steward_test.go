@@ -117,11 +117,11 @@ func TestUIReview10QuotaWarningText(t *testing.T) {
 		renderQuotaGroupList(c, "warn96-", groups96, quotaGroupListOptions{})
 	}, 500, 300)
 	tt96.Frame()
-	if !tt96.HasText("5 小时") || !tt96.HasText("即将用尽") {
-		t.Fatalf("96%% 警告应包含窗口名与即将用尽: %v", tt96.Texts())
+	if !tt96.HasText("5 小时") || !tt96.HasText("96%") {
+		t.Fatalf("96%% 应包含窗口名与百分比: %v", tt96.Texts())
 	}
-	if tt96.HasText("重置于") || tt96.HasText("13:45") {
-		t.Fatalf("96%% 警告不应重复拼接重置时刻: %v", tt96.Texts())
+	if tt96.HasText("即将用尽") || tt96.HasText("已用尽") || tt96.HasText("重置于") || tt96.HasText("13:45") {
+		t.Fatalf("96%% 不应重复拼接用尽警告或重置时刻: %v", tt96.Texts())
 	}
 
 	groups100 := []trayQuotaGroupModel{{
@@ -138,10 +138,10 @@ func TestUIReview10QuotaWarningText(t *testing.T) {
 		renderQuotaGroupList(c, "warn100-", groups100, quotaGroupListOptions{})
 	}, 500, 300)
 	tt100.Frame()
-	if !tt100.HasText("每周") || !tt100.HasText("已用尽") {
-		t.Fatalf("100%% 警告应包含窗口名与已用尽: %v", tt100.Texts())
+	if !tt100.HasText("每周") || !tt100.HasText("100%") {
+		t.Fatalf("100%% 应包含窗口名与百分比: %v", tt100.Texts())
 	}
-	if tt100.HasText("即将用尽") || tt100.HasText("重置于") {
-		t.Fatalf("100%% 警告不应包含即将用尽或重置时刻: %v", tt100.Texts())
+	if tt100.HasText("即将用尽") || tt100.HasText("已用尽") || tt100.HasText("重置于") {
+		t.Fatalf("100%% 不应包含重复用尽警告或重置时刻: %v", tt100.Texts())
 	}
 }

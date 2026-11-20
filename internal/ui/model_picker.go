@@ -1645,6 +1645,7 @@ func renderTierEditingBanner(c *ui.Context, p ModelPickerProps, state *ModelPick
 	ui.Row(c.Key(p.KeyPrefix+"tier-editing-banner")).
 		AlignItems(ui.Center).
 		Justify(ui.SpaceBetween).
+		Gap(Space2).
 		Padding(Space2, Space3).
 		Radius(RadiusSM).
 		Background(ThemeAccent(c).Alpha(0.12)).
@@ -1653,13 +1654,17 @@ func renderTierEditingBanner(c *ui.Context, p ModelPickerProps, state *ModelPick
 			ui.Text(c, fmt.Sprintf("正在为「%s」档选择模型", tierName)).
 				FontSize(uiFont(TypeFootnote)).
 				TextColor(modelPickerTextPrimary).
-				SingleLine()
+				SingleLine().
+				MinWidth(0).
+				Shrink(1).
+				Ellipsis("…")
 			cancelBtn := ui.ButtonBase(c.Key(p.KeyPrefix+"tier-editing-cancel")).
 				Label("取消").
 				Tooltip("取消选择").
 				Padding(Space0, Space2).
 				Radius(RadiusXS).
 				Center().
+				Shrink(0).
 				Background(ui.Transparent)
 			if cancelBtn.Hovered() {
 				cancelBtn.Background(ColorHoverDark)
@@ -1711,7 +1716,8 @@ func renderModelPickerTiersSection(c *ui.Context, p ModelPickerProps, state *Mod
 							Height(ControlLG).
 							Padding(0, Space3).
 							Radius(RadiusMD).
-							Grow(1)
+							Grow(1).
+							MinWidth(0)
 						if rowBtn.Hovered() || isEditing {
 							rowBtn.Background(ColorHoverDark)
 						} else {
@@ -1727,23 +1733,31 @@ func renderModelPickerTiersSection(c *ui.Context, p ModelPickerProps, state *Mod
 							ui.Row(c.Key(p.KeyPrefix + "tier-row-content-" + tier.ID)).
 								AlignItems(ui.Center).
 								Justify(ui.SpaceBetween).
+								Gap(Space2).
 								Grow(1).
+								MinWidth(0).
 								Children(func() {
 									renderSwarmTierChip(c, p.KeyPrefix+"tier-chip-"+tier.ID, tier.Name, tier.ID, tier.ReadOnly)
 									ui.Row(c.Key(p.KeyPrefix + "tier-row-right-" + tier.ID)).
 										AlignItems(ui.Center).
 										Gap(Space2).
+										MinWidth(0).
+										Shrink(1).
 										Children(func() {
 											ui.Text(c, effectiveText).
 												FontSize(uiFont(TypeFootnote)).
 												TextColor(modelPickerTextSecondary).
-												SingleLine()
+												SingleLine().
+												MinWidth(0).
+												Shrink(1).
+												Ellipsis("…")
 											if hasSessionOverride {
 												ui.Box(c.Key(p.KeyPrefix+"tier-dot-"+tier.ID)).
 													Size(6, 6).
 													Radius(RadiusPill).
 													Background(ThemeAccent(c)).
-													Tooltip("会话覆盖")
+													Tooltip("会话覆盖").
+													Shrink(0)
 											}
 										})
 								})
@@ -1755,7 +1769,8 @@ func renderModelPickerTiersSection(c *ui.Context, p ModelPickerProps, state *Mod
 								Tooltip("恢复").
 								Size(26, 26).
 								Radius(RadiusPill).
-								Center()
+								Center().
+								Shrink(0)
 							if btnReset.Hovered() {
 								btnReset.Background(ColorHoverDark)
 							} else {

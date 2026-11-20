@@ -35,6 +35,11 @@ func modelPickerPageTransition(c *ui.Context, el ui.Element, state *ModelPickerS
 	if state == nil {
 		return
 	}
+	if reduceMotion(c) {
+		state.pageDepth = depth
+		el.Translate(0, 0).Opacity(1)
+		return
+	}
 	if depth != state.pageDepth {
 		if depth < state.pageDepth {
 			state.pageDir = -1

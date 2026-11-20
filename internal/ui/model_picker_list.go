@@ -403,6 +403,9 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 			FontWeight(600).
 			TextColor(modelPickerTextPrimary).
 			SingleLine().
+			MinWidth(0).
+			Shrink(1).
+			Ellipsis("…").
 			Grow(1)
 		if trailing != nil {
 			trailing()
@@ -414,7 +417,8 @@ func renderModelPickerAgentHeader(c *ui.Context, key string, icon func(), title 
 			}
 			arrow := ui.Icon(c.Key(key+"-arrow"), IconChevronRight()).
 				Size(10, 10).
-				TextColor(modelPickerTextSecondary)
+				TextColor(modelPickerTextSecondary).
+				Shrink(0)
 			if reduceMotion(c) {
 				arrow.Rotate(angle)
 			} else {

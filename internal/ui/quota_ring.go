@@ -106,8 +106,10 @@ func renderComposerQuotaRing(c *ui.Context, key, label string, outer, inner *quo
 	if inner != nil {
 		innerValue = float32(inner.used / 100)
 	}
-	outerValue = host.AnimateTo("outer", outerValue, ui.Animation{Duration: animateDuration(c, DurSlow), Ease: ui.EaseOut})
-	innerValue = host.AnimateTo("inner", innerValue, ui.Animation{Duration: animateDuration(c, DurSlow), Ease: ui.EaseOut})
+	if !reduceMotion(c) {
+		outerValue = host.AnimateTo("outer", outerValue, ui.Animation{Duration: animateDuration(c, DurSlow), Ease: ui.EaseOut})
+		innerValue = host.AnimateTo("inner", innerValue, ui.Animation{Duration: animateDuration(c, DurSlow), Ease: ui.EaseOut})
+	}
 	outerColor, innerColor := ThemeSecondaryText(c), ThemeSecondaryText(c)
 	if outer != nil {
 		outerColor = quotaLevelColor(c, outer.used)

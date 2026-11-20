@@ -11,21 +11,20 @@ func TestQuotaWarningThreshold(t *testing.T) {
 	for _, tc := range []struct {
 		used  float64
 		reset time.Time
-		want  string
+		pct   string
 	}{
-		{94.9, time.Time{}, ""},
-		{95, time.Time{}, "5h: 即将用尽"},
-		{100, time.Date(2026, 1, 1, 13, 45, 0, 0, time.Local), "5h: 已用尽"},
+		{94.9, time.Time{}, "95%"},
+		{95, time.Time{}, "95%"},
+		{100, time.Date(2026, 1, 1, 13, 45, 0, 0, time.Local), "100%"},
 	} {
 		groups := []trayQuotaGroupModel{{Title: "测试", Accounts: []trayQuotaAccountModel{{Windows: []trayQuotaWindowModel{{ShortLabel: "5h", UsedPercent: tc.used, resetsAt: tc.reset}}}}}}
 		tt := ui.NewTester(func(c *ui.Context) { renderQuotaGroupList(c, "test-", groups, quotaGroupListOptions{}) }, 500, 300)
 		tt.Frame()
-		if tc.want == "" {
-			if tt.HasText("即将用尽") || tt.HasText("已用尽") {
-				t.Fatalf("%.1f 不应显示提示", tc.used)
-			}
-		} else if !tt.HasText(tc.want) {
-			t.Fatalf("%.1f 缺少 %q: %v", tc.used, tc.want, tt.Texts())
+		if !tt.HasText("5h") || !tt.HasText(tc.pct) {
+			t.Fatalf("%.1f 缺少窗口或百分比 %q: %v", tc.used, tc.pct, tt.Texts())
+		}
+		if tt.HasText("即将用尽") || tt.HasText("已用尽") {
+			t.Fatalf("%.1f 不应额外显示重复用尽提示: %v", tc.used, tt.Texts())
 		}
 		if tt.HasText("重置于") {
 			t.Fatalf("%.1f 不应重复拼接重置时刻: %v", tc.used, tt.Texts())

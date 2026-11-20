@@ -365,7 +365,10 @@ func renderEffortSignal(c *ui.Context, key string, props EffortSliderCardProps) 
 	colors := effortTitleGradient(props)
 
 	row := ui.Row(c.Key(key)).Height(IconSM).Gap(Space0).AlignItems(ui.End)
-	progress := row.AnimateWith(key+"/progress", float32(filled), animateDuration(c, effortSignalDuration), ui.EaseOut)
+	progress := float32(filled)
+	if !reduceMotion(c) {
+		progress = row.AnimateWith(key+"/progress", float32(filled), animateDuration(c, effortSignalDuration), ui.EaseOut)
+	}
 	row.Children(func() {
 		for i := 0; i < n; i++ {
 			bar := ui.Box(c.Key(fmt.Sprintf("%s/bar-%d", key, i))).

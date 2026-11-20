@@ -201,11 +201,13 @@ func collectSessionStats(s *chatState, threadID string, now time.Time) sessionSt
 	}
 
 	if hp := getSwarmPanelState(s); hp != nil {
+		swarmPanelMu.Lock()
 		for _, h := range hp.state.Bees {
 			st.bees++
 			st.beeTokens += h.Tokens
 			st.beeToolCalls += h.ToolCalls
 		}
+		swarmPanelMu.Unlock()
 	}
 
 	if st.usage.Total.Input > 0 || st.usage.Total.Output > 0 {
@@ -481,7 +483,7 @@ func renderSessionStatsPopover(c *ui.Context, s *chatState, threadID, key string
 		sessionStatsGroup(c, key+"-change", "改动", changeRows)
 		sessionStatsGroup(c, key+"-bees", "子代理", beeRows)
 		if st.hasCost {
-			sessionStatsGroup(c, key+"-cost", "费用", [][2]string{{"估算费用", fmt.Sprintf("≈ $%.2f", st.costUSD)}})
+			sessionStatsGroup(c, key+"-cost", "", [][2]string{{"估算费用", fmt.Sprintf("≈ $%.2f", st.costUSD)}})
 		}
 		if len(tokenRows)+len(activityRows)+len(toolRows)+len(timeRows)+len(changeRows)+len(beeRows) == 0 {
 			ui.Text(c, "暂无统计数据").
@@ -497,13 +499,17 @@ func sessionStatsGroup(c *ui.Context, key, title string, rows [][2]string) {
 	if len(rows) == 0 {
 		return
 	}
-	ui.Row(c.Key(key + "-header")).Gap(Space2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).
-			FontSize(scaledFont(TypeCaption)).
-			Bold().
-			TextColor(ThemeSecondaryText(c))
-		ui.Box(c.Key(key + "-header-line")).Height(Hairline).Grow(1).Background(ThemeDivider(c))
-	})
+	if title != "" {
+		ui.Row(c.Key(key + "-header")).Gap(Space2).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, title).
+				FontSize(scaledFont(TypeCaption)).
+				Bold().
+				TextColor(ThemeSecondaryText(c))
+			ui.Box(c.Key(key + "-header-line")).Height(Hairline).Grow(1).Background(ThemeDivider(c))
+		})
+	} else {
+		ui.Box(c.Key(key + "-divider")).Height(Hairline).FillWidth().Background(ThemeDivider(c))
+	}
 	for i, r := range rows {
 		ui.Row(c.Key(fmt.Sprintf("%s-row-%d", key, i))).
 			FillWidth().

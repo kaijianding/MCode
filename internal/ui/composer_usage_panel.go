@@ -30,14 +30,22 @@ const composerCreditsTTL = time.Minute
 type composerCreditsEntry struct {
 	credits  ProviderCredits
 	ok       bool
+	err      string
+	loading  bool
 	loadedAt time.Time
+}
+
+type composerCreditsOpenTracker struct {
+	usageOpen bool
+	quotaOpen bool
 }
 
 // composerCreditsByChat 按 chatState 旁挂缓存 Composer 展示的提供方余额（chatState 字段不在本文件，
 // 用旁挂表保存）。键是 chatState 指针，随会话对象存活；读写统一由 composerCreditsMu 保护。
 var (
-	composerCreditsMu     sync.Mutex
-	composerCreditsByChat = make(map[*chatState]map[string]composerCreditsEntry)
+	composerCreditsMu         sync.Mutex
+	composerCreditsByChat     = make(map[*chatState]map[string]composerCreditsEntry)
+	composerCreditsOpenByChat = make(map[*chatState]composerCreditsOpenTracker)
 )
 
 // SetChatCreditsForProvider 为指定 chatState 与 provider 注入余额缓存（测试或外部注入用）。
@@ -69,6 +77,92 @@ func getChatCreditsForProvider(s *chatState, provider string) (ProviderCredits, 
 	return entry.credits, true
 }
 
+// getChatCreditsErrForProvider 读取 provider 最近一次余额读取失败的简短错误文案。
+func getChatCreditsErrForProvider(s *chatState, provider string) string {
+	provider = strings.TrimSpace(provider)
+	if s == nil || provider == "" {
+		return ""
+	}
+	composerCreditsMu.Lock()
+	defer composerCreditsMu.Unlock()
+	return composerCreditsByChat[s][provider].err
+}
+
+// clearComposerCreditsErr 清除指定 provider 的余额错误，使下次打开浮层时照常重试。
+func (s *chatState) clearComposerCreditsErr(provider string) {
+	provider = strings.TrimSpace(provider)
+	if s == nil || provider == "" {
+		return
+	}
+	composerCreditsMu.Lock()
+	if entries := composerCreditsByChat[s]; entries != nil {
+		if entry, ok := entries[provider]; ok && entry.err != "" {
+			entry.err = ""
+			entries[provider] = entry
+		}
+	}
+	composerCreditsMu.Unlock()
+}
+
+// markComposerCreditsPopoverOpen 记录某类浮层曾经处于打开状态，用于关闭后重置错误缓存。
+func markComposerCreditsPopoverOpen(s *chatState, usage, quota bool) {
+	if s == nil {
+		return
+	}
+	composerCreditsMu.Lock()
+	tr := composerCreditsOpenByChat[s]
+	if usage {
+		tr.usageOpen = true
+	}
+	if quota {
+		tr.quotaOpen = true
+	}
+	composerCreditsOpenByChat[s] = tr
+	composerCreditsMu.Unlock()
+}
+
+// syncComposerCreditsPopoverState 在浮层从打开变为关闭时清理余额错误，保证下次打开浮层照常重试。
+func syncComposerCreditsPopoverState(s *chatState) {
+	if s == nil {
+		return
+	}
+	composerCreditsMu.Lock()
+	tr := composerCreditsOpenByChat[s]
+	closed := (tr.usageOpen && !s.composerView.usageOpen) || (tr.quotaOpen && !s.composerView.quotaOpen)
+	if tr.usageOpen && !s.composerView.usageOpen {
+		tr.usageOpen = false
+	}
+	if tr.quotaOpen && !s.composerView.quotaOpen {
+		tr.quotaOpen = false
+	}
+	composerCreditsOpenByChat[s] = tr
+	if closed {
+		if entries := composerCreditsByChat[s]; entries != nil {
+			for k, entry := range entries {
+				if entry.err != "" {
+					entry.err = ""
+					entries[k] = entry
+				}
+			}
+		}
+	}
+	composerCreditsMu.Unlock()
+}
+
+func formatComposerCreditsErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "余额读取超时"
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "余额读取失败"
+	}
+	return "余额读取失败: " + msg
+}
+
 // loadComposerCreditsForProvider 后台加载 provider 的余额：同一 provider 一分钟内不重复请求。
 // 后端未实现或不支持余额时不写入数据，因此这类 provider 不会出现在面板上。
 func (s *chatState) loadComposerCreditsForProvider(provider string, force bool) {
@@ -84,16 +178,27 @@ func (s *chatState) loadComposerCreditsForProvider(provider string, force bool) 
 		composerCreditsByChat[s] = entries
 	}
 	prev := entries[provider]
-	if !force && !prev.loadedAt.IsZero() && now.Sub(prev.loadedAt) < composerCreditsTTL {
+	if prev.loading {
 		composerCreditsMu.Unlock()
 		return
 	}
-	// 先写入读取时间作为占位，避免同一 TTL 窗口内并发渲染重复发起请求。
-	entries[provider] = composerCreditsEntry{credits: prev.credits, ok: prev.ok, loadedAt: now}
+	if !force && prev.err == "" && !prev.loadedAt.IsZero() && now.Sub(prev.loadedAt) < composerCreditsTTL {
+		composerCreditsMu.Unlock()
+		return
+	}
+	if !force && prev.err != "" {
+		// 当前打开期间已失败，避免逐帧重复请求；关闭重开或手动刷新时清除 err 后再重试。
+		composerCreditsMu.Unlock()
+		return
+	}
+	// 先写入 loading 占位，避免同一并发渲染重复发起请求；不提前写 loadedAt，失败时保持零值。
+	entries[provider] = composerCreditsEntry{credits: prev.credits, ok: prev.ok, loading: true, loadedAt: prev.loadedAt}
 	composerCreditsMu.Unlock()
 
 	go func() {
-		credits, err := s.client.ProviderCredits(context.Background(), provider)
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		defer cancel()
+		credits, err := s.client.ProviderCredits(ctx, provider)
 		composerCreditsMu.Lock()
 		entries := composerCreditsByChat[s]
 		if entries == nil {
@@ -108,8 +213,12 @@ func (s *chatState) loadComposerCreditsForProvider(provider string, force bool) 
 			// 该 provider 没有余额接口：不展示，TTL 内不再请求。
 			entry = composerCreditsEntry{loadedAt: time.Now()}
 		default:
-			// 读取失败：保留上一次的结果，TTL 过后再重试。
-			entry.loadedAt = time.Now()
+			// 读取失败：保留上一次的余额结果（若有），记录错误且不写 loadedAt，下次打开浮层时照常重试。
+			entry = composerCreditsEntry{
+				credits: entry.credits,
+				ok:      entry.ok,
+				err:     formatComposerCreditsErr(err),
+			}
 		}
 		entries[provider] = entry
 		composerCreditsMu.Unlock()
@@ -641,6 +750,23 @@ func renderComposerCreditsRow(c *ui.Context, key string, credits ProviderCredits
 		})
 }
 
+// renderComposerCreditsErrRow 在原本显示余额的位置展示一行错误色简短提示。
+func renderComposerCreditsErrRow(c *ui.Context, key, errText string) {
+	ui.Row(c.Key(key)).
+		FillWidth().
+		AlignItems(ui.Center).
+		Gap(Space3).
+		Children(func() {
+			ui.Text(c, errText).
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(ThemeDanger(c)).
+				SingleLine().
+				Ellipsis("…").
+				MinWidth(0).
+				Shrink(1)
+		})
+}
+
 // formatTurnCostUSD 把单轮费用格式化成面板里的一行文本，金额保留 4 位小数；
 // 金额不大于 0（provider 未上报）时返回空串，面板不显示费用行。
 func formatTurnCostUSD(cost float64) string {
@@ -650,14 +776,20 @@ func formatTurnCostUSD(cost float64) string {
 	return fmt.Sprintf("本轮费用 $%.4f", cost)
 }
 
+const usagePopoverWidth float32 = 360
+
 // renderUsagePanel 渲染上下文用量浮窗内容（卡片外观由 PopoverBase 的外层面板提供）。
 func renderUsagePanel(c *ui.Context, s *chatState, th *Thread) {
+	if s != nil && s.composerView.usageOpen {
+		markComposerCreditsPopoverOpen(s, true, false)
+	}
 	threadProvider := ""
 	if th != nil {
 		threadProvider = th.Provider
 	}
 	popoverCardShadow(ui.Column(c.Key("composer-usage-panel")).
-		Width(360).
+		Label("上下文用量面板").
+		Width(clampPopoverWidth(c, usagePopoverWidth)).
 		Padding(Space4, Space5, Space4, Space5).
 		Gap(Space4).
 		Radius(RadiusMD).
@@ -753,12 +885,18 @@ func renderUsagePanel(c *ui.Context, s *chatState, th *Thread) {
 
 			// 预付费余额：仅当 provider 支持余额接口时出现（如 DeepSeek、Z.ai）。
 			s.loadComposerCreditsForProvider(threadProvider, false)
-			if credits, ok := getChatCreditsForProvider(s, threadProvider); ok {
+			credits, hasCredits := getChatCreditsForProvider(s, threadProvider)
+			creditsErr := getChatCreditsErrForProvider(s, threadProvider)
+			if creditsErr != "" || hasCredits {
 				ui.Row(c.Key("composer-usage-credits-divider")).
 					FillWidth().
 					Height(Hairline).
 					Background(ThemeDivider(c))
-				renderComposerCreditsRow(c, "composer-usage-credits", credits)
+				if creditsErr != "" {
+					renderComposerCreditsErrRow(c, "composer-usage-credits-err", creditsErr)
+				} else {
+					renderComposerCreditsRow(c, "composer-usage-credits", credits)
+				}
 			}
 		}))
 }
@@ -926,7 +1064,22 @@ func composerQuotaGroupModels(provider, title string, windows []ProviderQuotaWin
 	return models
 }
 
-const quotaPopoverWidth float32 = 440
+const (
+	quotaPopoverWidth  float32 = 440
+	quotaPopoverMargin float32 = 8
+)
+
+// clampPopoverWidth 把浮层理想宽度限制在「窗口宽 - 2*边距」之内，避免窄窗口溢出。
+func clampPopoverWidth(c *ui.Context, ideal float32) float32 {
+	if c == nil {
+		return ideal
+	}
+	winW, _ := c.Size()
+	if winW <= 0 {
+		return ideal
+	}
+	return min(ideal, max(0, winW-2*quotaPopoverMargin))
+}
 
 // quotaStripGroup 是额度条里的一组读数：一个供应商对应一组。
 type quotaStripGroup struct {
@@ -1110,6 +1263,7 @@ func quotaStripPlans(s *chatState, groups []quotaStripGroup) []quotaStripPlan {
 // 两者都没有时这组显示「额度未知」，不借用其他账户的数字。
 // 嵌入状态（浮动面板里的子代理输入框）同样渲染，用的是该子代理会话的供应商。
 func renderComposerQuotaStrip(c *ui.Context, s *chatState, th *Thread, tiers ...composerChinSize) {
+	syncComposerCreditsPopoverState(s)
 	tier := composerChinFull
 	if len(tiers) > 0 {
 		tier = tiers[0]
@@ -1700,6 +1854,7 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 			}
 			s.composerView.quotaOpen = true
 			s.composerView.quotaPopoverProvider = provider
+			s.clearComposerCreditsErr(provider)
 			s.loadComposerQuotaForProvider(provider, plan.group.threadID, plan.group.model, false)
 		})
 	if groupOpen || group.Hovered() {
@@ -1793,10 +1948,12 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 	if contentMaxHeight > Space2*2 {
 		contentMaxHeight -= Space2 * 2
 	}
+	popoverW := clampPopoverWidth(c, quotaPopoverWidth)
 	popover := PopoverCard(c, group, PopoverProps{
 		Key:       "composer-quota-popover-" + keySuffix,
 		Open:      &open,
-		Width:     quotaPopoverWidth,
+		Width:     popoverW,
+		MaxWidth:  popoverW,
 		MaxHeight: popoverMaxHeight,
 	}, func() {
 		renderComposerQuotaPopover(c, s, th, provider, contentMaxHeight, plan.group)
@@ -1805,6 +1962,7 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 	if groupOpen && popover.Dismissed() {
 		s.composerView.quotaOpen = false
 		s.composerView.quotaPopoverProvider = ""
+		s.clearComposerCreditsErr(provider)
 	}
 	return true
 }
@@ -2193,6 +2351,9 @@ func composerQuotaPopoverMaxHeight(c *ui.Context, anchor ui.Element) float32 {
 // 额度列表。弹层由额度条里被点击的 provider 组锚定，因此只展示这一个 provider 的额度。
 // maxHeight 大于 0 时面板与列表都不超过它，供应商再多也不会长出窗口。
 func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provider string, maxHeight float32, quotaGroups ...quotaStripGroup) {
+	if s != nil && s.composerView.quotaOpen {
+		markComposerCreditsPopoverOpen(s, false, true)
+	}
 	g := quotaStripGroup{provider: provider}
 	if len(quotaGroups) > 0 {
 		g = quotaGroups[0]
@@ -2228,18 +2389,28 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 			AlignItems(ui.Center).
 			Gap(Space2).
 			Children(func() {
-				renderProviderIconColor(c, provider, IconMD, ThemeSecondaryText(c))
+				ui.Box(c.Key("composer-quota-popover-icon")).
+					Size(IconMD, IconMD).
+					Center().
+					Shrink(0).
+					Children(func() {
+						renderProviderIconColor(c, provider, IconMD, ThemeSecondaryText(c))
+					})
 				ui.Text(c, title).
 					FontSize(uiFont(FontSizeTitle3)).
 					FontWeight(600).
 					TextColor(ThemePrimaryText(c)).
-					SingleLine()
+					SingleLine().
+					MinWidth(0).
+					Shrink(1).
+					Ellipsis("…")
 
 				if len(groups) == 1 && groups[0].Plan != "" {
 					ui.Text(c, "· "+groups[0].Plan).
 						FontSize(uiFont(TypeFootnote)).
 						TextColor(ThemeSecondaryText(c)).
-						SingleLine()
+						SingleLine().
+						Shrink(0)
 				}
 				ui.Spacer(c)
 				if len(groups) == 1 && groups[0].HeadText != "" {
@@ -2247,7 +2418,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 					if groups[0].HeadWarn {
 						textColor = ThemeWarning(c)
 					}
-					ui.Text(c, groups[0].HeadText).FontSize(uiFont(TypeFootnote)).TextColor(textColor).SingleLine()
+					ui.Text(c, groups[0].HeadText).FontSize(uiFont(TypeFootnote)).TextColor(textColor).SingleLine().Shrink(0)
 				}
 
 				refresh := ui.ButtonBase(c.Key("composer-quota-refresh")).
@@ -2256,6 +2427,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 					Height(ControlSM).
 					Radius(RadiusPill).
 					Padding(0, Space3).
+					Shrink(0).
 					Background(ThemeSurface(c)).
 					OnClick(func() {
 						// 先让网关重新向厂商读取，结束后无论成败都会重新拉额度与余额。
@@ -2267,14 +2439,20 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 				refresh.Children(func() {
 					ui.Text(c, composerQuotaRefreshLabel(s, provider)).
 						FontSize(uiFont(FontSizeProjectName)).
-						TextColor(ThemePrimaryText(c))
+						TextColor(ThemePrimaryText(c)).
+						SingleLine()
 				})
 			})
 
 		// 预付费余额：仅当 provider 支持余额接口时出现，与额度列表并列。
 		s.loadComposerCreditsForProvider(provider, false)
 		credits, hasCredits := getChatCreditsForProvider(s, provider)
-		if hasCredits {
+		creditsErr := getChatCreditsErrForProvider(s, provider)
+		if creditsErr != "" {
+			ui.Row(c.Key("composer-quota-credits-wrapper")).FillWidth().Padding(0, Space4).Children(func() {
+				renderComposerCreditsErrRow(c, "composer-quota-credits-err", creditsErr)
+			})
+		} else if hasCredits {
 			ui.Row(c.Key("composer-quota-credits-wrapper")).FillWidth().Padding(0, Space4).Children(func() {
 				renderComposerCreditsRow(c, "composer-quota-credits", credits)
 			})
@@ -2408,7 +2586,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 			if listMax > 0 {
 				// 面板上下内边距 Space4*2、标题行 ControlSM、列表上方间距 Space4；余额行约 ControlXS 再加同样的间距。
 				listMax -= Space4*2 + ControlSM + Space4
-				if hasCredits {
+				if hasCredits || creditsErr != "" {
 					listMax -= ControlXS + Space4
 				}
 				if errText != "" {

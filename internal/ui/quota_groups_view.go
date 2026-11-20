@@ -126,7 +126,8 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 								ui.Box(c.Key(fmt.Sprintf("%s-dot-%d", accKey, n))).
 									Size(Space2, Space2).
 									Radius(RadiusPill).
-									Background(dotColor)
+									Background(dotColor).
+									Shrink(0)
 							}
 
 							// 进度条：整行与半格共用，填充与配速虚影逻辑保持一致；fixedWidth 为 0 表示撑满剩余宽度。
@@ -358,10 +359,13 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 												AlignItems(ui.Center).
 												Children(func() {
 													ui.Box(c.Key(accKey + "-name-indent")).
-														Width(rowIndent)
+														Width(rowIndent).
+														Shrink(0)
 
 													ui.Row(c.Key(accKey + "-name")).
 														Grow(1).
+														MinWidth(0).
+														Shrink(1).
 														AlignItems(ui.Center).
 														Gap(Space3).
 														Children(func() {
@@ -379,7 +383,8 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 																ui.Text(c, "· "+curAcc.Plan).
 																	FontSize(uiFont(TypeFootnote)).
 																	TextColor(ThemeSecondaryText(c)).
-																	SingleLine()
+																	SingleLine().
+																	Shrink(0)
 															}
 
 															ui.Spacer(c)
@@ -392,29 +397,15 @@ func renderQuotaGroupList(c *ui.Context, keyPrefix string, groups []trayQuotaGro
 																ui.Text(c, curAcc.HeadText).
 																	FontSize(uiFont(TypeFootnote)).
 																	TextColor(textColor).
-																	SingleLine()
+																	SingleLine().
+																	Shrink(0)
 															}
 
 															if accSelected {
-																ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
+																ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c)).Shrink(0)
 															}
 														})
 												})
-										}
-
-										for wIdx, win := range curAcc.Windows {
-											if win.UsedPercent < 95 {
-												continue
-											}
-											warning := "即将用尽"
-											if win.UsedPercent >= 100 {
-												warning = "已用尽"
-											}
-											warning = trayQuotaLabeledText(win.ShortLabel, warning)
-											ui.Row(c.Key(fmt.Sprintf("%s-warning-%d", accKey, wIdx))).FillWidth().Children(func() {
-												ui.Box(c.Key(fmt.Sprintf("%s-warning-indent-%d", accKey, wIdx))).Width(rowIndent)
-												ui.Text(c, warning).FontSize(uiFont(TypeFootnote)).TextColor(quotaLevelColor(c, win.UsedPercent)).SingleLine()
-											})
 										}
 
 										// 相邻画条窗口两两并排，宽窗口独占整行。
