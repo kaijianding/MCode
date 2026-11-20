@@ -1925,11 +1925,15 @@ type worktreeUIState struct {
 	moveTransfer bool
 	moving       bool
 
-	moveToProjectOpen     bool
-	moveToProjectThreadID string
-	moveToProjectQuery    string
-	moveToProjectSelected int
-	movingToProject       bool
+	moveToProjectOpen      bool
+	moveToProjectThreadID  string
+	moveToProjectQuery     string
+	moveToProjectSelected  int
+	moveToProjectScroll    bool
+	moveToProjectPointerOn bool
+	moveToProjectPointerX  float32
+	moveToProjectPointerY  float32
+	movingToProject        bool
 }
 
 var (
@@ -2389,6 +2393,10 @@ func (s *chatState) openMoveToProjectModal(threadID string) {
 	ws.moveToProjectThreadID = threadID
 	ws.moveToProjectQuery = ""
 	ws.moveToProjectSelected = 0
+	ws.moveToProjectScroll = false
+	ws.moveToProjectPointerOn = false
+	ws.moveToProjectPointerX = 0
+	ws.moveToProjectPointerY = 0
 	ws.movingToProject = false
 	ws.mu.Unlock()
 	s.invalidate()
@@ -2464,6 +2472,10 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 	open := ws.moveToProjectOpen && ws.moveToProjectThreadID == threadID
 	query := ws.moveToProjectQuery
 	selected := ws.moveToProjectSelected
+	scrollSelected := ws.moveToProjectScroll
+	prevPointerOn := ws.moveToProjectPointerOn
+	prevPointerX := ws.moveToProjectPointerX
+	prevPointerY := ws.moveToProjectPointerY
 	moving := ws.movingToProject
 	ws.mu.Unlock()
 	if !open {
@@ -2504,6 +2516,7 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 						ws.mu.Lock()
 						ws.moveToProjectQuery = v
 						ws.moveToProjectSelected = 0
+						ws.moveToProjectScroll = false
 						ws.mu.Unlock()
 						s.invalidate()
 					},
@@ -2520,6 +2533,7 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 							} else {
 								ws.moveToProjectSelected = 0
 							}
+							ws.moveToProjectScroll = true
 							ws.mu.Unlock()
 							s.invalidate()
 							return true
@@ -2530,12 +2544,19 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 							} else if len(filtered) > 0 {
 								ws.moveToProjectSelected = selected
 							}
+							ws.moveToProjectScroll = true
 							ws.mu.Unlock()
 							s.invalidate()
 							return true
 						case ui.KeyEnter:
 							if len(filtered) > 0 && !moving {
-								s.submitMoveToProject(filtered[selected].ID)
+								ws.mu.Lock()
+								idx := ws.moveToProjectSelected
+								ws.mu.Unlock()
+								if idx < 0 || idx >= len(filtered) {
+									idx = selected
+								}
+								s.submitMoveToProject(filtered[idx].ID)
 							}
 							return true
 						}
@@ -2543,9 +2564,22 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 					},
 				})
 
-				ui.Scroll(c.Key("move-to-project-scroll")).FillWidth().MaxHeight(360).Children(func() {
+				scrollEl := ui.Scroll(c.Key("move-to-project-scroll")).FillWidth().MaxHeight(360)
+				px, py, pointerOver := scrollEl.PointerPosition()
+				pointerMoved := pointerOver && (!prevPointerOn || px != prevPointerX || py != prevPointerY)
+				scrollEl.Children(func() {
 					ui.Column(c.Key("move-to-project-list")).FillWidth().Children(func() {
 						if len(filtered) == 0 {
+							if pointerOver != prevPointerOn || pointerMoved || scrollSelected {
+								ws.mu.Lock()
+								ws.moveToProjectPointerOn = pointerOver
+								ws.moveToProjectPointerX = px
+								ws.moveToProjectPointerY = py
+								if scrollSelected && ws.moveToProjectSelected == selected {
+									ws.moveToProjectScroll = false
+								}
+								ws.mu.Unlock()
+							}
 							ui.Row(c.Key("move-to-project-empty")).FillWidth().Padding(Space2, Space3).Children(func() {
 								ui.Text(c, "无匹配项目").
 									FontSize(sidebarFont(TypeBody)).
@@ -2554,6 +2588,7 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 							})
 							return
 						}
+						hoveredIdx := -1
 						for i, p := range filtered {
 							project := p
 							item := ui.ButtonBase(c.Key("move-to-project-item-"+project.ID)).
@@ -2563,8 +2598,14 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 								FillWidth().
 								Justify(ui.Start).
 								Disabled(moving)
-							if i == selected || item.Hovered() {
+							if item.Hovered() {
+								hoveredIdx = i
+							}
+							if i == selected {
 								item.Background(ThemeHover(c))
+								if scrollSelected {
+									item.ScrollIntoView()
+								}
 							}
 							if item.Clicked() {
 								s.submitMoveToProject(project.ID)
@@ -2575,6 +2616,25 @@ func renderMoveToProjectPopover(c *ui.Context, s *chatState, threadID string, an
 									TextColor(ThemePrimaryText(c)).
 									SingleLine()
 							})
+						}
+						if pointerOver != prevPointerOn || pointerMoved || scrollSelected {
+							needInvalidate := false
+							ws.mu.Lock()
+							ws.moveToProjectPointerOn = pointerOver
+							ws.moveToProjectPointerX = px
+							ws.moveToProjectPointerY = py
+							// 仅在指针实际进入或移动时按悬停切换选中，防止静止悬停在滚动或键盘导航时抢回选中。
+							if pointerMoved && hoveredIdx >= 0 && hoveredIdx != ws.moveToProjectSelected {
+								ws.moveToProjectSelected = hoveredIdx
+								ws.moveToProjectScroll = false
+								needInvalidate = true
+							} else if scrollSelected && ws.moveToProjectSelected == selected {
+								ws.moveToProjectScroll = false
+							}
+							ws.mu.Unlock()
+							if needInvalidate {
+								s.invalidate()
+							}
 						}
 					})
 				})

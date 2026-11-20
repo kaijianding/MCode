@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -652,6 +653,152 @@ func TestChatsMoveToProjectMenu(t *testing.T) {
 	fake2.mu.Unlock()
 	if escCalls != 0 {
 		t.Fatalf("按 Esc 关闭浮层不应发生移动调用, got %d", escCalls)
+	}
+}
+
+func TestChatsMoveToProjectHoverSelect(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "chats-builtin", Name: "对话"},
+			{ID: "p1", Name: "普通项目"},
+			{ID: "p2", Name: "其他项目"},
+		},
+		map[string][]Thread{
+			"chats-builtin": {{ID: "c1", ProjectID: "chats-builtin", Title: "对话会话", UpdatedAt: now}},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("对话会话")
+	})
+	if err := tt.RightClick("对话会话"); err != nil {
+		t.Fatalf("RightClick 对话会话失败: %v", err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("移到项目…"); err != nil {
+		t.Fatalf("ChooseMenuItem 移到项目… 失败: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("移到项目")
+		return ok && tt.Focused("搜索项目")
+	})
+	tt.Advance(500 * time.Millisecond)
+	tt.Frame()
+
+	target, ok := tt.AccessByRole(ui.RoleButton, "其他项目")
+	if !ok || target.Bounds.W <= 0 || target.Bounds.H <= 0 {
+		t.Fatalf("未找到「其他项目」按钮: ok=%v bounds=%+v", ok, target.Bounds)
+	}
+	tt.Move(target.Bounds.X+target.Bounds.W/2, target.Bounds.Y+target.Bounds.H/2)
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+
+	waitFor(t, tt, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.moveThreadToProjectCalls) == 1
+	})
+	fake.mu.Lock()
+	calls := append([][2]string(nil), fake.moveThreadToProjectCalls...)
+	fake.mu.Unlock()
+	if len(calls) != 1 || calls[0] != [2]string{"c1", "p2"} {
+		t.Fatalf("悬停「其他项目」后回车应移动到 p2，实际调用: %v", calls)
+	}
+}
+
+func TestChatsMoveToProjectKeyboardScroll(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetChatsProjectID("chats-builtin")
+	now := time.Now()
+	projects := make([]Project, 0, 21)
+	projects = append(projects, Project{ID: "chats-builtin", Name: "对话"})
+	for i := 1; i <= 20; i++ {
+		projects = append(projects, Project{
+			ID:   fmt.Sprintf("p%02d", i),
+			Name: fmt.Sprintf("项目-%02d", i),
+		})
+	}
+	fake.SetProjectsAndThreads(
+		projects,
+		map[string][]Thread{
+			"chats-builtin": {{ID: "c1", ProjectID: "chats-builtin", Title: "对话会话", UpdatedAt: now}},
+		},
+	)
+
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+
+	waitFor(t, tt, func() bool {
+		return tt.HasText("对话会话")
+	})
+	if err := tt.RightClick("对话会话"); err != nil {
+		t.Fatalf("RightClick 对话会话失败: %v", err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("移到项目…"); err != nil {
+		t.Fatalf("ChooseMenuItem 移到项目… 失败: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("移到项目")
+		return ok && tt.Focused("搜索项目")
+	})
+	tt.Advance(500 * time.Millisecond)
+	tt.Frame()
+
+	first, ok := tt.AccessByRole(ui.RoleButton, "项目-01")
+	if !ok {
+		t.Fatal("未找到「项目-01」按钮")
+	}
+	// 先把指针停在第一行，验证后续键盘下移与滚动不会被静止悬停抢回。
+	tt.Move(first.Bounds.X+first.Bounds.W/2, first.Bounds.Y+first.Bounds.H/2)
+	tt.Frame()
+
+	card, ok := tt.Find("移到项目")
+	if !ok {
+		t.Fatal("未找到「移到项目」浮层卡片")
+	}
+	lastBefore, ok := tt.AccessByRole(ui.RoleButton, "项目-20")
+	if !ok {
+		t.Fatal("未找到「项目-20」按钮")
+	}
+	if lastBefore.Bounds.Y+lastBefore.Bounds.H <= card.Y+card.H {
+		t.Fatalf("初始时「项目-20」应超出浮层可视区，card=%+v last=%+v", card, lastBefore.Bounds)
+	}
+
+	for range 19 {
+		tt.Key(0, ui.KeyDown)
+		tt.Frame()
+	}
+
+	lastAfter, ok := tt.AccessByRole(ui.RoleButton, "项目-20")
+	if !ok {
+		t.Fatal("下移后未找到「项目-20」按钮")
+	}
+	if lastAfter.Bounds.Y < card.Y || lastAfter.Bounds.Y+lastAfter.Bounds.H > card.Y+card.H {
+		t.Fatalf("键盘下移后「项目-20」应滚入浮层可视区，card=%+v last=%+v", card, lastAfter.Bounds)
+	}
+
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.moveThreadToProjectCalls) == 1
+	})
+	fake.mu.Lock()
+	calls := append([][2]string(nil), fake.moveThreadToProjectCalls...)
+	fake.mu.Unlock()
+	if len(calls) != 1 || calls[0] != [2]string{"c1", "p20"} {
+		t.Fatalf("键盘下移到最后一项后回车应移动到 p20，实际调用: %v", calls)
 	}
 }
 
