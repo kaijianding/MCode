@@ -317,7 +317,7 @@ func renderMentionPreview(c *ui.Context, s *chatState, anchor ui.Element, key st
 			Border(Hairline, ThemeBorder(c))
 		applyElevation(c, card, ElevPopover).
 			Children(func() {
-				renderMentionPreviewHeader(c, s, key, seg)
+				renderMentionPreviewHeader(c, s, seg)
 				switch {
 				case !exists || (digest != nil && digest.missing):
 					ui.Text(c, "该会话已不存在").FontSize(scaledFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
@@ -348,22 +348,17 @@ func renderMentionPreview(c *ui.Context, s *chatState, anchor ui.Element, key st
 	mentionPreviewMu.Unlock()
 }
 
-// renderMentionPreviewHeader 渲染浮层头部：被引用会话的当前标题与说明。
-func renderMentionPreviewHeader(c *ui.Context, s *chatState, key string, seg mentionSegment) {
+// renderMentionPreviewHeader 渲染浮层头部：被引用会话的当前标题。
+func renderMentionPreviewHeader(c *ui.Context, s *chatState, seg mentionSegment) {
 	title := mentionThreadTitle(s, seg.ThreadID)
 	if title == "" {
 		title = strings.TrimPrefix(seg.Text, "@")
 	}
-	ui.Column(c.Key("mention-preview-head-" + key)).Gap(Space0).Children(func() {
-		ui.Text(c, title).
-			FontSize(scaledFont(TypeBody)).
-			FontWeight(600).
-			TextColor(ThemePrimaryText(c)).
-			SingleLine()
-		ui.Text(c, "被引用的会话").
-			FontSize(scaledFont(TypeCaption)).
-			TextColor(ThemeSecondaryText(c))
-	})
+	ui.Text(c, title).
+		FontSize(scaledFont(TypeBody)).
+		FontWeight(600).
+		TextColor(ThemePrimaryText(c)).
+		SingleLine()
 }
 
 // renderMentionPreviewBody 渲染三段式摘要正文：目标、近期对话与结论，超出高度上限时内部滚动。

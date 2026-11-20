@@ -114,12 +114,10 @@ func renderErrorMessage(c *ui.Context, s *chatState, m Message) ui.Element {
 
 	// 「继续」只在「这条错误仍是最新一条消息且线程没在跑」时出现：点击发送的是
 	// 一条从中断处继续的提示，不再重发上一条用户消息。
-	var messages []Message
 	s.mu.Lock()
-	messages = append([]Message(nil), s.messages...)
+	isLast := errorIsLastMessage(s.messages, m)
 	threadID := s.selectedThreadID
 	s.mu.Unlock()
-	isLast := errorIsLastMessage(messages, m)
 	showRetry := errorRetryVisible(isLast, s.isThreadRunning(threadID))
 
 	return ui.Row(c.Key("msg-err-" + m.ID)).MaxWidth(timelineContentMaxWidth(s)).Children(func() {

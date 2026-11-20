@@ -339,6 +339,17 @@ func providerNoticeProgress(s *chatState, m Message) (isLast, running bool) {
 	return isLast, s.isThreadRunning(threadID)
 }
 
+// capacityRetryRedrawDelay 返回倒计时下一次整秒跳变（或到点）前的重绘等待时长，
+// 取整方式与 capacityRetrySeconds 对齐，确保秒数按秒更新且不早于到期时间。
+func capacityRetryRedrawDelay(remaining time.Duration) time.Duration {
+	if remaining <= 0 {
+		return 0
+	}
+	secs := capacityRetrySeconds(remaining)
+	toNextSecond := remaining - time.Duration(secs-1)*time.Second
+	return min(remaining, toNextSecond)
+}
+
 // renderCapacityAutoRetry 渲染满载/限流横幅里的自动重试进度：等待期间显示倒计时与取消按钮，
 // 到点就由 tickCapacityRetry 发一条「继续」；次数用尽后换成手动「继续」按钮。
 func renderCapacityAutoRetry(c *ui.Context, s *chatState, m Message, fg ui.Color) {
@@ -348,8 +359,8 @@ func renderCapacityAutoRetry(c *ui.Context, s *chatState, m Message, fg ui.Color
 	isLast, running := providerNoticeProgress(s, m)
 	remaining, attempts, armed := s.tickCapacityRetry(c.Now(), m, isLast, running)
 	if armed {
-		// 到点前登记一次重绘：即便这一帧没有别的重绘，也能按时自动重试。
-		c.After(remaining)
+		// 等待期间按整秒边界（或剩余时长）登记一次重绘，既让倒计时按秒走，也能按时自动重试。
+		c.After(capacityRetryRedrawDelay(remaining))
 		secs := capacityRetrySeconds(remaining)
 		ui.Row(c.Key("provider-banner-retry-" + m.ID)).Gap(Space3).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, fmt.Sprintf("将在 %d 秒后自动重试（第 %d/%d 次）", secs, attempts+1, capacityRetryMaxAttempts)).
@@ -357,7 +368,7 @@ func renderCapacityAutoRetry(c *ui.Context, s *chatState, m Message, fg ui.Color
 				TextColor(fg.Alpha(0.85))
 			Button(c, ButtonOpts{
 				Key:     "provider-banner-cancel-" + m.ID,
-				Text:    fmt.Sprintf("取消自动重试（%d 秒后重试）", secs),
+				Text:    "取消自动重试",
 				Variant: ButtonSecondary,
 				Size:    ControlSM,
 				Label:   "取消自动重试",

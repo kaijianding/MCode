@@ -335,6 +335,8 @@ func animateMessageEnter(c *ui.Context, el ui.Element, msgID string, play bool) 
 	return el.Translate(0, (1-k)*messageEnterShift).Opacity(k)
 }
 
+var userMentionThreadsSnapshot = mentionThreadsSnapshot
+
 // renderUserMessage 渲染靠右对齐的用户气泡。
 // 超过折叠阈值（普通会话 8 行 / 600 字，子代理嵌入会话 5 行 / 400 字）时只显示预览：
 // 正文底部渐隐，气泡内右下角给「展开 · 还有 N 行」胶囊；展开后同一位置改为「收起」，
@@ -389,8 +391,12 @@ func renderUserMessage(c *ui.Context, s *chatState, m Message) ui.Element {
 					return body.SelectedTexts()
 				}))
 				body.Children(func() {
-					// 正文里命中当前会话列表的 @会话引用渲染为可点击胶囊，其余文本原样渲染
-					if segments := splitThreadMentions(displayText, mentionThreadsSnapshot(s)); hasThreadMention(segments) {
+					// 正文里命中当前会话列表的 @会话引用渲染为可点击胶囊，其余文本原样渲染；不含 '@' 时跳过快照与拆分。
+					var segments []mentionSegment
+					if strings.Contains(displayText, "@") {
+						segments = splitThreadMentions(displayText, userMentionThreadsSnapshot(s))
+					}
+					if hasThreadMention(segments) {
 						renderUserMentionParagraph(c, s, m, segments)
 					} else {
 						ui.Text(c, displayText).

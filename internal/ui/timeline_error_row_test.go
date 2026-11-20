@@ -3,6 +3,8 @@ package mcodeui
 import (
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // TestErrorSummaryLine 验证错误行摘要只取首行、压缩空白，并在超过字数上限时截断加省略号。
@@ -120,5 +122,37 @@ func TestErrorRetryPrompt(t *testing.T) {
 	}
 	if got := errorRetryPrompt(withMedia, "e1"); got != "" {
 		t.Fatalf("只有附件的用户消息正文为空应返回空，got %q", got)
+	}
+}
+
+// TestUIReview4ErrorRowLastMessageRetry 验证 renderErrorMessage 直接读取会话消息末尾判定是否显示「继续」。
+func TestUIReview4ErrorRowLastMessageRetry(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	t.Cleanup(s.close)
+	errLast := Message{ID: "e2", Role: "assistant", Kind: "error", Text: "最后一条失败"}
+	errOlder := Message{ID: "e1", Role: "assistant", Kind: "error", Text: "早期失败"}
+	s.mu.Lock()
+	s.selectedThreadID = "t1"
+	s.messages = []Message{
+		{ID: "u1", Role: "user", Text: "跑一下"},
+		errOlder,
+		errLast,
+	}
+	s.mu.Unlock()
+
+	ttLast := ui.NewTester(func(c *ui.Context) {
+		renderErrorMessage(c, s, errLast)
+	}, 600, 200)
+	ttLast.Frame()
+	if !ttLast.HasText("继续") {
+		t.Fatalf("最后一条错误应显示「继续」，当前文案: %q", ttLast.Texts())
+	}
+
+	ttOlder := ui.NewTester(func(c *ui.Context) {
+		renderErrorMessage(c, s, errOlder)
+	}, 600, 200)
+	ttOlder.Frame()
+	if ttOlder.HasText("继续") {
+		t.Fatalf("非最后一条错误不应显示「继续」，当前文案: %q", ttOlder.Texts())
 	}
 }

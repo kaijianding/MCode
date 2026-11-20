@@ -373,8 +373,8 @@ func TestTimelineRowsQuestionAnswerMessageRendersCard(t *testing.T) {
 	}
 }
 
-// TestTimelineRowsQuestionAnswerShowsRepliedMark 覆盖已回复卡片的标题行：右侧显示「已回复」，
-// 跳过的卡片不出现这个标记。
+// TestTimelineRowsQuestionAnswerShowsRepliedMark 覆盖已回复卡片的标题行：显示「提问」，
+// 不再重复渲染「已回复」文字。
 func TestTimelineRowsQuestionAnswerShowsRepliedMark(t *testing.T) {
 	payload := `{"requestID":"req-replied","skipped":false,"items":[{"question":"先做哪一项？","answers":["界面"]}]}`
 	msgs := []Message{
@@ -382,8 +382,27 @@ func TestTimelineRowsQuestionAnswerShowsRepliedMark(t *testing.T) {
 		questionAnswerTestMessage("qa1", payload, 1),
 	}
 	tt := newTimelineTester(t, msgs, "先做哪一项？")
-	if !tt.HasText("已回复") {
-		t.Fatalf("已回复卡片的标题行应显示「已回复」：%q", tt.Texts())
+	if !tt.HasText("提问") {
+		t.Fatalf("已回复卡片的标题行应显示「提问」：%q", tt.Texts())
+	}
+	if tt.HasText("已回复") {
+		t.Fatalf("已回复卡片不应再显示「已回复」：%q", tt.Texts())
+	}
+}
+
+// TestUIReview4AnsweredQuestionOmitsRepliedLabel 验证已回复提问卡片不再渲染多余的「已回复」标签。
+func TestUIReview4AnsweredQuestionOmitsRepliedLabel(t *testing.T) {
+	payload := `{"requestID":"req-replied-ui4","skipped":false,"items":[{"question":"先做哪一项？","answers":["界面"]}]}`
+	msgs := []Message{
+		{ID: "u1", Role: "user", Text: "帮我选一个", TurnIndex: 1, IsFinal: true},
+		questionAnswerTestMessage("qa1", payload, 1),
+	}
+	tt := newTimelineTester(t, msgs, "先做哪一项？")
+	if !tt.HasText("提问") {
+		t.Fatalf("已回复卡片应显示「提问」：%q", tt.Texts())
+	}
+	if tt.HasText("已回复") {
+		t.Fatalf("已回复卡片不应渲染「已回复」：%q", tt.Texts())
 	}
 }
 

@@ -1,7 +1,7 @@
 package mcodeui
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,7 +185,7 @@ func TestRateLimitBannerShowsAutoRetry(t *testing.T) {
 	if !tt.HasText("第 1/5 次") {
 		t.Fatalf("横幅应显示重试次数，当前文案: %q", tt.Texts())
 	}
-	if !tt.HasText(capacityRetryCancelText(5)) {
+	if !tt.HasText("取消自动重试") {
 		t.Fatalf("横幅应可取消自动重试，当前文案: %q", tt.Texts())
 	}
 
@@ -203,8 +203,8 @@ func TestRateLimitBannerCancelStopsAutoRetry(t *testing.T) {
 		{ID: "u1", Role: "user", Text: "跑一下测试", TurnIndex: 1, IsFinal: true},
 		rateLimitRetryMessage(),
 	})
-	waitFor(t, tt, func() bool { return tt.HasText(capacityRetryCancelText(5)) })
-	if err := tt.Click(capacityRetryCancelText(5)); err != nil {
+	waitFor(t, tt, func() bool { return tt.HasText("取消自动重试") })
+	if err := tt.Click("取消自动重试"); err != nil {
 		t.Fatalf("点不到取消按钮: %v", err)
 	}
 
@@ -219,7 +219,70 @@ func TestRateLimitBannerCancelStopsAutoRetry(t *testing.T) {
 	}
 }
 
-// capacityRetryCancelText 复现取消按钮在倒计时 secs 秒时的文案。
-func capacityRetryCancelText(secs int) string {
-	return fmt.Sprintf("取消自动重试（%d 秒后重试）", secs)
+// TestUIReview4CapacityRetryCountdownAndCancelButton 验证：
+// 1. remaining=3.5s 时请求的重绘间隔不超过 1s（精确为 0.5s 对齐整秒跳变），且倒计时按秒更新；
+// 2. 取消按钮使用固定文案「取消自动重试」，不再重复带秒数；
+// 3. 倒计时结束后不再登记悬空定时器/重绘。
+func TestUIReview4CapacityRetryCountdownAndCancelButton(t *testing.T) {
+	if got := capacityRetryRedrawDelay(3500 * time.Millisecond); got <= 0 || got > time.Second || got != 500*time.Millisecond {
+		t.Fatalf("capacityRetryRedrawDelay(3.5s) = %v, want 500ms (<= 1s)", got)
+	}
+
+	fake := NewFakeClient()
+	s := newChatState(fake)
+	t.Cleanup(s.close)
+	msg := rateLimitRetryMessage()
+	s.mu.Lock()
+	s.selectedThreadID = "t1"
+	s.threads = []Thread{{ID: "t1", Title: "测试会话"}}
+	s.messages = []Message{
+		{ID: "u1", Role: "user", Text: "跑一下测试", TurnIndex: 1, IsFinal: true},
+		msg,
+	}
+	s.mu.Unlock()
+
+	var frames int
+	tt := ui.NewTester(func(c *ui.Context) {
+		frames++
+		renderProviderNoticeBanner(c, s, msg, providerNoticeRateLimit, "")
+	}, 700, 300)
+	tt.Frame()
+	if !tt.HasText("将在 5 秒后自动重试") {
+		t.Fatalf("初始应显示 5 秒倒计时，当前文案: %q", tt.Texts())
+	}
+	if !tt.HasText("取消自动重试") {
+		t.Fatalf("取消按钮应显示「取消自动重试」，当前文案: %q", tt.Texts())
+	}
+	for _, txt := range tt.Texts() {
+		if strings.HasPrefix(txt, "取消自动重试") && txt != "取消自动重试" {
+			t.Fatalf("取消按钮不应包含秒数，实际文案: %q", txt)
+		}
+	}
+
+	// 推进 1.5s，此时 remaining = 3.5s，当前帧仍显示 4 秒，并应登记 <= 1s（0.5s）后的重绘。
+	tt.Advance(1500 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("将在 4 秒后自动重试") {
+		t.Fatalf("推进 1.5s 后应显示 4 秒，当前文案: %q", tt.Texts())
+	}
+
+	// 再推进 0.5s（不超过 1s），应当触发重绘并把倒计时更新为 3 秒。
+	tt.Advance(500 * time.Millisecond)
+	if !tt.HasText("将在 3 秒后自动重试") {
+		t.Fatalf("remaining=3.5s 后在 1s 内（0.5s）应重绘更新到 3 秒，当前文案: %q", tt.Texts())
+	}
+
+	// 等完剩余 3s 到点触发重试；等待异步发送结束并消费最后一帧后，不再有未决重绘或悬空定时器。
+	fake.ResetCalls()
+	tt.Advance(3 * time.Second)
+	waitRetrySend(t, s, fake, 1)
+	tt.Frame()
+	if tt.FramePending() {
+		t.Fatalf("自动重试完成后不应有未决重绘")
+	}
+	framesAfterDone := frames
+	tt.Advance(5 * time.Second)
+	if frames != framesAfterDone {
+		t.Fatalf("非 armed 状态不应再触发重绘，多跑了 %d 帧", frames-framesAfterDone)
+	}
 }

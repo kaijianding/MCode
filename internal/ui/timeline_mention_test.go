@@ -237,3 +237,33 @@ func TestSplitThreadMentionsCollapsedPreview(t *testing.T) {
 		t.Fatalf("被截断掉的引用不应命中")
 	}
 }
+
+// TestUIReview4MentionPreviewOmitsSubtitle 验证 @会话引用预览浮层不再渲染多余副标题「被引用的会话」。
+func TestUIReview4MentionPreviewOmitsSubtitle(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	t.Cleanup(s.close)
+	id, key := "mention-no-subtitle", "mention-no-subtitle-preview"
+	s.threads = []Thread{{ID: id, Title: "目标会话"}}
+	mentionPreviewMu.Lock()
+	mentionPreviewOpen[key] = true
+	mentionPreviewDigests[id] = &mentionPreviewDigest{goal: "完成重构"}
+	mentionPreviewMu.Unlock()
+	t.Cleanup(func() {
+		mentionPreviewMu.Lock()
+		delete(mentionPreviewOpen, key)
+		delete(mentionPreviewDigests, id)
+		mentionPreviewMu.Unlock()
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		anchor := ui.Box(c.Key("anchor")).Size(50, 30)
+		renderMentionPreview(c, s, anchor, key, mentionSegment{ThreadID: id, Text: "@目标会话"})
+	}, 800, 600)
+	tt.Frame()
+	if !tt.HasText("目标会话") {
+		t.Fatalf("预览浮层应显示会话标题，当前文案: %q", tt.Texts())
+	}
+	if tt.HasText("被引用的会话") {
+		t.Fatalf("预览浮层不应再渲染「被引用的会话」，当前文案: %q", tt.Texts())
+	}
+}

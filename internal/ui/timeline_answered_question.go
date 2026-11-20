@@ -265,8 +265,6 @@ func renderAnsweredQuestionCard(c *ui.Context, s *chatState, q answeredQuestion)
 			ui.Row(c.Key("answered-question-header-" + id)).Gap(Space3).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, IconCircleCheck()).Size(IconSM, IconSM).TextColor(ThemeSuccess(c))
 				ui.Text(c, "提问").Bold().FontSize(scaledFont(TypeBody)).TextColor(ThemePrimaryText(c)).Selectable()
-				ui.Spacer(c)
-				ui.Text(c, "已回复").FontSize(scaledFont(TypeFootnote)).TextColor(ThemeSecondaryText(c)).Selectable()
 			})
 			for i, item := range q.Items {
 				renderAnsweredQuestionEntry(c, id, i, item)
