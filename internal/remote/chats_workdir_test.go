@@ -449,13 +449,151 @@ func TestMoveThreadToProjectRejects(t *testing.T) {
 	backend.threads[chatsRes.ThreadID].workDir = ""
 	backend.mu.Unlock()
 
-	// 8. 有子会话或自身是子会话
+	// 8. 自身是子会话
 	childID := newUUID()
 	backend.AddThread(wire.ThreadSummary{ID: childID, ProjectID: chatsProjID, ParentThreadID: &chatsRes.ThreadID, IsHelper: true}, nil)
 	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: childID, ProjectID: normalProjID}); err == nil {
 		t.Fatal("helper 子会话应被拒绝")
 	}
-	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{ThreadID: chatsRes.ThreadID, ProjectID: normalProjID}); err == nil {
-		t.Fatal("有子会话的父会话应被拒绝")
+}
+
+func TestMoveThreadToProjectWithChildren(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "move_with_children.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer s.Close()
+
+	hub := NewStreamHub(StreamHubOptions{Interval: 10 * time.Millisecond})
+	defer hub.Close()
+	backend := NewMemoryBackend(hub)
+	defer backend.Close()
+	backend.RegisterHarness(&mockHarness{kind: "mock"})
+	if err := backend.AttachStore(ctx, s); err != nil {
+		t.Fatalf("AttachStore: %v", err)
+	}
+
+	chatsProjID := newUUID()
+	targetProjID := newUUID()
+	backend.AddProject(wire.ProjectSummary{ID: chatsProjID, Name: "对话", Path: t.TempDir()})
+	backend.AddProject(wire.ProjectSummary{ID: targetProjID, Name: "目标项目", Path: t.TempDir()})
+	backend.SetChatsProjectID(chatsProjID)
+
+	// (c) 后代运行中时移动被拒绝，且父会话与后代的 ProjectID 都没有变化。
+	runningParentRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: chatsProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(runningParent): %v", err)
+	}
+	runningChildID := newUUID()
+	backend.AddThread(wire.ThreadSummary{
+		ID:             runningChildID,
+		ProjectID:      chatsProjID,
+		ParentThreadID: &runningParentRes.ThreadID,
+		IsHelper:       true,
+		IsRunning:      true,
+	}, nil)
+	if _, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{
+		ThreadID:  runningParentRes.ThreadID,
+		ProjectID: targetProjID,
+	}); err == nil {
+		t.Fatal("后代运行中时移动父会话应被拒绝")
+	}
+	for _, id := range []string{runningParentRes.ThreadID, runningChildID} {
+		got, err := backend.GetThread(ctx, id)
+		if err != nil {
+			t.Fatalf("GetThread(%s): %v", id, err)
+		}
+		if got.ProjectID != chatsProjID {
+			t.Fatalf("拒绝移动后会话 %s ProjectID = %q, want %q", id, got.ProjectID, chatsProjID)
+		}
+		st, err := s.GetThread(ctx, id)
+		if err != nil {
+			t.Fatalf("store.GetThread(%s): %v", id, err)
+		}
+		if st.ProjectID != chatsProjID {
+			t.Fatalf("拒绝移动后 store 中会话 %s ProjectID = %q, want %q", id, st.ProjectID, chatsProjID)
+		}
+	}
+
+	// (a)(b) 父会话带子会话和孙会话：三者一同移动，store 也更新；workDir 非空的后代保留其 workDir。
+	parentRes, err := backend.CreateThread(ctx, wire.ThreadCreateParams{ProjectID: chatsProjID, ActionID: newUUID()})
+	if err != nil {
+		t.Fatalf("CreateThread(parent): %v", err)
+	}
+	childID := newUUID()
+	grandchildID := newUUID()
+	backend.AddThread(wire.ThreadSummary{
+		ID:             childID,
+		ProjectID:      chatsProjID,
+		ParentThreadID: &parentRes.ThreadID,
+		IsHelper:       true,
+	}, []wire.ThreadMessage{{ID: newUUID(), Role: "user", Text: "子会话消息"}})
+	backend.AddThread(wire.ThreadSummary{
+		ID:             grandchildID,
+		ProjectID:      chatsProjID,
+		ParentThreadID: &childID,
+		IsHelper:       true,
+	}, nil)
+
+	customWorkDir := t.TempDir()
+	backend.mu.Lock()
+	backend.threads[childID].sessionID = "child-sess"
+	backend.threads[grandchildID].workDir = customWorkDir
+	backend.threads[grandchildID].sessionID = "grandchild-sess"
+	backend.mu.Unlock()
+
+	var hookCalls int
+	var hookThreads []wire.ThreadSummary
+	removeListener := backend.AddThreadsChangedListener(func(ev wire.ThreadsChanged) {
+		hookCalls++
+		hookThreads = append(hookThreads, ev.Threads...)
+	})
+	defer removeListener()
+
+	movedParent, err := backend.MoveThreadToProject(ctx, wire.ThreadsMoveToProjectParams{
+		ThreadID:  parentRes.ThreadID,
+		ProjectID: targetProjID,
+	})
+	if err != nil {
+		t.Fatalf("MoveThreadToProject failed: %v", err)
+	}
+	if movedParent.ProjectID != targetProjID {
+		t.Fatalf("movedParent.ProjectID = %q, want %q", movedParent.ProjectID, targetProjID)
+	}
+	if hookCalls != 1 || len(hookThreads) != 3 {
+		t.Fatalf("threadsChangedHook calls=%d len=%d, want 1 and 3", hookCalls, len(hookThreads))
+	}
+
+	for _, id := range []string{parentRes.ThreadID, childID, grandchildID} {
+		got, err := backend.GetThread(ctx, id)
+		if err != nil {
+			t.Fatalf("GetThread(%s): %v", id, err)
+		}
+		if got.ProjectID != targetProjID {
+			t.Fatalf("移动后会话 %s ProjectID = %q, want %q", id, got.ProjectID, targetProjID)
+		}
+		st, err := s.GetThread(ctx, id)
+		if err != nil {
+			t.Fatalf("store.GetThread(%s): %v", id, err)
+		}
+		if st.ProjectID != targetProjID {
+			t.Fatalf("移动后 store 中会话 %s ProjectID = %q, want %q", id, st.ProjectID, targetProjID)
+		}
+	}
+
+	backend.mu.Lock()
+	childSessionID := backend.threads[childID].sessionID
+	childNeedsHandoff := backend.threads[childID].needsHandoff
+	childReinject := backend.threads[childID].reinjectGuidance
+	grandchildWorkDir := backend.threads[grandchildID].workDir
+	grandchildSessionID := backend.threads[grandchildID].sessionID
+	backend.mu.Unlock()
+
+	if childSessionID != "" || !childNeedsHandoff || !childReinject {
+		t.Fatalf("无 workDir 后代应重置会话状态: sessionID=%q needsHandoff=%v reinject=%v", childSessionID, childNeedsHandoff, childReinject)
+	}
+	if grandchildWorkDir != customWorkDir || grandchildSessionID != "grandchild-sess" {
+		t.Fatalf("有 workDir 后代应保留独立目录与会话状态: workDir=%q sessionID=%q", grandchildWorkDir, grandchildSessionID)
 	}
 }

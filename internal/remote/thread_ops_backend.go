@@ -369,12 +369,38 @@ func (b *MemoryBackend) MoveThreadToProject(ctx context.Context, p wire.ThreadsM
 			Message: "子会话无法移动到其他项目",
 		}
 	}
-	for _, other := range b.threads {
-		if other.parentThreadID == p.ThreadID || (other.summary.ParentThreadID != nil && *other.summary.ParentThreadID == p.ThreadID) {
+
+	type descendantEntry struct {
+		id string
+		td *memoryThread
+	}
+	var descendants []descendantEntry
+	seen := map[string]bool{p.ThreadID: true}
+	queue := []string{p.ThreadID}
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+		for id, other := range b.threads {
+			if other == nil || seen[id] {
+				continue
+			}
+			if other.parentThreadID == parentID || (other.summary.ParentThreadID != nil && *other.summary.ParentThreadID == parentID) {
+				seen[id] = true
+				descendants = append(descendants, descendantEntry{id: id, td: other})
+				queue = append(queue, id)
+			}
+		}
+	}
+	sort.Slice(descendants, func(i, j int) bool {
+		return descendants[i].id < descendants[j].id
+	})
+
+	for _, desc := range descendants {
+		if desc.td.summary.IsRunning || desc.td.runTurnID != "" || desc.td.runCancel != nil || desc.td.stewardBusy {
 			b.mu.Unlock()
 			return wire.ThreadSummary{}, &wire.RPCError{
 				Code:    wire.ErrCodeOperationRejected,
-				Message: "包含子会话的会话无法移动到其他项目",
+				Message: "子会话运行中，无法移动到其他项目",
 			}
 		}
 	}
@@ -402,6 +428,18 @@ func (b *MemoryBackend) MoveThreadToProject(ctx context.Context, p wire.ThreadsM
 	}
 
 	if b.store != nil {
+		for _, desc := range descendants {
+			if err := b.store.UpdateThreadProject(ctx, desc.id, p.ProjectID); err != nil {
+				b.mu.Unlock()
+				if errors.Is(err, store.ErrNotFound) {
+					return wire.ThreadSummary{}, &wire.RPCError{
+						Code:    wire.ErrCodeResourceNotFound,
+						Message: fmt.Sprintf("thread %s not found", desc.id),
+					}
+				}
+				return wire.ThreadSummary{}, err
+			}
+		}
 		if err := b.store.UpdateThreadProject(ctx, p.ThreadID, p.ProjectID); err != nil {
 			b.mu.Unlock()
 			if errors.Is(err, store.ErrNotFound) {
@@ -417,6 +455,7 @@ func (b *MemoryBackend) MoveThreadToProject(ctx context.Context, p wire.ThreadsM
 		}
 	}
 
+	now := b.nowLocked().Format(time.RFC3339Nano)
 	td.summary.ProjectID = p.ProjectID
 	td.summary.WorktreeRequested = false
 	td.workDir = ""
@@ -428,14 +467,48 @@ func (b *MemoryBackend) MoveThreadToProject(ctx context.Context, p wire.ThreadsM
 	delete(b.guidanceDelivered, p.ThreadID)
 	td.sortOrder = sortOrder
 	td.summary.OrderKey = formatOrderKey(sortOrder)
-	td.summary.UpdatedAt = b.nowLocked().Format(time.RFC3339Nano)
+	td.summary.UpdatedAt = now
 	summary := b.summaryForPublishLocked(td)
+
+	type publishedDescendant struct {
+		id      string
+		summary wire.ThreadSummary
+	}
+	publishedDescendants := make([]publishedDescendant, 0, len(descendants))
+	changedThreads := make([]wire.ThreadSummary, 0, 1+len(descendants))
+	changedThreads = append(changedThreads, summary)
+	for _, desc := range descendants {
+		desc.td.summary.ProjectID = p.ProjectID
+		desc.td.summary.UpdatedAt = now
+		if desc.td.workDir == "" {
+			if err := b.ensureMessagesLocked(desc.td, desc.id); err != nil {
+				log.Printf("ensure messages for thread %s error: %v", desc.id, err)
+			}
+			b.ensureMessagesLoadedLocked(desc.td)
+			desc.td.summary.WorktreeRequested = false
+			desc.td.sessionID = ""
+			desc.td.sessionEpoch++
+			desc.td.continuationSent = false
+			desc.td.needsHandoff = len(desc.td.messages) > 0
+			desc.td.reinjectGuidance = true
+			delete(b.guidanceDelivered, desc.id)
+		}
+		descSummary := b.summaryForPublishLocked(desc.td)
+		publishedDescendants = append(publishedDescendants, publishedDescendant{
+			id:      desc.id,
+			summary: descSummary,
+		})
+		changedThreads = append(changedThreads, descSummary)
+	}
 	hook := b.threadsChangedHook
 	b.mu.Unlock()
 
 	b.hub.Publish(p.ThreadID, nil, nil, summary)
+	for _, pub := range publishedDescendants {
+		b.hub.Publish(pub.id, nil, nil, pub.summary)
+	}
 	if hook != nil {
-		hook(wire.ThreadsChanged{Threads: []wire.ThreadSummary{summary}})
+		hook(wire.ThreadsChanged{Threads: changedThreads})
 	}
 	return summary, nil
 }
