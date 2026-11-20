@@ -951,6 +951,7 @@ func renderSwarmPanelStrip(c *ui.Context, s *chatState, f swarmFloatFrame, id pa
 		if isTeam {
 			open := swarmMenuFlag(key)
 			btn := ui.ButtonBase(c.Key("swarm-strip-count")).
+				Shrink(0).
 				Radius(RadiusXL).
 				Padding(Space1, Space3).
 				Background(ThemeHover(c)).
@@ -997,6 +998,9 @@ func renderSwarmPanelStrip(c *ui.Context, s *chatState, f swarmFloatFrame, id pa
 		}
 		handle := ui.Row(c.Key("swarm-strip-handle")).
 			Grow(1).
+			MinWidth(0).
+			Shrink(1).
+			ClipX().
 			AlignItems(ui.Center).
 			Gap(Space2).
 			Padding(Space1, Space3).
@@ -1014,19 +1018,19 @@ func renderSwarmPanelStrip(c *ui.Context, s *chatState, f swarmFloatFrame, id pa
 		}
 		handle.Children(func() {
 			renderSwarmGlyph(c, "strip-"+cur.ThreadID, cur, 18)
-			ui.Text(c, cur.Name).FontSize(uiFont(TypeFootnote)).FontWeight(600).TextColor(persona.Color)
+			ui.Text(c, cur.Name).FontSize(uiFont(TypeFootnote)).FontWeight(600).TextColor(persona.Color).SingleLine().Ellipsis("…").MinWidth(0).Shrink(1)
 			// 顶栏胶囊补上档位徽章，与团队卡片里的档位展示保持一致。
 			if cur.Tier != "" {
 				renderSwarmTierChip(c, "strip-tier-"+cur.ThreadID, swarmTierName(s, cur.Tier), cur.Tier, cur.ReadOnly)
 			}
-			ui.Text(c, statusText).FontSize(uiFont(TypeCaption)).FontWeight(500).TextColor(statusColor)
+			ui.Text(c, statusText).FontSize(uiFont(TypeCaption)).FontWeight(500).TextColor(statusColor).SingleLine().Shrink(0)
 			if d := formatSwarmDuration(cur.StartedAt, cur.FinishedAt); d != "" {
-				ui.Text(c, d).FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c).Alpha(0.8))
+				ui.Text(c, d).FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c).Alpha(0.8)).SingleLine().Shrink(0)
 			}
 		})
 		trackSwarmPanelDrag(s, f, id, key, rest, handle)
 
-		pop := ui.ButtonBase(c.Key("swarm-strip-pop")).Radius(RadiusXS).Padding(Space1).Label("在独立窗口打开 " + cur.Name).Role(ui.RoleButton).Tooltip("在独立会话窗口打开此子代理")
+		pop := ui.ButtonBase(c.Key("swarm-strip-pop")).Shrink(0).Radius(RadiusXS).Padding(Space1).Label("在独立窗口打开 " + cur.Name).Role(ui.RoleButton).Tooltip("在独立会话窗口打开此子代理")
 		{
 			scale := motionPressScale(c, pop, "button-press-scale", pop.Pressed())
 			pop.Scale(scale, scale)
@@ -1050,6 +1054,7 @@ func renderSwarmPanelStrip(c *ui.Context, s *chatState, f swarmFloatFrame, id pa
 			icon = IconArrowLeft()
 		}
 		closeBtn := ui.ButtonBase(c.Key("swarm-strip-close")).
+			Shrink(0).
 			Size(ControlSM, ControlSM).
 			Radius(RadiusPill).
 			Background(ThemeHover(c)).
@@ -1267,21 +1272,21 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 						row.Children(func() {
 							ui.Row(c.Key("swarm-menu-inner-" + bee.ThreadID)).FillWidth().AlignItems(ui.Center).Gap(Space3).Children(func() {
 								renderSwarmGlyph(c, "menu-"+bee.ThreadID, bee, IconLG)
-								ui.Column(c.Key("swarm-menu-meta-" + bee.ThreadID)).Grow(1).Gap(Space0).Children(func() {
-									ui.Row(c.Key("swarm-menu-title-" + bee.ThreadID)).AlignItems(ui.Center).Gap(Space2).Children(func() {
-										ui.Text(c, bee.Name).FontSize(uiFont(TypeFootnote)).FontWeight(600).TextColor(ThemePrimaryText(c))
+								ui.Column(c.Key("swarm-menu-meta-" + bee.ThreadID)).Grow(1).MinWidth(0).Shrink(1).Gap(Space0).Children(func() {
+									ui.Row(c.Key("swarm-menu-title-" + bee.ThreadID)).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(Space2).Children(func() {
+										ui.Text(c, bee.Name).FontSize(uiFont(TypeFootnote)).FontWeight(600).TextColor(ThemePrimaryText(c)).SingleLine().Ellipsis("…").MinWidth(0).Shrink(1)
 										// 菜单每行同样带档位徽章，key 带 ThreadID 保证各子代理之间唯一。
 										if bee.Tier != "" {
 											renderSwarmTierChip(c, "menu-tier-"+bee.ThreadID, swarmTierName(s, bee.Tier), bee.Tier, bee.ReadOnly)
 										}
-										ui.Text(c, swarmStatusLabel(bee.Status)).FontSize(uiFont(TypeCaption)).TextColor(swarmStatusColor(c, bee.Status))
+										ui.Text(c, swarmStatusLabel(bee.Status)).FontSize(uiFont(TypeCaption)).TextColor(swarmStatusColor(c, bee.Status)).SingleLine().Shrink(0)
 									})
 									if bee.Task != "" {
-										ui.Text(c, bee.Task).FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c))
+										ui.Text(c, bee.Task).FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).SingleLine().Ellipsis("…").MinWidth(0)
 									}
 								})
 								if bee.Status == "running" {
-									stop := ui.ButtonBase(c.Key("swarm-menu-stop-"+bee.ThreadID)).Radius(RadiusXS).Padding(Space0, Space2).
+									stop := ui.ButtonBase(c.Key("swarm-menu-stop-"+bee.ThreadID)).Shrink(0).Radius(RadiusXS).Padding(Space0, Space2).
 										Label("停止 " + bee.Name).
 										Role(ui.RoleButton).
 										Tooltip("停止此子代理")
@@ -1301,7 +1306,7 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 										ui.Icon(c, IconSquare()).Size(8, 8).TextColor(ThemeDanger(c))
 									})
 								}
-								pop := ui.ButtonBase(c.Key("swarm-menu-pop-"+bee.ThreadID)).Radius(RadiusXS).Padding(Space0, Space1).
+								pop := ui.ButtonBase(c.Key("swarm-menu-pop-"+bee.ThreadID)).Shrink(0).Radius(RadiusXS).Padding(Space0, Space1).
 									Label("在独立窗口打开 " + bee.Name).
 									Role(ui.RoleButton).
 									Tooltip("在独立窗口中打开")

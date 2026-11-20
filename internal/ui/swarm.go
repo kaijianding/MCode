@@ -1791,10 +1791,12 @@ func renderSwarmPanel(c *ui.Context, s *chatState) {
 	}
 
 	winW, winH := c.Size()
+	panelW := min(swarmPanelWidth, max(0, winW-2*swarmPanelMargin))
 
 	ui.Overlay(c, func() {
 		card := ui.Column(c.Key("swarm-panel-root")).
-			Width(swarmPanelWidth).
+			Width(panelW).
+			MaxWidth(max(0, winW-2*swarmPanelMargin)).
 			MaxHeight(panelMaxH).
 			Radius(swarmPanelRadius).
 			Background(ThemeSurface(c)).
@@ -1893,11 +1895,11 @@ func renderSwarmPanel(c *ui.Context, s *chatState) {
 
 		// 位置：默认贴窗口右侧、会话头下方，叠加用户拖拽的偏移；先限制在容器内，再按左右边缘吸附停靠。
 		// 写回偏移后容器尺寸变化时只需重新 clamp，面板始终可见。
-		baseX := winW - swarmPanelWidth - swarmPanelMargin
+		baseX := winW - panelW - swarmPanelMargin
 		swarmPanelMu.Lock()
 		ox, oy := hp.offsetX, hp.offsetY
 		swarmPanelMu.Unlock()
-		x, y := dockSwarmPanelPos(baseX+ox, swarmPanelAnchorY+oy, swarmPanelWidth, panelMaxH, winW, winH)
+		x, y := dockSwarmPanelPos(baseX+ox, swarmPanelAnchorY+oy, panelW, panelMaxH, winW, winH)
 		swarmPanelMu.Lock()
 		hp.offsetX, hp.offsetY = x-baseX, y-swarmPanelAnchorY
 		swarmPanelMu.Unlock()
@@ -1953,6 +1955,8 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 	// 顶部控制行：标题、进度、开启/关闭、停止全部、清理已结束；整行兼作浮动面板的拖拽手柄
 	topRow := ui.Row(c.Key("swarm-top-row")).
 		FillWidth().
+		MinWidth(0).
+		Wrap().
 		AlignItems(ui.Center).
 		Gap(Space3).
 		Margin(0, 0, Space3, 0).
@@ -1976,6 +1980,7 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 				plansOnlyLabel := "只规划"
 				plansOnlyBtn := ui.ButtonBase(c.Key("swarm-plans-only-btn")).
 					Label(plansOnlyLabel).
+					Shrink(0).
 					Radius(RadiusSM).
 					Padding(Space1, Space3)
 				{
@@ -2013,6 +2018,7 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 			}
 			toggleBtn := ui.ButtonBase(c.Key("swarm-toggle-btn")).
 				Label(toggleLabel).
+				Shrink(0).
 				Radius(RadiusSM).
 				Padding(Space1, Space3)
 			{
@@ -2039,6 +2045,7 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 			if hasRunning {
 				stopAllBtn := ui.ButtonBase(c.Key("swarm-stop-all-btn")).
 					Label("停止全部").
+					Shrink(0).
 					Radius(RadiusSM).
 					Padding(Space1, Space3)
 				{
@@ -2066,6 +2073,7 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 			if hasFinished {
 				clearBtn := ui.ButtonBase(c.Key("swarm-clear-finished-btn")).
 					Label("清理已结束").
+					Shrink(0).
 					Radius(RadiusSM).
 					Padding(Space1, Space3)
 				{
@@ -2094,6 +2102,7 @@ func renderSwarmNormal(c *ui.Context, s *chatState, st SwarmState) {
 			if beeID := swarmPopOutBeeID(st); beeID != "" {
 				popOutBtn := ui.ButtonBase(c.Key("swarm-pop-out-btn")).
 					Label("在独立窗口中打开").
+					Shrink(0).
 					Tooltip("在独立窗口中打开").
 					Radius(RadiusSM).
 					Padding(Space1, Space2)
@@ -2175,6 +2184,7 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 	key := fmt.Sprintf("swarm-bee-%d-%s", h.Index, h.ThreadID)
 	ui.Column(c.Key(key)).
 		FillWidth().
+		MinWidth(0).
 		Padding(Space3, Space3).
 		Radius(RadiusSM).
 		Background(ThemeSurface(c)).
@@ -2184,6 +2194,8 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 		Children(func() {
 			ui.Row(c.Key(key + "-meta")).
 				FillWidth().
+				MinWidth(0).
+				Wrap().
 				AlignItems(ui.Center).
 				Gap(Space3).
 				Children(func() {
@@ -2192,7 +2204,11 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 					ui.Text(c, title).
 						FontSize(uiFont(TypeBody)).
 						FontWeight(600).
-						TextColor(ThemePrimaryText(c))
+						TextColor(ThemePrimaryText(c)).
+						SingleLine().
+						Ellipsis("…").
+						MinWidth(0).
+						Shrink(1)
 
 					if h.Tier != "" {
 						renderSwarmTierChip(c, "bee-tier-"+h.ThreadID, swarmTierName(s, h.Tier), h.Tier, h.ReadOnly)
@@ -2349,6 +2365,7 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 					if h.PendingMerge {
 						reviewBtn := ui.ButtonBase(c.Key(key+"-review-btn")).
 							Label("审查").
+							Shrink(0).
 							Radius(RadiusXS).
 							Padding(Space1, Space2).
 							Background(ThemeAccent(c))
@@ -2370,6 +2387,7 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 					} else if (h.Merged || len(h.ConflictFiles) > 0) && (h.Status == "completed" || h.Status == "failed") {
 						viewBtn := ui.ButtonBase(c.Key(key+"-view-diff-btn")).
 							Label("查看改动").
+							Shrink(0).
 							Radius(RadiusXS).
 							Padding(Space1, Space2)
 						{
@@ -2393,6 +2411,7 @@ func renderSwarmBeeRow(c *ui.Context, s *chatState, h SwarmBee, idx int) {
 					if h.Status == "running" {
 						stopBtn := ui.ButtonBase(c.Key(key+"-stop-btn")).
 							Label("停止").
+							Shrink(0).
 							Radius(RadiusXS).
 							Padding(Space1, Space2)
 						{
