@@ -127,6 +127,7 @@ func TestComposerPlanCapsuleEmbeddedBee(t *testing.T) {
 	}
 	s.composerView.planPillOpen = true
 	s.messages[0].ToolInput = `{"todos":[{"content":"一","status":"completed"},{"content":"二","status":"completed"},{"content":"三","status":"completed"}]}`
+	s.messagesRev++ // 生产代码改写 s.messages 都会递增 messagesRev，待办胶囊按它缓存
 	if _, ok := composerPlanCapsule(nil, s, "bee"); ok || s.composerView.planPillOpen {
 		t.Fatal("全部完成后应隐藏胶囊并关闭浮层")
 	}
