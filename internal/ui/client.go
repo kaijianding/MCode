@@ -880,7 +880,9 @@ type ProviderQuotaWindow struct {
 	Label       string
 	UsedPercent float64
 	ResetsAt    time.Time
-	Account     string
+	Account string
+	// AccountID 是 agy 账号 ID，供会话指定账号使用；其它 provider 为空。
+	AccountID string
 	// Active 表示这是后端认定新会话当前会用到的账号。
 	Active bool
 	// Disabled 表示账号已停用（路由覆盖关了它），不算法在用，界面显示「已停止」。

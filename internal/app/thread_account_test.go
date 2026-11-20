@@ -148,3 +148,55 @@ func TestThreadAccount_CreateWithOptionsAndSetThreadAccount(t *testing.T) {
 		t.Fatal("清空 Account 且未跑过首轮后，不应再返回绑定账号")
 	}
 }
+
+func TestProviderQuotaAgyAccountID(t *testing.T) {
+	dir := t.TempDir()
+	index := accounts.Index{
+		Version:          1,
+		DefaultAccountID: accounts.SystemAccountID,
+		Accounts: []accounts.Account{
+			{
+				ID:     accounts.SystemAccountID,
+				Label:  "系统账号",
+				Status: accounts.StatusActive,
+				On:     true,
+				Order:  0,
+				Weight: 100,
+				Quota:  map[string]accounts.QuotaGroup{quota.GroupGemini: {UsedPercent: 15}},
+			},
+			{
+				ID:     "acc-work",
+				Label:  "工作账号",
+				Status: accounts.StatusActive,
+				On:     true,
+				Order:  1,
+				Weight: 100,
+				Quota:  map[string]accounts.QuotaGroup{quota.GroupGemini: {UsedPercent: 45}},
+			},
+		},
+	}
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agy-accounts.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := accounts.NewManager(accounts.Options{DataDir: dir, HostHome: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &Client{agy: mgr}
+	windows, err := client.ProviderQuota(context.Background(), "agy")
+	if err != nil {
+		t.Fatalf("ProviderQuota 失败: %v", err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("期望返回 2 个窗口，实际 %d: %+v", len(windows), windows)
+	}
+	if windows[0].AccountID != accounts.SystemAccountID || windows[1].AccountID != "acc-work" {
+		t.Fatalf("窗口 AccountID 不正确: got=[%q, %q] want=[%q, %q]",
+			windows[0].AccountID, windows[1].AccountID, accounts.SystemAccountID, "acc-work")
+	}
+}

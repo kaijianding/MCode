@@ -456,7 +456,7 @@ func (c *Client) ProviderQuota(ctx context.Context, provider string) ([]mcodeui.
 			windows = append(windows, mcodeui.ProviderQuotaWindow{
 				ID: group, Period: agyQuotaGroupPeriod(group),
 				Label: label + " · " + group, UsedPercent: q.UsedPercent, ResetsAt: resetAt,
-				Account: label, Active: active, Disabled: !on,
+				Account: label, AccountID: account.ID, Active: active, Disabled: !on,
 			})
 		}
 	}

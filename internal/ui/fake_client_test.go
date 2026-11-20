@@ -291,9 +291,11 @@ type FakeClient struct {
 	sendErr             error
 	deleteCalls         []string
 	addProjectCalls     []string
-	setRuntimeModeCalls []setRuntimeModeCall
-	SetAgentCalls       []SetAgentCall
-	composerPrefsCalls  []composerPrefsCall
+	setRuntimeModeCalls   []setRuntimeModeCall
+	SetAgentCalls         []SetAgentCall
+	setThreadAccountCalls []setThreadAccountCall
+	setThreadAccountErr   error
+	composerPrefsCalls    []composerPrefsCall
 	composerPrefsHook   func(string, ComposerPrefs) error
 	fastModeCalls       []FastModeCall
 	beeTiersCalls       []BeeTiersCall
@@ -1435,9 +1437,21 @@ func (f *FakeClient) SetThreadAgent(threadID, provider, model string) error {
 	return nil
 }
 
+type setThreadAccountCall struct {
+	ThreadID  string
+	AccountID string
+}
+
 func (f *FakeClient) SetThreadAccount(threadID, accountID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.setThreadAccountCalls = append(f.setThreadAccountCalls, setThreadAccountCall{
+		ThreadID:  threadID,
+		AccountID: accountID,
+	})
+	if f.setThreadAccountErr != nil {
+		return f.setThreadAccountErr
+	}
 	for _, list := range f.threads {
 		for i := range list {
 			if list[i].ID == threadID {
@@ -1446,6 +1460,12 @@ func (f *FakeClient) SetThreadAccount(threadID, accountID string) error {
 		}
 	}
 	return nil
+}
+
+func (f *FakeClient) SetThreadAccountCalls() []setThreadAccountCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]setThreadAccountCall(nil), f.setThreadAccountCalls...)
 }
 
 func (f *FakeClient) RenameThread(threadID, title string) error {
@@ -4532,6 +4552,33 @@ func (f *FakeClient) ProviderQuota(ctx context.Context, provider string) ([]Prov
 	}
 	res := make([]ProviderQuotaWindow, len(f.providerQuotaResult))
 	copy(res, f.providerQuotaResult)
+	if provider == "agy" {
+		if threadID := QuotaThread(ctx); threadID != "" {
+			var explicitAccount string
+			for _, list := range f.threads {
+				for _, th := range list {
+					if th.ID == threadID {
+						explicitAccount = th.Account
+						break
+					}
+				}
+			}
+			if explicitAccount != "" {
+				hasExplicit := false
+				for _, w := range res {
+					if w.AccountID == explicitAccount && !w.Disabled {
+						hasExplicit = true
+						break
+					}
+				}
+				if hasExplicit {
+					for i := range res {
+						res[i].Active = res[i].AccountID == explicitAccount && !res[i].Disabled
+					}
+				}
+			}
+		}
+	}
 	return res, nil
 }
 

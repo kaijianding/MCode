@@ -1240,6 +1240,226 @@ func quotaStripGroupTooltip(name string, plan quotaStripPlan) string {
 	return tooltip
 }
 
+// agyAccountSelectable 判断当前会话与额度窗口是否满足 agy 账号选择条件：
+// 仅当当前线程 Provider == "agy"、点击的是 agy 组，且存在至少 2 个未停用且 AccountID 非空的不同账号时为真。
+func agyAccountSelectable(th *Thread, provider string, windows []ProviderQuotaWindow) bool {
+	if th == nil || th.Provider != "agy" || provider != "agy" {
+		return false
+	}
+	seen := make(map[string]struct{}, 4)
+	for _, w := range windows {
+		id := strings.TrimSpace(w.AccountID)
+		if w.Disabled || id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		if len(seen) >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// agyAccountLocked 判断 agy 账号选择器是否锁定：
+// 运行中始终锁定；无消息时解锁；已有消息时默认锁定，
+// 例外是线程显式指定的账号已不可用（不在窗口里、已停用、或任一窗口 UsedPercent >= 100）时解锁。
+func agyAccountLocked(th *Thread, hasMessages, isRunning bool, windows []ProviderQuotaWindow) bool {
+	if isRunning {
+		return true
+	}
+	if !hasMessages {
+		return false
+	}
+	if th == nil {
+		return true
+	}
+	accountID := strings.TrimSpace(th.Account)
+	if accountID == "" {
+		return true
+	}
+	// shortcut: 冷却状态不在窗口里、暂不参与解锁判断。
+	found := false
+	enabled := false
+	for _, w := range windows {
+		if strings.TrimSpace(w.AccountID) != accountID {
+			continue
+		}
+		found = true
+		if !w.Disabled {
+			enabled = true
+		}
+		if w.UsedPercent >= 100 {
+			return false
+		}
+	}
+	return found && enabled
+}
+
+// composerAgyAccountLockInputs 读取用于账号锁定判定的消息非空与运行状态。
+func composerAgyAccountLockInputs(s *chatState, th *Thread) (hasMessages, isRunning bool) {
+	if th != nil && (th.IsRunning || th.SwarmBusy) {
+		isRunning = true
+	}
+	if s == nil {
+		return false, isRunning
+	}
+	s.mu.Lock()
+	hasMessages = len(s.messages) > 0 || s.embeddedBee
+	if th != nil && !isRunning {
+		for _, t := range s.threads {
+			if t.ID == th.ID {
+				if t.IsRunning || t.SwarmBusy {
+					isRunning = true
+				}
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	return hasMessages, isRunning
+}
+
+// agyAccountDisplayNameForID 从额度窗口中查出指定 AccountID 对应的显示名（经 quotaAccountDisplayName 处理）。
+func agyAccountDisplayNameForID(provider, accountID string, windows []ProviderQuotaWindow) string {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return ""
+	}
+	for _, w := range windows {
+		if strings.TrimSpace(w.AccountID) != accountID {
+			continue
+		}
+		name := strings.TrimSpace(w.Account)
+		if name == "" {
+			name, _ = quotaWindowAccount(w)
+		}
+		return quotaAccountDisplayName(name, provider)
+	}
+	return ""
+}
+
+type agyAccountOption struct {
+	accountID    string
+	displayName  string
+	trailing     string
+	disabled     bool
+	fiveHourFull bool
+}
+
+// agyAccountOptions 从额度窗口提取可选的 agy 账号列表（保持窗口出现顺序）。
+func agyAccountOptions(provider string, windows []ProviderQuotaWindow) []agyAccountOption {
+	var opts []agyAccountOption
+	index := make(map[string]int, 4)
+	has5h := make(map[string]bool, 4)
+	for _, w := range windows {
+		id := strings.TrimSpace(w.AccountID)
+		if id == "" {
+			continue
+		}
+		i, ok := index[id]
+		if !ok {
+			name := strings.TrimSpace(w.Account)
+			if name == "" {
+				name, _ = quotaWindowAccount(w)
+			}
+			display := quotaAccountDisplayName(name, provider)
+			if display == "" {
+				display = id
+			}
+			i = len(opts)
+			index[id] = i
+			opts = append(opts, agyAccountOption{
+				accountID:   id,
+				displayName: display,
+				disabled:    true,
+			})
+		}
+		if !w.Disabled {
+			opts[i].disabled = false
+		}
+		if !has5h[id] {
+			if key, ok := agyQuotaStripWindowKey(w.Label); ok && key == "5h" {
+				has5h[id] = true
+				pct := int(math.Round(math.Max(0, math.Min(100, w.UsedPercent))))
+				opts[i].trailing = fmt.Sprintf("%d%%", pct)
+				opts[i].fiveHourFull = w.UsedPercent >= 100
+			}
+		}
+	}
+	return opts
+}
+
+// selectComposerAgyAccount 乐观更新当前会话的 agy 账号，收起额度弹层，并在后台下发 SetThreadAccount；
+// 失败时回滚会话账号并弹提示，成功后强制重载该会话额度让额度条切到新账号。
+func selectComposerAgyAccount(s *chatState, th *Thread, provider, targetThreadID, quotaThreadID, quotaModel, targetAccountID string) {
+	if s == nil {
+		return
+	}
+	s.composerView.quotaOpen = false
+	s.composerView.quotaPopoverProvider = ""
+
+	prevAccount := ""
+	if th != nil && (targetThreadID == "" || th.ID == targetThreadID) {
+		prevAccount = th.Account
+		th.Account = targetAccountID
+	}
+	if targetThreadID == "" {
+		s.invalidate()
+		return
+	}
+
+	s.mu.Lock()
+	foundPrev := false
+	for i := range s.threads {
+		if s.threads[i].ID == targetThreadID {
+			prevAccount = s.threads[i].Account
+			foundPrev = true
+			s.threads[i].Account = targetAccountID
+			break
+		}
+	}
+	for _, list := range s.threadsByProj {
+		for i := range list {
+			if list[i].ID == targetThreadID {
+				if !foundPrev {
+					prevAccount = list[i].Account
+					foundPrev = true
+				}
+				list[i].Account = targetAccountID
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	s.invalidate()
+
+	if s.client == nil {
+		return
+	}
+	go func() {
+		if err := s.client.SetThreadAccount(targetThreadID, targetAccountID); err != nil {
+			s.mu.Lock()
+			for i := range s.threads {
+				if s.threads[i].ID == targetThreadID && s.threads[i].Account == targetAccountID {
+					s.threads[i].Account = prevAccount
+				}
+			}
+			for _, list := range s.threadsByProj {
+				for i := range list {
+					if list[i].ID == targetThreadID && list[i].Account == targetAccountID {
+						list[i].Account = prevAccount
+					}
+				}
+			}
+			s.mu.Unlock()
+			s.setToast("切换账号失败: " + err.Error())
+			s.invalidate()
+			return
+		}
+		s.loadComposerQuotaForProvider(provider, quotaThreadID, quotaModel, true)
+	}()
+}
+
 // renderComposerQuotaProviderGroup 渲染额度条里一个供应商的读数（点击组打开该 provider 的额度弹层），
 // 以及组间的 secondary 色竖线（竖线属于组外，不可点击）。不是第一组时前置竖线。
 // 组内顺序：供应商图标，然后每个窗口「短标签 + 迷你进度条 + 已用百分比」。
@@ -1366,6 +1586,13 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 	}
 
 	groupOpen := s.composerView.quotaOpen && s.composerView.quotaPopoverProvider == provider
+	accountLabel := ""
+	if th != nil && strings.TrimSpace(th.Account) != "" {
+		allWindows := quotaGroupWindows(s, plan.group)
+		if agyAccountSelectable(th, provider, allWindows) {
+			accountLabel = agyAccountDisplayNameForID(provider, th.Account, allWindows)
+		}
+	}
 	groupTooltip := quotaStripGroupTooltip(s.providerDisplayName(provider), plan)
 	outer, inner := quotaRingWindows(provider, windows)
 	if tier >= composerChinIcons && outer != nil {
@@ -1405,6 +1632,17 @@ func renderComposerQuotaProviderGroup(c *ui.Context, s *chatState, th *Thread, p
 					ui.Box(c.Key("composer-quota-provider-icon-" + keySuffix)).
 						Label(s.providerDisplayName(provider)).
 						Children(func() { renderProviderIconColor(c, provider, IconSM, ThemeSecondaryText(c)) })
+				}
+				if tier < composerChinIcons && accountLabel != "" {
+					ui.Text(c, accountLabel).
+						FontSize(uiFont(FontSizeProjectName)).
+						FontWeight(500).
+						TextColor(ThemeSecondaryText(c)).
+						SingleLine().
+						Ellipsis("…").
+						Shrink(1).
+						MinWidth(0).
+						MaxWidth(120)
 				}
 				if unknownAccount {
 					ui.Text(c, "额度未知").
@@ -1967,6 +2205,68 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 					renderUsageStatusLine(c, usageStatusFor(errText, nil, time.Time{}, usagePanelNow()), FontSizeCallout, usageSettingsTarget{s, settingsProvider})
 				})
 			}
+			var accountSectionHeight float32
+			if agyAccountSelectable(th, provider, windows) {
+				options := agyAccountOptions(provider, windows)
+				hasMessages, isRunning := composerAgyAccountLockInputs(s, th)
+				locked := agyAccountLocked(th, hasMessages, isRunning, windows)
+				currentAccountID := ""
+				if th != nil {
+					currentAccountID = strings.TrimSpace(th.Account)
+				}
+				targetThreadID := g.threadID
+				if targetThreadID == "" && th != nil {
+					targetThreadID = th.ID
+				}
+				if targetThreadID == "" && s != nil {
+					targetThreadID = s.selectedThreadID
+				}
+				ui.Column(c.Key("composer-quota-account-section")).
+					FillWidth().
+					Shrink(0).
+					Gap(Space3).
+					Children(func() {
+						ui.Column(c.Key("composer-quota-account-rows")).
+							FillWidth().
+							Padding(0, Space1).
+							Gap(Space0).
+							Children(func() {
+								menuRow(c, menuRowProps{
+									Key:      "composer-quota-account-auto",
+									Title:    "自动",
+									Checked:  currentAccountID == "",
+									Disabled: locked,
+									OnClick: func() {
+										selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, "")
+									},
+								})
+								for _, opt := range options {
+									curOpt := opt
+									menuRow(c, menuRowProps{
+										Key:      "composer-quota-account-" + curOpt.accountID,
+										Title:    curOpt.displayName,
+										Trailing: curOpt.trailing,
+										Checked:  currentAccountID == curOpt.accountID,
+										Disabled: locked || curOpt.disabled || curOpt.fiveHourFull,
+										OnClick: func() {
+											selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, curOpt.accountID)
+										},
+									})
+								}
+							})
+						ui.Row(c.Key("composer-quota-account-divider-wrap")).
+							FillWidth().
+							Padding(0, Space4).
+							Children(func() {
+								ui.Row(c.Key("composer-quota-account-divider")).
+									FillWidth().
+									Height(Hairline).
+									Background(ThemeDivider(c))
+							})
+					})
+				rowCount := float32(1 + len(options))
+				accountSectionHeight = rowCount*(ControlLG+Space0) + Space3 + Hairline + Space4
+			}
 			// 标题行固定在面板顶部，账户列表放进滚动容器：窗口矮或供应商多时只滚列
 			// 表，不把弹层顶出屏幕。列表高度扣掉面板内边距、标题行与间距后不超过上限。
 			listMax := maxHeight
@@ -1979,6 +2279,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 				if errText != "" {
 					listMax -= ControlXS + Space4
 				}
+				listMax -= accountSectionHeight
 				listMax = max(listMax, 40)
 			}
 			list := ui.Scroll(c.Key("composer-quota-popover-scroll")).
