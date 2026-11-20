@@ -275,7 +275,7 @@ func renderSwarmTierEditorForm(c *ui.Context, st *SettingsState, uiSt *swarmTier
 					TextColor(ThemeSecondaryText(c))
 				TextField(c, TextFieldProps{
 					Key: "swarm-tier-name-" + popKey + "-input", Value: &uiSt.draft.Name,
-					Label: "编辑档位名称", Placeholder: "如：只读 / 执行 / 深度", FillWidth: true,
+					Label: "编辑档位名称", Placeholder: "如：只读 / 执行 / 攻坚", FillWidth: true,
 				})
 			})
 

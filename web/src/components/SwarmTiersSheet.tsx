@@ -359,7 +359,7 @@ export const SwarmTiersSheet: React.FC<SwarmTiersSheetProps> = ({ isOpen, onClos
             type="text"
             value={draft.name}
             onChange={(event) => updateDraft({ name: event.target.value })}
-            placeholder="如：只读 / 执行 / 深度"
+            placeholder="如：只读 / 执行 / 攻坚"
             className={INPUT_CLASS}
           />
         </label>

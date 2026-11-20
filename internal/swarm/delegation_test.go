@@ -473,12 +473,12 @@ func TestBeePrompt_RulesByTier(t *testing.T) {
 	plan := beePrompt("Aspen", d, BeeConfig{WritePaths: []string{"docs/plans/**", "notes/*.md"}})
 	code := beePrompt("Aspen", d, BeeConfig{})
 
-	for _, bad := range []string{"然后动手修改", "可以做有范围的自测"} {
+	for _, bad := range []string{"然后动手修改", "可以做有范围的自测", "不跑构建与测试"} {
 		if strings.Contains(readOnly, bad) {
 			t.Errorf("只读类不应包含 %q:\n%s", bad, readOnly)
 		}
 	}
-	if !strings.Contains(readOnly, "开头先用不超过 1000 字按 brief 的问题编号写出各条结论") {
+	if !strings.Contains(readOnly, "开头先用不超过 1000 字按任务说明的问题编号写出各条结论") {
 		t.Errorf("只读类汇报应先写结论:\n%s", readOnly)
 	}
 	if !strings.Contains(readOnly, "阻塞与环境差异") {
@@ -501,6 +501,9 @@ func TestBeePrompt_RulesByTier(t *testing.T) {
 	for name, got := range map[string]string{"只读": readOnly, "方案": plan, "改代码": code} {
 		if strings.Contains(got, "独立工作副本") {
 			t.Errorf("%s类不应包含 %q:\n%s", name, "独立工作副本", got)
+		}
+		if strings.Contains(strings.ToLower(got), "brief") {
+			t.Errorf("%s类不应包含内部术语 brief:\n%s", name, got)
 		}
 		if strings.Contains(got, "如果长时间在几种设计之间犹豫") || strings.Contains(got, "只读任务必须使用只读工具") {
 			t.Errorf("%s类不应保留已删除的旧规则:\n%s", name, got)

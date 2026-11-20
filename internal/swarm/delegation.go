@@ -907,7 +907,7 @@ func beeWorkRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 	case cfg.ReadOnly:
 		rules = []string{
 			"- 立即开始，只读回答问题所需的内容。",
-			"- 只用只读工具（如 read、find、grep、serena 等）和只读命令查阅，不修改任何文件，不跑构建与测试。",
+			"- 只用只读工具（如 read、find、grep、serena 等）、只读命令和有范围的 go build、go test、go vet 查阅与复现，不修改任何文件。",
 		}
 	case len(cfg.WritePaths) > 0:
 		rules = []string{
@@ -922,8 +922,8 @@ func beeWorkRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 		}
 		rules = []string{
 			"- 立即开始，只读完成任务所需的内容，然后动手修改。",
-			"- brief 已经点明文件、位置和改法的，直接照做，不再反复读。",
-			"- 不碰 brief 没提到的文件（确实无法避免的除外），不回退、不重排、不清理别人的改动。",
+			"- 任务说明已经点明文件、位置和改法的，直接照做，不再反复读。",
+			"- 不碰任务说明没提到的文件（确实无法避免的除外），不回退、不重排、不清理别人的改动。",
 			selfCheckRule,
 		}
 	}
@@ -932,8 +932,8 @@ func beeWorkRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 		"- 查文档、核对外部库或网页信息时，可以用 web_fetch、web_search 等联网工具或 curl（必须带 -m 超时）；只读不写，不向外部服务提交、发布或上传内容，不发送密钥或用户信息。",
 		"- 不执行 git commit、push、branch、stash、reset、checkout。",
 		"- 严禁调用提问工具（如 ask_user_question、ask_user、question 等）向用户或主代理询问确认。",
-		"- brief 有歧义或有多种做法时，按最直接的理解继续，并在汇报里写明你的选择。",
-		"- 遇到阻塞（缺文件、命令无法运行、brief 与代码事实对不上）就停下并在汇报里说明，不要猜测或绕过。",
+		"- 任务说明有歧义或有多种做法时，按最直接的理解继续，并在汇报里写明你的选择。",
+		"- 遇到阻塞（缺文件、命令无法运行、任务说明与代码事实对不上）就停下并在汇报里说明，不要猜测或绕过。",
 	)
 	if strings.TrimSpace(cfg.SystemPrompt) != "" {
 		rules = append(rules, "- 档位要求与以上规则冲突时，以档位要求为准。")
@@ -948,7 +948,7 @@ func beeReportRulesFor(cfg BeeConfig, hasAcceptance bool) string {
 	switch {
 	case cfg.ReadOnly:
 		// 1000 字的阈值是为了让结论与阻塞留在 ReportSummaryLimit（1500）以内。
-		first = "- 汇报只写一次：开头先用不超过 1000 字按 brief 的问题编号写出各条结论，以及阻塞与环境差异（如副本缺文件、命令无法运行）；之后再逐条给出对应的引用，不要整段转述源码。"
+		first = "- 汇报只写一次：开头先用不超过 1000 字按任务说明的问题编号写出各条结论，以及阻塞与环境差异（如副本缺文件、命令无法运行）；之后再逐条给出对应的引用，不要整段转述源码。"
 	case len(cfg.WritePaths) > 0:
 		// 1000 字的阈值是为了让汇报留在 ReportSummaryLimit（1500）以内。
 		first = "- 汇报只写一次：先写根因，再写编号步骤，每步给出位置、改法和验收标准。汇报正文超过约 1000 字时，把完整方案写进允许写入的路径，汇报里只留根因、各步标题和该文件路径。"

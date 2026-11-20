@@ -541,6 +541,7 @@ export type RemoteThreadSummary = {
   provider: string;
   model: string | null;
   effort: string | null;
+  account?: string;
   isRunning: boolean;
   isArchived: boolean;
   isPinned: boolean;
@@ -729,6 +730,7 @@ export type RemoteThreadsUpdateParams = {
   provider?: string;
   model?: string;
   effort?: string;
+  account?: string;
 };
 
 export type RemoteThreadsUpdateResult = {
@@ -1014,6 +1016,7 @@ export type RemoteComposerOptions = {
   provider?: string;
   model?: string;
   effort?: string;
+  account?: string;
   runtimeMode?: "readonly" | "supervised" | "auto" | "fullAccess";
   interactionMode?: "build" | "plan";
   workspaceMode?: "local" | "worktree";

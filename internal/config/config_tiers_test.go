@@ -603,3 +603,48 @@ func TestUpgradeReadTierPromptFromPreviousDefault(t *testing.T) {
 		t.Errorf("已清空的只读提示词不应被回填：got=%q", got[2].SystemPrompt)
 	}
 }
+
+func TestUpgradeAllBuiltinTierTextsFromBriefEra(t *testing.T) {
+	defaults := DefaultSwarmTiers()
+	for _, def := range defaults {
+		if strings.Contains(strings.ToLower(def.Description), "brief") {
+			t.Errorf("档位 %s 默认用途说明不应包含 brief: %q", def.ID, def.Description)
+		}
+		if strings.Contains(strings.ToLower(def.SystemPrompt), "brief") {
+			t.Errorf("档位 %s 默认档位要求不应包含 brief: %q", def.ID, def.SystemPrompt)
+		}
+	}
+
+	prev := []SwarmTier{
+		{
+			ID:           "read",
+			Description:  "只读调研与排查：回答 brief 列出的问题，如符号在哪、谁调用、历史上改过什么；可跑有范围的测试复现问题并给出根因证据",
+			SystemPrompt: "你是只读调研档。逐条回答 brief 里的问题，每条发现写成 path:line，后面紧跟用反引号包住的源码原文。可以用读文件、搜索工具和只读命令（ls、cat、grep、rg、git log、git blame 等），也可以跑有范围的 go build、go test、go vet 来复现、二分、测量；其他命令（如 sqlite3、awk、带重定向的命令）会被拒绝。读 mcode 会话用 mcode 的 session_get 工具。命令被拒或失败时换读文件或搜索工具继续，不要停下。汇报根因时附上证据：path:line、复现命令和输出。不给改法；brief 没问到的不展开。",
+		},
+		{
+			ID:           "chore",
+			Description:  "机械活：brief 已逐字给出改法、无需判断的修改，如重放补丁、改名、格式化、按给定期望补测试、按给定文字改文档",
+			SystemPrompt: "你是机械活档。严格按 brief 逐字执行，不自行扩展。遇到需要判断的地方，或者测试与代码对不上、不确定该改哪一边时，停下并在汇报里说明，不要自己选；不为了让测试通过去改断言。",
+		},
+		{
+			ID:           "edit",
+			Description:  "按 brief 的步骤改代码，步骤内的实现细节自行判断，并补覆盖该行为的测试",
+			SystemPrompt: "你是执行档。按 brief 的步骤改代码，步骤内的实现细节（命名、错误处理、锚点漂移后按语义找到对应位置）自行判断，并补覆盖该行为的测试。发现步骤本身有错，或需要改步骤以外的内容时，在汇报里说明，不扩大修改范围。",
+		},
+		{
+			ID:           "deep",
+			Description:  "攻坚：步骤已定但落地需要细致推理的改动，如并发与锁、生命周期与状态机、跨包重构；按 brief 改代码并补测试",
+			SystemPrompt: "你是攻坚档。按 brief 的步骤改代码。涉及并发、生命周期、状态或跨包改动时，先读清相关调用方和不变量再动手，并补覆盖该行为的测试，包括边界与竞态。发现步骤本身有错，或需要改步骤以外的内容时，在汇报里说明，不扩大修改范围。",
+		},
+	}
+
+	got := UpgradeBuiltinTierTexts(prev)
+	for i, def := range defaults {
+		if got[i].Description != def.Description {
+			t.Errorf("档位 %s 旧用途说明未升级：got=%q want=%q", def.ID, got[i].Description, def.Description)
+		}
+		if got[i].SystemPrompt != def.SystemPrompt {
+			t.Errorf("档位 %s 旧档位要求未升级：got=%q want=%q", def.ID, got[i].SystemPrompt, def.SystemPrompt)
+		}
+	}
+}
