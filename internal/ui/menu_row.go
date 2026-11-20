@@ -40,8 +40,8 @@ func menuRow(c *ui.Context, p menuRowProps) ui.Element {
 	if p.Highlighted || (!p.Disabled && btn.Hovered()) {
 		btn.Background(ThemeHover(c))
 	}
-	if !p.Disabled && btn.FocusVisible() {
-		btn.Shadow(0, 0, 0, 2, ThemeAccent(c)).Shadow(0, 0, 0, 1, ThemeSurfaceCard(c))
+	if !p.Disabled {
+		focusRing(c, btn)
 	}
 	if !p.Disabled && p.OnClick != nil {
 		btn.OnClick(p.OnClick)

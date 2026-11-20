@@ -232,9 +232,7 @@ func renderButton(c *ui.Context, p ButtonOpts, iconOnly, active bool) ui.Element
 		if p.Variant == ButtonSecondary {
 			b.Border(1, ThemeBorder(c))
 		}
-		if b.FocusVisible() {
-			b.Shadow(0, 0, 0, 2, ThemeAccent(c)).Shadow(0, 0, 0, 1, ThemeSurfaceCard(c))
-		}
+		focusRing(c, b)
 		scale := motionPressScale(c, b, "button-press-scale", !disabled && b.Pressed())
 		b.Scale(scale, scale).Children(func() {
 			if p.Loading {
@@ -260,4 +258,11 @@ func renderButton(c *ui.Context, p ButtonOpts, iconOnly, active bool) ui.Element
 		buildButton(c)
 	})
 	return wrap
+}
+
+// focusRing 在元素具备键盘焦点可见态时绘制双层零模糊聚焦描边。
+func focusRing(c *ui.Context, e ui.Element) {
+	if e.FocusVisible() {
+		e.Shadow(0, 0, 0, 2, ThemeAccent(c)).Shadow(0, 0, 0, 1, ThemeSurfaceCard(c))
+	}
 }
