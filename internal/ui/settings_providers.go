@@ -694,8 +694,16 @@ func renderPageCustomEndpoints(c *ui.Context, st *SettingsState) {
 						if deletingID == epVal.ID {
 							delLabel = "删除中…"
 						}
+						delA11y := delLabel + " " + epVal.Name
+						if strings.TrimSpace(epVal.Name) == "" {
+							if deletingID == epVal.ID {
+								delA11y = delLabel
+							} else {
+								delA11y = delLabel + "端点"
+							}
+						}
 						delBtn := ui.ButtonBase(c.Key("btn-del-ep-"+epVal.ID)).
-							Label(delLabel+" "+epVal.Name).
+							Label(delA11y).
 							Disabled(busy).
 							Radius(RadiusSM).
 							Padding(Space1, Space4)
@@ -1302,18 +1310,17 @@ func renderProviderAddSheetBody(c *ui.Context, st *SettingsState, cliCandidates 
 	}
 	renderSettingsSection(c, "sec-provider-add-type", "类型", func() {
 		renderSettingRow(c, "row-provider-add-type", "类型", func() {
-			choice := kind
-			if choice == 2 {
-				choice = 1
-			}
 			choiceFunc(
-				[]string{"智能体", "API Key"},
-				func(*SettingsState) (int, bool) { return choice, false },
+				[]string{"智能体", "API Key", "自定义端点"},
+				func(*SettingsState) (int, bool) { return kind, false },
 				func(st *SettingsState, index int) {
 					st.mu.Lock()
 					st.presets.addType = index
 					st.presets.addPresetID = ""
 					st.presets.apiKeyDraft = ""
+					if index == 2 {
+						openCustomEndpointForm(st, nil, endpointFormScopeCustom)
+					}
 					st.mu.Unlock()
 					st.invalidate()
 				},

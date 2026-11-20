@@ -16,10 +16,13 @@ const settingsPageOpenIn = "workbench"
 
 // openInPageState 维护「打开方式」页的表单状态，只在 UI 线程读写。
 type openInPageState struct {
-	adding    bool
-	draftName string
-	draftPath string
-	err       string
+	adding            bool
+	draftName         string
+	draftPath         string
+	err               string
+	pendingDelete     bool
+	pendingDeleteIdx  int
+	pendingDeleteName string
 }
 
 // getOpenInPageState 取该设置面板的「打开方式」表单状态；第一次访问时在 st.mu 下懒初始化。
@@ -141,15 +144,51 @@ func renderPageOpenIn(c *ui.Context, st *SettingsState) {
 	ui.Column(c.Key("openin-sections-container")).Gap(Space5).Children(func() {
 		renderSettingsSection(c, "sec-openin-apps", "应用列表", func() {
 			for i := range apps {
-				renderOpenInAppRow(c, st, apps, i)
+				renderOpenInAppRow(c, st, ps, apps, i)
 			}
 			renderOpenInAddApp(c, st, ps)
 		})
 	})
+
+	if ps.pendingDelete && (ps.pendingDeleteIdx < 0 || ps.pendingDeleteIdx >= len(apps)) {
+		ps.pendingDelete = false
+	}
+	targetName := ""
+	if ps.pendingDelete {
+		targetName = apps[ps.pendingDeleteIdx].Name
+	}
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:          "openin-delete",
+		Open:         ps.pendingDelete,
+		Tone:         ConfirmDanger,
+		Title:        "删除「" + targetName + "」？",
+		Body:         "将从打开方式列表中移除该应用。",
+		ConfirmLabel: "删除",
+		ConfirmA11y:  "确认删除 " + targetName,
+		CancelLabel:  "取消",
+		OnConfirm: func() {
+			idx := ps.pendingDeleteIdx
+			ps.pendingDelete = false
+			ps.pendingDeleteIdx = 0
+			ps.pendingDeleteName = ""
+			if idx >= 0 && idx < len(apps) {
+				next := append([]config.OpenInAppConfig(nil), apps[:idx]...)
+				next = append(next, apps[idx+1:]...)
+				st.saveOpenInApps(next)
+			}
+			st.invalidate()
+		},
+		OnCancel: func() {
+			ps.pendingDelete = false
+			ps.pendingDeleteIdx = 0
+			ps.pendingDeleteName = ""
+			st.invalidate()
+		},
+	})
 }
 
 // renderOpenInAppRow 渲染打开方式列表中的一项：名称、开关、上移/下移、删除。
-func renderOpenInAppRow(c *ui.Context, st *SettingsState, apps []config.OpenInAppConfig, i int) {
+func renderOpenInAppRow(c *ui.Context, st *SettingsState, ps *openInPageState, apps []config.OpenInAppConfig, i int) {
 	app := apps[i]
 	if i > 0 {
 		renderSettingsDivider(c, "div-openin-"+app.Name)
@@ -186,9 +225,9 @@ func renderOpenInAppRow(c *ui.Context, st *SettingsState, apps []config.OpenInAp
 		})
 
 		openInIconButton(c, "btn-openin-delete-"+app.Name, "删除", IconTrash2(), true, func() {
-			next := append([]config.OpenInAppConfig(nil), apps[:i]...)
-			next = append(next, apps[i+1:]...)
-			st.saveOpenInApps(next)
+			ps.pendingDelete = true
+			ps.pendingDeleteIdx = i
+			ps.pendingDeleteName = app.Name
 			st.invalidate()
 		})
 	})

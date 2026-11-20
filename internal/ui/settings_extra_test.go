@@ -442,6 +442,10 @@ func TestSettingsExtra_ShortcutsCustomizeAndReset(t *testing.T) {
 	if err := settingsClick(t, tt, "全部恢复默认"); err != nil {
 		t.Fatalf("click reset all failed: %v", err)
 	}
+	waitFor(t, tt, func() bool { return tt.HasText("全部恢复默认快捷键？") })
+	if err := tt.Click("恢复默认"); err != nil {
+		t.Fatalf("confirm reset all failed: %v", err)
+	}
 	waitFor(t, tt, func() bool {
 		_, _, ok := matchShortcut(ui.Cmd|ui.Alt, ui.KeyD)
 		return !ok

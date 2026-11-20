@@ -1206,6 +1206,10 @@ func TestSettings_ModelsPage_PreferencesAndBudgetPersistence(t *testing.T) {
 	click("Claude Sonnet")
 	clickEffortSlider(t, tt, 1)
 	click("快速模式")
+	waitFor(t, tt, func() bool {
+		pref, _ := fake.ModelPreferences(context.Background(), pin)
+		return pref.Effort != nil && *pref.Effort == "high" && pref.FastMode
+	})
 	pref, _ := fake.ModelPreferences(context.Background(), pin)
 	if pref.Effort == nil || *pref.Effort != "high" || !pref.FastMode {
 		t.Fatalf("偏好未保存: %+v", pref)
@@ -1242,6 +1246,10 @@ func TestSettings_ModelsPage_PreferencesAndBudgetPersistence(t *testing.T) {
 		t.Fatalf("移除后重新添加丢失偏好: %+v", pref)
 	}
 	click("重置强度与快速模式")
+	waitFor(t, tt, func() bool {
+		pref, _ := fake.ModelPreferences(context.Background(), pin)
+		return pref.Effort == nil && !pref.FastMode
+	})
 	pref, _ = fake.ModelPreferences(context.Background(), pin)
 	if pref.Effort != nil || pref.FastMode {
 		t.Fatalf("重置未持久化: %+v", pref)
@@ -1301,6 +1309,7 @@ func TestSettings_ModelsPage_WriteFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	clickEffortSlider(t, tt, 1)
+	waitFor(t, tt, func() bool { return tt.HasText("保存模型偏好失败：disk full") })
 	if !tt.HasText("保存模型偏好失败：disk full") || st.cfg.Models.ModelPreferenceFor(pin).Effort != nil {
 		t.Fatal("偏好保存失败仍更新了配置")
 	}

@@ -258,6 +258,17 @@ func (d workbenchDocsControl) render(c *ui.Context, st *SettingsState, s setting
 }
 
 func (d workbenchDocsControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
+	if st != nil {
+		st.workbenchCtx.mu.Lock()
+		if !st.workbenchCtx.guidanceInit {
+			st.workbenchCtx.guidanceInit = true
+			st.workbenchCtx.lastGuidance = !disabled
+		} else if st.workbenchCtx.lastGuidance != !disabled {
+			st.workbenchCtx.lastGuidance = !disabled
+			st.workbenchCtx.loaded = false
+		}
+		st.workbenchCtx.mu.Unlock()
+	}
 	docs := workbenchContextInjectEntries(workbenchContextManifest(st))
 	if len(docs) == 0 {
 		settingStatus(c, s.ID+"-empty", "未建立项目文档")
@@ -298,6 +309,7 @@ func (d workbenchDocsControl) renderDisabled(c *ui.Context, st *SettingsState, s
 			commitSettingsControl(st, func(cfg *config.Config) {
 				cfg.Workbench.ContextInjectCustomDocs = setContextInjectDocEnabled(cfg.Workbench.ContextInjectCustomDocs, doc.refID, value)
 			})
+			invalidateWorkbenchContextCache(st)
 		}
 	})
 }
@@ -444,32 +456,6 @@ type workbenchInjectDoc struct {
 	title    string // 展示标题
 	standard bool
 	exists   bool
-}
-
-// workbenchContextManifest 读取当前项目文档清单；没有关联项目或读取失败时返回 nil。
-func workbenchContextManifest(st *SettingsState) *projctx.Manifest {
-	if st == nil {
-		return nil
-	}
-	st.mu.Lock()
-	chat := st.chat
-	st.mu.Unlock()
-	if chat == nil || chat.client == nil {
-		return nil
-	}
-	projectPath := chat.getSelectedProjectPath()
-	if projectPath == "" {
-		return nil
-	}
-	svc, err := projctx.New(projectPath)
-	if err != nil {
-		return nil
-	}
-	manifest, err := svc.Manifest()
-	if err != nil {
-		return nil
-	}
-	return &manifest
 }
 
 // workbenchContextInjectEntries 把清单展开为注入开关列表：四篇标准文档在前（缺失也列出），自定义文档在后。

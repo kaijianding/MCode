@@ -168,7 +168,6 @@ func TestSettingsGuard_ProseText(t *testing.T) {
 		"settings_page_mcp.go":              1,
 		"settings_page_archive.go":          1,
 		"settings_page_swarm.go":            3,
-		"settings_page_models.go":           1,
 		"settings_page_mcp_catalog.go":      1,
 		"settings_page_providers_agents.go": 1,
 	}
@@ -285,7 +284,7 @@ func TestSettingsGuard_RenderPurity(t *testing.T) {
 	allowed := map[string]int{
 		"settings_page_providers_agents.go": 13,
 		"settings_page_archive.go":          13,
-		"settings_page_models.go":           7,
+		"settings_page_models.go":           6,
 		"settings_page_about.go":            5,
 		"settings_page_mcp.go":              2,
 		"settings_page_mcp_cache.go":        3,

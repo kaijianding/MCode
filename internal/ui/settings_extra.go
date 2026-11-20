@@ -251,7 +251,8 @@ func renderShortcutResetAll(c *ui.Context, st *SettingsState) {
 		resetAll.Background(ThemeOverlay(c, 0.15))
 	}
 	if resetAll.Clicked() {
-		st.resetShortcutOverrides()
+		st.shortcutResetConfirmOpen = true
+		st.invalidate()
 	}
 	resetAll.Children(func() {
 		ui.Text(c, "全部恢复默认").
@@ -285,6 +286,24 @@ func renderShortcutTable(c *ui.Context, st *SettingsState, hint string) {
 	for _, grp := range groups {
 		renderShortcutGroup(c, st, grp, grouped[grp], conflicts)
 	}
+
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:          "settings-shortcuts-reset-all",
+		Open:         st.shortcutResetConfirmOpen,
+		Tone:         ConfirmDanger,
+		Title:        "全部恢复默认快捷键？",
+		Body:         "将清除所有自定义快捷键覆盖，恢复为默认键位。",
+		ConfirmLabel: "恢复默认",
+		CancelLabel:  "取消",
+		OnConfirm: func() {
+			st.shortcutResetConfirmOpen = false
+			st.resetShortcutOverrides()
+		},
+		OnCancel: func() {
+			st.shortcutResetConfirmOpen = false
+			st.invalidate()
+		},
+	})
 }
 
 // renderShortcutKeysBadge 渲染快捷键键位小标签。

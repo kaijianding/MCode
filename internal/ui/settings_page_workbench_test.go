@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"mcode/internal/config"
@@ -114,6 +115,7 @@ func TestSettingsPageWorkbench_Tree(t *testing.T) {
 	st.cfg.Workbench.StuckInterruptTimeout = 1800
 
 	tt := ui.NewTester(func(c *ui.Context) { renderPageWorkbench(c, st) }, 1000, 4000)
+	waitFor(t, tt, func() bool { return tt.HasText("标准 4 · 自定义 1") })
 
 	texts := make(map[string]bool)
 	for _, text := range tt.Texts() {
@@ -329,6 +331,7 @@ func TestSettingsDependentControls(t *testing.T) {
 		renderPageWorkbench(c, st)
 		renderSettingsTreeSetting(c, st, quit)
 	}, 1000, 4000)
+	waitFor(t, tt, func() bool { return tt.HasText("Api Design") })
 	if !tt.HasText("退出应用") {
 		t.Fatal("关闭窗口选项缺少退出应用")
 	}
@@ -411,6 +414,7 @@ func TestWorkbenchSettings_ToggleAndPersist(t *testing.T) {
 	dataDir := settingsTestDir(t)
 	st := NewSettingsState(dataDir, nil, s)
 	tt := ui.NewTester(func(c *ui.Context) { renderPageWorkbench(c, st) }, 1000, 4000)
+	waitFor(t, tt, func() bool { return tt.HasText("标准 4 · 自定义 1") })
 
 	initialGuidance := st.cfg.Workbench.ContextGuidanceEnabled()
 	if err := tt.Click("切换注入项目说明"); err != nil {
@@ -476,6 +480,7 @@ func TestWorkbenchSettings_NoCustomDocs(t *testing.T) {
 	st := NewSettingsState(settingsTestDir(t), nil, s)
 	tt := ui.NewTester(func(c *ui.Context) { renderPageWorkbench(c, st) }, 420, 4000)
 
+	waitFor(t, tt, func() bool { return tt.HasText("标准 4 · 自定义 0") })
 	if !tt.HasText("标准 4 · 自定义 0") {
 		t.Fatalf("计数应显示标准 4 与自定义 0: %v", tt.Texts())
 	}
@@ -513,7 +518,14 @@ func TestWorkbenchSettings_StandardDocsListed(t *testing.T) {
 	s.projects = []Project{{ID: "p1", Name: "demo", Path: project}}
 	st := NewSettingsState(settingsTestDir(t), nil, s)
 
-	docs := workbenchContextInjectEntries(workbenchContextManifest(st))
+	var manifest *projctx.Manifest
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if manifest = workbenchContextManifest(st); manifest != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	docs := workbenchContextInjectEntries(manifest)
 	if len(docs) != 5 {
 		t.Fatalf("expected 4 standard + 1 custom docs, got %+v", docs)
 	}
@@ -539,6 +551,7 @@ func TestWorkbenchSettings_StandardDocsListed(t *testing.T) {
 
 	// 开关渲染：标准文档开关置灰，自定义文档可切换，保存的 key 为 refID。
 	tt := ui.NewTester(func(c *ui.Context) { renderPageWorkbench(c, st) }, 1000, 4000)
+	waitFor(t, tt, func() bool { return tt.HasText("Instructions") })
 	if err := tt.Click("切换Instructions"); err != nil {
 		t.Fatalf("standard doc switch should be disabled: %v", err)
 	}

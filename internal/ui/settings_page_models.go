@@ -67,6 +67,9 @@ type modelsPageState struct {
 	dragDy             float32
 	openPopoverKey     string
 	preferences        map[string]ModelPreference
+	prefSeq            map[string]uint64
+	prefTail           map[string]<-chan struct{}
+	lastSavedPref      map[string]ModelPreference
 	// seeded 表示首帧已用配置里的固定模型填过「你的模型」，避免加载期间区块空白。
 	seeded bool
 	// loadCatalogOnly 表示本次加载只刷新供应商目录：固定模型、偏好与上限保持原样。
@@ -108,6 +111,8 @@ func (st *SettingsState) refreshModels() {
 		st.modelsRefreshDone = true
 		if err != nil {
 			st.modelsRefreshErr = err.Error()
+		} else {
+			st.toastMessage = "模型列表已刷新"
 		}
 		st.mu.Unlock()
 		st.invalidate()
@@ -243,20 +248,6 @@ func (ps *modelsPageState) changePin(st *SettingsState, client Client, pin Model
 
 func (ps *modelsPageState) removePin(st *SettingsState, client Client, pin ModelPin) {
 	ps.changePin(st, client, pin, false, nil)
-}
-
-func (ps *modelsPageState) savePreference(st *SettingsState, client Client, pin ModelPin, pref ModelPreference) {
-	if client == nil {
-		return
-	}
-	if err := client.UpdateModelPreference(context.Background(), pin, pref); err != nil {
-		ps.opErr = "保存模型偏好失败：" + err.Error()
-	} else {
-		ps.preferences[pin.Key()] = pref
-		ps.opErr = ""
-		ps.syncSettings(st)
-	}
-	st.invalidate()
 }
 
 // reorderPins 纯函数：将 pins 中的元素从 from 移动至 to 位置，返回新切片。越界时原样返回。
@@ -653,7 +644,7 @@ func renderPinnedModels(c *ui.Context, st *SettingsState) {
 	if loadErrText == "" {
 		loadErrText = ps.catalogErr
 	}
-	if loadErrText != "" || ps.opErr != "" || refreshDone {
+	if loadErrText != "" || ps.opErr != "" || (refreshDone && refreshErr != "") {
 		status := ui.Column(c.Key("models-pinned-status")).Padding(settingsRowPadY, settingsRowPadX)
 		status.Children(func() {
 			if loadErrText != "" {
@@ -668,12 +659,8 @@ func renderPinnedModels(c *ui.Context, st *SettingsState) {
 			if ps.opErr != "" {
 				ui.Text(c, ps.opErr).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
 			}
-			if refreshDone {
-				if refreshErr != "" {
-					ui.Text(c, refreshErr).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
-				} else {
-					ui.Text(c, "模型列表已刷新").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
-				}
+			if refreshDone && refreshErr != "" {
+				ui.Text(c, refreshErr).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
 			}
 		})
 	}

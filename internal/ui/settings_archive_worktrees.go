@@ -347,13 +347,9 @@ func renderArchiveWorktreeSection(c *ui.Context, st *SettingsState) {
 		ui.Row(c.Key("archive-wt-header")).
 			Padding(settingsCardPad, Space5).
 			Gap(Space4).
+			Justify(ui.End).
 			AlignItems(ui.Center).
 			Children(func() {
-				ui.Text(c, "扫描各项目遗留的 Worktree（孤立目录、已合入、有未提交改动），勾选后可彻底删除并回收磁盘空间；正在被会话使用的 Worktree 不可选择。").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c)).
-					Grow(1)
-
 				Button(c.Key("btn-archive-wt-scan"), ButtonOpts{
 					Icon:     IconRefreshCw(),
 					Text:     "扫描",

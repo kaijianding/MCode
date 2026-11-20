@@ -271,3 +271,64 @@ func (ps *modelsPageState) reorder(st *SettingsState, client Client, from, to in
 		}
 	})
 }
+
+func (ps *modelsPageState) savePreference(st *SettingsState, client Client, pin ModelPin, pref ModelPreference) {
+	if client == nil || st == nil {
+		return
+	}
+	pinKey := pin.Key()
+	if ps.prefSeq == nil {
+		ps.prefSeq = make(map[string]uint64)
+	}
+	if ps.prefTail == nil {
+		ps.prefTail = make(map[string]<-chan struct{})
+	}
+	if ps.lastSavedPref == nil {
+		ps.lastSavedPref = make(map[string]ModelPreference)
+	}
+	if _, ok := ps.lastSavedPref[pinKey]; !ok {
+		ps.lastSavedPref[pinKey] = ps.preferences[pinKey]
+	}
+	ps.preferences[pinKey] = pref
+	ps.opErr = ""
+	ps.prefSeq[pinKey]++
+	seq := ps.prefSeq[pinKey]
+	previous := ps.prefTail[pinKey]
+	done := make(chan struct{})
+	ps.prefTail[pinKey] = done
+
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var err error
+		if previous != nil {
+			select {
+			case <-previous:
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		}
+		if err == nil {
+			err = client.UpdateModelPreference(ctx, pin, pref)
+		}
+		ps.opMu.Lock()
+		ps.completed = append(ps.completed, func() {
+			if err != nil {
+				if seq == ps.prefSeq[pinKey] {
+					ps.preferences[pinKey] = ps.lastSavedPref[pinKey]
+					ps.opErr = "保存模型偏好失败：" + err.Error()
+				}
+				return
+			}
+			ps.lastSavedPref[pinKey] = pref
+			if seq == ps.prefSeq[pinKey] {
+				ps.preferences[pinKey] = pref
+				ps.opErr = ""
+			}
+			ps.syncSettings(st)
+		})
+		ps.opMu.Unlock()
+		st.invalidate()
+	}()
+}

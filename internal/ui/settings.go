@@ -119,7 +119,10 @@ type SettingsState struct {
 
 	// resetPendingPage 是已点「恢复本页默认」、等待二次确认的页面 id；空串表示没有。
 	// 和 advancedOpen 一样只在界面线程读写。
-	resetPendingPage string
+	resetPendingPage         string
+	shortcutResetConfirmOpen bool
+	toastMessage             string
+	workbenchCtx             workbenchContextCache
 
 	// openSheet 是当前打开的面板 id（空表示无），sheetJumpRow 是面板内要跳到的那一行。
 	openSheet    string
@@ -511,6 +514,7 @@ func (s *SettingsState) Close() {
 	disposeEditor := detachSwarmTierEditorLocked(s)
 	s.open = false
 	s.resetPendingPage = ""
+	s.shortcutResetConfirmOpen = false
 	s.mcpPage = nil
 	s.mcpCatalogPage = nil
 	s.swarmTiersPage = nil
@@ -527,6 +531,16 @@ func (s *SettingsState) Close() {
 	}
 	closeSettingsSheet(s)
 
+	s.invalidate()
+}
+
+func (s *SettingsState) setToast(msg string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.toastMessage = msg
+	s.mu.Unlock()
 	s.invalidate()
 }
 
@@ -1325,11 +1339,15 @@ func renderSettingsNavHits(c *ui.Context, st *SettingsState, hits []settingsItem
 			Radius(RowCornerRadius).
 			Gap(Space3).
 			AlignItems(ui.Center).
+			Focusable().
+			KeepFocus().
+			Cursor(ui.CursorPointer).
 			Label("settings-nav-hit-" + hit.Item.ID)
 
 		if hitRow.Hovered() {
 			hitRow.Background(ThemeHover(c))
 		}
+		focusRing(c, hitRow)
 		if hitRow.Clicked() {
 			st.focusSettingsItem(hit)
 		}
@@ -1493,6 +1511,9 @@ func renderSettingsNavItem(c *ui.Context, st *SettingsState, item settingsNavDef
 		Radius(RowCornerRadius).
 		Gap(Space3).
 		AlignItems(ui.Center).
+		Focusable().
+		KeepFocus().
+		Cursor(ui.CursorPointer).
 		Label(item.title)
 
 	hoverTarget, selTarget := float32(0), float32(0)
@@ -1512,6 +1533,7 @@ func renderSettingsNavItem(c *ui.Context, st *SettingsState, item settingsNavDef
 		bg = bg.Mix(ThemeSelected(c), sel)
 		row.Background(bg)
 	}
+	focusRing(c, row)
 
 	if row.Clicked() {
 		st.selectSettingsPage(item.id)
@@ -1573,6 +1595,14 @@ func renderSettingsDetail(c *ui.Context, st *SettingsState) {
 
 	// 每帧渲染详情区之前把逐项搜索的定位与高亮状态交给行渲染器；高亮过期就地清掉。
 	st.syncSettingsRowFocus()
+
+	st.mu.Lock()
+	toast := st.toastMessage
+	st.toastMessage = ""
+	st.mu.Unlock()
+	if toast != "" {
+		c.Toast(toast)
+	}
 
 	// 技能/MCP 列表与扫描时的项目目录绑定，切项目后重扫，避免写盘落到别的项目（J-07）。
 	if st.currentPage == "extensions" {

@@ -31,6 +31,7 @@ type providerRowsState struct {
 	currentProviderKind string
 	loaded              bool
 	loading             bool
+	cacheOnce           sync.Once
 	recheckOnFocus      bool
 	focusWindow         *mygo.Window
 	available           map[string]bool
@@ -362,13 +363,7 @@ func (st *SettingsState) loadProviderRows() {
 		st.mu.Unlock()
 		return
 	}
-	// 页面打开时先同步读上一次成功加载的缓存立即渲染，随后在后台刷新；
-	// 没有缓存时保持原有的加载中状态。
-	if !st.providerRows.loaded {
-		if cached, ok := loadProviderStatusCache(st.dataDir); ok {
-			applyProviderStatusCache(st, cached)
-		}
-	}
+	dataDir := st.dataDir
 	st.providerRows.loading = true
 	st.mu.Unlock()
 	st.invalidate()
@@ -376,6 +371,16 @@ func (st *SettingsState) loadProviderRows() {
 	providerStatusCacheWriters.Add(1)
 	go func() {
 		defer providerStatusCacheWriters.Done()
+		st.providerRows.cacheOnce.Do(func() {
+			if cached, ok := loadProviderStatusCache(dataDir); ok {
+				st.mu.Lock()
+				if !st.providerRows.loaded {
+					applyProviderStatusCache(st, cached)
+				}
+				st.mu.Unlock()
+				st.invalidate()
+			}
+		})
 		// 无论中途哪个调用失败，都要把 loading 复位，否则行会一直停在「检查中…」。
 		defer func() {
 			st.mu.Lock()
