@@ -497,13 +497,21 @@ func renderFileManagerRow(c *ui.Context, s *chatState, props fileManagerRowProps
 		}
 		ui.Icon(c, props.icon).Size(IconSM, IconSM).TextColor(iconColor).Shrink(0)
 
-		ui.Text(c, props.name).
+		nameText := ui.Text(c, props.name).
 			FontSize(uiFont(TypeFootnote)).
 			TextColor(nameColor).
 			SingleLine().
 			TruncateMiddle().
 			Grow(1).
 			MinWidth(0)
+		if props.entry.Path != "" {
+			if w := nameText.LayoutBounds().W; w > 0 {
+				naturalW, _ := c.MeasureText(0, ui.Span{Text: props.name, Size: uiFont(TypeFootnote)})
+				if naturalW > w+Hairline {
+					nameText.Tooltip(props.entry.Path)
+				}
+			}
+		}
 
 		if props.symlink {
 			renderFileManagerTag(c, props.key+"-symlink", "链接", ThemeSecondaryText(c))
@@ -664,14 +672,21 @@ func renderFileManagerFileHeader(c *ui.Context, s *chatState, tab fileManagerTab
 						TextColor(ThemePrimaryText(c)).
 						SingleLine().
 						Tooltip(tab.path)
-					detail := tab.path
-					if tab.totalSize > 0 {
-						detail = tab.path + " · " + formatFileSize(tab.totalSize)
+					var detail string
+					if tab.path != fileName {
+						detail = tab.path
+						if tab.totalSize > 0 {
+							detail += " · " + formatFileSize(tab.totalSize)
+						}
+					} else if tab.totalSize > 0 {
+						detail = formatFileSize(tab.totalSize)
 					}
-					ui.Text(c, detail).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c)).
-						SingleLine()
+					if detail != "" {
+						ui.Text(c, detail).
+							FontSize(uiFont(TypeCaption)).
+							TextColor(ThemeSecondaryText(c)).
+							SingleLine()
+					}
 				})
 
 			if isMarkdownPath(tab.path) {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -123,28 +124,28 @@ func fileTreeWatchTick(s *chatState, st *fileManagerState, threadID string) {
 
 // fileTreeWatchTickExisting 只推进已经存在的监听状态；计时器回调使用，
 // 避免会话释放后又为旧指针重建计时器。
-func fileTreeWatchTickExisting(s *chatState, st *fileManagerState, threadID string, timerSeq uint64) {
+func fileTreeWatchTickExisting(s *chatState, st *fileManagerState, threadID string, timerSeq uint64) bool {
 	w := fileTreeWatchLookup(st)
 	if w == nil {
-		return
+		return false
 	}
-	fileTreeWatchTickState(s, st, threadID, w, timerSeq)
+	return fileTreeWatchTickState(s, st, threadID, w, timerSeq)
 }
 
-func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string, w *fileTreeWatchState, fromTimerSeq uint64) {
+func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string, w *fileTreeWatchState, fromTimerSeq uint64) bool {
 	if s == nil || st == nil || threadID == "" || w == nil {
-		return
+		return false
 	}
 	client, ok := s.client.(workspaceGenerationClient)
 	if !ok {
-		return
+		return false
 	}
 
 	fileManagerMu.Lock()
 	sessionGen := st.gen
 	if st.threadID != threadID {
 		fileManagerMu.Unlock()
-		return
+		return false
 	}
 	fileManagerMu.Unlock()
 
@@ -152,7 +153,7 @@ func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string,
 	w.mu.Lock()
 	if w.disposed || (fromTimerSeq != 0 && w.timerSeq != fromTimerSeq) {
 		w.mu.Unlock()
-		return
+		return false
 	}
 	if w.threadID != threadID || w.sessionGen != sessionGen {
 		w.cancelLocked()
@@ -171,13 +172,13 @@ func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string,
 	if w.inFlight {
 		w.scheduleTimerLocked(s, st, threadID, fileTreeWatchInterval)
 		w.mu.Unlock()
-		return
+		return false
 	}
 	if !w.lastCheck.IsZero() {
 		if wait := fileTreeWatchInterval - now.Sub(w.lastCheck); wait > 0 {
 			w.scheduleTimerLocked(s, st, threadID, wait)
 			w.mu.Unlock()
-			return
+			return false
 		}
 	}
 	w.seq++
@@ -190,6 +191,7 @@ func fileTreeWatchTickState(s *chatState, st *fileManagerState, threadID string,
 	w.mu.Unlock()
 
 	go fileTreeWatchCheck(s, st, client, threadID, sessionGen, seq, ctx, cancel)
+	return false
 }
 
 // fileTreeWatchCheck 在后台取一次代次，变化时刷新目录、内容与 Git 标记。
@@ -360,8 +362,9 @@ func (w *fileTreeWatchState) scheduleTimerLocked(s *chatState, st *fileManagerSt
 		w.timer = nil
 		w.timerAt = time.Time{}
 		w.mu.Unlock()
-		fileTreeWatchTickExisting(s, st, threadID, seq)
-		s.invalidate()
+		if fileTreeWatchTickExisting(s, st, threadID, seq) {
+			s.invalidate()
+		}
 	})
 	w.timer = timer
 	w.timerAt = time.Now().Add(wait)
@@ -436,6 +439,7 @@ func fileTreeApplyGitLocked(tree *fileTreeState, files []GitChangedFile) bool {
 		}
 	}
 	tree.git = next
+	tree.gitRev++
 	if changed {
 		// 只看改动视图按新列表重建，并重新展开新增的父目录。
 		tree.changedSig = ""
@@ -455,6 +459,7 @@ func (s *chatState) fileTreeToggleOnlyChanged(threadID string) {
 	on := tree.onlyChanged
 	if on {
 		tree.changedSig = ""
+		tree.changedCacheOK = false
 	}
 	fileManagerMu.Unlock()
 	if on {
@@ -484,9 +489,17 @@ func fileTreeChangedOutlineLocked(tree *fileTreeState) *ui.OutlineState[string] 
 	return outline
 }
 
+// fileTreeChangedRowsBuilds 记录「只看改动」树结构的实际构建次数，供缓存命中测试观测。
+var fileTreeChangedRowsBuilds atomic.Int64
+
 // fileTreeChangedRowsLocked 从 Git 改动列表生成只包含改动文件与必要父目录的树。
 // 数据变化时默认展开全部目录；用户手动收起的目录在数据不变时保持收起。
 func fileTreeChangedRowsLocked(tree *fileTreeState) (roots []string, children map[string][]string, entries map[string]FileEntry) {
+	if tree.changedCacheOK && tree.changedCacheRev == tree.gitRev {
+		return tree.changedRoots, tree.changedChildren, tree.changedEntries
+	}
+	fileTreeChangedRowsBuilds.Add(1)
+
 	children = make(map[string][]string)
 	entries = make(map[string]FileEntry)
 	dirs := map[string]bool{"": true}
@@ -538,7 +551,12 @@ func fileTreeChangedRowsLocked(tree *fileTreeState) (roots []string, children ma
 			}
 		}
 	}
-	return children[""], children, entries
+	tree.changedRoots = children[""]
+	tree.changedChildren = children
+	tree.changedEntries = entries
+	tree.changedCacheRev = tree.gitRev
+	tree.changedCacheOK = true
+	return tree.changedRoots, tree.changedChildren, tree.changedEntries
 }
 
 // fileTreeChangedRootCountLocked 统计「只看改动」的根条目数，供空状态判断。

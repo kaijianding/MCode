@@ -406,6 +406,7 @@ func loadPreviewPage(s *chatState, st *browserTab) {
 			previewMu.Lock()
 			if current := previewStateForTokenLocked(s, token); current != nil {
 				current.err = "加载预览失败: " + err.Error()
+				current.loading = false
 			}
 			previewMu.Unlock()
 		}
@@ -694,13 +695,16 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 					if in.Submitted() {
 						openPreviewURL(s, addr)
 					}
-					if captureConsole && previewConsoleErrorCount(snap.consoleErrors) > 0 {
+					errorCount := previewConsoleErrorCount(snap.consoleErrors)
+					if captureConsole && (len(snap.consoleErrors) > 0 || snap.consoleOpen) {
 						badgeBtn := ui.ButtonBase(c.Key("preview-console-badge")).
 							Label("控制台").
 							Tooltip("展开或收起控制台").
 							Radius(RadiusXS).
-							Padding(Space0, Space2).
-							Background(ThemeDanger(c).Alpha(0.18))
+							Padding(Space0, Space2)
+						if errorCount > 0 {
+							badgeBtn.Background(ThemeDanger(c).Alpha(0.18))
+						}
 						badgeBtnScale := motionPressScale(c, badgeBtn, "button-press-scale", badgeBtn.Pressed())
 						badgeBtn.Scale(badgeBtnScale, badgeBtnScale)
 						if badgeBtn.Clicked() {
@@ -713,11 +717,12 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 						}
 						badgeBtn.Children(func() {
 							ui.Text(c, "控制台").FontSize(uiFont(TypeCaption))
-							count := previewConsoleErrorCount(snap.consoleErrors)
-							previous := ui.Local(badgeBtn, "error-count", func() int { return count })
-							_, fade := motionNumberProgress(c, badgeBtn, *previous != count)
-							*previous = count
-							ui.Text(c, fmt.Sprint(count)).FontSize(codeFontSize()).TextColor(ThemeDanger(c).Alpha(fade))
+							previous := ui.Local(badgeBtn, "error-count", func() int { return errorCount })
+							_, fade := motionNumberProgress(c, badgeBtn, *previous != errorCount)
+							*previous = errorCount
+							if errorCount > 0 {
+								ui.Text(c, fmt.Sprint(errorCount)).FontSize(codeFontSize()).TextColor(ThemeDanger(c).Alpha(fade))
+							}
 						})
 					}
 
@@ -767,7 +772,24 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 
 			// 主体区域
 			if snap.err != "" && snap.web != nil {
-				ui.Text(c, snap.err).TextColor(ThemeDanger(c)).FontSize(uiFont(TypeFootnote)).Padding(Space3)
+				ui.Row(c.Key("preview-err-bar")).
+					Padding(Space3).
+					Gap(Space2).
+					AlignItems(ui.Center).
+					Children(func() {
+						ui.Text(c, snap.err).
+							TextColor(ThemeDanger(c)).
+							FontSize(uiFont(TypeFootnote)).
+							Grow(1).
+							MinWidth(0)
+						Button(c, ButtonOpts{
+							Key:     "preview-retry-btn",
+							Text:    "重试",
+							Size:    ControlXS,
+							Variant: ButtonSecondary,
+							OnClick: func() { browserReloadOrStop(s, st) },
+						})
+					})
 			}
 			if snap.web == nil {
 				ui.Column(c.Key("preview-empty-state")).
@@ -785,7 +807,19 @@ func renderPreviewPanel(c *ui.Context, s *chatState) {
 								renderBrowserServerCandidates(c, s, threadID, getBrowserQuickPorts(s))
 							})
 						} else {
-							EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg})
+							var retryAction func()
+							if snap.err != "" {
+								retryAction = func() {
+									Button(c, ButtonOpts{
+										Key:     "preview-empty-retry-btn",
+										Text:    "重试",
+										Size:    ControlXS,
+										Variant: ButtonSecondary,
+										OnClick: func() { browserReloadOrStop(s, st) },
+									})
+								}
+							}
+							EmptyState(c, EmptyStateProps{Icon: IconGlobe(), Title: msg, Action: retryAction})
 						}
 					})
 			} else if browserTabVisible(st) {

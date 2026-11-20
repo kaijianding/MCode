@@ -51,6 +51,7 @@ type fileTreeState struct {
 	gitErr      string
 	gitTriedGen uint64
 	gitSeq      int
+	gitRev      uint64
 
 	// onlyChanged 打开时用 Git 改动列表生成独立树；changedOutline 与完整树状态互不影响。
 	onlyChanged      bool
@@ -58,6 +59,11 @@ type fileTreeState struct {
 	changedSig       string
 	changedSelected  int
 	changedSelection ui.Selection[string]
+	changedCacheRev  uint64
+	changedCacheOK   bool
+	changedRoots     []string
+	changedChildren  map[string][]string
+	changedEntries   map[string]FileEntry
 }
 
 // ensureFileTreeLocked 初始化树状态；调用方持 fileManagerMu。
@@ -927,6 +933,9 @@ func renderFileManagerTree(c *ui.Context, s *chatState, threadID string) {
 	if fileManagerGOOS == "darwin" && treeEl.Focused() && treeEl.Shortcut(0, ui.KeySpace) {
 		fileManagerQuickLookSelected(s)
 	}
+	if treeEl.Submitted() || (treeEl.Focused() && treeEl.Shortcut(0, ui.KeyEnter)) {
+		fileTreeOpenSelected(s, threadID)
+	}
 
 	if onlyChanged {
 		return
@@ -971,4 +980,51 @@ func renderFileManagerTree(c *ui.Context, s *chatState, threadID string) {
 	if pendingOpen != "" {
 		s.openFileManagerFile(threadID, pendingOpen, true)
 	}
+}
+
+// fileTreeOpenSelected 用 Enter 打开当前选中文件或展开/收起当前选中目录（同点击行为）。
+func fileTreeOpenSelected(s *chatState, threadID string) bool {
+	if s == nil || threadID == "" {
+		return false
+	}
+	st := getFileManagerState(s)
+	if st == nil {
+		return false
+	}
+	fileManagerMu.Lock()
+	tree := st.tree
+	if tree == nil || st.query != "" {
+		fileManagerMu.Unlock()
+		return false
+	}
+	outline := fileTreeActiveOutlineLocked(tree)
+	selected := tree.selected
+	selection := &tree.selection
+	entries := tree.entries
+	if tree.onlyChanged {
+		selected = tree.changedSelected
+		selection = &tree.changedSelection
+		_, _, entries = fileTreeChangedRowsLocked(tree)
+	}
+	var entry FileEntry
+	var found bool
+	if selected >= 0 && selected < outline.Rows() {
+		path := outline.Item(selected)
+		if selection.Has(path) {
+			entry, found = entries[path]
+		}
+	}
+	if !found && selection.Len() == 1 {
+		for path := range selection.All() {
+			entry, found = entries[path]
+			break
+		}
+	}
+	deleted := found && tree.onlyChanged && tree.git[entry.Path].Status == "D"
+	fileManagerMu.Unlock()
+	if !found || entry.Protected || deleted {
+		return false
+	}
+	s.fileTreeClickEntry(threadID, entry, false, 0)
+	return true
 }
