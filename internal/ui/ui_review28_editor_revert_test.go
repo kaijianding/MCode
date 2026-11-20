@@ -348,3 +348,243 @@ func TestUIReview28LongPathTruncationAndButtonBounds(t *testing.T) {
 		}
 	}
 }
+
+// TestUIReview28_MiniEditorTypingPersists 验证迷你编辑器通过真实键盘/文字输入事件输入后，界面与 st.text 均持久保留全部输入。
+func TestUIReview28_MiniEditorTypingPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "typing.go")
+	if err := os.WriteFile(path, []byte("hello "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := newMiniEditorState(path)
+	disabled := false
+	st.workbench.EditorAutoSave = &disabled
+
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		applyAppTheme(c)
+		st.view(c)
+	}, MiniEditorDefaultWidth, MiniEditorDefaultHeight, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+
+	field, ok := tt.AccessByRole(ui.RoleTextField, "")
+	if !ok {
+		t.Fatalf("未找到迷你编辑器文本区")
+	}
+	tt.ClickAt(field.Bounds.X+200, field.Bounds.Y+20)
+	tt.Frame()
+
+	field, ok = tt.AccessByRole(ui.RoleTextField, "")
+	if !ok || !field.Focused {
+		t.Fatalf("点击文本区后应获得焦点, ok=%v field=%+v", ok, field)
+	}
+
+	for _, ch := range []string{"w", "o", "r", "l", "d"} {
+		tt.Type(ch)
+		tt.Frame()
+	}
+
+	field, ok = tt.AccessByRole(ui.RoleTextField, "")
+	if !ok {
+		t.Fatalf("输入后未找到文本区")
+	}
+	st.mu.Lock()
+	gotText := st.text
+	st.mu.Unlock()
+
+	if !strings.Contains(field.Value, "hello world") || !strings.Contains(gotText, "hello world") {
+		t.Fatalf("界面文本区和 st.text 应包含全部输入, field.Value=%q st.text=%q", field.Value, gotText)
+	}
+}
+
+// TestUIReview28_RevertDialogClosesByUser 验证撤销弹窗打开后可通过 Esc 与点击“取消”按钮关闭。
+func TestUIReview28_RevertDialogClosesByUser(t *testing.T) {
+	t.Cleanup(func() { modalDragReset(modalDragRevert) })
+
+	s := newChatState(NewFakeClient())
+	t.Cleanup(s.close)
+	st := getRevertDialogState(s)
+
+	openDialog := func() {
+		st.mu.Lock()
+		st.open = true
+		st.loading = false
+		st.executing = false
+		st.err = ""
+		st.preview = &RevertPreview{
+			TurnID: "turn-1",
+			Files:  []RevertFile{{Path: "a.go", Additions: 1}},
+		}
+		st.mu.Unlock()
+	}
+
+	openDialog()
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		applyAppTheme(c)
+		renderRevertDialog(c, s)
+	}, 800, 600, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+
+	if !tt.HasText("撤销此轮改动") {
+		t.Fatalf("打开撤销弹窗后应显示标题: %v", tt.Texts())
+	}
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
+	st.mu.Lock()
+	openAfterEsc := st.open
+	st.mu.Unlock()
+	if openAfterEsc {
+		t.Fatalf("按 Esc 后 st.open 应变为 false")
+	}
+	if tt.HasText("撤销此轮改动") || tt.HasText("取消") {
+		t.Fatalf("按 Esc 后弹窗元素应消失: %v", tt.Texts())
+	}
+
+	openDialog()
+	tt.Frame()
+	if !tt.HasText("撤销此轮改动") || !tt.HasText("取消") {
+		t.Fatalf("重新打开撤销弹窗后应显示标题与取消按钮: %v", tt.Texts())
+	}
+
+	if err := tt.Click("取消"); err != nil {
+		t.Fatalf("点击取消按钮失败: %v", err)
+	}
+	tt.Frame()
+
+	st.mu.Lock()
+	openAfterCancel := st.open
+	st.mu.Unlock()
+	if openAfterCancel {
+		t.Fatalf("点击取消按钮后 st.open 应变为 false")
+	}
+	if tt.HasText("撤销此轮改动") || tt.HasText("取消") {
+		t.Fatalf("点击取消按钮后弹窗元素应消失: %v", tt.Texts())
+	}
+}
+
+// TestUIReview28_MiniEditorOnCloseFallback 验证关窗拦截的退路：
+// 1. 首次保存失败拦截关闭并记下 closeBlocked；
+// 2. 无新输入再关一次放行，用户有新输入则重置 closeBlocked；
+// 3. 当前文本等于 baseline 时即使存在 saveErr 也直接放行。
+func TestUIReview28_MiniEditorOnCloseFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	// 场景 A：首次失败拦截 + 新输入重置 closeBlocked + 无新输入再关放行
+	conflictPath := filepath.Join(dir, "fallback.go")
+	if err := os.WriteFile(conflictPath, []byte("init"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := newMiniEditorState(conflictPath)
+	disabled := false
+	st.workbench.EditorAutoSave = &disabled
+
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		applyAppTheme(c)
+		st.view(c)
+	}, MiniEditorDefaultWidth, MiniEditorDefaultHeight, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+
+	field, ok := tt.AccessByRole(ui.RoleTextField, "")
+	if !ok {
+		t.Fatalf("未找到迷你编辑器文本区")
+	}
+	tt.ClickAt(field.Bounds.X+200, field.Bounds.Y+20)
+	tt.Frame()
+	tt.Type("1")
+	tt.Frame()
+
+	// 制造外部改动冲突，触发保存失败
+	if err := os.WriteFile(conflictPath, []byte("external"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev1 := &mygo.CloseEvent{}
+	st.onClose(ev1)
+	if !ev1.DefaultPrevented() {
+		t.Fatalf("首次关窗保存失败时应取消关闭")
+	}
+	st.mu.Lock()
+	blocked := st.closeBlocked
+	st.mu.Unlock()
+	if !blocked {
+		t.Fatalf("首次关窗拦截后应记录 closeBlocked=true")
+	}
+
+	// 用户有新输入：应重置 closeBlocked，随后再次关窗仍应拦截
+	tt.Type("2")
+	tt.Frame()
+	st.mu.Lock()
+	blockedAfterInput := st.closeBlocked
+	st.mu.Unlock()
+	if blockedAfterInput {
+		t.Fatalf("用户有新输入后应重置 closeBlocked=false")
+	}
+
+	ev2 := &mygo.CloseEvent{}
+	st.onClose(ev2)
+	if !ev2.DefaultPrevented() {
+		t.Fatalf("新输入重置 closeBlocked 后再次保存失败仍应拦截关闭")
+	}
+
+	// 没有新输入的前提下再关一次：直接放行
+	ev3 := &mygo.CloseEvent{}
+	st.onClose(ev3)
+	if ev3.DefaultPrevented() {
+		t.Fatalf("无新输入再次关窗时应直接放行")
+	}
+
+	// 场景 B：用户把文本改回原样（text == baseline），即使 saveErr 非空也直接放行
+	revertedPath := filepath.Join(dir, "reverted.go")
+	if err := os.WriteFile(revertedPath, []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stRev := newMiniEditorState(revertedPath)
+	stRev.workbench.EditorAutoSave = &disabled
+
+	ttRev := ui.NewTesterWith(func(c *ui.Context) {
+		applyAppTheme(c)
+		stRev.view(c)
+	}, MiniEditorDefaultWidth, MiniEditorDefaultHeight, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+	revField, ok := ttRev.AccessByRole(ui.RoleTextField, "")
+	if !ok {
+		t.Fatalf("未找到文本区")
+	}
+	ttRev.ClickAt(revField.Bounds.X+200, revField.Bounds.Y+20)
+	ttRev.Frame()
+	ttRev.Type("x")
+	ttRev.Frame()
+
+	if err := os.WriteFile(revertedPath, []byte("other"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stRev.saveNow()
+	stRev.mu.Lock()
+	errBeforeRevert := stRev.saveErr
+	stRev.mu.Unlock()
+	if errBeforeRevert == "" {
+		t.Fatalf("冲突保存应留下 saveErr")
+	}
+
+	// 用退格把文本改回 baseline，saveIfUnchanged 提前 return 不会清掉 saveErr
+	ttRev.Key(0, ui.KeyBackspace)
+	ttRev.Frame()
+	stRev.mu.Lock()
+	sameAsBaseline := stRev.text == stRev.baseline
+	errAfterRevert := stRev.saveErr
+	stRev.mu.Unlock()
+	if !sameAsBaseline || errAfterRevert == "" {
+		t.Fatalf("预期改回基线且仍保留 saveErr, sameAsBaseline=%v saveErr=%q", sameAsBaseline, errAfterRevert)
+	}
+
+	evRev := &mygo.CloseEvent{}
+	stRev.onClose(evRev)
+	if evRev.DefaultPrevented() {
+		t.Fatalf("文本等于 baseline 时即使 saveErr 非空也应直接放行")
+	}
+}

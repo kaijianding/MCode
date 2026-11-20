@@ -59,9 +59,10 @@ type miniEditorState struct {
 	baseline string // 上次读写的磁盘内容基线，用于外部改动检测
 	loadErr  string // 读取失败（非 UTF-8/权限）时保持只读，永不写回
 	preview  bool   // Markdown 预览开关
-	saveErr  string
-	saving   bool
-	savedAt  time.Time
+	saveErr      string
+	saving       bool
+	savedAt      time.Time
+	closeBlocked bool // 首次关窗保存失败后曾拦截关闭；无新输入再关一次放行
 
 	timer        *time.Timer
 	scheduledFor string // 已排入防抖保存的文本，避免每帧重启计时器
@@ -200,6 +201,7 @@ func (st *miniEditorState) saveIfUnchanged(content string) {
 	st.baseline = text
 	st.saving = false
 	st.saveErr = ""
+	st.closeBlocked = false
 	st.savedAt = time.Now()
 	st.mu.Unlock()
 	st.invalidate()
@@ -217,15 +219,36 @@ func (st *miniEditorState) saveNow() {
 	st.saveIfUnchanged(text)
 }
 
-// onClose 在窗口关闭前同步落盘；保存失败时取消关闭，保留窗口与错误提示。
+// onClose 在窗口关闭前同步落盘；文本等于基线或此前已拦截且无新输入时直接放行，
+// 否则首次保存失败时取消关闭并记下 closeBlocked，保留窗口与错误提示。
 func (st *miniEditorState) onClose(e *mygo.CloseEvent) {
+	st.mu.Lock()
+	if st.text == st.baseline || st.closeBlocked {
+		if st.timer != nil {
+			st.timer.Stop()
+			st.timer = nil
+		}
+		st.closeBlocked = false
+		st.mu.Unlock()
+		return
+	}
+	st.mu.Unlock()
+
 	st.saveNow()
+
 	st.mu.Lock()
 	saveErr := st.saveErr
-	st.mu.Unlock()
-	if saveErr != "" && e != nil {
-		e.PreventDefault()
+	stillDirty := st.text != st.baseline
+	if saveErr != "" && stillDirty {
+		st.closeBlocked = true
+		st.mu.Unlock()
+		if e != nil {
+			e.PreventDefault()
+		}
+		return
 	}
+	st.closeBlocked = false
+	st.mu.Unlock()
 }
 
 // setSaveErr 记录保存错误并触发重绘。
@@ -258,6 +281,7 @@ func (st *miniEditorState) reload() {
 	st.scheduledFor = st.text
 	st.saveErr = ""
 	st.loadErr = ""
+	st.closeBlocked = false
 	st.savedAt = time.Now()
 	st.mu.Unlock()
 	st.invalidate()
@@ -428,6 +452,7 @@ func (st *miniEditorState) view(c *ui.Context) {
 				if text != prevText {
 					st.mu.Lock()
 					st.text = text
+					st.closeBlocked = false
 					st.mu.Unlock()
 				}
 			})
