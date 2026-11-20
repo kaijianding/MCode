@@ -4,9 +4,29 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+// swarmLeadBackfillVersion 返回“回填历史 bee 会话”迁移之前的 user_version（即该迁移在 migrations 中的 0 基下标）。
+func swarmLeadBackfillVersion(t *testing.T) int {
+	t.Helper()
+	const marker = "refs.rank = 1"
+	idx := -1
+	for i, script := range migrations {
+		if strings.Contains(script, marker) {
+			if idx != -1 {
+				t.Fatalf("migrations 中匹配 %q 的条目超过一条: %d 和 %d", marker, idx, i)
+			}
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("migrations 中未找到匹配 %q 的回填迁移", marker)
+	}
+	return idx
+}
 
 // TestBackfillSwarmLeadHelpers 验证 hydra_leads.heads_json 中的 bee 线程回填 parent_thread_id 与 is_helper。
 func TestBackfillSwarmLeadHelpers(t *testing.T) {
@@ -89,7 +109,7 @@ func TestBackfillSwarmLeadHelpers(t *testing.T) {
 	}
 
 	// 模拟旧库：把版本退回一次性回填迁移之前，再通过 Open 触发升级。
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", len(migrations)-1)); err != nil {
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", swarmLeadBackfillVersion(t))); err != nil {
 		t.Fatalf("回退 user_version 失败: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -172,7 +192,7 @@ func TestBackfillSwarmLeadHelpersDuplicateAndInvalidJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", len(migrations)-1)); err != nil {
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", swarmLeadBackfillVersion(t))); err != nil {
 		t.Fatalf("回退 user_version 失败: %v", err)
 	}
 	if err := s.Close(); err != nil {
