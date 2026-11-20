@@ -496,8 +496,8 @@ func TestAutomationWorkspace_Duplicate(t *testing.T) {
 	if err := tt.Click("自动化更多操作"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("auto-duplicate-auto-1") })
-	if err := tt.Click("auto-duplicate-auto-1"); err != nil {
+	waitFor(t, tt, func() bool { _, ok := tt.Find("复制自动化"); return ok })
+	if err := tt.Click("复制自动化"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool { return len(fake.CreateAutomationCalls()) == 1 })
@@ -725,10 +725,10 @@ func TestAutomationWorkspace_RunNowBlockedWhenPassive(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool {
-		_, ok := tt.Find("auto-run-now-auto-1")
+		_, ok := tt.Find("立即运行")
 		return ok
 	})
-	if err := tt.Click("auto-run-now-auto-1"); err != nil {
+	if err := tt.Click("立即运行"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool {
@@ -756,10 +756,10 @@ func TestAutomationWorkspace_RunNowPassiveError(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool {
-		_, ok := tt.Find("auto-run-now-auto-1")
+		_, ok := tt.Find("立即运行")
 		return ok
 	})
-	if err := tt.Click("auto-run-now-auto-1"); err != nil {
+	if err := tt.Click("立即运行"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText("无法立即运行") })

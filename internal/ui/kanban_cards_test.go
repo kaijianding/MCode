@@ -93,7 +93,7 @@ func TestKanbanCardKeyboardActions(t *testing.T) {
 	task := KanbanTask{ID: "key", Title: "键盘任务", Status: "todo", Column: "todo", CanStart: true}
 	tt := ui.NewTester(func(c *ui.Context) { renderTaskCard(c, s, ks, task, kanbanTaskCardState{}) }, 400, 200)
 	tt.Key(0, ui.KeyTab)
-	if !tt.Focused("kanban-task-card-key") {
+	if !tt.Focused(task.Title) {
 		t.Fatal("卡片应可用键盘聚焦")
 	}
 	if _, ok := tt.Find("kanban-task-key-start"); !ok {

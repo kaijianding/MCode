@@ -14,7 +14,7 @@ func TestAutomationConfigVisualGroups(t *testing.T) {
 		if enabled {
 			status = "状态：已启用"
 		}
-		for _, text := range []string{"计划", "执行", "停止与补跑", status, "心跳模式沿用原会话设置", "模型：model-x", "权限：" + automationRuntimeModeLabel("readonly"), "运行次数：最多 7 次", "错过后补跑：开启"} {
+		for _, text := range []string{"计划", "执行", "停止与补跑", status, "模型：model-x", "权限：" + automationRuntimeModeLabel("readonly"), "运行次数：最多 7 次", "错过后补跑：开启"} {
 			if !tt.HasText(text) {
 				t.Errorf("缺少 %s", text)
 			}

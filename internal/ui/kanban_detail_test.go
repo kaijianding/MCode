@@ -190,14 +190,14 @@ func TestKanbanDetailCloseReturnsFocus(t *testing.T) {
 	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{{ID: "focus", ProjectID: "p1", Title: "焦点任务", Status: "todo", Column: "todo"}}})
 	tt, _ := newWorkspaceTester(t, fake, "tasks")
 	waitFor(t, tt, func() bool { return tt.HasText("焦点任务") })
-	if err := tt.Click("kanban-task-card-focus"); err != nil {
+	if err := tt.Click("焦点任务"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool { _, ok := tt.Find("kanban-task-detail-close"); return ok })
 	if err := tt.Click("kanban-task-detail-close"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, func() bool { return tt.Focused("kanban-task-card-focus") })
+	waitFor(t, tt, func() bool { return tt.Focused("焦点任务") })
 }
 
 func TestKanbanDetailNoApproveOrReviewThread(t *testing.T) {
@@ -205,7 +205,7 @@ func TestKanbanDetailNoApproveOrReviewThread(t *testing.T) {
 	fake.SetKanbanBoard(KanbanBoard{Tasks: []KanbanTask{{ID: "review", ProjectID: "p1", Title: "无批准权限", Status: "review", Column: "review", CanReview: true}}})
 	tt, _ := newWorkspaceTester(t, fake, "tasks")
 	waitFor(t, tt, func() bool { return tt.HasText("无批准权限") })
-	if err := tt.Click("kanban-task-card-review"); err != nil {
+	if err := tt.Click("无批准权限"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool { _, ok := tt.Find("kanban-task-detail-accept"); return ok })

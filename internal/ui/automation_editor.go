@@ -237,12 +237,6 @@ func renderAutomationEditor(c *ui.Context, s *chatState, as *automationState, is
 										s.invalidate()
 									}
 								})
-
-							if heartbeat {
-								ui.Text(c, "心跳模式沿用原会话设置").
-									FontSize(uiFont(TypeCaption)).
-									TextColor(ThemeSecondaryText(c))
-							}
 						})
 
 					ui.Text(c, "停止与补跑").FontSize(uiFont(TypeBody)).FontWeight(500).TextColor(ThemePrimaryText(c))

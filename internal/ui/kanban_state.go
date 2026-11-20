@@ -104,9 +104,11 @@ type kanbanState struct {
 	quickAddOpen bool
 	quickAddText string
 
-	// 进行中 / 卡死卡片的行为菜单与删除确认
+	// 进行中 / 卡死卡片的行为菜单与删除、中断、取消目标确认
 	rescueMenuTaskID string
 	deleteTaskID     string
+	interruptTaskID  string
+	cancelGoalID     string
 
 	// 新建任务草稿
 	showNewTask      bool

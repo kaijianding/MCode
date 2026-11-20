@@ -34,6 +34,7 @@ func renderGoalDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 	kanbanMu.Lock()
 	goalID, board, reviewGoalID := ks.goalID, ks.board, ks.planReviewGoalID
 	replanID, feedback := ks.replanGoalID, ks.replanFeedback
+	cancelGoalID := ks.cancelGoalID
 	busy := ks.goalBusy[goalID]
 	kanbanMu.Unlock()
 	var goal *KanbanGoal
@@ -46,7 +47,7 @@ func renderGoalDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 	ui.Column(c.Key("kanban-goal-detail")).Label("kanban-goal-detail").Fill().Children(func() {
 		ui.Row(c.Key("kanban-goal-detail-header")).FillWidth().Padding(Space4, Space5).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "目标详情").FontWeight(600).TextColor(ThemePrimaryText(c)).Grow(1)
-			IconButton(c.Key("kanban-goal-detail-close"), IconButtonProps{Icon: IconX(), Label: "关闭目标详情", Tooltip: "关闭目标详情", Variant: ButtonGhost, OnClick: func() { kanbanMu.Lock(); ks.goalDetailOpen = false; kanbanMu.Unlock(); s.invalidate() }})
+			IconButton(c.Key("kanban-goal-detail-close"), IconButtonProps{Icon: IconX(), Label: "关闭目标详情", Tooltip: "关闭目标详情", Variant: ButtonGhost, OnClick: func() { kanbanMu.Lock(); ks.goalDetailOpen = false; ks.cancelGoalID = ""; kanbanMu.Unlock(); s.invalidate() }})
 		})
 		if goal == nil {
 			ui.Text(c, "目标已不存在").TextColor(ThemeSecondaryText(c))
@@ -108,8 +109,37 @@ func renderGoalDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 				Button(c.Key("goal-replan-toggle"), ButtonOpts{Disabled: busy != "", Text: "重新规划", Label: "重新规划", OnClick: func() { kanbanMu.Lock(); ks.replanGoalID = goalID; kanbanMu.Unlock(); s.invalidate() }})
 			}
 			if goal.Status != "completed" && goal.Status != "cancelled" {
-				Button(c.Key("goal-cancel"), ButtonOpts{Disabled: busy != "", Loading: busy == "cancel", Text: "取消目标", Label: "取消目标", Variant: ButtonDanger, OnClick: func() { s.cancelGoal(goalID, goal.Revision) }})
+				Button(c.Key("goal-cancel"), ButtonOpts{Disabled: busy != "", Loading: busy == "cancel", Text: "取消目标", Label: "取消目标", Variant: ButtonDanger, OnClick: func() {
+					kanbanMu.Lock()
+					ks.cancelGoalID = goalID
+					kanbanMu.Unlock()
+					s.invalidate()
+				}})
 			}
+		})
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:             "kanban-goal-cancel-" + goal.ID,
+			Open:            cancelGoalID == goal.ID,
+			Tone:            ConfirmDanger,
+			Title:           "取消该目标？",
+			Body:            "将停止未完成的任务并标记目标为已取消",
+			ConfirmLabel:    "取消目标",
+			ConfirmA11y:     "kanban-goal-cancel-confirm-yes-" + goal.ID,
+			CancelLabel:     "取消",
+			CancelA11y:      "kanban-goal-cancel-dismiss-" + goal.ID,
+			ConfirmDisabled: busy != "",
+			OnConfirm: func() {
+				kanbanMu.Lock()
+				ks.cancelGoalID = ""
+				kanbanMu.Unlock()
+				s.cancelGoal(goalID, goal.Revision)
+			},
+			OnCancel: func() {
+				kanbanMu.Lock()
+				ks.cancelGoalID = ""
+				kanbanMu.Unlock()
+				s.invalidate()
+			},
 		})
 	})
 }

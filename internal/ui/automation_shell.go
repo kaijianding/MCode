@@ -310,12 +310,12 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 						if ui.Switch(c.Key("automation-detail-toggle"), &enabled).Label("启用自动化").Disabled(busyIDs[selected.ID]).Changed() {
 							s.setAutomationEnabled(selected, enabled)
 						}
-						Button(c.Key("automation-detail-run"), ButtonOpts{Text: "立即运行", Label: "auto-run-now-" + selected.ID, Disabled: runningIDs[selected.ID] || busyIDs[selected.ID], Variant: ButtonSecondary, OnClick: func() { s.requestAutomationRun(selected.ID) }})
+						Button(c.Key("automation-detail-run"), ButtonOpts{Text: "立即运行", Label: "立即运行", Disabled: runningIDs[selected.ID] || busyIDs[selected.ID], Variant: ButtonSecondary, OnClick: func() { s.requestAutomationRun(selected.ID) }})
 						more := IconButton(c.Key("automation-detail-more"), IconButtonProps{Icon: IconMoreHorizontal(), Label: "自动化更多操作", Variant: ButtonGhost, OnClick: func() { as.moreOpen = true }})
 						appPopover(c, more, &as.moreOpen, nil, func() {
 							popoverCard(c, ui.Column(c.Key("automation-more-menu"))).Padding(Space2, Space2).Children(func() {
-								Button(c.Key("automation-copy"), ButtonOpts{Text: "复制", Label: "auto-duplicate-" + selected.ID, Variant: ButtonGhost, OnClick: func() { as.moreOpen = false; s.duplicateAutomation(selected) }})
-								Button(c.Key("automation-delete"), ButtonOpts{Text: "删除", Variant: ButtonDanger, OnClick: func() { as.moreOpen = false; s.deleteAutomation(selected.ID) }})
+								Button(c.Key("automation-copy"), ButtonOpts{Text: "复制", Label: "复制自动化", Variant: ButtonGhost, OnClick: func() { as.moreOpen = false; s.duplicateAutomation(selected) }})
+								Button(c.Key("automation-delete"), ButtonOpts{Text: "删除", Variant: ButtonDanger, OnClick: func() { as.moreOpen = false; as.confirmDelete = true; s.invalidate() }})
 							})
 						})
 					})
@@ -361,4 +361,22 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 			s.invalidate()
 		}
 	}
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:          "automation-delete-confirm",
+		Open:         as.confirmDelete && selected.ID != "",
+		Tone:         ConfirmDanger,
+		Title:        "删除自动化？",
+		Body:         "此操作不可撤销",
+		ConfirmLabel: "删除",
+		CancelLabel:  "取消",
+		OnConfirm: func() {
+			as.confirmDelete = false
+			s.deleteAutomation(selected.ID)
+			s.invalidate()
+		},
+		OnCancel: func() {
+			as.confirmDelete = false
+			s.invalidate()
+		},
+	})
 }

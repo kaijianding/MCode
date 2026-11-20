@@ -2,6 +2,7 @@ package mcodeui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -294,8 +295,8 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 							ks.detailEditHadFocus = false
 							s.commitKanbanDetailEdit(*task, "notes")
 						}
-					} else {
-						notes := ui.Text(c.Key("kanban-detail-notes"), "需求: "+task.Notes).Focusable()
+					} else if strings.TrimSpace(task.Notes) != "" {
+						notes := ui.Text(c.Key("kanban-detail-notes"), task.Notes).Focusable()
 						if notes.Clicked() && s.kanbanEditAvailable() {
 							ks.detailEditField, ks.detailEditTaskID = "notes", task.ID
 							ks.detailEditNotes, ks.detailEditOrigNotes = task.Notes, task.Notes

@@ -38,7 +38,7 @@ func TestKanbanCardActionSlotStable(t *testing.T) {
 						task.DependsOn = []string{"dep"}
 					}
 					tt := ui.NewTesterWith(func(c *ui.Context) { renderTaskCard(c, s, ks, task, kanbanTaskCardState{}) }, width, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
-					before, ok := tt.Find("kanban-task-card-long")
+					before, ok := tt.Find(task.Title)
 					if !ok {
 						t.Fatal("卡片不存在")
 					}
@@ -46,8 +46,8 @@ func TestKanbanCardActionSlotStable(t *testing.T) {
 					if _, ok := tt.Find("kanban-task-long-more"); ok {
 						t.Fatal("未悬停时不应显示动作")
 					}
-					hoverKanbanCard(t, tt, task.ID)
-					after, _ := tt.Find("kanban-task-card-long")
+					hoverKanbanCard(t, tt, task.Title)
+					after, _ := tt.Find(task.Title)
 					titleAfter, _ := tt.Find(task.Title)
 					if before != after || title != titleAfter {
 						t.Fatalf("动作改变布局: card %v -> %v, title %v -> %v", before, after, title, titleAfter)
@@ -72,15 +72,15 @@ func TestKanbanMorePopoverStableAndEscape(t *testing.T) {
 		kanbanMu.Unlock()
 		renderTaskCard(c, s, ks, task, st)
 	}, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
-	before, _ := tt.Find("kanban-task-card-menu")
-	hoverKanbanCard(t, tt, task.ID)
+	before, _ := tt.Find(task.Title)
+	hoverKanbanCard(t, tt, task.Title)
 	if err := tt.Click("kanban-task-menu-more"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := tt.Find("kanban-task-rescue-delete-menu"); !ok {
 		t.Fatal("菜单未打开")
 	}
-	after, _ := tt.Find("kanban-task-card-menu")
+	after, _ := tt.Find(task.Title)
 	if before != after {
 		t.Fatalf("菜单改变卡片布局: %v -> %v", before, after)
 	}
@@ -159,7 +159,7 @@ func TestKanbanCardFocusAndSelectionHaveSeparateMarkers(t *testing.T) {
 	kanbanKeyboardSelect(s, task.ID, "toggle")
 	tt := ui.NewTesterWith(func(c *ui.Context) { renderTaskCard(c, s, ks, task, kanbanTaskCardState{}) }, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
 	tt.Key(0, ui.KeyTab)
-	if !tt.Focused("kanban-task-card-state") {
+	if !tt.Focused(task.Title) {
 		t.Fatal("卡片未获得焦点")
 	}
 	if _, ok := tt.Find("kanban-task-focus-state"); !ok {
@@ -168,14 +168,14 @@ func TestKanbanCardFocusAndSelectionHaveSeparateMarkers(t *testing.T) {
 	if _, ok := tt.Find("kanban-task-selection-state"); !ok {
 		t.Fatal("缺少多选标记")
 	}
-	if _, ok := tt.Find("kanban-task-card-state"); !ok {
+	if _, ok := tt.Find(task.Title); !ok {
 		t.Fatal("详情打开状态丢失")
 	}
 }
 
-func visualDragToColumn(t *testing.T, tt *ui.Tester, taskID, column string) {
+func visualDragToColumn(t *testing.T, tt *ui.Tester, taskLabel, column string) {
 	t.Helper()
-	from, ok := tt.Find("kanban-task-card-" + taskID)
+	from, ok := tt.Find(taskLabel)
 	if !ok {
 		t.Fatal("拖拽源不存在")
 	}
@@ -221,7 +221,7 @@ func TestKanbanVisualEmptyColumnDrop(t *testing.T) {
 			if !ok || col.H < KanbanEmptyDropMinHeight {
 				t.Fatalf("空列高度不足: %v", col)
 			}
-			visualDragToColumn(t, tt, task.ID, target)
+			visualDragToColumn(t, tt, task.Title, target)
 			if target == "review" {
 				waitFor(t, tt, func() bool { return len(fake.MoveTaskCalls()) == 1 })
 				call := fake.MoveTaskCalls()[0]
@@ -239,7 +239,7 @@ func TestKanbanVisualEmptyColumnDrop(t *testing.T) {
 				if got.Column != task.Column || got.Status != task.Status {
 					t.Fatalf("非法投放改变任务: %+v", got)
 				}
-				if _, ok := tt.Find("kanban-task-card-" + task.ID); !ok {
+				if _, ok := tt.Find(task.Title); !ok {
 					t.Fatal("源卡片消失")
 				}
 			}
@@ -250,7 +250,7 @@ func TestKanbanVisualEmptyColumnDrop(t *testing.T) {
 func TestKanbanVisualDoneRailReviewDrop(t *testing.T) {
 	task := KanbanTask{ID: "review-drop", ProjectID: "p1", Title: "审阅任务", Status: "review", Column: "review", CanMove: true, CanReview: true, Revision: 3}
 	tt, s, fake := visualColumnTester(t, task, "done")
-	visualDragToColumn(t, tt, task.ID, "done")
+	visualDragToColumn(t, tt, task.Title, "done")
 	ks := getKanbanState(s)
 	kanbanMu.Lock()
 	id, tab, expanded := ks.detailTaskID, ks.detailTab, ks.doneExpanded
@@ -282,7 +282,7 @@ func TestKanbanVisualOpenFocusSelectedStates(t *testing.T) {
 	ks := getKanbanState(s)
 	task := KanbanTask{ID: "states", Title: "状态卡", Status: "todo", Column: "todo"}
 	tt := ui.NewTesterWith(func(c *ui.Context) { renderTaskCard(c, s, ks, task, kanbanTaskCardState{}) }, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
-	before, ok := tt.Find("kanban-task-card-states")
+	before, ok := tt.Find(task.Title)
 	if !ok {
 		t.Fatal("缺少卡片")
 	}
@@ -292,11 +292,11 @@ func TestKanbanVisualOpenFocusSelectedStates(t *testing.T) {
 	kanbanKeyboardProject(s, "p1")
 	kanbanKeyboardSelect(s, task.ID, "toggle")
 	tt.Key(0, ui.KeyTab)
-	after, _ := tt.Find("kanban-task-card-states")
+	after, _ := tt.Find(task.Title)
 	if before != after {
 		t.Fatalf("状态改变卡片几何: %v -> %v", before, after)
 	}
-	if !tt.Focused("kanban-task-card-states") {
+	if !tt.Focused(task.Title) {
 		t.Fatal("卡片未聚焦")
 	}
 	for _, label := range []string{"kanban-task-open-states", "kanban-task-focus-states", "kanban-task-selection-states"} {

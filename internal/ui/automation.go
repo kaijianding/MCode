@@ -391,8 +391,10 @@ func (as *automationState) fillAutomation(auto Automation) {
 	}
 	if !auto.Schedule.Date.IsZero() {
 		loc := time.Local
-		if tz, err := time.LoadLocation(as.timezone); as.timezone != "" && err == nil {
-			loc = tz
+		if as.timezone != "" {
+			if tz, err := cachedLoadLocation(as.timezone); err == nil {
+				loc = tz
+			}
 		}
 		as.onceDateStr = auto.Schedule.Date.In(loc).Format("2006-01-02 15:04")
 	} else {

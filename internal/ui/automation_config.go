@@ -80,9 +80,6 @@ func renderAutomationConfig(c *ui.Context, a Automation) {
 			if a.RuntimeMode != "" {
 				field("权限", automationRuntimeModeLabel(a.RuntimeMode))
 			}
-			if a.RunMode == "heartbeat" {
-				ui.Text(c, "心跳模式沿用原会话设置").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
-			}
 		})
 		section("automation-config-limits", "停止与补跑", func() {
 			field("停止条件", a.StopWhen)

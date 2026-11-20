@@ -26,7 +26,7 @@ func TestKanbanCardAndListRowListMotion(t *testing.T) {
 
 			show = true
 			tt.Frame()
-			if _, ok := tt.Find("kanban-task-card-motion"); !ok {
+			if _, ok := tt.Find(task.Title); !ok {
 				t.Fatal("卡片未渲染")
 			}
 			if _, ok := tt.Find("kanban-list-row-motion"); !ok {

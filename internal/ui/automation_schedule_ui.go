@@ -6,11 +6,26 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"mcode/internal/automation"
 )
+
+var locationCache sync.Map
+
+func cachedLoadLocation(name string) (*time.Location, error) {
+	if cached, ok := locationCache.Load(name); ok {
+		return cached.(*time.Location), nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := locationCache.LoadOrStore(name, loc)
+	return actual.(*time.Location), nil
+}
 
 func automationScheduleFromDraft(as *automationState) (AutomationSchedule, map[string]string) {
 	sch := AutomationSchedule{Type: as.scheduleType, Timezone: strings.TrimSpace(as.timezone)}
@@ -21,7 +36,7 @@ func automationScheduleFromDraft(as *automationState) (AutomationSchedule, map[s
 	loc := time.Local
 	if sch.Timezone != "" {
 		var err error
-		loc, err = time.LoadLocation(sch.Timezone)
+		loc, err = cachedLoadLocation(sch.Timezone)
 		if err != nil {
 			errs["timezone"] = "请输入有效的时区"
 			loc = time.Local
@@ -418,7 +433,7 @@ func renderAutomationScheduleFields(c *ui.Context, s *chatState, as *automationS
 			ui.Text(c, "预计运行").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
 			loc := time.Local
 			if as.timezone != "" {
-				if zone, err := time.LoadLocation(as.timezone); err == nil {
+				if zone, err := cachedLoadLocation(as.timezone); err == nil {
 					loc = zone
 				}
 			}

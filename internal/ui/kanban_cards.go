@@ -335,6 +335,7 @@ type kanbanTaskCardState struct {
 	moveMenuTaskID, reviewTaskID, reviewFeedback string
 	goals                                        []KanbanGoal
 	rescueMenuTaskID, deleteTaskID               string
+	interruptTaskID                              string
 }
 
 // projectNameFor 返回项目显示名，找不到时返回空字符串。
@@ -370,11 +371,16 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 	primaryText := ThemePrimaryText(c)
 	secondaryText := ThemeSecondaryText(c)
 	busy := kanbanTaskBusy(ks, task.ID)
-	actions := kanbanActions(task, false)
+	actions := kanbanActions(task, busy)
+
+	cardLabel := task.Title
+	if strings.TrimSpace(cardLabel) == "" {
+		cardLabel = "任务"
+	}
 
 	var card ui.Element
 	card = ui.Column(c.Key("kanban-task-card-"+task.ID)).
-		Label("kanban-task-card-"+task.ID).
+		Label(cardLabel).
 		Focusable().
 		FillWidth().
 		Padding(Space4, Space4).
@@ -531,6 +537,7 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 								ks.moveMenuTaskID = ""
 							}
 							ks.deleteTaskID = ""
+							ks.interruptTaskID = ""
 							kanbanMu.Unlock()
 							s.invalidate()
 						},
@@ -566,10 +573,6 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 							AlignItems(ui.Center).
 							Gap(Space1).
 							Children(func() {
-								ui.Text(c, "移动到:").
-									FontSize(uiFont(TypeCaption)).
-									TextColor(secondaryText)
-
 								for _, opt := range actions.menu {
 									optVal := opt
 									Button(c.Key(optVal.key), ButtonOpts{
@@ -601,12 +604,6 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 							AlignItems(ui.Center).
 							Gap(Space1).
 							Children(func() {
-								if rescuable {
-									ui.Text(c, "救援:").
-										FontSize(uiFont(TypeCaption)).
-										TextColor(secondaryText)
-								}
-
 								if (task.Status == "done" || task.Column == "done") && actions.targets["todo"] != "" {
 									Button(c.Key("kanban-task-"+task.ID+"-reopen"), ButtonOpts{
 										Text: "重新打开", Label: "kanban-task-" + task.ID + "-reopen", Size: ControlXS, Variant: ButtonSecondary,
@@ -662,8 +659,11 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 										OnClick: func() {
 											kanbanMu.Lock()
 											ks.rescueMenuTaskID = ""
+											ks.moveMenuTaskID = ""
+											ks.deleteTaskID = ""
+											ks.interruptTaskID = task.ID
 											kanbanMu.Unlock()
-											s.interruptTaskToTodo(task)
+											s.invalidate()
 										},
 									})
 								}
@@ -677,6 +677,7 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 										kanbanMu.Lock()
 										ks.rescueMenuTaskID = ""
 										ks.moveMenuTaskID = ""
+										ks.interruptTaskID = ""
 										ks.deleteTaskID = task.ID
 										kanbanMu.Unlock()
 										s.invalidate()
@@ -687,6 +688,31 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 				})
 			})
 		}
+
+		// 中断并重置为待办二次确认
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:          "kanban-task-interrupt-" + task.ID,
+			Open:         st.interruptTaskID == task.ID,
+			Tone:         ConfirmDanger,
+			Title:        "中断并重置为待办？",
+			Body:         "将中断当前执行会话并移回待办列",
+			ConfirmLabel: "中断并重置",
+			ConfirmA11y:  "kanban-task-interrupt-confirm-yes-" + task.ID,
+			CancelLabel:  "取消",
+			CancelA11y:   "kanban-task-interrupt-cancel-" + task.ID,
+			OnConfirm: func() {
+				kanbanMu.Lock()
+				ks.interruptTaskID = ""
+				kanbanMu.Unlock()
+				s.interruptTaskToTodo(task)
+			},
+			OnCancel: func() {
+				kanbanMu.Lock()
+				ks.interruptTaskID = ""
+				kanbanMu.Unlock()
+				s.invalidate()
+			},
+		})
 
 		// 删除二次确认：确认后调用客户端删除任务，成功时刷新看板。
 		RenderConfirmDialog(c, ConfirmDialog{

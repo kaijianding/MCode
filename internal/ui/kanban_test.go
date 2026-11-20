@@ -70,11 +70,11 @@ func exactTextCount(tt *ui.Tester, text string) int {
 	return n
 }
 
-func hoverKanbanCard(t *testing.T, tt *ui.Tester, id string) {
+func hoverKanbanCard(t *testing.T, tt *ui.Tester, label string) {
 	t.Helper()
-	r, ok := tt.Find("kanban-task-card-" + id)
+	r, ok := tt.Find(label)
 	if !ok {
-		t.Fatalf("找不到任务卡片 %s", id)
+		t.Fatalf("找不到任务卡片 %s", label)
 	}
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 }
@@ -104,7 +104,7 @@ func TestKanbanWorkspace_MoveTask(t *testing.T) {
 	})
 
 	// 经更多菜单移动。
-	hoverKanbanCard(t, tt, "task-1")
+	hoverKanbanCard(t, tt, "待办任务1")
 	if err := tt.Click("kanban-task-task-1-more"); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestKanbanWorkspace_RevisionConflict(t *testing.T) {
 	})
 
 	// 执行移动
-	hoverKanbanCard(t, tt, "task-conflict-1")
+	hoverKanbanCard(t, tt, "冲突任务")
 	if err := tt.Click("kanban-task-task-conflict-1-more"); err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestKanbanWorkspace_StartTask(t *testing.T) {
 	})
 
 	// 悬停后点击启动按钮
-	hoverKanbanCard(t, tt, "task-start-1")
+	hoverKanbanCard(t, tt, "待启动任务")
 	if err := tt.Click("kanban-task-task-start-1-start"); err != nil {
 		if clickErr := tt.Click("启动"); clickErr != nil {
 			t.Fatalf("click start button failed: %v", err)
@@ -333,7 +333,7 @@ func TestKanbanWorkspace_DragTransitions(t *testing.T) {
 				}
 				tt.Scroll(column.X+column.W/2, column.Y+20, 200, 0)
 			}
-			from, ok := tt.Find("kanban-task-card-drag-task")
+			from, ok := tt.Find("拖动任务")
 			if !ok {
 				t.Fatal("task card missing")
 			}
@@ -381,7 +381,7 @@ func TestKanbanWorkspace_DragRejectsInvalidTransition(t *testing.T) {
 	ks.doneExpanded = true
 	kanbanMu.Unlock()
 	waitFor(t, tt, func() bool { return tt.HasText("已完成任务") })
-	from, ok := tt.Find("kanban-task-card-done-task")
+	from, ok := tt.Find("已完成任务")
 	if !ok {
 		t.Fatal("task card missing")
 	}
@@ -441,7 +441,7 @@ index 1111111..2222222 100644
 		return tt.HasText("详情测试任务")
 	})
 
-	if err := tt.Click("kanban-task-card-task-detail-1"); err != nil {
+	if err := tt.Click("详情测试任务"); err != nil {
 		t.Fatalf("click task card failed: %v", err)
 	}
 
@@ -478,7 +478,7 @@ index 1111111..2222222 100644
 	if err := tt.Click("kanban-detail-tab-result"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("需求: 详情备注") })
+	waitFor(t, tt, func() bool { return tt.HasText("详情备注") })
 
 	if err := tt.Click("kanban-task-detail-close"); err != nil {
 		t.Fatalf("click 'kanban-task-detail-close' failed: %v", err)
@@ -516,8 +516,8 @@ func TestKanbanWorkspace_DetailAccept(t *testing.T) {
 		return tt.HasText("待审查任务1")
 	})
 
-	if err := tt.Click("kanban-task-card-task-review-1"); err != nil {
-		t.Fatalf("click 'kanban-task-card-task-review-1' failed: %v", err)
+	if err := tt.Click("待审查任务1"); err != nil {
+		t.Fatalf("click '待审查任务1' failed: %v", err)
 	}
 
 	waitFor(t, tt, func() bool {
@@ -567,8 +567,8 @@ func TestKanbanWorkspace_DetailRejectWithFeedback(t *testing.T) {
 		return tt.HasText("待驳回任务2")
 	})
 
-	if err := tt.Click("kanban-task-card-task-review-2"); err != nil {
-		t.Fatalf("click 'kanban-task-card-task-review-2' failed: %v", err)
+	if err := tt.Click("待驳回任务2"); err != nil {
+		t.Fatalf("click '待驳回任务2' failed: %v", err)
 	}
 
 	waitFor(t, tt, func() bool {
@@ -627,7 +627,7 @@ func TestKanbanWorkspace_DetailRevisionConflict(t *testing.T) {
 		return tt.HasText("冲突详情任务")
 	})
 
-	if err := tt.Click("kanban-task-card-task-conflict-detail"); err != nil {
+	if err := tt.Click("冲突详情任务"); err != nil {
 		t.Fatalf("click open detail failed: %v", err)
 	}
 
@@ -713,7 +713,7 @@ func TestKanbanWorkspace_DetailConflictRefreshFailure(t *testing.T) {
 	fake.SetReviewTaskError(ErrRevisionConflict)
 	tt, s := newWorkspaceTester(t, fake, "tasks")
 	waitFor(t, tt, func() bool { return tt.HasText(task.Title) })
-	if err := tt.Click("kanban-task-card-" + task.ID); err != nil {
+	if err := tt.Click(task.Title); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.Click("kanban-task-detail-feedback"); err != nil {
@@ -875,9 +875,9 @@ func TestKanbanWorkspace_SearchFilter(t *testing.T) {
 	}
 	tt.Type("login")
 	waitFor(t, tt, func() bool {
-		_, kept := tt.Find("kanban-task-card-s-1")
-		_, byNotes := tt.Find("kanban-task-card-s-2")
-		_, filtered := tt.Find("kanban-task-card-s-3")
+		_, kept := tt.Find("修复 Login 流程")
+		_, byNotes := tt.Find("编写文档")
+		_, filtered := tt.Find("清理日志")
 		return kept && byNotes && !filtered
 	})
 
@@ -974,7 +974,7 @@ func TestKanbanWorkspace_ReopenDone(t *testing.T) {
 	kanbanMu.Unlock()
 	waitFor(t, tt, func() bool { return tt.HasText("已完成任务") })
 
-	hoverKanbanCard(t, tt, "done-1")
+	hoverKanbanCard(t, tt, "已完成任务")
 	if err := tt.Click("kanban-task-done-1-more"); err != nil {
 		t.Fatal(err)
 	}
@@ -1001,7 +1001,7 @@ func TestKanbanWorkspace_BlockedStartShowsReason(t *testing.T) {
 	tt, _ := newWorkspaceTester(t, fake, "tasks")
 	waitFor(t, tt, func() bool { return tt.HasText("被阻塞任务") })
 
-	hoverKanbanCard(t, tt, "blocked-1")
+	hoverKanbanCard(t, tt, "被阻塞任务")
 	if err := tt.Click("kanban-task-blocked-1-start"); err != nil {
 		t.Fatalf("click blocked start failed: %v", err)
 	}

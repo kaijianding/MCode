@@ -125,6 +125,7 @@ func renderTasksShell(c *ui.Context, s *chatState) {
 		reviewFeedback:   ks.reviewFeedback,
 		rescueMenuTaskID: ks.rescueMenuTaskID,
 		deleteTaskID:     ks.deleteTaskID,
+		interruptTaskID:  ks.interruptTaskID,
 		viewFilter:       ks.viewFilter,
 	}
 	// 搜索只改变展示，不改看板数据；看板与列表视图共用同一份过滤结果。
@@ -309,6 +310,7 @@ type kanbanModalBodyProps struct {
 	reviewFeedback   string
 	rescueMenuTaskID string
 	deleteTaskID     string
+	interruptTaskID  string
 }
 
 func renderTasksAutomationCreate(c *ui.Context, s *chatState, scopeID string) {
@@ -694,6 +696,7 @@ func renderKanbanModalBody(c *ui.Context, s *chatState, ks *kanbanState, p kanba
 							goals:            p.board.Goals,
 							rescueMenuTaskID: p.rescueMenuTaskID,
 							deleteTaskID:     p.deleteTaskID,
+							interruptTaskID:  p.interruptTaskID,
 						})
 					}
 				})

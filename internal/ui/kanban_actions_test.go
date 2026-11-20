@@ -59,7 +59,7 @@ func TestKanbanDragReviewOpensDetail(t *testing.T) {
 		t.Fatal("middle column missing")
 	}
 	tt.Scroll(column.X+column.W/2, column.Y+20, 200, 0)
-	from, ok := tt.Find("kanban-task-card-review-drag")
+	from, ok := tt.Find("拖动审阅")
 	if !ok {
 		t.Fatal("task card missing")
 	}
@@ -86,7 +86,7 @@ func TestKanbanTargetPreservesStaleRevision(t *testing.T) {
 	fake.SetMoveTaskError(fmt.Errorf("%w", ErrRevisionConflict))
 	tt, _ := newWorkspaceTester(t, fake, "tasks")
 	waitFor(t, tt, func() bool { return tt.HasText(task.Title) })
-	from, ok := tt.Find("kanban-task-card-stale")
+	from, ok := tt.Find(task.Title)
 	if !ok {
 		t.Fatal("task card missing")
 	}
@@ -113,8 +113,8 @@ func TestKanbanBlockedDependencyOpensTask(t *testing.T) {
 		{ID: "dependency", ProjectID: "p1", Title: "前置工作", Status: "todo", Column: "todo"},
 	}})
 	tt, state := newWorkspaceTester(t, fake, "tasks")
-	waitFor(t, tt, func() bool { _, ok := tt.Find("kanban-task-card-blocked"); return ok })
-	if err := tt.Click("kanban-task-card-blocked"); err != nil {
+	waitFor(t, tt, func() bool { _, ok := tt.Find("阻塞任务"); return ok })
+	if err := tt.Click("阻塞任务"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, tt, func() bool { _, ok := tt.Find("前置工作"); return ok })
