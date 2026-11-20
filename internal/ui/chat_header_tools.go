@@ -27,43 +27,6 @@ const (
 	headerCapsuleHeight     = headerCapsuleButtonSize + 2*headerCapsulePadding
 )
 
-// headerGitMenuOption 在标题栏弹出菜单里渲染一行可点击选项；左侧图标由调用方给出，
-// 便于脚本/打开方式菜单与渲染逻辑区分。
-func headerGitMenuOption(c *ui.Context, key, label, title, detail string, icon *ui.SVG, onClick func()) {
-	opt := ui.ButtonBase(c.Key(key)).
-		Label(label).
-		Padding(Space2, Space3).
-		Radius(RadiusPill).
-		FillWidth()
-	if opt.Hovered() {
-		opt.Background(ThemeHover(c))
-	}
-	if onClick != nil {
-		opt.OnClick(onClick)
-	}
-	opt.Children(func() {
-		ui.Row(c.Key(key + "-row")).
-			Gap(Space3).
-			AlignItems(ui.Center).
-			Grow(1).
-			Children(func() {
-				if icon != nil {
-					ui.Icon(c, icon).Size(14, 14).TextColor(ThemeSecondaryText(c))
-				}
-				ui.Text(c, title).
-					FontSize(uiFont(TypeBody)).
-					TextColor(ThemePrimaryText(c)).
-					SingleLine()
-				if detail != "" {
-					ui.Text(c, detail).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c)).
-						SingleLine()
-				}
-			})
-	})
-}
-
 // renderHeaderScriptsMenuButton 渲染标题栏执行命令按钮：有项目工作目录就显示，
 // 没有脚本时菜单给出空状态与「添加脚本…」入口；菜单同时列出项目脚本（在前）与 package.json
 // 脚本（只读展示），只要存在项目脚本就提供「编辑脚本…」入口打开应用内的脚本编辑弹窗
@@ -159,10 +122,17 @@ func renderHeaderScriptsMenuButton(c *ui.Context, s *chatState, threadID string)
 									if script.ID != "" {
 										key = "chat-header-script-" + script.ID
 									}
-									headerGitMenuOption(c, key, script.Name, script.Name, script.Command, IconTerminal(), func() {
-										hs.scriptsMenuOpen = false
-										s.runScriptInTerminal(script)
-										s.invalidate()
+									menuRow(c, menuRowProps{
+										Key:      key,
+										Label:    script.Name,
+										Icon:     IconTerminal(),
+										Title:    script.Name,
+										Trailing: script.Command,
+										OnClick: func() {
+											hs.scriptsMenuOpen = false
+											s.runScriptInTerminal(script)
+											s.invalidate()
+										},
 									})
 								}
 								if len(scripts) > headerScriptsCollapseThreshold {
@@ -185,9 +155,15 @@ func renderHeaderScriptsMenuButton(c *ui.Context, s *chatState, threadID string)
 										break
 									}
 								}
-								headerGitMenuOption(c, "chat-header-scripts-edit", label, label, "", IconPencilLine(), func() {
-									hs.scriptsMenuOpen = false
-									openScriptsSheet(s, threadID)
+								menuRow(c, menuRowProps{
+									Key:   "chat-header-scripts-edit",
+									Label: label,
+									Icon:  IconPencilLine(),
+									Title: label,
+									OnClick: func() {
+										hs.scriptsMenuOpen = false
+										openScriptsSheet(s, threadID)
+									},
 								})
 							})
 					})
@@ -349,25 +325,43 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 					Bold().
 					TextColor(ThemeSecondaryText(c)).
 					Padding(Space1, Space3, Space0, Space3)
-				headerGitMenuOption(c, "chat-header-open-in-unified-finder", openInFileManagerName(), openInFileManagerName(), "", IconFolderOpen(), func() {
-					hs.openInMenuOpen = false
-					s.openInWithApp(openInApp{Name: openInFileManagerName()}, dir)
-					s.invalidate()
+				menuRow(c, menuRowProps{
+					Key:   "chat-header-open-in-unified-finder",
+					Label: openInFileManagerName(),
+					Icon:  IconFolderOpen(),
+					Title: openInFileManagerName(),
+					OnClick: func() {
+						hs.openInMenuOpen = false
+						s.openInWithApp(openInApp{Name: openInFileManagerName()}, dir)
+						s.invalidate()
+					},
 				})
 				// 终端读取 General.TerminalShell 配置的终端应用，空则默认 Terminal。
-				headerGitMenuOption(c, "chat-header-open-in-unified-terminal", "在终端中打开", "在终端中打开", "", IconTerminal(), func() {
-					hs.openInMenuOpen = false
-					if err := openDirInExternalTerminal(dir, getTerminalConfiguredShell(s)); err != nil {
-						s.setToast("打开终端失败: " + err.Error())
-					}
-					s.invalidate()
+				menuRow(c, menuRowProps{
+					Key:   "chat-header-open-in-unified-terminal",
+					Label: "在终端中打开",
+					Icon:  IconTerminal(),
+					Title: "在终端中打开",
+					OnClick: func() {
+						hs.openInMenuOpen = false
+						if err := openDirInExternalTerminal(dir, getTerminalConfiguredShell(s)); err != nil {
+							s.setToast("打开终端失败: " + err.Error())
+						}
+						s.invalidate()
+					},
 				})
 				for _, app := range apps {
 					a := app
-					headerGitMenuOption(c, "chat-header-open-in-unified-"+a.Name, a.Name, a.Name, "", IconExternalLink(), func() {
-						hs.openInMenuOpen = false
-						s.openInWithApp(a, dir)
-						s.invalidate()
+					menuRow(c, menuRowProps{
+						Key:   "chat-header-open-in-unified-" + a.Name,
+						Label: a.Name,
+						Icon:  IconExternalLink(),
+						Title: a.Name,
+						OnClick: func() {
+							hs.openInMenuOpen = false
+							s.openInWithApp(a, dir)
+							s.invalidate()
+						},
 					})
 				}
 				ui.Box(c.Key("chat-header-open-in-unified-divider")).
@@ -375,13 +369,25 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 					Height(Hairline).
 					Background(ThemeDivider(c)).
 					Margin(4, 4, 4, 4)
-				headerGitMenuOption(c, "chat-header-open-in-unified-copy-path", "复制路径", "复制路径", "", IconCopy(), func() {
-					hs.openInMenuOpen = false
-					c.WriteClipboard(dir)
-					s.setToast("已复制路径")
-					s.invalidate()
+				menuRow(c, menuRowProps{
+					Key:   "chat-header-open-in-unified-copy-path",
+					Label: "复制路径",
+					Icon:  IconCopy(),
+					Title: "复制路径",
+					OnClick: func() {
+						hs.openInMenuOpen = false
+						c.WriteClipboard(dir)
+						s.setToast("已复制路径")
+						s.invalidate()
+					},
 				})
-				headerGitMenuOption(c, "chat-header-open-in-unified-custom", "自定义…", "自定义…", "", IconSettings(), openSettings)
+				menuRow(c, menuRowProps{
+					Key:     "chat-header-open-in-unified-custom",
+					Label:   "自定义…",
+					Icon:    IconSettings(),
+					Title:   "自定义…",
+					OnClick: openSettings,
+				})
 			})
 	})
 }

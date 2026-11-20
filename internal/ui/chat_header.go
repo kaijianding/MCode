@@ -758,11 +758,16 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 									copyBranch = st.Head
 								}
 								if copyBranch != "" {
-									renderGitMenuOption(c, "chat-header-git-copy-branch-btn", "复制分支名", "复制分支名", "", false, false, func() {
-										hs.branchMenuOpen = false
-										c.WriteClipboard(copyBranch)
-										s.setToast("已复制分支名")
-										s.invalidate()
+									menuRow(c, menuRowProps{
+										Key:   "chat-header-git-copy-branch-btn",
+										Label: "复制分支名",
+										Title: "复制分支名",
+										OnClick: func() {
+											hs.branchMenuOpen = false
+											c.WriteClipboard(copyBranch)
+											s.setToast("已复制分支名")
+											s.invalidate()
+										},
 									})
 								}
 
@@ -778,10 +783,23 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 											continue
 										}
 										name := filepath.Base(wt.Path)
-										renderGitMenuOption(c, "chat-header-git-wt-"+wt.Path, "切换到 worktree "+name, name, wt.Branch, wt.Current, busy, func() {
-											run(func() error {
-												return s.client.GitSwitchWorktree(context.Background(), threadID, wt.Path)
-											})
+										var onClick func()
+										if !wt.Current {
+											onClick = func() {
+												run(func() error {
+													return s.client.GitSwitchWorktree(context.Background(), threadID, wt.Path)
+												})
+											}
+										}
+										menuRow(c, menuRowProps{
+											Key:         "chat-header-git-wt-" + wt.Path,
+											Label:       "切换到 worktree " + name,
+											Title:       name,
+											Trailing:    truncateRunes(wt.Branch, 16),
+											Checked:     wt.Current,
+											Highlighted: wt.Current,
+											Disabled:    busy,
+											OnClick:     onClick,
 										})
 									}
 								}
@@ -799,14 +817,20 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 									emptyThread := s.selectedThreadID == threadID && len(s.messages) == 0
 									s.mu.Unlock()
 									if emptyThread {
-										renderGitMenuOption(c, "chat-header-git-new-wt-btn", "为此会话新建 Worktree", "为此会话新建 Worktree", "", false, busy, func() {
-											run(func() error {
-												if err := s.client.MoveToWorktree(context.Background(), threadID, "", false); err != nil {
-													return err
-												}
-												s.setToast("已迁入 Worktree")
-												return nil
-											})
+										menuRow(c, menuRowProps{
+											Key:      "chat-header-git-new-wt-btn",
+											Label:    "为此会话新建 Worktree",
+											Title:    "为此会话新建 Worktree",
+											Disabled: busy,
+											OnClick: func() {
+												run(func() error {
+													if err := s.client.MoveToWorktree(context.Background(), threadID, "", false); err != nil {
+														return err
+													}
+													s.setToast("已迁入 Worktree")
+													return nil
+												})
+											},
 										})
 									} else if hs.wtMoving {
 										ui.Column(c.Key("chat-header-git-move-wt-form")).
@@ -864,14 +888,20 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 												})
 											})
 									} else {
-										renderGitMenuOption(c, "chat-header-git-move-wt-btn", "迁入 Worktree…", "迁入 Worktree…", "", false, busy, func() {
-											chatHeaderMu.Lock()
-											hs.wtMoving = true
-											hs.wtBranch = ""
-											hs.wtTransfer = true
-											hs.branchErr = ""
-											chatHeaderMu.Unlock()
-											s.invalidate()
+										menuRow(c, menuRowProps{
+											Key:      "chat-header-git-move-wt-btn",
+											Label:    "迁入 Worktree…",
+											Title:    "迁入 Worktree…",
+											Disabled: busy,
+											OnClick: func() {
+												chatHeaderMu.Lock()
+												hs.wtMoving = true
+												hs.wtBranch = ""
+												hs.wtTransfer = true
+												hs.branchErr = ""
+												chatHeaderMu.Unlock()
+												s.invalidate()
+											},
 										})
 									}
 								}
@@ -1400,43 +1430,18 @@ func renderHeaderPermissionCapsule(c *ui.Context, s *chatState, threadID string)
 									o := opt
 									currentMode := o.mode == mode
 									supported := headerRuntimeModeSupported(provider, o.mode)
-									optBtn := ui.ButtonBase(c.Key("chat-header-permission-option-"+o.mode)).
-										Label(o.title).
-										Height(ControlMD).
-										Padding(0, Space3).
-										Radius(RadiusSM).
-										FillWidth()
-									if !supported {
-										optBtn.Disabled(true)
-										optBtn.Opacity(0.4)
-									} else {
-										if optBtn.Hovered() {
-											optBtn.Background(ThemeHover(c))
-										}
-										optBtn.OnClick(func() {
+									menuRow(c, menuRowProps{
+										Key:      "chat-header-permission-option-" + o.mode,
+										Icon:     permissionModeIcon(o.mode),
+										Title:    o.title,
+										Checked:  currentMode,
+										Disabled: !supported,
+										OnClick: func() {
 											// 先关菜单再切换档位
 											hs.permissionMenuOpen = false
 											s.invalidate()
 											s.setHeaderRuntimeMode(threadID, o.mode)
-										})
-									}
-									optBtn.Children(func() {
-										ui.Row(c.Key("chat-header-permission-row-" + o.mode)).
-											Gap(Space3).
-											AlignItems(ui.Center).
-											Grow(1).
-											Children(func() {
-												if currentMode {
-													ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-												} else {
-													ui.Box(c.Key("chat-header-permission-check-"+o.mode)).Size(14, 14)
-												}
-												ui.Icon(c, permissionModeIcon(o.mode)).Size(16, 16).TextColor(ThemeSecondaryText(c))
-												ui.Text(c, o.title).
-													FontSize(uiFont(TypeBody)).
-													TextColor(ThemePrimaryText(c)).
-													SingleLine()
-											})
+										},
 									})
 								}
 								renderHeaderPersonaSection(c, s, hs, threadID, current, personas)
@@ -1473,48 +1478,26 @@ func renderHeaderPersonaSection(c *ui.Context, s *chatState, hs *chatHeaderState
 	}
 }
 
-// renderHeaderPersonaOption 渲染单个菜单项：写法与权限档位项一致，26 行高、左侧选中勾与未选中占位。
+// renderHeaderPersonaOption 渲染单个人设菜单项；
 // id 传 personaNoneValue 表示「无人设」项；点击先关菜单，再按三态语义写入当前会话的人设。
 func renderHeaderPersonaOption(c *ui.Context, s *chatState, hs *chatHeaderState, threadID, current, id, label string, personas []MagpiePersona) {
-	key := "chat-header-persona-option-" + id
 	checked := personaMenuChecked(current, id, personas)
-	item := ui.ButtonBase(c.Key(key)).
-		Label(label).
-		Height(ControlMD).
-		Padding(0, Space3).
-		Radius(RadiusSM).
-		FillWidth()
-	if item.Hovered() {
-		item.Background(ThemeHover(c))
-	}
-	item.OnClick(func() {
-		// 先关菜单再写入
-		hs.permissionMenuOpen = false
-		s.invalidate()
-		value, ok := personaMenuWriteValue(current, id)
-		if !ok {
-			return
-		}
-		s.updateComposerPrefs(threadID, func(prefs *ComposerPrefs) {
-			prefs.Persona = value
-		}, "切换人设失败")
-	})
-	item.Children(func() {
-		ui.Row(c.Key(key + "-row")).
-			Gap(Space3).
-			AlignItems(ui.Center).
-			Grow(1).
-			Children(func() {
-				if checked {
-					ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-				} else {
-					ui.Box(c.Key(key+"-check")).Size(14, 14)
-				}
-				ui.Text(c, label).
-					FontSize(uiFont(TypeBody)).
-					TextColor(ThemePrimaryText(c)).
-					SingleLine()
-			})
+	menuRow(c, menuRowProps{
+		Key:     "chat-header-persona-option-" + id,
+		Title:   label,
+		Checked: checked,
+		OnClick: func() {
+			// 先关菜单再写入
+			hs.permissionMenuOpen = false
+			s.invalidate()
+			value, ok := personaMenuWriteValue(current, id)
+			if !ok {
+				return
+			}
+			s.updateComposerPrefs(threadID, func(prefs *ComposerPrefs) {
+				prefs.Persona = value
+			}, "切换人设失败")
+		},
 	})
 }
 
@@ -1964,7 +1947,12 @@ func renderChatHeaderAuxGroup(c *ui.Context, s *chatState) {
 				appPopover(c.Key("chat-header-aux-more-popover"), trigger, &hs.auxMenuOpen, nil, func() {
 					popoverCard(c, ui.Column(c.Key("chat-header-aux-more-menu")).Width(180).Padding(Space1).Children(func() {
 						item := func(key, title, detail string, action func()) {
-							renderGitMenuOption(c, key, title, title, detail, false, false, func() { hs.auxMenuOpen = false; action() })
+							menuRow(c, menuRowProps{
+								Key:      key,
+								Title:    title,
+								Trailing: detail,
+								OnClick:  func() { hs.auxMenuOpen = false; action() },
+							})
 						}
 						item("chat-header-context-btn", "项目文档", "", s.headerToggleContextPanel)
 						detail := ""

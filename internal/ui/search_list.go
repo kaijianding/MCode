@@ -164,48 +164,23 @@ func searchList(c *ui.Context, p searchListProps) {
 				})
 			} else {
 				for i, entry := range filtered {
-					item := ui.ButtonBase(c.Key(p.Key+"-item-"+entry.ID)).
-						Label(entry.Title).
-						Padding(Space2, Space3).
-						Radius(RadiusSM).
-						FillWidth().
-						Justify(ui.Start).
-						Disabled(p.Disabled)
+					item := menuRow(c, menuRowProps{
+						Key:         p.Key + "-item-" + entry.ID,
+						Title:       entry.Title,
+						Trailing:    entry.Trailing,
+						Checked:     entry.Checked,
+						Disabled:    p.Disabled,
+						Highlighted: i == selected,
+					})
 					if item.Hovered() {
 						hoveredIdx = i
 					}
-					if i == selected {
-						item.Background(ThemeHover(c))
-						if scrollSelected {
-							item.ScrollIntoView()
-						}
+					if i == selected && scrollSelected {
+						item.ScrollIntoView()
 					}
 					if !p.Disabled && item.Clicked() && p.OnSelect != nil {
 						p.OnSelect(entry.ID)
 					}
-					item.Children(func() {
-						ui.Row(c.Key(p.Key+"-item-row-"+entry.ID)).
-							Gap(Space2).
-							AlignItems(ui.Center).
-							Grow(1).
-							Children(func() {
-								ui.Text(c, entry.Title).
-									FontSize(uiFont(TypeBody)).
-									TextColor(ThemePrimaryText(c)).
-									Grow(1).
-									SingleLine()
-								if entry.Trailing != "" {
-									ui.Text(c, entry.Trailing).
-										FontSize(uiFont(TypeCaption)).
-										TextColor(ThemeSecondaryText(c)).
-										Shrink(0).
-										SingleLine()
-								}
-								if entry.Checked {
-									ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-								}
-							})
-					})
 				}
 			}
 			if pointerOver != prevPointerOn || pointerMoved || scrollSelected {
