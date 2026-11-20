@@ -22,6 +22,7 @@ var (
 type kanbanModalState struct {
 	open           bool
 	pickerMenuOpen bool
+	pickerList     searchListState
 }
 
 func getKanbanModalState(s *chatState) *kanbanModalState {
@@ -38,7 +39,7 @@ func getKanbanModalState(s *chatState) *kanbanModalState {
 	return st
 }
 
-// setKanbanPickerMenuOpen 设置「新建任务」弹窗内项目下拉的展开状态（与头部菜单独立）。
+// setKanbanPickerMenuOpen 设置「新建任务/目标」弹窗内项目下拉的展开状态（与头部菜单独立）。
 func setKanbanPickerMenuOpen(s *chatState, open bool) {
 	st := getKanbanModalState(s)
 	if st == nil {
@@ -47,6 +48,9 @@ func setKanbanPickerMenuOpen(s *chatState, open bool) {
 	kanbanModalMu.Lock()
 	st.pickerMenuOpen = open
 	kanbanModalMu.Unlock()
+	if open {
+		st.pickerList.reset()
+	}
 	s.invalidate()
 }
 

@@ -52,6 +52,7 @@ func openKanbanNewGoalSheet(s *chatState) {
 	ks.showNewGoal = true
 	ks.showNewTask = false
 	kanbanMu.Unlock()
+	setKanbanPickerMenuOpen(s, false)
 	s.invalidate()
 }
 
@@ -64,6 +65,7 @@ func closeKanbanNewGoalSheet(s *chatState) {
 	kanbanMu.Lock()
 	ks.showNewGoal = false
 	kanbanMu.Unlock()
+	setKanbanPickerMenuOpen(s, false)
 	modalDragReset(modalDragKanbanNewGoal)
 	s.invalidate()
 }
@@ -127,24 +129,6 @@ func kanbanProjectHint(path string) string {
 	return filepath.Base(path)
 }
 
-// kanbanProjectOptionLabel 渲染下拉一行：名称占满剩余宽度，重名时右侧追加次要色小号的父目录名。
-func kanbanProjectOptionLabel(c *ui.Context, opt kanbanModalPickOption) {
-	ui.Text(c, opt.Name).
-		FontSize(uiFont(TypeFootnote)).
-		TextColor(ThemePrimaryText(c)).
-		Grow(1).
-		SingleLine()
-	if opt.Hint != "" {
-		ui.Text(c, opt.Hint).
-			Label("项目所在目录 "+opt.Hint).
-			FontSize(uiFont(TypeCaption)).
-			TextColor(ThemeSecondaryText(c)).
-			Margin(0, Space2, 0, 0).
-			Shrink(0).
-			SingleLine()
-	}
-}
-
 // kanbanSheetProjectPicker 渲染新建弹窗里的项目选择：显示当前项目名，点击在下方展开项目列表。
 // 弹窗内的下拉使用独立的开关状态与浮层，不与看板头部的项目菜单共用；
 // 选中、点外部、按 Esc 关闭弹窗时都会清理该状态。
@@ -202,45 +186,44 @@ func kanbanSheetProjectPicker(c *ui.Context, s *chatState, projectID string, onS
 		if !open || len(opts) == 0 {
 			return
 		}
+		items := make([]searchListItem, 0, len(opts))
+		for _, opt := range opts {
+			items = append(items, searchListItem{
+				ID:       opt.ID,
+				Title:    opt.Name,
+				Trailing: opt.Hint,
+				Checked:  opt.ID == projectID,
+			})
+		}
 		opened := true
+		const pickerMenuWidth float32 = 320
+		// 列表上限由 searchList 默认 MaxHeight(360) 控制，整体加上搜索框与内边距不超过 404。
+		pickerMenuMaxHeight := 360 + ControlMD + Space2*2 + Space1
 		anchoredMenu(c, "kanban-sheet-project-menu", btn, &opened, func() {
 			setKanbanPickerMenuOpen(s, false)
-		}, 220, 320, 280, func() {
-			popoverCard(c, ui.Column(c.Key("kanban-sheet-project-menu-card")).
-				FillWidth().
-				Padding(Space1).
-				Gap(2).
-				MaxHeight(272).
-				Clip().
+		}, pickerMenuWidth, pickerMenuWidth, pickerMenuMaxHeight, func() {
+			popoverCard(c, ui.Column(c.Key("kanban-sheet-project-menu-card"))).
+				Width(pickerMenuWidth).
+				Padding(Space2).
+				Gap(Space1).
 				Children(func() {
-					ui.Scroll(c.Key("kanban-sheet-project-menu-scroll")).Grow(1).Children(func() {
-						ui.Column(c.Key("kanban-sheet-project-menu-list")).Gap(2).Children(func() {
-							for _, opt := range opts {
-								option := opt
-								item := ui.ButtonBase(c.Key("kanban-sheet-project-menu-item-"+option.ID)).
-									Label(option.Name).
-									FillWidth().
-									Height(ControlMD).
-									Padding(0, Space3).
-									Radius(RadiusSM).
-									AlignItems(ui.Center)
-								if item.Hovered() {
-									item.Background(ThemeHover(c))
-								}
-								item.OnClick(func() {
-									setKanbanPickerMenuOpen(s, false)
-									onSelect(option.ID)
-								})
-								item.Children(func() {
-									kanbanProjectOptionLabel(c, option)
-									if option.ID == projectID {
-										ui.Icon(c, IconCheck()).Size(10, 10).TextColor(ThemeAccent(c))
-									}
-								})
-							}
-						})
+					searchList(c, searchListProps{
+						Key:         "kanban-sheet-project",
+						Label:       "搜索项目",
+						Placeholder: "选择项目…",
+						Empty:       "无匹配项目",
+						Items:       items,
+						State:       &kst.pickerList,
+						OnSelect: func(id string) {
+							setKanbanPickerMenuOpen(s, false)
+							onSelect(id)
+						},
+						OnDismiss: func() {
+							setKanbanPickerMenuOpen(s, false)
+						},
+						Invalidate: s.invalidate,
 					})
-				}))
+				})
 		})
 	})
 }

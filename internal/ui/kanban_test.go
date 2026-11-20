@@ -1214,6 +1214,133 @@ func TestKanbanWorkspace_NewTaskPickerIndependent(t *testing.T) {
 	}
 }
 
+// TestKanbanSheetProjectPickerSearch 覆盖新建任务弹窗内项目选择器的搜索与键盘交互：
+// 输入搜索词后仅剩匹配项目，回车后 onSelect 收到对应项目并关闭菜单；
+// 再次打开后按 Esc 关闭菜单且不改变已选项目。
+func TestKanbanSheetProjectPickerSearch(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetKanbanBoard(KanbanBoard{})
+	fake.projects = []Project{
+		{ID: "p1", Name: "Alpha", Path: "/Users/me/work/alpha"},
+		{ID: "p2", Name: "Beta", Path: "/Users/me/work/beta"},
+	}
+
+	tt, state := newWorkspaceTester(t, fake, "tasks")
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("新建任务")
+		return ok
+	})
+	if err := tt.Click("新建任务"); err != nil {
+		t.Fatalf("click new task failed: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("kanban-new-task-card")
+		if !ok {
+			return false
+		}
+		_, btnOK := tt.AccessByRole(ui.RoleButton, "项目")
+		return btnOK
+	})
+
+	openPicker := func() {
+		t.Helper()
+		btn, ok := tt.AccessByRole(ui.RoleButton, "项目")
+		if !ok {
+			t.Fatal("未找到项目选择器按钮")
+		}
+		tt.ClickAt(btn.Bounds.X+btn.Bounds.W/2, btn.Bounds.Y+btn.Bounds.H/2)
+		waitFor(t, tt, func() bool {
+			_, menuOK := tt.Find("kanban-sheet-project-menu")
+			return menuOK && tt.Focused("搜索项目")
+		})
+	}
+	hasMenuItem := func(name string) bool {
+		menuRect, ok := tt.Find("kanban-sheet-project-menu")
+		if !ok {
+			return false
+		}
+		for _, a := range tt.AccessAll() {
+			if a.Role == ui.RoleButton && a.Name == name &&
+				a.Bounds.X >= menuRect.X && a.Bounds.X+a.Bounds.W <= menuRect.X+menuRect.W &&
+				a.Bounds.Y >= menuRect.Y && a.Bounds.Y+a.Bounds.H <= menuRect.Y+menuRect.H {
+				return true
+			}
+		}
+		return false
+	}
+
+	openPicker()
+	if !hasMenuItem("Alpha") {
+		t.Fatal("打开项目选择器后应显示 Alpha")
+	}
+	if !hasMenuItem("Beta") {
+		t.Fatal("打开项目选择器后应显示 Beta")
+	}
+
+	tt.Type("Beta")
+	tt.Frame()
+	if hasMenuItem("Alpha") {
+		t.Fatal("搜索 Beta 后不应再显示 Alpha")
+	}
+	if !hasMenuItem("Beta") {
+		t.Fatal("搜索 Beta 后应保留 Beta")
+	}
+
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool {
+		_, menu := tt.Find("kanban-sheet-project-menu")
+		return !menu
+	})
+
+	ks := getKanbanState(state)
+	kanbanMu.Lock()
+	selected := ks.newTaskProjectID
+	kanbanMu.Unlock()
+	if selected != "p2" {
+		t.Fatalf("回车后期望选中项目 p2，实际: %q", selected)
+	}
+	kanbanModalMu.Lock()
+	openAfterEnter := kanbanModalStates[state].pickerMenuOpen
+	kanbanModalMu.Unlock()
+	if openAfterEnter {
+		t.Fatal("回车选中项目后选择器菜单应关闭")
+	}
+
+	// 再次打开选择器，重置搜索状态后输入关键词并按 Esc，菜单关闭且不改变已选项目。
+	openPicker()
+	if !hasMenuItem("Alpha") {
+		t.Fatal("重新打开后应重置搜索并显示 Alpha")
+	}
+	tt.Type("Alpha")
+	tt.Frame()
+	if hasMenuItem("Beta") {
+		t.Fatal("搜索 Alpha 后不应再显示 Beta")
+	}
+
+	tt.Key(0, ui.KeyEscape)
+	waitFor(t, tt, func() bool {
+		_, menu := tt.Find("kanban-sheet-project-menu")
+		return !menu
+	})
+
+	kanbanMu.Lock()
+	afterEsc := ks.newTaskProjectID
+	kanbanMu.Unlock()
+	if afterEsc != "p2" {
+		t.Fatalf("Esc 关闭选择器不应改变已选项目，期望 p2，实际: %q", afterEsc)
+	}
+	kanbanModalMu.Lock()
+	openAfterEsc := kanbanModalStates[state].pickerMenuOpen
+	kanbanModalMu.Unlock()
+	if openAfterEsc {
+		t.Fatal("Esc 关闭后选择器菜单状态应为关闭")
+	}
+	if _, ok := tt.Find("kanban-new-task-sheet"); !ok {
+		t.Fatal("Esc 关闭项目选择器不应关闭新建任务弹窗")
+	}
+}
+
 // TestKanbanHeaderProjectMenuClamped 测试项目菜单与按钮对齐，并在空间不足时向上展开。
 // 按钮的 Tester 查找键是 Label“项目”；overlay 打开后命中树可能被压缩，
 // 因此展开状态在状态层断言，几何信息仅在菜单面板可见时再核对。
