@@ -68,7 +68,9 @@ func requestNewAutomation(s *chatState, scopeID string, chooseProject func(onCho
 		chosen = true
 		as := getAutomationState(s)
 		as.resetToNewAutomation(s)
+		automationMu.Lock()
 		as.editorProjectID = id
+		automationMu.Unlock()
 		s.invalidate()
 	}
 	if scopeID != "" {
@@ -83,11 +85,14 @@ func prepareAutomationLeave(s *chatState, next func()) bool {
 		return true
 	}
 	as := getAutomationState(s)
+	automationMu.Lock()
 	if !as.editorOpen || !as.dirty() {
+		automationMu.Unlock()
 		return true
 	}
 	as.pendingLeave = next
 	as.confirmDiscard = true
+	automationMu.Unlock()
 	s.invalidate()
 	return false
 }
@@ -97,6 +102,7 @@ func handleAutomationEscape(s *chatState) bool {
 		return false
 	}
 	as := getAutomationState(s)
+	automationMu.Lock()
 	switch {
 	case as.chooseProjectOpen:
 		as.chooseProjectOpen = false
@@ -117,8 +123,10 @@ func handleAutomationEscape(s *chatState) bool {
 	case as.narrowDetail:
 		as.narrowDetail = false
 	default:
+		automationMu.Unlock()
 		return false
 	}
+	automationMu.Unlock()
 	s.invalidate()
 	return true
 }
@@ -144,15 +152,16 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 		return
 	}
 	as := getAutomationState(s)
-	if as.projectID != p.ScopeID || !as.initialized {
-		if as.projectID != p.ScopeID {
-			as.stopSchedulePreview()
-			*as = automationState{loadID: as.loadID, runsLoadID: as.runsLoadID, saveID: as.saveID, previewEpoch: as.previewEpoch, runRequest: as.runRequest + 1, selectionVersion: as.selectionVersion + 1, editSession: as.editSession + 1, watchStop: as.watchStop, runningIDs: make(map[string]bool), busyIDs: make(map[string]bool), projectID: p.ScopeID, filter: as.filter, unreadOnly: as.unreadOnly}
-		}
-		if s.client != nil {
-			s.startAutomationWatch(p.ScopeID)
-			s.loadAutomations(p.ScopeID)
-		}
+	automationMu.Lock()
+	needLoad := as.projectID != p.ScopeID || !as.initialized
+	if as.projectID != p.ScopeID {
+		as.stopSchedulePreview()
+		*as = automationState{loadID: as.loadID, runsLoadID: as.runsLoadID, saveID: as.saveID, previewEpoch: as.previewEpoch, runRequest: as.runRequest + 1, selectionVersion: as.selectionVersion + 1, editSession: as.editSession + 1, watchStop: as.watchStop, runningIDs: make(map[string]bool), busyIDs: make(map[string]bool), projectID: p.ScopeID, filter: as.filter, unreadOnly: as.unreadOnly}
+	}
+	automationMu.Unlock()
+	if needLoad && s.client != nil {
+		s.startAutomationWatch(p.ScopeID)
+		s.loadAutomations(p.ScopeID)
 	}
 	visible := filterAutomationStatus(as.autos, p.SearchText, as.filter, as.unreadOnly, as.unread)
 	automationMu.Lock()
@@ -292,13 +301,13 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 					for _, project := range s.projects {
 						names[project.ID] = project.Name
 					}
-					renderAutomationList(c, automationListProps{Visible: visible, SelectedID: as.selectedID, Unread: as.unread, RunningIDs: runningIDs, ScopeID: p.ScopeID, ProjectNames: names, Scroll: &as.listScroll, KeyboardFocusID: &as.keyboardFocusID, EditorOpen: as.editorOpen, Now: time.Now(), OnSelect: func(a Automation) { as.selectAutomation(a, s) }, OnEdit: func(a Automation) { as.fillAutomation(a); as.editorOpen = true; s.invalidate() }})
+					renderAutomationList(c, automationListProps{Visible: visible, SelectedID: as.selectedID, Unread: as.unread, RunningIDs: runningIDs, ScopeID: p.ScopeID, ProjectNames: names, Scroll: &as.listScroll, KeyboardFocusID: &as.keyboardFocusID, EditorOpen: as.editorOpen, Now: time.Now(), OnSelect: func(a Automation) { as.selectAutomation(a, s) }, OnEdit: func(a Automation) { automationMu.Lock(); as.fillAutomation(a); as.editorOpen = true; automationMu.Unlock(); s.invalidate() }})
 				})
 			}
 			if !narrow || (as.narrowDetail && selected.ID != "") {
 				ui.Column(c.Key("automation-detail-col")).Grow(1).FillHeight().BorderWidth(Hairline).BorderColor(ThemeDivider(c)).Padding(Space6, Space6).Gap(Space4).Children(func() {
 					if narrow {
-						Button(c.Key("automation-back"), ButtonOpts{Text: "← 自动化", Variant: ButtonGhost, OnClick: func() { as.narrowDetail = false; s.invalidate() }})
+						Button(c.Key("automation-back"), ButtonOpts{Text: "← 自动化", Variant: ButtonGhost, OnClick: func() { automationMu.Lock(); as.narrowDetail = false; automationMu.Unlock(); s.invalidate() }})
 					}
 					if selected.ID == "" {
 						ui.Column(c.Key("automation-select-prompt")).Grow(1).Center().Children(func() { ui.Text(c, "未选择自动化").TextColor(ThemeSecondaryText(c)) })
@@ -315,12 +324,18 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 						appPopover(c, more, &as.moreOpen, nil, func() {
 							popoverCard(c, ui.Column(c.Key("automation-more-menu"))).Padding(Space2, Space2).Children(func() {
 								Button(c.Key("automation-copy"), ButtonOpts{Text: "复制", Label: "复制自动化", Variant: ButtonGhost, OnClick: func() { as.moreOpen = false; s.duplicateAutomation(selected) }})
-								Button(c.Key("automation-delete"), ButtonOpts{Text: "删除", Variant: ButtonDanger, OnClick: func() { as.moreOpen = false; as.confirmDelete = true; s.invalidate() }})
+								Button(c.Key("automation-delete"), ButtonOpts{Text: "删除", Variant: ButtonDanger, OnClick: func() { as.moreOpen = false; automationMu.Lock(); as.confirmDelete = true; automationMu.Unlock(); s.invalidate() }})
 							})
 						})
 					})
 					ui.Text(c, automationScheduleText(selected.Schedule)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c))
-					Segmented(c, "automation-detail-tabs", &as.detailTab, []Segment{{Label: "运行记录"}, {Label: "配置"}}, func(i int) { as.detailTab = i; s.invalidate() })
+					detailTab := as.detailTab
+					Segmented(c, "automation-detail-tabs", &detailTab, []Segment{{Label: "运行记录"}, {Label: "配置"}}, func(i int) {
+						automationMu.Lock()
+						as.detailTab = i
+						automationMu.Unlock()
+						s.invalidate()
+					})
 					if as.detailTab == 0 {
 						unread := 0
 						for _, r := range as.runs {
@@ -337,10 +352,12 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 						})
 					} else {
 						Button(c.Key("automation-edit"), ButtonOpts{Text: "编辑", Variant: ButtonSecondary, OnClick: func() {
+							automationMu.Lock()
 							if !as.dirty() {
 								as.fillAutomation(selected)
 							}
 							as.editorOpen = true
+							automationMu.Unlock()
 							s.invalidate()
 						}})
 						renderAutomationConfig(c, selected)
@@ -357,7 +374,9 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 			})
 		})
 		if !open {
+			automationMu.Lock()
 			as.closeEditor()
+			automationMu.Unlock()
 			s.invalidate()
 		}
 	}
@@ -370,12 +389,16 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 		ConfirmLabel: "删除",
 		CancelLabel:  "取消",
 		OnConfirm: func() {
+			automationMu.Lock()
 			as.confirmDelete = false
+			automationMu.Unlock()
 			s.deleteAutomation(selected.ID)
 			s.invalidate()
 		},
 		OnCancel: func() {
+			automationMu.Lock()
 			as.confirmDelete = false
+			automationMu.Unlock()
 			s.invalidate()
 		},
 	})
