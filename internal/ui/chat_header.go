@@ -1831,9 +1831,10 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 const chatThreadsPopoverWidth float32 = 320 // token-exempt: 会话列表需要足够宽度展示长标题。
 
 // chatToolbarState 维护会话头部工具栏的弹层状态，按 chatState 附加（同 chatHeaderState）。
-// threadsPopoverOpen 绑定在会话列表 Popover 上，只在 UI 线程读写。
+// threadsPopoverOpen 与 threadsList 绑定在会话列表 Popover 上，只在 UI 线程读写。
 type chatToolbarState struct {
 	threadsPopoverOpen bool
+	threadsList        searchListState
 	morePopoverOpen    bool
 }
 
@@ -1863,13 +1864,16 @@ func (s *chatState) headerNewThread() {
 	s.createNewThread()
 }
 
-// headerToggleThreadsPopover 切换会话列表 Popover 的展开状态。
+// headerToggleThreadsPopover 切换会话列表 Popover 的展开状态；打开时重置搜索与键盘选中状态。
 func (s *chatState) headerToggleThreadsPopover() {
 	if s == nil {
 		return
 	}
 	ts := getChatToolbarState(s)
 	ts.threadsPopoverOpen = !ts.threadsPopoverOpen
+	if ts.threadsPopoverOpen {
+		ts.threadsList.reset()
+	}
 	s.invalidate()
 }
 
@@ -1987,64 +1991,54 @@ func renderChatHeaderAuxGroup(c *ui.Context, s *chatState) {
 		})
 }
 
-// renderChatThreadsPopover 渲染会话列表 Popover：按当前会话列表顺序列出标题，当前会话打勾。
+// renderChatThreadsPopover 渲染会话列表 Popover：用 searchList 列出非临时会话并支持搜索与键盘选择。
 func renderChatThreadsPopover(c *ui.Context, s *chatState) {
 	s.mu.Lock()
 	threads := withoutProvisional(s.threads)
 	selectedID := s.selectedThreadID
 	s.mu.Unlock()
 
-	_, height := c.Size()
-	ui.Scroll(c.Key("chat-header-threads-scroll")).MaxHeight(max(100, height-120)).Children(func() {
-		ui.Column(c.Key("chat-header-threads-menu")).FillWidth().Children(func() {
-			if len(threads) == 0 {
-				ui.Text(c, "暂无会话").FontSize(uiFont(TypeFootnote)).TextColor(ThemeSecondaryText(c)).Padding(Space2, Space3)
-				return
-			}
-			for _, th := range threads {
-				renderChatThreadMenuItem(c, s, th, th.ID == selectedID)
-			}
+	items := make([]searchListItem, 0, len(threads))
+	for _, th := range threads {
+		title := strings.TrimSpace(th.Title)
+		if title == "" {
+			title = "未命名会话"
+		}
+		items = append(items, searchListItem{
+			ID:       th.ID,
+			Title:    title,
+			Trailing: formatRelativeTime(threadActivityTime(th)),
+			Checked:  th.ID == selectedID,
 		})
-	})
-}
+	}
 
-// renderChatThreadMenuItem 渲染会话列表 Popover 的一项：当前会话打勾且不可点击，其余点击切换会话并关闭弹层。
-func renderChatThreadMenuItem(c *ui.Context, s *chatState, th Thread, current bool) {
-	title := strings.TrimSpace(th.Title)
-	if title == "" {
-		title = "未命名会话"
-	}
-	opt := ui.ButtonBase(c.Key("chat-header-threads-item-"+th.ID)).
-		Label("切换到会话 "+title).
-		Height(ControlSM).
-		Padding(0, Space3).
-		Radius(RadiusSM).
-		FillWidth()
-	if current {
-		opt.Background(ThemeOverlaySelected(c))
-	} else {
-		if opt.Hovered() {
-			opt.Background(ThemeHover(c))
-		}
-		if opt.Clicked() {
-			s.headerSelectThread(th.ID)
-		}
-	}
-	opt.Children(func() {
-		ui.Row(c.Key("chat-header-threads-item-" + th.ID + "-row")).
-			Gap(Space3).
-			AlignItems(ui.Center).
-			Grow(1).
-			Children(func() {
-				if current {
-					ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-				} else {
-					ui.Box(c.Key("chat-header-threads-item-"+th.ID+"-check-placeholder")).Size(14, 14)
+	ts := getChatToolbarState(s)
+	_, height := c.Size()
+	ui.Column(c.Key("chat-header-threads-menu")).FillWidth().Gap(Space1).Children(func() {
+		searchList(c, searchListProps{
+			Key:         "chat-header-threads",
+			Label:       "搜索会话",
+			Placeholder: "搜索会话…",
+			Empty:       "无匹配会话",
+			Items:       items,
+			State:       &ts.threadsList,
+			MaxHeight:   max(100, height-120),
+			OnSelect: func(id string) {
+				s.mu.Lock()
+				current := s.selectedThreadID
+				s.mu.Unlock()
+				if id == current {
+					ts.threadsPopoverOpen = false
+					s.invalidate()
+					return
 				}
-				ui.Text(c, title).
-					FontSize(uiFont(TypeBody)).
-					TextColor(ThemePrimaryText(c)).
-					SingleLine()
-			})
+				s.headerSelectThread(id)
+			},
+			OnDismiss: func() {
+				ts.threadsPopoverOpen = false
+				s.invalidate()
+			},
+			Invalidate: s.invalidate,
+		})
 	})
 }

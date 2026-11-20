@@ -54,10 +54,10 @@ func TestChatToolbarThreadsPopover(t *testing.T) {
 		t.Fatalf("click threads button failed: %v", err)
 	}
 	waitFor(t, tt, func() bool {
-		_, ok := tt.Find("切换到会话 第二个会话")
+		_, ok := tt.Find("第二个会话")
 		return ok
 	})
-	if err := tt.Click("切换到会话 第二个会话"); err != nil {
+	if err := tt.Click("第二个会话"); err != nil {
 		t.Fatalf("click thread item failed: %v", err)
 	}
 	waitFor(t, tt, func() bool {
@@ -74,6 +74,67 @@ func TestChatToolbarThreadsPopover(t *testing.T) {
 	s.mu.Unlock()
 	if !collapsed {
 		t.Fatal("从 Popover 选择会话不应展开侧栏")
+	}
+}
+
+// 标题栏会话下拉支持搜索过滤、回车切换并关闭，以及 Esc 关闭且不切换。
+func TestChatThreadsPopoverSearch(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.threads["p1"] = append(fake.threads["p1"],
+		Thread{ID: "t2", ProjectID: "p1", Title: "部署脚本"},
+		Thread{ID: "t3", ProjectID: "p1", Title: "代码评审"},
+	)
+	s, root := buildRoot(fake)
+	tt := ui.NewTester(root, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
+
+	s.toggleSidebar()
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("会话列表")
+		return ok
+	})
+
+	if err := tt.Click("会话列表"); err != nil {
+		t.Fatalf("click threads button failed: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.Focused("搜索会话") })
+
+	tt.Type("部署")
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleButton, "部署脚本"); !ok {
+		t.Fatal("输入「部署」后应显示匹配会话「部署脚本」")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "代码评审"); ok {
+		t.Fatal("输入「部署」后不应显示「代码评审」")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "测试会话1"); ok {
+		t.Fatal("输入「部署」后不应显示「测试会话1」")
+	}
+
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, func() bool {
+		s.mu.Lock()
+		selected := s.selectedThreadID
+		s.mu.Unlock()
+		return selected == "t2" && !getChatToolbarState(s).threadsPopoverOpen
+	})
+
+	if err := tt.Click("会话列表"); err != nil {
+		t.Fatalf("reopen threads popover failed: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.Focused("搜索会话") })
+	if _, ok := tt.AccessByRole(ui.RoleButton, "代码评审"); !ok {
+		t.Fatal("重新打开下拉应重置搜索框并显示全部会话")
+	}
+
+	tt.Key(0, ui.KeyEscape)
+	waitFor(t, tt, func() bool { return !getChatToolbarState(s).threadsPopoverOpen })
+	s.mu.Lock()
+	selected := s.selectedThreadID
+	s.mu.Unlock()
+	if selected != "t2" {
+		t.Fatalf("按 Esc 关闭后不应切换会话，期望 t2，实际 %q", selected)
 	}
 }
 
