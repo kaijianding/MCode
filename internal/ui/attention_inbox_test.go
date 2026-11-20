@@ -378,8 +378,8 @@ func TestAttentionInboxEmptyState(t *testing.T) {
 		t.Fatalf("点击入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool { return tt.HasText(attentionInboxEmptyText) })
-	if !tt.HasText("各会话在后台推进。需要你批准或回答的事会出现在这里。") {
-		t.Fatalf("空态文案应为「各会话在后台推进。需要你批准或回答的事会出现在这里。」，当前文本: %q", tt.Texts())
+	if !tt.HasText("没有待处理") {
+		t.Fatalf("空态文案应为「没有待处理」，当前文本: %q", tt.Texts())
 	}
 
 	// 快捷键「打开待处理收件箱」与点击入口行共用同一份 open 状态：再按一次收起。

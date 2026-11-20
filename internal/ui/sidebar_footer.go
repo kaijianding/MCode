@@ -13,13 +13,12 @@ import (
 // kanbanBadgeRefreshInterval 是底栏看板待审阅徽标的后台刷新间隔。
 const kanbanBadgeRefreshInterval = 30 * time.Second
 
-// sidebarFooterState 维护底栏两个浮层的展开状态与看板待审阅徽标缓存，按 chatState 附加（同 chatHeaderState）。
-// addProjectOpen、moreMenuOpen 绑定在控件上，只在 UI 线程读写；
+// sidebarFooterState 维护底栏浮层的展开状态与看板待审阅徽标缓存，按 chatState 附加（同 chatHeaderState）。
+// addProjectOpen 绑定在控件上，只在 UI 线程读写；
 // kanbanReviewCount、kanbanFetchedAt、kanbanLoading 由后台 goroutine 写入，受 sidebarFooterMu 保护。
 type sidebarFooterState struct {
 	addProjectOpen     bool
 	chatAddProjectOpen bool
-	moreMenuOpen       bool
 	updateVisible      bool
 	updateOpen         bool
 	whatsNewOpen       bool
@@ -59,7 +58,7 @@ func renderUnreadDot(c *ui.Context, key string) ui.Element {
 
 // renderSidebarBottomBar 渲染底部常驻工具栏：
 // 添加项目（浮层：选择文件夹 / 从 GitHub 克隆）、
-// 任务与看板（带待审阅圆点）、自动化、设置齿轮与更多菜单。
+// 任务与看板（带待审阅圆点）、自动化、设置齿轮与源码编辑器图标按钮。
 func renderSidebarBottomBar(c *ui.Context, s *chatState) {
 	if s == nil {
 		return
@@ -89,7 +88,6 @@ func renderSidebarBottomBar(c *ui.Context, s *chatState) {
 				Tooltip: "添加项目",
 				OnClick: func() {
 					fs.addProjectOpen = !fs.addProjectOpen
-					fs.moreMenuOpen = false
 					s.invalidate()
 				},
 			})
@@ -160,24 +158,18 @@ func renderSidebarBottomBar(c *ui.Context, s *chatState) {
 				fs.updateVisible = status.Available
 			}
 
-			// 更多操作图标按钮：点击展开更多菜单
-			moreBtn := IconButton(c, IconButtonProps{
-				Key:     "sidebar-more-btn",
-				Icon:    IconMoreHorizontal(),
+			// 源码编辑器图标按钮（与 ⇧⌘E 快捷键同一入口）。
+			IconButton(c, IconButtonProps{
+				Key:     "sidebar-editor-btn",
+				Icon:    IconPencilLine(),
 				Size:    ControlSM,
 				Variant: ButtonGhost,
-				Label:   "更多",
-				Active:  fs.moreMenuOpen,
+				Label:   "源码编辑器 " + shortcutDisplay("⇧⌘E"),
+				Tooltip: "源码编辑器 " + shortcutDisplay("⇧⌘E"),
 				OnClick: func() {
-					fs.moreMenuOpen = !fs.moreMenuOpen
-					fs.addProjectOpen = false
+					openMiniEditorFromPicker(s)
 					s.invalidate()
 				},
-			})
-			appPopover(c.Key("sidebar-more-popover"), moreBtn, &fs.moreMenuOpen, func() {
-				fs.moreMenuOpen = false
-			}, func() {
-				renderSidebarMoreMenu(c, s)
 			})
 		})
 }
@@ -200,22 +192,6 @@ func renderAddProjectPopover(c *ui.Context, s *chatState) {
 				fs.addProjectOpen = false
 				fs.chatAddProjectOpen = false
 				openGitHubClonePanel(s)
-				s.invalidate()
-			})
-		})
-}
-
-// renderSidebarMoreMenu 渲染「更多」浮层：源码编辑器入口（与 ⇧⌘E 快捷键同一函数）。
-func renderSidebarMoreMenu(c *ui.Context, s *chatState) {
-	fs := getSidebarFooterState(s)
-	popoverCard(c, ui.Column(c.Key("sidebar-more-menu"))).
-		Gap(Space0).
-		Padding(Space1).
-		MinWidth(190).
-		Children(func() {
-			renderGitMenuOption(c, "sidebar-more-editor", "源码编辑器", "源码编辑器", shortcutDisplay("⇧⌘E"), false, false, func() {
-				fs.moreMenuOpen = false
-				openMiniEditorFromPicker(s)
 				s.invalidate()
 			})
 		})

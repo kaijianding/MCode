@@ -28,9 +28,8 @@ const attentionInboxRefreshInterval = time.Second
 // attentionInboxPopoverMaxHeight 是浮层内列表的最大高度，超出后在浮层内滚动。
 const attentionInboxPopoverMaxHeight float32 = 360
 
-// attentionInboxEmptyText 是列表为空时的文案：陈述各会话正在后台推进，
-// 再说明什么情况下这里会出现内容，比「暂无」更能解释收件箱的作用。
-const attentionInboxEmptyText = "各会话在后台推进。需要你批准或回答的事会出现在这里。"
+// attentionInboxEmptyText 是列表为空时的简短空态文案。
+const attentionInboxEmptyText = "没有待处理"
 
 // attentionInboxKindGroup 是收件箱的一个分组：切片顺序就是浮层里的展示顺序。
 type attentionInboxKindGroup struct {

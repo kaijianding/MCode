@@ -262,3 +262,232 @@ func TestStewardOptionalClientsAbsent(t *testing.T) {
 		t.Fatal("客户端不报告启用状态时应为未知")
 	}
 }
+
+type stewardCountingAsyncFakeClient struct {
+	*stewardFakeClient
+
+	mu sync.Mutex
+
+	idCalls   int
+	idNick    string
+	idAvatar  string
+	idGate    chan struct{}
+	idStarted chan struct{}
+
+	enCalls   int
+	enVal     bool
+	enGate    chan struct{}
+	enStarted chan struct{}
+}
+
+func (f *stewardCountingAsyncFakeClient) StewardIdentity() (string, string) {
+	f.mu.Lock()
+	f.idCalls++
+	gate := f.idGate
+	started := f.idStarted
+	f.mu.Unlock()
+
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		<-gate
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.idNick, f.idAvatar
+}
+
+func (f *stewardCountingAsyncFakeClient) StewardEnabled() bool {
+	f.mu.Lock()
+	f.enCalls++
+	gate := f.enGate
+	started := f.enStarted
+	f.mu.Unlock()
+
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		<-gate
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enVal
+}
+
+func (f *stewardCountingAsyncFakeClient) identityCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.idCalls
+}
+
+func (f *stewardCountingAsyncFakeClient) enabledCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enCalls
+}
+
+func waitChanWithTimeout(t *testing.T, ch <-chan struct{}, desc string) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ch:
+	case <-timer.C:
+		t.Fatalf("等待 %s 超时", desc)
+	}
+}
+
+func pollCondition(t *testing.T, cond func() bool, desc string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("轮询 %s 超时", desc)
+}
+
+func TestUIReview1StewardIdentityAsyncCache(t *testing.T) {
+	gate1 := make(chan struct{})
+	started1 := make(chan struct{}, 4)
+	var release1 sync.Once
+	t.Cleanup(func() { release1.Do(func() { close(gate1) }) })
+
+	fake := &stewardCountingAsyncFakeClient{
+		stewardFakeClient: newStewardFakeClient(""),
+		idNick:            "阿默",
+		idAvatar:          "✦",
+		idGate:            gate1,
+		idStarted:         started1,
+	}
+	s := newChatState(fake)
+	t.Cleanup(s.close)
+
+	// 同步路径不得阻塞或直接调 client；刷新期间连续多次调用只起一个 goroutine。
+	for i := 0; i < 5; i++ {
+		nick, av := s.stewardIdentity()
+		if nick != "" || av != "总" {
+			t.Fatalf("首次未命中缓存应返回默认身份 (\"\", \"总\")，第 %d 次得到 (%q, %q)", i, nick, av)
+		}
+	}
+	waitChanWithTimeout(t, started1, "首次 StewardIdentity 后台拉取")
+	if calls := fake.identityCalls(); calls != 1 {
+		t.Fatalf("刷新期间应只起 1 个 goroutine，实际调用 %d 次", calls)
+	}
+
+	release1.Do(func() { close(gate1) })
+	pollCondition(t, func() bool {
+		nick, av := s.stewardIdentity()
+		return nick == "阿默" && av == "✦"
+	}, "identity 异步刷新返回新值")
+
+	// 缓存有效期内再次调用不触发新的后台拉取。
+	for i := 0; i < 3; i++ {
+		nick, av := s.stewardIdentity()
+		if nick != "阿默" || av != "✦" {
+			t.Fatalf("缓存命中应返回 (\"阿默\", \"✦\")，得到 (%q, %q)", nick, av)
+		}
+	}
+	if calls := fake.identityCalls(); calls != 1 {
+		t.Fatalf("缓存有效期内不应再次调用 client，实际 %d 次", calls)
+	}
+
+	// 模拟 TTL 过期：同步仍返回旧缓存，并异步刷新成新身份。
+	gate2 := make(chan struct{})
+	started2 := make(chan struct{}, 4)
+	var release2 sync.Once
+	t.Cleanup(func() { release2.Do(func() { close(gate2) }) })
+
+	fake.mu.Lock()
+	fake.idNick = "新总管"
+	fake.idAvatar = ""
+	fake.idGate = gate2
+	fake.idStarted = started2
+	fake.mu.Unlock()
+
+	st := getStewardOpenState(s)
+	st.mu.Lock()
+	st.identityAt = time.Now().Add(-stewardEnabledCacheTTL - time.Second)
+	st.mu.Unlock()
+
+	nick, av := s.stewardIdentity()
+	if nick != "阿默" || av != "✦" {
+		t.Fatalf("缓存过期同步返回应仍为旧值 (\"阿默\", \"✦\")，得到 (%q, %q)", nick, av)
+	}
+	waitChanWithTimeout(t, started2, "过期后 StewardIdentity 异步刷新")
+	if calls := fake.identityCalls(); calls != 2 {
+		t.Fatalf("过期后刷新应只发起第 2 次调用，实际 %d 次", calls)
+	}
+
+	release2.Do(func() { close(gate2) })
+	pollCondition(t, func() bool {
+		n, a := s.stewardIdentity()
+		return n == "新总管" && a == "新"
+	}, "identity 过期后异步刷新成新值")
+
+	var nilState *chatState
+	if n, a := nilState.stewardIdentity(); n != "" || a != "总" {
+		t.Fatalf("nil chatState 应返回默认值，得到 (%q, %q)", n, a)
+	}
+}
+
+func TestUIReview1StewardEnabledAsyncCache(t *testing.T) {
+	gate := make(chan struct{})
+	started := make(chan struct{}, 4)
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(gate) }) })
+
+	fake := &stewardCountingAsyncFakeClient{
+		stewardFakeClient: newStewardFakeClient(""),
+		enVal:             true,
+		enGate:            gate,
+		enStarted:         started,
+	}
+	s := newChatState(fake)
+	t.Cleanup(s.close)
+
+	// 从未取过时返回 known=false，不阻塞在 gate 上，且只起一个 goroutine。
+	for i := 0; i < 4; i++ {
+		if en, known := s.stewardEnabledState(); known || en {
+			t.Fatalf("未完成首次刷新时应返回 (false, false)，得到 (%v, %v)", en, known)
+		}
+	}
+	waitChanWithTimeout(t, started, "首次 StewardEnabled 后台拉取")
+	if calls := fake.enabledCalls(); calls != 1 {
+		t.Fatalf("刷新期间应只起 1 个 goroutine，实际 %d 次", calls)
+	}
+
+	release.Do(func() { close(gate) })
+	pollCondition(t, func() bool {
+		en, known := s.stewardEnabledState()
+		return known && en
+	}, "enabled 首次异步刷新完成")
+
+	// invalidateStewardEnabledState 清时间戳但保留旧值，并触发下一次异步刷新。
+	fake.mu.Lock()
+	fake.enVal = false
+	fake.enGate = nil
+	fake.enStarted = nil
+	fake.mu.Unlock()
+
+	invalidateStewardEnabledState(s)
+	if en, known := s.stewardEnabledState(); !known || !en {
+		t.Fatalf("invalidate 后同步返回应保留旧值 (true, true)，得到 (%v, %v)", en, known)
+	}
+	pollCondition(t, func() bool {
+		en, known := s.stewardEnabledState()
+		return known && !en
+	}, "invalidate 后异步刷新成新值")
+}

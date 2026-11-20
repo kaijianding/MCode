@@ -61,16 +61,8 @@ type stewardIdentityClient interface {
 	StewardIdentity() (nickname, avatar string)
 }
 
-// stewardIdentity 返回总管的昵称原文（去首尾空白，可为空）与头像字符，供侧栏行、提示文案与胶囊使用。
-// 客户端不支持身份接口时昵称为空；头像为空时取 stewardName(nickname) 的首个 rune，
-// 昵称的兜底留给展示位置按需调用 stewardName / stewardLabel，避免拼出「总管 · 总管」。
-func (s *chatState) stewardIdentity() (string, string) {
-	nickname, avatar := "", ""
-	if s != nil && s.client != nil {
-		if c, ok := s.client.(stewardIdentityClient); ok {
-			nickname, avatar = c.StewardIdentity()
-		}
-	}
+// normalizeStewardIdentity 规范化总管昵称与头像字符，头像为空时取显示名首字。
+func normalizeStewardIdentity(nickname, avatar string) (string, string) {
 	nickname = strings.TrimSpace(nickname)
 	avatar = strings.TrimSpace(avatar)
 	if avatar == "" {
@@ -81,7 +73,45 @@ func (s *chatState) stewardIdentity() (string, string) {
 	return nickname, avatar
 }
 
-// stewardEnabledCacheTTL 是启用状态的缓存时长：侧栏每帧都会问一次，
+// stewardIdentity 返回总管的昵称原文（去首尾空白，可为空）与头像字符，供侧栏行、提示文案与胶囊使用。
+// 渲染路径只读缓存并在缓存缺失或过期时异步刷新，不在渲染线程同步读取配置；
+// 从未取过或客户端不支持身份接口时昵称为空，头像回落为 stewardName(nickname) 的首个 rune。
+func (s *chatState) stewardIdentity() (string, string) {
+	if s == nil || s.client == nil {
+		return normalizeStewardIdentity("", "")
+	}
+	c, ok := s.client.(stewardIdentityClient)
+	if !ok {
+		return normalizeStewardIdentity("", "")
+	}
+	st := getStewardOpenState(s)
+	if st == nil {
+		return normalizeStewardIdentity("", "")
+	}
+
+	st.mu.Lock()
+	nickname, avatar := st.nickname, st.avatar
+	needRefresh := st.identityAt.IsZero() || time.Since(st.identityAt) >= stewardEnabledCacheTTL
+	if needRefresh && !st.identityLoading {
+		st.identityLoading = true
+		st.mu.Unlock()
+		go func() {
+			nick, av := c.StewardIdentity()
+			st.mu.Lock()
+			st.nickname = nick
+			st.avatar = av
+			st.identityAt = time.Now()
+			st.identityLoading = false
+			st.mu.Unlock()
+			s.invalidate()
+		}()
+	} else {
+		st.mu.Unlock()
+	}
+	return normalizeStewardIdentity(nickname, avatar)
+}
+
+// stewardEnabledCacheTTL 是启用状态与身份的缓存时长：侧栏每帧都会问一次，
 // 而客户端的实现可能要去磁盘读配置，不能每帧都读一次。
 const stewardEnabledCacheTTL = 2 * time.Second
 
@@ -94,10 +124,18 @@ type stewardOpenState struct {
 	mu       sync.Mutex
 	creating bool
 	pending  string
-	// 启用状态的短缓存：enabledAt 为零值表示还没取过。
-	enabledAt            time.Time
-	enabled              bool
-	enabledKnown         bool
+	// 启用状态的短缓存：enabledAt 为零值表示还没取过；enabledLoading 防止并发重复刷新。
+	enabledAt      time.Time
+	enabled        bool
+	enabledKnown   bool
+	enabledLoading bool
+	enabledGen     uint64
+	// 身份（昵称与头像）的短缓存：identityAt 为零值表示还没取过；identityLoading 防止并发重复刷新。
+	identityAt      time.Time
+	nickname        string
+	avatar          string
+	identityLoading bool
+
 	decisionCount        int
 	decisionCountAt      time.Time
 	decisionCountLoading bool
@@ -134,9 +172,9 @@ func (s *chatState) stewardClient() (StewardClient, bool) {
 	return c, ok
 }
 
-// stewardEnabledState 返回客户端报告的启用状态；客户端不支持该接口时 known 为 false，
+// stewardEnabledState 返回客户端报告的启用状态；客户端不支持该接口或尚未完成首次异步拉取时 known 为 false，
 // 调用方据此保持原来的渲染行为，不凭空下结论。
-// 结果按 stewardEnabledCacheTTL 缓存：配置读取可能很重，而侧栏每帧都会问。
+// 结果按 stewardEnabledCacheTTL 缓存：渲染路径只读缓存并在过期或首次访问时异步刷新，不在渲染线程同步读配置。
 func (s *chatState) stewardEnabledState() (enabled, known bool) {
 	if s == nil || s.client == nil {
 		return false, false
@@ -146,26 +184,38 @@ func (s *chatState) stewardEnabledState() (enabled, known bool) {
 		return false, false
 	}
 	st := getStewardOpenState(s)
-	if st != nil {
-		st.mu.Lock()
-		if !st.enabledAt.IsZero() && time.Since(st.enabledAt) < stewardEnabledCacheTTL {
-			enabled, known = st.enabled, st.enabledKnown
+	if st == nil {
+		return false, false
+	}
+
+	st.mu.Lock()
+	enabled, known = st.enabled, st.enabledKnown
+	needRefresh := st.enabledAt.IsZero() || time.Since(st.enabledAt) >= stewardEnabledCacheTTL
+	gen := st.enabledGen
+	if needRefresh && !st.enabledLoading {
+		st.enabledLoading = true
+		st.mu.Unlock()
+		go func() {
+			en := c.StewardEnabled()
+			st.mu.Lock()
+			if st.enabledGen == gen {
+				st.enabled = en
+				st.enabledKnown = true
+				st.enabledAt = time.Now()
+			}
+			st.enabledLoading = false
 			st.mu.Unlock()
-			return enabled, known
-		}
+			s.invalidate()
+		}()
+	} else {
 		st.mu.Unlock()
 	}
-	enabled = c.StewardEnabled()
-	if st != nil {
-		st.mu.Lock()
-		st.enabled, st.enabledKnown, st.enabledAt = enabled, true, time.Now()
-		st.mu.Unlock()
-	}
-	return enabled, true
+	return enabled, known
 }
 
 // invalidateStewardEnabledState 丢掉某会话的启用状态缓存：设置页刚改过开关时调用，
-// 否则侧栏要等缓存过期才会换掉「未启用」那一行。调用方不得持有 stewardOpenState.mu。
+// 否则侧栏要等缓存过期才会换掉「未启用」那一行。只清掉时间戳以触发下一次异步刷新，不清掉旧值。
+// 调用方不得持有 stewardOpenState.mu。
 func invalidateStewardEnabledState(s *chatState) {
 	st := getStewardOpenState(s)
 	if st == nil {
@@ -173,6 +223,7 @@ func invalidateStewardEnabledState(s *chatState) {
 	}
 	st.mu.Lock()
 	st.enabledAt = time.Time{}
+	st.enabledGen++
 	st.mu.Unlock()
 }
 
@@ -248,7 +299,23 @@ func (s *chatState) openStewardThread() {
 	if _, ok := s.stewardClient(); !ok {
 		return
 	}
-	if enabled, known := s.stewardEnabledState(); known && !enabled {
+	enabled, known := s.stewardEnabledState()
+	if !known {
+		// 冷启动尚未完成异步预热时（如侧栏折叠或未渲染前直接触发动作），按需同步读取一次以保证跳转准确。
+		if ec, ok := s.client.(stewardEnabledClient); ok {
+			enabled = ec.StewardEnabled()
+			known = true
+			if st := getStewardOpenState(s); st != nil {
+				st.mu.Lock()
+				st.enabled = enabled
+				st.enabledKnown = true
+				st.enabledAt = time.Now()
+				st.enabledGen++
+				st.mu.Unlock()
+			}
+		}
+	}
+	if known && !enabled {
 		openStewardSettings(s)
 		return
 	}

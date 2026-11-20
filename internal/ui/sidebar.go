@@ -562,7 +562,12 @@ func renderSidebar(c *ui.Context, s *chatState) {
 			// 动态视图：不渲染项目树，按最后活跃时间分组平铺全部会话；搜索词非空时按标题过滤。
 			if activityView {
 				if lowerQuery != "" {
-					for gi, group := range groupThreadsByActivity(matchingThreads, time.Now()) {
+					groups := groupThreadsByActivity(matchingThreads, time.Now())
+					if len(groups) == 0 && len(chatsMatches) == 0 {
+						renderSidebarNoResultsCard(c)
+						return
+					}
+					for gi, group := range groups {
 						renderActivityGroupHeader(c, group.Title, gi == 0, threadPadX)
 						for _, th := range group.Threads {
 							renderSidebarThreadRow(c, s, sidebarThreadRowOptions{
@@ -2168,10 +2173,6 @@ func renderWorktreeManageModal(c *ui.Context, s *chatState) {
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c))
 				}))
-
-				ui.Text(c, "仅清理已合入、无未提交改动、且 10 分钟内无活动的 Worktree；使用中的不会被删除").
-					FontSize(sidebarFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
 
 				switch {
 				case scanning:

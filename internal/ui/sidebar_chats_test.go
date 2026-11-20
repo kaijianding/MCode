@@ -484,7 +484,7 @@ func TestChatsSidebarSearchOnlyChatsNoEmptyCard(t *testing.T) {
 	if _, ok := tt.Find("打开会话 专属闲聊"); !ok {
 		t.Fatalf("仅对话命中时应显示命中会话: %q", tt.Texts())
 	}
-	if tt.HasText("无结果") || tt.HasText("试试输入会话标题或项目名称") {
+	if tt.HasText("无结果") {
 		t.Fatalf("仅对话命中时不应显示无结果卡片: %q", tt.Texts())
 	}
 	if _, ok := tt.Find("打开会话 项目会话"); ok {

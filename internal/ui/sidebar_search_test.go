@@ -79,8 +79,56 @@ func TestSidebarSearchNoMatches(t *testing.T) {
 	_, projectExpanded := tt.Find("收起项目 mcode-test")
 	_, projectCollapsed := tt.Find("展开项目 mcode-test")
 	_, sessionVisible := tt.Find("打开会话 测试会话1")
-	if projectExpanded || projectCollapsed || !tt.HasText("无结果") || !tt.HasText("试试输入会话标题或项目名称") || sessionVisible {
+	if projectExpanded || projectCollapsed || !tt.HasText("无结果") || tt.HasText("试试输入会话标题或项目名称") || sessionVisible {
 		t.Fatalf("全部无命中时应显示全局提示: %q", tt.Texts())
+	}
+}
+
+func TestUIReview1ActivitySearchEmptyOrDormantProjectShowsNoResults(t *testing.T) {
+	testenv.TempHome(t)
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(
+		[]Project{
+			{ID: "p1", Name: "EmptyAlpha"},
+			{ID: "p2", Name: "DormantBeta"},
+		},
+		map[string][]Thread{
+			"p1": nil,
+			"p2": {{ID: "t1", ProjectID: "p2", Title: "旧会话", Dormant: true, UpdatedAt: time.Now()}},
+		},
+	)
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool {
+		_, p1 := tt.Find("收起项目 EmptyAlpha")
+		_, p2 := tt.Find("收起项目 DormantBeta")
+		return p1 && p2
+	})
+
+	state.toggleActivityView()
+	*getSearchQuery(state) = "emptyalpha"
+	state.invalidate()
+	tt.Frame()
+	if !tt.HasText("无结果") {
+		t.Fatalf("动态视图下搜索只命中空项目名时应显示无结果卡片，当前文本: %q", tt.Texts())
+	}
+
+	*getSearchQuery(state) = "dormantbeta"
+	state.invalidate()
+	tt.Frame()
+	if !tt.HasText("无结果") {
+		t.Fatalf("动态视图下搜索只命中全部休眠的项目名时应显示无结果卡片，当前文本: %q", tt.Texts())
+	}
+
+	// 项目树视图保持原行为：项目名命中时仍显示该项目行，不显示无结果。
+	state.toggleActivityView()
+	state.invalidate()
+	tt.Frame()
+	_, p2Expanded := tt.Find("收起项目 DormantBeta")
+	_, p2Collapsed := tt.Find("展开项目 DormantBeta")
+	if (!p2Expanded && !p2Collapsed) || tt.HasText("无结果") {
+		t.Fatalf("项目树视图下项目名命中应显示该项目而非无结果，当前文本: %q", tt.Texts())
 	}
 }
 

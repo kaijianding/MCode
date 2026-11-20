@@ -156,14 +156,14 @@ func searchHasAnyMatch(projects []Project, threadsByProj map[string][]Thread, qu
 }
 
 // renderSidebarNoResultsCard 渲染搜索无结果的弱化卡片：
-// 放大镜图标 + 「无结果」标题 + 提示副标题，在列表区居中展示。
+// 放大镜图标 + 「无结果」标题，在列表区居中展示。
 func renderSidebarNoResultsCard(c *ui.Context) {
 	ui.Column(c.Key("sidebar-no-results")).
 		Padding(sidebarNoResultsPadY, Space5).
 		AlignItems(ui.Center).
 		Children(func() {
 			EmptyState(c, EmptyStateProps{
-				Icon: IconSearch(), Title: "无结果", Description: "试试输入会话标题或项目名称",
+				Icon: IconSearch(), Title: "无结果",
 			})
 		})
 }
