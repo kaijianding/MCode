@@ -924,54 +924,6 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 	})
 }
 
-// renderGitMenuOption 渲染 Popover 中的一项，当前项打勾且不可点击。
-// 返回该项元素，供调用方在禁用时补 Tooltip 说明原因。
-func renderGitMenuOption(c *ui.Context, key, label, title, detail string, current, busy bool, onClick func()) ui.Element {
-	opt := ui.ButtonBase(c.Key(key)).
-		Label(label).
-		Padding(Space2, Space3).
-		Radius(RadiusSM).
-		FillWidth().
-		Justify(ui.Start).
-		AlignItems(ui.Center)
-	if current {
-		opt.Background(ThemeHover(c))
-	} else if busy {
-		opt.Disabled(true)
-	} else {
-		if opt.Hovered() {
-			opt.Background(ThemeHover(c))
-		}
-		opt.OnClick(onClick)
-	}
-	opt.Children(func() {
-		ui.Row(c.Key(key + "-row")).
-			Gap(Space3).
-			AlignItems(ui.Center).
-			Grow(1).
-			Children(func() {
-				if current {
-					ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))
-				} else {
-					ui.Box(c.Key(key+"-check-placeholder")).Size(14, 14)
-				}
-				ui.Text(c, title).
-					FontSize(uiFont(TypeBody)).
-					TextColor(ThemePrimaryText(c)).
-					Grow(1).
-					SingleLine()
-				if detail != "" {
-					ui.Text(c, detail).
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c)).
-						MaxWidth(96).
-						SingleLine()
-				}
-			})
-	})
-	return opt
-}
-
 // renderGitCountBadge 渲染 Git 按钮右上角的改动数角标：用 Absolute 叠在按钮容器上，
 // 不占布局宽度也不撑高胶囊；强调色底、白字，超过 99 显示 99+。
 func renderGitCountBadge(c *ui.Context, key string, count int) {

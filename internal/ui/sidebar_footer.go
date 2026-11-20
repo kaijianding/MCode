@@ -182,17 +182,27 @@ func renderAddProjectPopover(c *ui.Context, s *chatState) {
 		Padding(Space1).
 		MinWidth(190).
 		Children(func() {
-			renderGitMenuOption(c, "sidebar-add-project-folder", "选择文件夹…", "选择文件夹…", "", false, false, func() {
-				fs.addProjectOpen = false
-				fs.chatAddProjectOpen = false
-				s.promptAddProject()
-				s.invalidate()
+			menuRow(c, menuRowProps{
+				Key:   "sidebar-add-project-folder",
+				Label: "选择文件夹…",
+				Title: "选择文件夹…",
+				OnClick: func() {
+					fs.addProjectOpen = false
+					fs.chatAddProjectOpen = false
+					s.promptAddProject()
+					s.invalidate()
+				},
 			})
-			renderGitMenuOption(c, "sidebar-add-project-clone", "从 GitHub 克隆…", "从 GitHub 克隆…", "", false, false, func() {
-				fs.addProjectOpen = false
-				fs.chatAddProjectOpen = false
-				openGitHubClonePanel(s)
-				s.invalidate()
+			menuRow(c, menuRowProps{
+				Key:   "sidebar-add-project-clone",
+				Label: "从 GitHub 克隆…",
+				Title: "从 GitHub 克隆…",
+				OnClick: func() {
+					fs.addProjectOpen = false
+					fs.chatAddProjectOpen = false
+					openGitHubClonePanel(s)
+					s.invalidate()
+				},
 			})
 		})
 }

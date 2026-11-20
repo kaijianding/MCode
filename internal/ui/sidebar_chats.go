@@ -266,10 +266,22 @@ func renderSidebarFilterControl(c *ui.Context, s *chatState) {
 				current := s.sidebarFilter
 				for _, opt := range sidebarThreadFilterOptions {
 					opt := opt
-					renderGitMenuOption(c, "chats-filter-"+opt.key, "过滤对话："+opt.label, opt.label, "", current == opt.value, false, func() {
-						s.sidebarFilter = opt.value
-						s.sidebarFilterOpen = false
-						s.invalidate()
+					isCurrent := current == opt.value
+					var onClick func()
+					if !isCurrent {
+						onClick = func() {
+							s.sidebarFilter = opt.value
+							s.sidebarFilterOpen = false
+							s.invalidate()
+						}
+					}
+					menuRow(c, menuRowProps{
+						Key:         "chats-filter-" + opt.key,
+						Label:       "过滤对话：" + opt.label,
+						Title:       opt.label,
+						Checked:     isCurrent,
+						Highlighted: isCurrent,
+						OnClick:     onClick,
 					})
 				}
 			})

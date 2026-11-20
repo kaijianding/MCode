@@ -787,10 +787,16 @@ func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state G
 			popoverCard(c, ui.Column(c.Key("git-pane-menu")).Width(gitPaneMenuWidth)).Padding(Space1).Gap(Space0).Children(func() {
 				// 菜单项左对齐，按同步、贮藏、PR、仓库分组，组间用细分隔线；禁用时保留原因提示。
 				option := func(key, label string, blocked bool, tip string, onClick func()) {
-					el := renderGitMenuOption(c, "git-pane-menu-"+key, label, label, "", false, blocked, func() {
-						ps.menuOpen = false
-						s.cancelPushPRConfirm()
-						onClick()
+					el := menuRow(c, menuRowProps{
+						Key:      "git-pane-menu-" + key,
+						Label:    label,
+						Title:    label,
+						Disabled: blocked,
+						OnClick: func() {
+							ps.menuOpen = false
+							s.cancelPushPRConfirm()
+							onClick()
+						},
 					})
 					if tip != "" {
 						el.Tooltip(tip)

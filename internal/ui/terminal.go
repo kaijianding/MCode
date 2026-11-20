@@ -1399,52 +1399,31 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 												Padding(Space1).
 												MinWidth(140).
 												Children(func() {
-													worktreeBtn := ui.ButtonBase(c.Key("terminal-tab-new-worktree")).
-														Label("Worktree 目录").
-														Padding(Space1, Space3).
-														Radius(RadiusXS).
-														FillWidth()
-													{
-														scale := motionPressScale(c, worktreeBtn, "button-press-scale", worktreeBtn.Pressed())
-														worktreeBtn.Scale(scale, scale)
-													}
-													if worktreeBtn.Hovered() {
-														worktreeBtn.Background(ThemeHover(c))
-													}
-													if worktreeBtn.Clicked() {
-														terminalMu.Lock()
-														st.newTabOpen = false
-														newTabOpen = false
-														terminalMu.Unlock()
-														_, _ = createTerminalTab(s, st, workDir, false)
-														s.invalidate()
-													}
-													worktreeBtn.Children(func() {
-														ui.Text(c, "Worktree 目录").FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
+													menuRow(c, menuRowProps{
+														Key:   "terminal-tab-new-worktree",
+														Label: "Worktree 目录",
+														Title: "Worktree 目录",
+														OnClick: func() {
+															terminalMu.Lock()
+															st.newTabOpen = false
+															newTabOpen = false
+															terminalMu.Unlock()
+															_, _ = createTerminalTab(s, st, workDir, false)
+															s.invalidate()
+														},
 													})
-
-													mainBtn := ui.ButtonBase(c.Key("terminal-tab-new-main")).
-														Label("主项目目录").
-														Padding(Space1, Space3).
-														Radius(RadiusXS).
-														FillWidth()
-													{
-														scale := motionPressScale(c, mainBtn, "button-press-scale", mainBtn.Pressed())
-														mainBtn.Scale(scale, scale)
-													}
-													if mainBtn.Hovered() {
-														mainBtn.Background(ThemeHover(c))
-													}
-													if mainBtn.Clicked() {
-														terminalMu.Lock()
-														st.newTabOpen = false
-														newTabOpen = false
-														terminalMu.Unlock()
-														_, _ = createTerminalTab(s, st, mainDir, true)
-														s.invalidate()
-													}
-													mainBtn.Children(func() {
-														ui.Text(c, "主项目目录").FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
+													menuRow(c, menuRowProps{
+														Key:   "terminal-tab-new-main",
+														Label: "主项目目录",
+														Title: "主项目目录",
+														OnClick: func() {
+															terminalMu.Lock()
+															st.newTabOpen = false
+															newTabOpen = false
+															terminalMu.Unlock()
+															_, _ = createTerminalTab(s, st, mainDir, true)
+															s.invalidate()
+														},
 													})
 												})
 										})

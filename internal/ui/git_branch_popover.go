@@ -300,7 +300,13 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 					index++
 					key := fmt.Sprintf("branch-%s-%s-%d", item.kind, item.name, idx)
 					if item.kind == "create" {
-						renderGitMenuOption(c, key, "新建分支 "+item.name, "＋ 新建分支 “"+item.name+"”", "", false, busy, func() { choose(item) })
+						menuRow(c, menuRowProps{
+							Key:      key,
+							Label:    "新建分支 " + item.name,
+							Title:    "＋ 新建分支 “" + item.name + "”",
+							Disabled: busy,
+							OnClick:  func() { choose(item) },
+						})
 						return
 					}
 					current := item.kind == "local" && (item.branch.Head || item.name == state.Branch)
@@ -428,19 +434,17 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 								popoverCard(c, ui.Column(c.Key(key+"-menu-content"))).Padding(Space1).Gap(Space0).Children(func() {
 									for _, a := range actions {
 										a := a
-										opt := ui.ButtonBase(c.Key(key+a.label)).Label(a.label).FillWidth().Height(RowHeight).Padding(0, Space3).Justify(ui.Start).Disabled(a.disabled || busy).Radius(RadiusSM)
+										opt := menuRow(c, menuRowProps{
+											Key:      key + a.label,
+											Label:    a.label,
+											Title:    a.label,
+											Danger:   a.label == "删除…",
+											Disabled: a.disabled || busy,
+											OnClick:  func() { p.mu.Lock(); p.menu = ""; p.mu.Unlock(); a.run() },
+										})
 										if a.disabled {
 											opt.Tooltip("当前分支不可执行此操作")
-										} else if opt.Hovered() {
-											opt.Background(ThemeHover(c))
 										}
-										opt.OnClick(func() { p.mu.Lock(); p.menu = ""; p.mu.Unlock(); a.run() }).Children(func() {
-											color := ThemePrimaryText(c)
-											if a.label == "删除…" {
-												color = ThemeDanger(c)
-											}
-											ui.Text(c, a.label).FontSize(uiFont(TypeFootnote)).TextColor(color)
-										})
 									}
 								})
 							})
@@ -454,7 +458,12 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 					if len(list) == 0 && needle != "" {
 						return
 					}
-					renderGitMenuOption(c, "branch-group-"+title, title, fmt.Sprintf("%s (%d)", title, len(list)), "", false, false, set)
+					menuRow(c, menuRowProps{
+						Key:     "branch-group-" + title,
+						Label:   title,
+						Title:   fmt.Sprintf("%s (%d)", title, len(list)),
+						OnClick: set,
+					})
 					motionUnfoldBody(c, "branch-group-body-"+title, expanded || needle != "", func() {
 						for _, item := range list {
 							renderItem(item)

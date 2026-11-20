@@ -538,29 +538,37 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 			})
 			appPopover(c, more, &st.menu, nil, func() {
 				popoverCard(c, ui.Column(c.Key("git-changes-commit-menu"))).Padding(Space1).Children(func() {
-					push := ui.ButtonBase(c.Key("git-changes-commit-push")).Label("提交并推送").FillWidth().Height(ControlMD).Padding(0, Space3).Disabled(disabled)
-					push.OnClick(func() { st.menu = false; commit(true) })
-					push.Children(func() { ui.Text(c, "提交并推送").FontSize(uiFont(TypeFootnote)) })
-					edit := ui.ButtonBase(c.Key("git-changes-commit-amend")).Label("修改上次提交").FillWidth().Height(ControlMD).Padding(0, Space3).Disabled(busy)
-					edit.OnClick(func() {
-						st.menu = false
-						gitChangesRun(ps, st, "amend", func(ctx context.Context) error {
-							msg, err := client.GitLastCommitMessage(ctx, threadID)
-							if err != nil {
-								return err
-							}
-							pushed, err := client.GitHeadPushed(ctx, threadID)
-							if err != nil {
-								return err
-							}
-							st.mu.Lock()
-							st.draft, st.amend, st.pushed = msg, true, pushed
-							st.mu.Unlock()
-							gitChangesDrafts.Store(state.WorkDir, msg)
-							return nil
-						})
+					menuRow(c, menuRowProps{
+						Key:      "git-changes-commit-push",
+						Label:    "提交并推送",
+						Title:    "提交并推送",
+						Disabled: disabled,
+						OnClick:  func() { st.menu = false; commit(true) },
 					})
-					edit.Children(func() { ui.Text(c, "修改上次提交").FontSize(uiFont(TypeFootnote)) })
+					menuRow(c, menuRowProps{
+						Key:      "git-changes-commit-amend",
+						Label:    "修改上次提交",
+						Title:    "修改上次提交",
+						Disabled: busy,
+						OnClick: func() {
+							st.menu = false
+							gitChangesRun(ps, st, "amend", func(ctx context.Context) error {
+								msg, err := client.GitLastCommitMessage(ctx, threadID)
+								if err != nil {
+									return err
+								}
+								pushed, err := client.GitHeadPushed(ctx, threadID)
+								if err != nil {
+									return err
+								}
+								st.mu.Lock()
+								st.draft, st.amend, st.pushed = msg, true, pushed
+								st.mu.Unlock()
+								gitChangesDrafts.Store(state.WorkDir, msg)
+								return nil
+							})
+						},
+					})
 				})
 			})
 		})
