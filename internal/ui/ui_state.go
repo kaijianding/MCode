@@ -75,22 +75,6 @@ func lastSelectedThread() string {
 	return lastThreadID
 }
 
-// clearLastThread 在回到新会话首页时清掉上次会话，并立即写盘：
-// 新会话首页没有后续消息触发写盘，手滑开了首页又退出也得回到首页。
-func clearLastThread(s *chatState) {
-	if !uiStatePersistenceEnabled(s) {
-		return
-	}
-	lastThreadMu.Lock()
-	hadRecord := lastThreadID != ""
-	lastThreadID = ""
-	lastThreadPending = true
-	lastThreadMu.Unlock()
-	if hadRecord {
-		persistUIState(s)
-	}
-}
-
 // loadLastThread 读取 ui-state.json 中保存的上次会话。
 func loadLastThread() string {
 	file, ok := loadUIStateFile()
@@ -980,13 +964,10 @@ func flushUIStateLocked(uiOverride *UIState) (time.Time, error) {
 	swarmEnabledGeneration := lastSwarmEnabledGeneration
 	swarmBeesGeneration := lastSwarmBeesGeneration
 	sidebarGeneration := lastSidebarGeneration
-	// 上次会话以磁盘为底，只有本进程待写时才覆盖，避免启动恢复的写盘把磁盘记录冲成空。
-	threadSnapshot := lastThreadID
+	// 上次会话以磁盘为底，只有本进程待写时才覆盖，避免侧栏写盘把磁盘记录冲掉。
 	lastThreadMu.Lock()
+	threadSnapshot := lastThreadID
 	threadApplied := lastThreadPending
-	if threadApplied {
-		file.LastThreadID = threadSnapshot
-	}
 	lastThreadMu.Unlock()
 	continueGeneration := continueDismissedGeneration
 	swarmFailedSeenGen := swarmFailedSeenGeneration
@@ -1005,6 +986,7 @@ func flushUIStateLocked(uiOverride *UIState) (time.Time, error) {
 	file.ProjectModels = merged.projects
 	// 只写新键，读到旧文件时顺手把 last_hydra 迁移掉。
 	file.LegacyLastSwarm = nil
+	diskThread := file.LastThreadID
 	sidebarConsumed := false
 	switch {
 	case uiOverride != nil:
@@ -1028,6 +1010,12 @@ func flushUIStateLocked(uiOverride *UIState) (time.Time, error) {
 		file.ProjectOrder = append([]string(nil), pending.projectOrder...)
 		file.ProjectActivation = copyBoolMap(pending.projectActivation)
 		sidebarConsumed = true
+	}
+	// UIState 整块赋值会顺带覆盖内嵌的 LastThreadID，在 switch 之后单独落定。
+	if threadApplied {
+		file.LastThreadID = threadSnapshot
+	} else {
+		file.LastThreadID = diskThread
 	}
 	inspectorApplied := make(map[string]pendingInspectorPreference)
 	if inspectorPreferencePendingPath == uiStatePath() {
@@ -1314,7 +1302,6 @@ func persistUIState(s *chatState) {
 		SidebarWidth:       s.sidebarWidth,
 		SidebarHidden:      s.sidebarCollapsed,
 		TerminalDockHeight: terminalDockHeightForPersist(s),
-		LastThreadID:       lastSelectedThread(),
 	}
 	s.mu.Unlock()
 	order := sidebarProjectOrder(s)
@@ -1353,9 +1340,6 @@ type chatUIState struct {
 	persist bool
 	// sidebarSlide 是侧边栏显示进度（0 隐藏，1 显示），root.go 每帧写入，chat.go 读取用于头部左边距。
 	sidebarSlide float32
-	// startupRestore 标记下一次选中来自启动恢复（而不是用户点击或窗口参数），
-	// 那次选中不改上次会话记录：磁盘上本来就是它，回写只会和列表加载的写盘互相覆盖。
-	startupRestore bool
 	// projectPopoverOpen 是新会话空态项目切换浮层的展开状态。
 	projectPopoverOpen bool
 	// projectPopoverList 保存新会话空态项目切换浮层的搜索与选择状态。
@@ -1420,22 +1404,6 @@ func uiStatePersistenceEnabled(s *chatState) bool {
 	defer chatUIMu.Unlock()
 	st := chatUIStates[s]
 	return st != nil && st.persist
-}
-
-// applyStartupThread 在窗口构建时决定首次选中的会话：显式指定的会话与待定位通知优先，
-// 其次回到主窗口上次退出的会话，最后交给会话列表加载时选最新活跃会话。
-func applyStartupThread(s *chatState) {
-	if s == nil || !uiStatePersistenceEnabled(s) {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.initialThreadID != "" {
-		return
-	}
-	if last := lastSelectedThread(); last != "" {
-		s.initialThreadID = last
-	}
 }
 
 // setSidebarVisibleProgress 记录当前帧的侧边栏显示进度（0 隐藏，1 显示）。

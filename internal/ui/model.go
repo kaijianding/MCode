@@ -1142,21 +1142,19 @@ func (s *chatState) loadProjects() {
 		s.bumpThreadsRuntimeLocked()
 
 		var targetThreadID string
-		var startupRestore bool
 		if s.initialThreadID != "" {
 			targetThreadID = s.initialThreadID
-			// 启动恢复的会话在侧栏列表里也可能是休眠/已归档的，带出列表就选不到。
-			if !threadExists(s.threads, targetThreadID) {
-				targetThreadID = ""
-			}
 			s.initialThreadID = ""
-			startupRestore = targetThreadID != ""
 		} else if s.creatingThread {
 			// 新建请求完成后自行选中，避免列表刷新抢走当前页面。
 		} else if len(s.threads) > 0 {
 			if s.selectedThreadID == "" || !threadExists(s.threads, s.selectedThreadID) {
 				// 首次选中：回到上次退出的会话，没有记录时选最新活跃会话。
-				targetThreadID = resolveStartupThread(s.threads, lastSelectedThread())
+				last := ""
+				if uiStatePersistenceEnabled(s) {
+					last = lastSelectedThread()
+				}
+				targetThreadID = resolveStartupThread(s.threads, last)
 			} else if d := s.takeDraftLocked(s.selectedThreadID); d.Text != "" {
 				// 会话已选中且仍存在，不会走 selectThread，这里直接回填它的草稿。
 				s.pendingDraftFill = &d.Text
@@ -1164,9 +1162,6 @@ func (s *chatState) loadProjects() {
 			}
 		}
 		s.mu.Unlock()
-		if startupRestore {
-			getChatUIState(s).startupRestore = true
-		}
 		if loadedProjects == len(projects) {
 			inspectorPrunePreferences(s)
 		}
@@ -1206,14 +1201,9 @@ func (s *chatState) loadThreads(projectID string, autoSelect bool) {
 		s.bumpThreadsRuntimeLocked()
 
 		var targetThreadID string
-		var startupRestore bool
 		if s.initialThreadID != "" {
 			targetThreadID = s.initialThreadID
-			if !threadExists(sorted, targetThreadID) {
-				targetThreadID = ""
-			}
 			s.initialThreadID = ""
-			startupRestore = targetThreadID != ""
 		} else if autoSelect && len(sorted) > 0 && !s.creatingThread {
 			for _, th := range sorted {
 				if !th.Dormant && !th.IsProvisional {
@@ -1226,9 +1216,6 @@ func (s *chatState) loadThreads(projectID string, autoSelect bool) {
 			}
 		}
 		s.mu.Unlock()
-		if startupRestore {
-			getChatUIState(s).startupRestore = true
-		}
 
 		s.invalidate()
 
@@ -1490,11 +1477,7 @@ func (s *chatState) selectThreadState(threadID string, knownEmpty bool, expected
 		time.AfterFunc(stewardDecisionCountRefresh, s.refreshStewardDecisionCount)
 	}
 	// 未开启持久化的窗口（独立会话窗口、测试）不记录上次会话，避免抢走主窗口的恢复目标。
-	// 启动恢复的那一次选中不改记录：磁盘上本来就是它，回写只会和列表加载的写盘抢跑。
-	ui := getChatUIState(s)
-	if ui != nil && ui.startupRestore {
-		ui.startupRestore = false
-	} else if uiStatePersistenceEnabled(s) {
+	if uiStatePersistenceEnabled(s) {
 		rememberSelectedThread(threadID)
 	}
 	s.invalidate()

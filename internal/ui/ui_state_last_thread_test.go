@@ -40,6 +40,7 @@ func TestResolveStartupThread(t *testing.T) {
 func TestStartupRestoresLastThread(t *testing.T) {
 	t.Setenv("MCODE_DATA", settingsTestDir(t))
 	testenv.TempHome(t)
+	t.Cleanup(waitUIStateWrites)
 	now := time.Now()
 	fake := NewFakeClient()
 	fake.SetProjectsAndThreads(
@@ -67,10 +68,11 @@ func TestStartupRestoresLastThread(t *testing.T) {
 	}
 }
 
-// TestLastThreadFollowsSelection 验证切换会话与打开新会话首页都会落到 ui-state.json。
+// TestLastThreadFollowsSelection 验证切换会话与新建临时会话都会落到 ui-state.json。
 func TestLastThreadFollowsSelection(t *testing.T) {
 	t.Setenv("MCODE_DATA", settingsTestDir(t))
 	testenv.TempHome(t)
+	t.Cleanup(waitUIStateWrites)
 	fake := NewFakeClient()
 	fake.SetProjectsAndThreads(
 		[]Project{{ID: "p1", Name: "Proj1"}},
@@ -90,12 +92,9 @@ func TestLastThreadFollowsSelection(t *testing.T) {
 	}
 
 	state.createProvisionalThread("p1", false)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && fake.LastCreatedProjectID() == "" {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := waitLastThreadOnDisk(""); got != "" {
-		t.Fatalf("打开新会话首页应清掉 last_thread，got %q", got)
+	waitSelectedThread(t, state, "t-new-1")
+	if got := waitLastThreadOnDisk("t-new-1"); got != "t-new-1" {
+		t.Fatalf("选中新会话后应记录 last_thread=t-new-1，got %q", got)
 	}
 }
 
@@ -104,7 +103,6 @@ func newPersistentChatState(client Client) *chatState {
 	state := newChatState(client)
 	WithUIStatePersistence()(state)
 	applyUIState(state, loadUIState())
-	applyStartupThread(state)
 	return state
 }
 
@@ -142,7 +140,10 @@ func TestLastThreadSurvivesStartupWrite(t *testing.T) {
 		map[string][]Thread{"p1": {{ID: "t1", ProjectID: "p1", Title: "会话 1", UpdatedAt: time.Now()}}},
 	)
 	state := newPersistentChatState(fake)
-	t.Cleanup(func() { uiStateBeforeWriteHook = nil })
+	t.Cleanup(func() {
+		waitUIStateWrites()
+		uiStateBeforeWriteHook = nil
+	})
 	var once sync.Once
 	uiStateBeforeWriteHook = func() {
 		once.Do(func() { rememberSelectedThread("t1") })
@@ -153,4 +154,62 @@ func TestLastThreadSurvivesStartupWrite(t *testing.T) {
 	if got := waitLastThreadOnDisk("t1"); got != "t1" {
 		t.Fatalf("写盘期间记住的会话应被后续写者写出，got %q", got)
 	}
+	waitUIStateWrites()
+}
+
+// TestLastThreadPendingSidebarDoesNotClobber 验证待写或后续的侧栏写盘不会用空/旧值覆盖 last_thread。
+func TestLastThreadPendingSidebarDoesNotClobber(t *testing.T) {
+	t.Setenv("MCODE_DATA", settingsTestDir(t))
+	testenv.TempHome(t)
+	t.Cleanup(waitUIStateWrites)
+
+	rememberSelectedThread("t1")
+	if got := waitLastThreadOnDisk("t1"); got != "t1" {
+		t.Fatalf("预期 t1 先落盘，got %q", got)
+	}
+	waitUIStateWrites()
+
+	// 排一笔 UIState.LastThreadID 为空的待写侧栏状态，模拟与会话切换合并写盘。
+	lastModelSelectionMu.Lock()
+	lastSelectionPendingSidebar = pendingUISidebarState{
+		set: true,
+		ui: UIState{
+			SidebarWidth: SidebarDefaultWidth,
+			LastThreadID: "",
+		},
+	}
+	lastSidebarGeneration++
+	lastModelSelectionMu.Unlock()
+
+	rememberSelectedThread("t2")
+	waitUIStateWrites()
+	if got := loadLastThread(); got != "t2" {
+		t.Fatalf("待写侧栏状态不应覆盖 last_thread=t2，got %q", got)
+	}
+
+	state := newPersistentChatState(NewFakeClient())
+	persistUIState(state)
+	waitUIStateWrites()
+	if got := loadLastThread(); got != "t2" {
+		t.Fatalf("后续侧栏写盘不应冲掉 last_thread=t2，got %q", got)
+	}
+}
+
+// TestInitialThreadNotInListStillSelected 验证 WithInitialThread 指定的会话不在列表里（如已归档）时仍会被选中。
+func TestInitialThreadNotInListStillSelected(t *testing.T) {
+	t.Setenv("MCODE_DATA", settingsTestDir(t))
+	testenv.TempHome(t)
+	t.Cleanup(waitUIStateWrites)
+
+	fake := NewFakeClient()
+	fake.SetProjectsAndThreads(
+		[]Project{{ID: "p1", Name: "Proj1"}},
+		map[string][]Thread{"p1": {
+			{ID: "t1", ProjectID: "p1", Title: "会话 1", UpdatedAt: time.Now()},
+		}},
+	)
+	state := newChatState(fake)
+	WithInitialThread("archived-thread")(state)
+	state.loadProjects()
+	waitSelectedThread(t, state, "archived-thread")
 }
