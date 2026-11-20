@@ -585,6 +585,7 @@ export type RemoteThreadSummary = {
   swarmBusy?: boolean;
   backgroundTasks?: number;
   mcpDisabled?: Array<string>;
+  agentSessionID?: string;
 };
 
 export type RemoteThreadExecutionStatus = {

@@ -576,6 +576,9 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 					}
 					pCancel()
 				}
+				if changed {
+					b.RepublishThreadSummary(threadID)
+				}
 				return
 
 			case harness.EventText:

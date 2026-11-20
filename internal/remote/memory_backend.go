@@ -514,6 +514,7 @@ func (b *MemoryBackend) stewardLocked(td *memoryThread) bool {
 // 调用方需持有 b.mu。
 func (b *MemoryBackend) summaryForPublishLocked(td *memoryThread) wire.ThreadSummary {
 	s := td.summary
+	s.AgentSessionID = td.sessionID
 	s.AIDurationMs = td.aiDuration.Milliseconds()
 	s.TotalDurationMs = td.totalDuration.Milliseconds()
 	// 有执行轮次或前台正在处理消息时报告运行中；否则纠正异常收尾残留的标记。

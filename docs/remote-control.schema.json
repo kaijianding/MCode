@@ -3046,6 +3046,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "agentSessionID": {
+          "type": "string",
+          "description": "Agent CLI 自己的会话 ID；还没跑过一轮时省略"
         }
       },
       "required": [
