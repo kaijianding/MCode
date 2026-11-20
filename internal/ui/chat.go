@@ -238,9 +238,12 @@ func renderChat(c *ui.Context, s *chatState) {
 			}
 
 			// 会话内查找（默认 ⌘F）：按有效绑定检测，改键后同样生效。
+			// 终端聚焦时优先打开终端搜索条；其余场景打开会话内查找。
 			// 注册表里该条目不进每帧注册集合，与 ⌘K、⌘B 的做法一致，避免被 dispatchActiveShortcut 抢占。
 			if mods, key, ok := shortcutBindingFor("find-in-thread"); ok && c.Shortcut(mods, key) {
-				s.openChatFind()
+				if !openTerminalSearchIfFocused(s) {
+					s.openChatFind()
+				}
 			}
 
 			ensureChatMarkdown(c, s)

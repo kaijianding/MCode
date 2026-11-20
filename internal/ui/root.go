@@ -325,8 +325,10 @@ func buildRoot(client Client, opts ...Option) (*chatState, func(c *ui.Context)) 
 				case "command-palette":
 					togglePalette(state)
 				case "find-in-thread":
-					// 会话内查找条：由 chat_find.go 渲染，菜单点击与 ⌘F 打开同一个浮条。
-					state.openChatFind()
+					// 终端聚焦时优先打开终端搜索条；否则打开会话内查找条（由 chat_find.go 渲染）。
+					if !openTerminalSearchIfFocused(state) {
+						state.openChatFind()
+					}
 				case "toggle-sidebar":
 					toggleSidebarPersisted(state)
 				case "stop-reply":

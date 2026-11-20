@@ -172,6 +172,7 @@ func (ss terminalSearchState) matchLabel() string {
 // terminalState 维护单个聊天会话视图下的内嵌终端状态。
 type terminalState struct {
 	visible    bool
+	focused    bool
 	height     float32
 	tabs       map[string][]*terminalTab
 	active     map[string]int
@@ -958,6 +959,37 @@ func handleTerminalSearchStatus(s *chatState, status terminal.SearchStatus) {
 	}
 }
 
+// openTerminalSearchIfFocused 在终端视图聚焦且存在活动标签时打开终端搜索条并返回 true。
+func openTerminalSearchIfFocused(s *chatState) bool {
+	return openTerminalSearch(s, true)
+}
+
+func openTerminalSearch(s *chatState, requireFocus bool) bool {
+	if s == nil {
+		return false
+	}
+	// 取 threadID 要先拿 s.mu，不能在持有 terminalMu 时取，避免与别处的加锁顺序相反。
+	threadID, _ := getSelectedThreadWorkDir(s)
+	terminalMu.Lock()
+	st, ok := terminalStates[s]
+	if !ok || (requireFocus && (!st.visible || !st.focused)) {
+		terminalMu.Unlock()
+		return false
+	}
+	tab := activeTerminalTab(st, threadID)
+	if tab == nil || tab.term == nil {
+		terminalMu.Unlock()
+		return false
+	}
+	st.search = st.search.opened(tab.id)
+	term := tab.term
+	terminalMu.Unlock()
+	// 重新打开时清掉上一次的高亮，搜索词从空开始。
+	term.EndSearch()
+	s.invalidate()
+	return true
+}
+
 // handleTerminalSearchKey 在终端聚焦时处理搜索快捷键：打开搜索条与关闭搜索条。
 // OnKey 只能在终端视图拿到键盘焦点时被调用，所以这里是终端范围内的局部按键处理。
 func handleTerminalSearchKey(s *chatState, mods ui.Modifiers, key ui.Key) bool {
@@ -972,29 +1004,14 @@ func handleTerminalSearchKey(s *chatState, mods ui.Modifiers, key ui.Key) bool {
 	if !openKey && !(key == ui.KeyEscape && mods == 0) {
 		return false
 	}
+	if openKey {
+		return openTerminalSearch(s, false)
+	}
 	// 取 threadID 要先拿 s.mu，不能在持有 terminalMu 时取，避免与别处的加锁顺序相反。
 	threadID, _ := getSelectedThreadWorkDir(s)
 	terminalMu.Lock()
 	st, ok := terminalStates[s]
-	if !ok {
-		terminalMu.Unlock()
-		return false
-	}
-	if openKey {
-		tab := activeTerminalTab(st, threadID)
-		if tab == nil || tab.term == nil {
-			terminalMu.Unlock()
-			return false
-		}
-		st.search = st.search.opened(tab.id)
-		term := tab.term
-		terminalMu.Unlock()
-		// 重新打开时清掉上一次的高亮，搜索词从空开始。
-		term.EndSearch()
-		s.invalidate()
-		return true
-	}
-	if !st.search.open {
+	if !ok || !st.search.open {
 		terminalMu.Unlock()
 		return false
 	}
@@ -1251,6 +1268,9 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 	terminalMu.Lock()
 	visible := st.visible
 	height := st.height
+	if !visible && st.focused {
+		st.focused = false
+	}
 	terminalMu.Unlock()
 
 	if !visible {
@@ -1301,6 +1321,7 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 	// 设置里的字号变化同步到已打开的终端；只在字号真的变了时才调用 SetFont。
 	syncTerminalFontSize(st, threadID, getTerminalFontSize(s))
 
+	focused := false
 	ui.Column(c.Key("terminal-dock")).
 		FillWidth().
 		Height(height).
@@ -1578,7 +1599,8 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 							})
 					})
 			} else if actTab != nil && actTab.term != nil {
-				terminal.View(c, actTab.term).Fill()
+				termView := terminal.View(c, actTab.term).Fill()
+				focused = termView.Focused()
 			} else if restoring {
 				ui.Column(c.Key("terminal-dock-restoring")).
 					Grow(1).
@@ -1596,6 +1618,12 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 					})
 			}
 		})
+
+	terminalMu.Lock()
+	if st.focused != focused {
+		st.focused = focused
+	}
+	terminalMu.Unlock()
 }
 
 // runScriptInTerminal 确保当前工作目录的终端存在并可见，然后发送脚本命令行。

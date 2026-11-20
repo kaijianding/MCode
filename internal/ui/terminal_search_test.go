@@ -1,10 +1,19 @@
 package mcodeui
 
 import (
+	"runtime"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
 	"mcode/internal/config"
 )
+
+func terminalSearchOpenModsForTest() ui.Modifiers {
+	if runtime.GOOS == "darwin" {
+		return ui.Cmd
+	}
+	return ui.Ctrl | ui.Shift
+}
 
 // 搜索条打开：绑定当前标签，搜索词与匹配计数从头开始。
 func TestTerminalSearchStateOpened(t *testing.T) {
@@ -116,5 +125,90 @@ func TestClampTerminalFontSize(t *testing.T) {
 		if got := clampTerminalFontSize(tc.in); got != tc.want {
 			t.Errorf("clampTerminalFontSize(%d)=%d，期望 %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+// openTerminalSearchIfFocused 仅在终端可见、聚焦且存在活动标签时打开搜索条。
+func TestOpenTerminalSearchIfFocused(t *testing.T) {
+	stubTerminals(t)
+	if openTerminalSearchIfFocused(nil) {
+		t.Fatal("nil chatState 不应打开终端搜索")
+	}
+
+	s := newChatState(NewFakeClient())
+	defer s.close()
+	s.selectedThreadID = "t1"
+	st := getTerminalState(s)
+
+	if openTerminalSearchIfFocused(s) {
+		t.Fatal("未展开且无标签时不应打开终端搜索")
+	}
+
+	tab, err := createTerminalTab(s, st, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("createTerminalTab 失败: %v", err)
+	}
+
+	terminalMu.Lock()
+	st.visible = false
+	st.focused = true
+	terminalMu.Unlock()
+	if openTerminalSearchIfFocused(s) {
+		t.Fatal("终端收起时不应打开终端搜索")
+	}
+
+	terminalMu.Lock()
+	st.visible = true
+	st.focused = false
+	terminalMu.Unlock()
+	if openTerminalSearchIfFocused(s) {
+		t.Fatal("终端未聚焦时不应打开终端搜索")
+	}
+
+	terminalMu.Lock()
+	st.focused = true
+	terminalMu.Unlock()
+	if !openTerminalSearchIfFocused(s) {
+		t.Fatal("终端可见且聚焦并有活动标签时应返回 true")
+	}
+
+	terminalMu.Lock()
+	search := st.search
+	terminalMu.Unlock()
+	if !search.open || search.tabID != tab.id {
+		t.Fatalf("期望打开绑定标签 %d 的搜索条，实际 %+v", tab.id, search)
+	}
+}
+
+// handleTerminalSearchKey 与 openTerminalSearchIfFocused 共用打开逻辑，按平台热键打开并在 Esc 时关闭。
+func TestHandleTerminalSearchKeyOpensAndCloses(t *testing.T) {
+	stubTerminals(t)
+	s := newChatState(NewFakeClient())
+	defer s.close()
+	s.selectedThreadID = "t1"
+	st := getTerminalState(s)
+	tab, err := createTerminalTab(s, st, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("createTerminalTab 失败: %v", err)
+	}
+
+	if !handleTerminalSearchKey(s, terminalSearchOpenModsForTest(), ui.KeyF) {
+		t.Fatal("终端搜索快捷键应返回 true")
+	}
+	terminalMu.Lock()
+	opened := st.search
+	terminalMu.Unlock()
+	if !opened.open || opened.tabID != tab.id {
+		t.Fatalf("快捷键后搜索条应绑定标签 %d 并打开，实际 %+v", tab.id, opened)
+	}
+
+	if !handleTerminalSearchKey(s, 0, ui.KeyEscape) {
+		t.Fatal("Esc 应关闭已打开的终端搜索条")
+	}
+	terminalMu.Lock()
+	closed := st.search
+	terminalMu.Unlock()
+	if closed.open {
+		t.Fatalf("Esc 后搜索条应关闭，实际 %+v", closed)
 	}
 }
