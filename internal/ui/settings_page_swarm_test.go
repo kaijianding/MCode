@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -721,5 +722,142 @@ func TestSwarmSections_Reorganized(t *testing.T) {
 	}
 	if got, want := ids(sections[advanced]), []string{"row-swarm-max-bees", "row-swarm-max-rounds", "row-swarm-bee-timeout", "row-swarm-request-timeout", "row-swarm-review-max-lines"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("高级行错误: %v", got)
+	}
+}
+
+func TestSwarmSettings_PairEditorRedesignLayoutAndReset(t *testing.T) {
+	testenv.TempHome(t)
+	setAppReduceMotion(t, true)
+	st := NewSettingsState(settingsTestDir(t), nil, nil)
+	workerEff := "high"
+	st.cfg.Orchestration.Pairs = []config.SwarmPair{{
+		ID:             "pair-redesign",
+		Name:           "配对测试",
+		LeadProvider:   config.ProviderClaude,
+		LeadModel:      "claude-3-7-sonnet",
+		WorkerProvider: config.ProviderCodex,
+		WorkerModel:    "gpt-4o",
+		WorkerEffort:   &workerEff,
+		WorkerFastMode: true,
+		BeeTiers: map[string]config.SwarmTierOverride{
+			"read": {
+				Provider: config.ProviderClaude,
+				Model:    "claude-3-5-haiku",
+			},
+		},
+	}}
+	for i := range st.cfg.Orchestration.Tiers {
+		if st.cfg.Orchestration.Tiers[i].ID == "edit" {
+			st.cfg.Orchestration.Tiers[i].Provider = ""
+			st.cfg.Orchestration.Tiers[i].Model = ""
+		}
+	}
+
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		ui.Column(c).Width(1100).Children(func() { renderPageSwarm(c, st) })
+	}, 1200, 7000, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+	tt.Frame()
+
+	if err := tt.Click("编辑"); err != nil {
+		t.Fatalf("click '编辑' failed: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("编辑模型配对") {
+		t.Fatalf("pair editor popover did not open: %v", tt.Texts())
+	}
+
+	nameRect, ok := tt.Find("编辑配对名称")
+	if !ok {
+		t.Fatal("missing '编辑配对名称' input")
+	}
+	if nameRect.W <= 300 {
+		t.Fatalf("expected pair name input width > 300, got %.1f", nameRect.W)
+	}
+
+	resetWorkerRect, ok := tt.Find("还原为与主代理相同")
+	if !ok {
+		t.Fatal("missing '还原为与主代理相同' reset icon button")
+	}
+	if resetWorkerRect.W > 28 {
+		t.Fatalf("expected compact reset icon button width <= 28, got %.1f", resetWorkerRect.W)
+	}
+	if _, hasWideReset := tt.Find("与主代理相同"); hasWideReset {
+		t.Fatal("wide '与主代理相同' text button must not be shown when worker model is customized")
+	}
+
+	leadRect, ok := tt.Find("选择主代理模型")
+	if !ok {
+		t.Fatal("missing '选择主代理模型' capsule")
+	}
+	workerRect, ok := tt.Find("选择子代理模型")
+	if !ok {
+		t.Fatal("missing '选择子代理模型' capsule")
+	}
+	readRect, ok := tt.Find("选择只读档模型")
+	if !ok {
+		t.Fatal("missing '选择只读档模型' capsule")
+	}
+	editRect, ok := tt.Find("选择执行档模型")
+	if !ok {
+		t.Fatal("missing '选择执行档模型' capsule")
+	}
+	leadRight := leadRect.X + leadRect.W
+	for _, item := range []struct {
+		name string
+		r    ui.Rect
+	}{
+		{"选择子代理模型", workerRect},
+		{"选择只读档模型", readRect},
+		{"选择执行档模型", editRect},
+	} {
+		if diff := math.Abs(float64((item.r.X + item.r.W) - leadRight)); diff > 1.5 {
+			t.Fatalf("%s right edge %.2f misaligned with lead right edge %.2f (diff %.2f > 1.5)",
+				item.name, item.r.X+item.r.W, leadRight, diff)
+		}
+	}
+
+	if !tt.HasText("跟随子代理") {
+		t.Fatalf("expected unconfigured inherited tier to display '跟随子代理': %v", tt.Texts())
+	}
+	if tt.HasText("继承 · 跟随会话子代理模型") {
+		t.Fatal("inherited tier must not display verbose '继承 · 跟随会话子代理模型'")
+	}
+
+	if err := tt.Click("还原为与主代理相同"); err != nil {
+		t.Fatalf("click '还原为与主代理相同' failed: %v", err)
+	}
+	tt.Frame()
+
+	uiSt := getSwarmUIState(st)
+	if uiSt.draft.WorkerProvider != "" || uiSt.draft.WorkerModel != "" || uiSt.draft.WorkerEffort != nil || uiSt.draft.WorkerFastMode {
+		t.Fatalf("expected worker draft fields cleared, got %+v", uiSt.draft)
+	}
+	if !tt.HasText("与主代理相同") {
+		t.Fatalf("expected worker capsule empty state '与主代理相同' after reset: %v", tt.Texts())
+	}
+	if _, ok := tt.Find("还原为与主代理相同"); ok {
+		t.Fatal("expected '还原为与主代理相同' reset button to disappear after reset")
+	}
+
+	leadRect2, ok := tt.Find("选择主代理模型")
+	if !ok {
+		t.Fatal("missing '选择主代理模型' capsule after reset")
+	}
+	workerRect2, ok := tt.Find("选择子代理模型")
+	if !ok {
+		t.Fatal("missing '选择子代理模型' capsule after reset")
+	}
+	if diff := math.Abs(float64((workerRect2.X + workerRect2.W) - (leadRect2.X + leadRect2.W))); diff > 1.5 {
+		t.Fatalf("worker right edge %.2f misaligned with lead right edge %.2f after reset (diff %.2f > 1.5)",
+			workerRect2.X+workerRect2.W, leadRect2.X+leadRect2.W, diff)
+	}
+
+	if tt.FramePending() {
+		t.Fatal("expected no pending frame under ReduceMotion after reset")
+	}
+	tt.Advance(200 * time.Millisecond)
+	tt.Frame()
+	if tt.FramePending() {
+		t.Fatal("expected UI to remain idle without continuous redraw under ReduceMotion")
 	}
 }

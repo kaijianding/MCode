@@ -228,6 +228,70 @@ func findSwarmModelInfo(providers []ProviderInfo, providerID, modelID string) Mo
 	}
 }
 
+const swarmPairEditorWidth float32 = 380
+
+func renderSwarmPairGroupCard(c *ui.Context, key string, children func()) {
+	ui.Column(c.Key(key)).
+		FillWidth().
+		Background(ThemeOverlay(c, OverlayFaint)).
+		Border(Hairline, ThemeDivider(c)).
+		Radius(RadiusMD).
+		Children(children)
+}
+
+func renderSwarmPairGroupDivider(c *ui.Context, key string) {
+	ui.Box(c.Key(key)).
+		FillWidth().
+		Padding(0, Space3).
+		Children(func() {
+			ui.Box(c.Key(key + "-line")).
+				Height(Hairline).
+				FillWidth().
+				Background(ThemeDivider(c))
+		})
+}
+
+func renderSwarmPairResetSlot(c *ui.Context, key, label string, visible bool, onClick func()) {
+	if !visible {
+		ui.Box(c.Key(key + "-spacer")).Size(ControlSM, ControlSM).Shrink(0)
+		return
+	}
+	b := ui.ButtonBase(c.Key(key)).
+		Size(ControlSM, ControlSM).
+		Radius(RadiusSM).
+		Center().
+		Shrink(0).
+		Label(label).
+		Tooltip(label)
+
+	hoverTarget, pressTarget := float32(0), float32(0)
+	if b.Hovered() {
+		hoverTarget = 1
+	}
+	if b.Pressed() {
+		pressTarget = 1
+	}
+	hover := b.AnimateTo("hover", hoverTarget, ui.Animation{Duration: animateDuration(c, DurSnap), Ease: EaseSnap})
+	press := b.AnimateTo("press", pressTarget, ui.Animation{Duration: animateDuration(c, DurFast), Ease: EaseSnap})
+	bg := ui.Transparent.Mix(ThemeOverlayHover(c), hover).Mix(ThemeOverlayPressed(c), press)
+	b.Background(bg)
+	focusRing(c, b)
+	scale := motionPressScale(c, b, "button-press-scale", b.Pressed())
+	b.Scale(scale, scale)
+	if b.Clicked() && onClick != nil {
+		onClick()
+	}
+	iconColor := ThemeSecondaryText(c)
+	if b.Hovered() || b.Pressed() {
+		iconColor = ThemePrimaryText(c)
+	}
+	b.Children(func() {
+		ui.Icon(c, iconRotateCcw).
+			Size(12, 12).
+			TextColor(iconColor)
+	})
+}
+
 // renderSwarmPairEditorPopover 渲染添加与编辑模型配对的 Popover 弹层。
 func renderSwarmPairEditorPopover(c *ui.Context, st *SettingsState, uiSt *swarmPairsUIState, popKey string, providers []ProviderInfo) {
 	providers = append([]ProviderInfo(nil), providers...)
@@ -238,15 +302,11 @@ func renderSwarmPairEditorPopover(c *ui.Context, st *SettingsState, uiSt *swarmP
 			}
 		}
 	}
-	ui.Scroll(c.Key("swarm-editor-scroll-" + popKey)).Width(settingsEditorPopoverWidth).MaxHeight(settingsEditorPopoverMaxHeight).Children(func() {
-		ui.Column(c.Key("swarm-editor-card-"+popKey)).
-			Width(settingsEditorPopoverWidth).
-			Padding(settingsCardPad, Space5).
-			Gap(Space4).
-			Background(ThemeSurface(c)).
-			Border(Hairline, ThemeBorder(c)).
-			Radius(RadiusMD).
-			Shadow(0, 6, 20, 0, ThemeOverlay(c, 0.18)).
+	ui.Scroll(c.Key("swarm-editor-scroll-" + popKey)).Width(swarmPairEditorWidth).MaxHeight(settingsEditorPopoverMaxHeight).Children(func() {
+		popoverCardStyle(c, ui.Column(c.Key("swarm-editor-card-"+popKey)).
+			Width(swarmPairEditorWidth).
+			Padding(Space5, Space5).
+			Gap(Space4)).
 			Children(func() {
 				formTitle := "编辑模型配对"
 				if uiSt.isNew {
@@ -259,256 +319,226 @@ func renderSwarmPairEditorPopover(c *ui.Context, st *SettingsState, uiSt *swarmP
 
 				// 1. 配对名称输入框
 				ui.Column(c.Key("field-name-" + popKey)).
+					FillWidth().
 					Gap(Space1).
 					Children(func() {
 						ui.Text(c, "配对名称").
 							FontSize(uiFont(TypeFootnote)).
+							FontWeight(500).
 							TextColor(ThemeSecondaryText(c))
-						textFunc(func(*SettingsState) (string, bool) {
-							return uiSt.draft.Name, false
-						}, func(_ *SettingsState, text string) {
-							uiSt.draft.Name = text
-						}, "自定义配对名称（可选）").render(c, st, setting{ID: "swarm-pair-name-" + popKey, Title: "配对名称"})
-					})
-
-				// 2. 主导区
-				ui.Row(c.Key("sec-lead-" + popKey)).
-					AlignItems(ui.Center).
-					Justify(ui.SpaceBetween).
-					Children(func() {
-						ui.Text(c, "主代理模型").
-							FontSize(uiFont(TypeFootnote)).
-							FontWeight(600).
-							TextColor(ThemePrimaryText(c))
-
-						leadEffort := ""
-						if uiSt.draft.LeadEffort != nil {
-							leadEffort = *uiSt.draft.LeadEffort
-						}
-						leadSel := ModelSelection{
-							Provider: uiSt.draft.LeadProvider,
-							Model:    uiSt.draft.LeadModel,
-							Effort:   leadEffort,
-							Fast:     uiSt.draft.LeadFastMode,
-						}
-						renderSwarmModelCapsuleEx(c, st, "swarm-pair-lead-capsule", "swarm-draft-lead-"+popKey, leadSel, "选择模型", "选择主代理模型", func(next ModelSelection) {
-							uiSt.draft.LeadProvider = next.Provider
-							uiSt.draft.LeadModel = next.Model
-							if next.Effort != "" {
-								v := next.Effort
-								uiSt.draft.LeadEffort = &v
-							} else {
-								uiSt.draft.LeadEffort = nil
-							}
-							uiSt.draft.LeadFastMode = next.Fast
-							st.invalidate()
+						TextField(c, TextFieldProps{
+							Key:         "swarm-pair-name-" + popKey + "-input",
+							Value:       &uiSt.draft.Name,
+							Label:       "编辑配对名称",
+							Placeholder: "自定义配对名称（可选）",
+							FillWidth:   true,
 						})
 					})
 
-				// 3. 执行区
-				ui.Row(c.Key("sec-worker-" + popKey)).
-					AlignItems(ui.Center).
-					Justify(ui.SpaceBetween).
-					Children(func() {
-						ui.Text(c, "子代理模型").
-							FontSize(uiFont(TypeFootnote)).
-							FontWeight(600).
-							TextColor(ThemePrimaryText(c))
+				// 2. 主代理模型 / 子代理模型分组卡片
+				renderSwarmPairGroupCard(c, "group-pair-models-"+popKey, func() {
+					ui.Row(c.Key("sec-lead-" + popKey)).
+						FillWidth().
+						Padding(Space2, Space3).
+						AlignItems(ui.Center).
+						Justify(ui.SpaceBetween).
+						Children(func() {
+							ui.Text(c, "主代理模型").
+								FontSize(uiFont(TypeFootnote)).
+								FontWeight(500).
+								TextColor(ThemePrimaryText(c))
 
-						workerEffort := ""
-						if uiSt.draft.WorkerEffort != nil {
-							workerEffort = *uiSt.draft.WorkerEffort
-						}
-						workerSel := ModelSelection{
-							Provider: uiSt.draft.WorkerProvider,
-							Model:    uiSt.draft.WorkerModel,
-							Effort:   workerEffort,
-							Fast:     uiSt.draft.WorkerFastMode,
-						}
-						ui.Row(c.Key("wrap-worker-capsule-" + popKey)).
-							AlignItems(ui.Center).
-							Gap(Space1).
-							Children(func() {
-								renderSwarmModelCapsuleEx(c, st, "swarm-pair-worker-capsule", "swarm-draft-worker-"+popKey, workerSel, "与主代理相同", "选择子代理模型", func(next ModelSelection) {
-									uiSt.draft.WorkerProvider = next.Provider
-									uiSt.draft.WorkerModel = next.Model
-									if next.Effort != "" {
-										v := next.Effort
-										uiSt.draft.WorkerEffort = &v
-									} else {
-										uiSt.draft.WorkerEffort = nil
-									}
-									uiSt.draft.WorkerFastMode = next.Fast
-									st.invalidate()
+							leadEffort := ""
+							if uiSt.draft.LeadEffort != nil {
+								leadEffort = *uiSt.draft.LeadEffort
+							}
+							leadSel := ModelSelection{
+								Provider: uiSt.draft.LeadProvider,
+								Model:    uiSt.draft.LeadModel,
+								Effort:   leadEffort,
+								Fast:     uiSt.draft.LeadFastMode,
+							}
+							ui.Row(c.Key("wrap-lead-capsule-" + popKey)).
+								AlignItems(ui.Center).
+								Gap(Space1).
+								Children(func() {
+									renderSwarmModelCapsuleEx(c, st, "swarm-pair-lead-capsule", "swarm-draft-lead-"+popKey, leadSel, "选择模型", "选择主代理模型", func(next ModelSelection) {
+										uiSt.draft.LeadProvider = next.Provider
+										uiSt.draft.LeadModel = next.Model
+										if next.Effort != "" {
+											v := next.Effort
+											uiSt.draft.LeadEffort = &v
+										} else {
+											uiSt.draft.LeadEffort = nil
+										}
+										uiSt.draft.LeadFastMode = next.Fast
+										st.invalidate()
+									})
+									renderSwarmPairResetSlot(c, "btn-reset-lead-"+popKey, "", false, nil)
 								})
+						})
 
-								if !swarmEmptySelection(workerSel) {
-									btnClear := ui.ButtonBase(c.Key("btn-clear-worker-"+popKey)).
-										Label("与主代理相同").
-										Padding(settingsBadgePadY, Space3).
-										Radius(RadiusSM).
-										Background(ui.Transparent)
-									{
-										scale := motionPressScale(c, btnClear, "button-press-scale", btnClear.Pressed())
-										btnClear.Scale(scale, scale)
-									}
-									if btnClear.Hovered() {
-										btnClear.Background(ThemeHover(c))
-									}
-									if btnClear.Clicked() {
+					renderSwarmPairGroupDivider(c, "div-pair-models-"+popKey)
+
+					ui.Row(c.Key("sec-worker-" + popKey)).
+						FillWidth().
+						Padding(Space2, Space3).
+						AlignItems(ui.Center).
+						Justify(ui.SpaceBetween).
+						Children(func() {
+							ui.Text(c, "子代理模型").
+								FontSize(uiFont(TypeFootnote)).
+								FontWeight(500).
+								TextColor(ThemePrimaryText(c))
+
+							workerEffort := ""
+							if uiSt.draft.WorkerEffort != nil {
+								workerEffort = *uiSt.draft.WorkerEffort
+							}
+							workerSel := ModelSelection{
+								Provider: uiSt.draft.WorkerProvider,
+								Model:    uiSt.draft.WorkerModel,
+								Effort:   workerEffort,
+								Fast:     uiSt.draft.WorkerFastMode,
+							}
+							ui.Row(c.Key("wrap-worker-capsule-" + popKey)).
+								AlignItems(ui.Center).
+								Gap(Space1).
+								Children(func() {
+									renderSwarmModelCapsuleEx(c, st, "swarm-pair-worker-capsule", "swarm-draft-worker-"+popKey, workerSel, "与主代理相同", "选择子代理模型", func(next ModelSelection) {
+										uiSt.draft.WorkerProvider = next.Provider
+										uiSt.draft.WorkerModel = next.Model
+										if next.Effort != "" {
+											v := next.Effort
+											uiSt.draft.WorkerEffort = &v
+										} else {
+											uiSt.draft.WorkerEffort = nil
+										}
+										uiSt.draft.WorkerFastMode = next.Fast
+										st.invalidate()
+									})
+									renderSwarmPairResetSlot(c, "btn-clear-worker-"+popKey, "还原为与主代理相同", !swarmEmptySelection(workerSel), func() {
 										uiSt.draft.WorkerProvider = ""
 										uiSt.draft.WorkerModel = ""
 										uiSt.draft.WorkerEffort = nil
 										uiSt.draft.WorkerFastMode = false
 										st.invalidate()
-									}
-									btnClear.Children(func() {
-										ui.Text(c, "与主代理相同").
-											FontSize(uiFont(TypeCaption)).
-											TextColor(ThemeSecondaryText(c))
 									})
-								}
-							})
-					})
+								})
+						})
+				})
 
-				// 4. 档位映射区
+				// 3. 档位映射区
 				if len(st.cfg.Orchestration.Tiers) > 0 {
 					ui.Column(c.Key("sec-tier-mappings-" + popKey)).
+						FillWidth().
 						Gap(Space2).
 						Children(func() {
-							ui.Row(c.Key("header-tier-mappings-" + popKey)).
-								AlignItems(ui.Center).
-								Gap(Space3).
-								Children(func() {
-									ui.Text(c, "档位映射").
-										FontSize(uiFont(TypeFootnote)).
-										FontWeight(600).
-										TextColor(ThemePrimaryText(c))
-								})
+							ui.Text(c, "档位映射").
+								FontSize(uiFont(TypeFootnote)).
+								FontWeight(500).
+								TextColor(ThemeSecondaryText(c))
 
-							for _, t := range st.cfg.Orchestration.Tiers {
-								tier := t
-								var override config.SwarmTierOverride
-								var hasOverride bool
-								if uiSt.draft.BeeTiers != nil {
-									override, hasOverride = uiSt.draft.BeeTiers[tier.ID]
-								}
+							renderSwarmPairGroupCard(c, "group-tier-mappings-"+popKey, func() {
+								for i, t := range st.cfg.Orchestration.Tiers {
+									if i > 0 {
+										renderSwarmPairGroupDivider(c, fmt.Sprintf("div-tier-map-%d-%s", i, popKey))
+									}
+									tier := t
+									var override config.SwarmTierOverride
+									var hasOverride bool
+									if uiSt.draft.BeeTiers != nil {
+										override, hasOverride = uiSt.draft.BeeTiers[tier.ID]
+									}
 
-								fastVal := false
-								if override.FastMode != nil {
-									fastVal = *override.FastMode
-								}
-								tierSel := ModelSelection{
-									Provider: override.Provider,
-									Model:    override.Model,
-									Effort:   override.Effort,
-									Fast:     fastVal,
-								}
-								globalCapsuleText := swarmModelCapsuleText(providers, tier.Provider, tier.Model, tier.Effort, tier.FastMode)
-								emptyLabel := "继承 · " + globalCapsuleText
-								tierName := tier.Name
-								if tierName == "" {
-									tierName = tier.ID
-								}
+									fastVal := false
+									if override.FastMode != nil {
+										fastVal = *override.FastMode
+									}
+									tierSel := ModelSelection{
+										Provider: override.Provider,
+										Model:    override.Model,
+										Effort:   override.Effort,
+										Fast:     fastVal,
+									}
+									emptyLabel := "跟随子代理"
+									if strings.TrimSpace(tier.Model) != "" {
+										emptyLabel = "继承 · " + swarmModelCapsuleText(providers, tier.Provider, tier.Model, tier.Effort, tier.FastMode)
+									}
+									tierName := tier.Name
+									if tierName == "" {
+										tierName = tier.ID
+									}
 
-								ui.Row(c.Key("tier-map-row-" + tier.ID + "-" + popKey)).
-									AlignItems(ui.Center).
-									Justify(ui.SpaceBetween).
-									Children(func() {
-										renderSwarmTierChip(c, "tier-map-chip-"+tier.ID+"-"+popKey, tier.Name, tier.ID, tier.ReadOnly)
+									ui.Row(c.Key("tier-map-row-" + tier.ID + "-" + popKey)).
+										FillWidth().
+										Padding(Space2, Space3).
+										AlignItems(ui.Center).
+										Justify(ui.SpaceBetween).
+										Children(func() {
+											renderSwarmTierChip(c, "tier-map-chip-"+tier.ID+"-"+popKey, tier.Name, tier.ID, tier.ReadOnly)
 
-										ui.Row(c.Key("tier-map-right-" + tier.ID + "-" + popKey)).
-											Label("tier-map-capsule-" + tier.ID).
-											AlignItems(ui.Center).
-											Gap(Space1).
-											Children(func() {
-												renderSwarmModelCapsuleEx(c, st, "swarm-pair-tier-capsule-"+tier.ID, "tier-map-"+tier.ID+"-"+popKey, tierSel, emptyLabel, "选择"+tierName+"档模型", func(next ModelSelection) {
-													f := next.Fast
-													if uiSt.draft.BeeTiers == nil {
-														uiSt.draft.BeeTiers = make(map[string]config.SwarmTierOverride)
-													}
-													uiSt.draft.BeeTiers[tier.ID] = config.SwarmTierOverride{
-														Provider: next.Provider,
-														Model:    next.Model,
-														Effort:   next.Effort,
-														FastMode: &f,
-													}
-													st.invalidate()
-												})
+											ui.Row(c.Key("tier-map-right-" + tier.ID + "-" + popKey)).
+												Label("tier-map-capsule-" + tier.ID).
+												AlignItems(ui.Center).
+												Gap(Space1).
+												Children(func() {
+													renderSwarmModelCapsuleEx(c, st, "swarm-pair-tier-capsule-"+tier.ID, "tier-map-"+tier.ID+"-"+popKey, tierSel, emptyLabel, "选择"+tierName+"档模型", func(next ModelSelection) {
+														f := next.Fast
+														if uiSt.draft.BeeTiers == nil {
+															uiSt.draft.BeeTiers = make(map[string]config.SwarmTierOverride)
+														}
+														uiSt.draft.BeeTiers[tier.ID] = config.SwarmTierOverride{
+															Provider: next.Provider,
+															Model:    next.Model,
+															Effort:   next.Effort,
+															FastMode: &f,
+														}
+														st.invalidate()
+													})
 
-												if hasOverride {
-													btnReset := ui.ButtonBase(c.Key("btn-reset-tier-map-"+tier.ID+"-"+popKey)).
-														Label("恢复继承").
-														Tooltip("恢复继承").
-														Size(ControlXS, ControlXS).
-														Radius(RadiusPill).
-														Center()
-													{
-														scale := motionPressScale(c, btnReset, "button-press-scale", btnReset.Pressed())
-														btnReset.Scale(scale, scale)
-													}
-													if btnReset.Hovered() {
-														btnReset.Background(ThemeHover(c))
-													} else {
-														btnReset.Background(ui.Transparent)
-													}
-													if btnReset.Clicked() {
+													renderSwarmPairResetSlot(c, "btn-reset-tier-map-"+tier.ID+"-"+popKey, "恢复继承", hasOverride, func() {
 														delete(uiSt.draft.BeeTiers, tier.ID)
 														if len(uiSt.draft.BeeTiers) == 0 {
 															uiSt.draft.BeeTiers = nil
 														}
 														st.invalidate()
-													}
-													btnReset.Children(func() {
-														ui.Icon(c, iconRotateCcw).
-															Size(settingsTinyIcon, settingsTinyIcon).
-															TextColor(ThemeSecondaryText(c))
 													})
-												}
-											})
-									})
-							}
+												})
+										})
+								}
+							})
 						})
 				}
 
-				// 5. 底部按钮（取消、保存）
+				// 4. 底部按钮（取消、保存）
 				ui.Row(c.Key("actions-" + popKey)).
+					FillWidth().
 					Justify(ui.End).
-					Gap(Space3).
+					Gap(Space2).
 					Children(func() {
-						btnCancel := ui.ButtonBase(c.Key("btn-cancel-"+popKey)).
-							Label("取消").
-							Padding(settingsPillPadX, Space4).
-							Radius(RadiusSM).
-							Background(ThemeHover(c))
-						{
-							scale := motionPressScale(c, btnCancel, "button-press-scale", btnCancel.Pressed())
-							btnCancel.Scale(scale, scale)
-						}
-						if btnCancel.Clicked() {
-							uiSt.openPopoverKey = ""
-							st.invalidate()
-						}
-						btnCancel.Children(func() {
-							ui.Text(c, "取消").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
+						Button(c, ButtonOpts{
+							Key:     "btn-cancel-" + popKey,
+							Text:    "取消",
+							Label:   "取消",
+							Variant: ButtonSecondary,
+							Size:    ControlMD,
+							OnClick: func() {
+								uiSt.openPopoverKey = ""
+								st.invalidate()
+							},
 						})
-
-						btnSave := ui.ButtonBase(c.Key("btn-save-"+popKey)).
-							Label("保存").
-							Padding(settingsPillPadX, Space4).
-							Radius(RadiusSM).
-							Background(ThemeAccent(c))
-						{
-							scale := motionPressScale(c, btnSave, "button-press-scale", btnSave.Pressed())
-							btnSave.Scale(scale, scale)
-						}
-						if btnSave.Clicked() {
-							swarmPairSave(st, uiSt.draft, uiSt.isNew)
-							uiSt.openPopoverKey = ""
-							st.invalidate()
-						}
-						btnSave.Children(func() {
-							ui.Text(c, "保存").FontSize(uiFont(TypeBody)).TextColor(ThemeOnAccent(c))
+						Button(c, ButtonOpts{
+							Key:     "btn-save-" + popKey,
+							Text:    "保存",
+							Label:   "保存",
+							Variant: ButtonPrimary,
+							Size:    ControlMD,
+							OnClick: func() {
+								swarmPairSave(st, uiSt.draft, uiSt.isNew)
+								uiSt.openPopoverKey = ""
+								st.invalidate()
+							},
 						})
 					})
 			})
