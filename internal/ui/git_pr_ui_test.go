@@ -422,7 +422,7 @@ func TestGitPRMergeCleansWorktree(t *testing.T) {
 		err, mergeErr       error
 		closeDialog         bool
 	}{
-		{name: "清理成功"},
+		{name: "清理成功", toast: "已合并"},
 		{name: "保留工作区", reason: "有未推送的提交", toast: "已保留 PR #42 的工作区：有未推送的提交"},
 		{name: "清理失败", err: errors.New("清理失败原文"), toast: "清理失败原文"},
 		{name: "合并失败", mergeErr: errors.New("合并失败原文")},

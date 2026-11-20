@@ -547,6 +547,11 @@ func submitReviewPR(s *chatState, dp *diffPanelState, tid, event string) bool {
 			dp.comments = slices.DeleteFunc(dp.comments, func(comment *reviewComment) bool { return ids[comment.id] })
 		}
 		diffPanelMu.Unlock()
+		if err == nil {
+			if msg := gitPRSuccessToast(event); msg != "" {
+				s.setToast(msg)
+			}
+		}
 		s.invalidate()
 	}()
 	return true

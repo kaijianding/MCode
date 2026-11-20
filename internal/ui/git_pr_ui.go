@@ -295,6 +295,21 @@ func gitPRMergeBlocked(detail git.PRDetail) bool {
 	return strings.EqualFold(strings.TrimSpace(detail.Mergeable), "CONFLICTING")
 }
 
+func gitPRSuccessToast(kind string) string {
+	switch kind {
+	case "approve":
+		return "已批准"
+	case "comment":
+		return "已提交评论"
+	case "request-changes":
+		return "已要求修改"
+	case "merge":
+		return "已合并"
+	default:
+		return ""
+	}
+}
+
 func (s *chatState) runGitPRAction(kind, method string) {
 	client, ok := s.client.(gitPRActionClient)
 	if !ok {
@@ -312,10 +327,13 @@ func (s *chatState) runGitPRAction(kind, method string) {
 	s.invalidate()
 	go func() {
 		var err error
+		var cleanupCh chan struct{}
 		if kind == "merge" {
 			err = client.GitPRMerge(context.Background(), threadID, number, method)
 			if cleanup, ok := s.client.(gitPRConflictClient); err == nil && ok {
+				cleanupCh = make(chan struct{})
 				go func() {
+					<-cleanupCh
 					reason, err := cleanup.GitPRCleanupWorktree(context.Background(), threadID, number)
 					if err != nil {
 						s.setToast(err.Error())
@@ -330,12 +348,18 @@ func (s *chatState) runGitPRAction(kind, method string) {
 		st.mu.Lock()
 		if !st.open || st.detailSeq != seq || st.selected != number {
 			st.mu.Unlock()
+			if cleanupCh != nil {
+				close(cleanupCh)
+			}
 			return
 		}
 		st.actionBusy = ""
 		if err != nil {
 			st.actionErr = err.Error()
 			st.mu.Unlock()
+			if cleanupCh != nil {
+				close(cleanupCh)
+			}
 			s.invalidate()
 			return
 		}
@@ -344,6 +368,12 @@ func (s *chatState) runGitPRAction(kind, method string) {
 		st.detailSeq++
 		seq = st.detailSeq
 		st.mu.Unlock()
+		if msg := gitPRSuccessToast(kind); msg != "" {
+			s.setToast(msg)
+		}
+		if cleanupCh != nil {
+			close(cleanupCh)
+		}
 		s.invalidate()
 		s.fetchGitPRDetail(number, seq)
 		s.fetchGitPRList()

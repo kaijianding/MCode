@@ -143,7 +143,7 @@ func configureReviewHunkActions(c *ui.Context, s *chatState, dp *diffPanelState,
 					}
 					s.invalidate()
 				}()
-			}, Body: "仅撤销当前改动块。"})
+			}})
 		if actionErr != "" {
 			ui.Text(c, actionErr).FontSize(uiFont(TypeCaption)).TextColor(ThemeDanger(c))
 		}

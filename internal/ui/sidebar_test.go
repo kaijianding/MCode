@@ -149,7 +149,7 @@ func TestSidebarGitHubCloneEntry(t *testing.T) {
 		t.Fatalf("click clone entry failed: %v", err)
 	}
 	waitFor(t, tt, func() bool {
-		return tt.HasText("选择仓库，克隆到你指定的目录并作为项目打开。")
+		return tt.HasText("从 GitHub 克隆")
 	})
 	if cs := getGitHubCloneState(state); cs == nil || !cs.open {
 		t.Fatalf("expected github clone panel opened")

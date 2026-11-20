@@ -281,6 +281,8 @@ func renderReviewPanel(c *ui.Context, s *chatState, dp *diffPanelState) {
 					diffPanelMu.Unlock()
 					s.loadDiff(tid, "")
 				})
+				renderGitPaneUndo(c, g.ps)
+				renderGitPaneForceConfirm(c, g.ps)
 				return
 			}
 		}
@@ -302,6 +304,7 @@ func renderReviewPanel(c *ui.Context, s *chatState, dp *diffPanelState) {
 		})
 		if g != nil {
 			renderGitPaneUndo(c, g.ps)
+			renderGitPaneForceConfirm(c, g.ps)
 			renderGitCommitComposer(c, s, tid, g.ps, panel)
 		}
 	})

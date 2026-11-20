@@ -332,7 +332,7 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 	}
 	commit := func(push bool) {
 		msg := strings.TrimSpace(draft)
-		if len(entries) == 0 || len(groups[0].entries) > 0 || busy {
+		if len(entries) == 0 || len(groups[0].entries) > 0 || busy || syncing {
 			return
 		}
 		if msg == "" {
@@ -495,7 +495,7 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 		if queued {
 			label = "生成后提交"
 		}
-		disabled := (gitChangesCommitDisabled(draft, len(entries), amend, busy) && !(generating && strings.TrimSpace(draft) == "" && len(entries) > 0 && !busy)) || len(groups[0].entries) > 0
+		disabled := (gitChangesCommitDisabled(draft, len(entries), amend, busy) && !(generating && strings.TrimSpace(draft) == "" && len(entries) > 0 && !busy)) || len(groups[0].entries) > 0 || syncing
 
 		ui.Row(c.Key("git-changes-commit-actions")).FillWidth().Gap(Hairline).Children(func() {
 			b := ui.ButtonBase(c.Key("git-changes-commit")).Label(label).Grow(1).Height(ControlLG).Gap(Space2).AlignItems(ui.Center).Radius(RadiusSM).Disabled(disabled).Background(ThemeAccent(c)).Transition(motionFeedback(c))
@@ -507,6 +507,8 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 				b.Tooltip("没有改动")
 			} else if len(groups[0].entries) > 0 {
 				b.Tooltip("请先解决冲突")
+			} else if syncing {
+				b.Tooltip("Git 操作进行中")
 			}
 			b.OnClick(func() { commit(false) })
 			b.Children(func() {

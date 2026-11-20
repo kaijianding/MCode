@@ -177,7 +177,7 @@ func TestGitHubClonePanelOpenAndClose(t *testing.T) {
 		t.Fatalf("点击侧边栏克隆入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool {
-		return tt.HasText("选择仓库，克隆到你指定的目录并作为项目打开。")
+		return tt.HasText("从 GitHub 克隆")
 	})
 	if !tt.HasText("尚未选择目录") || !tt.HasText("从 GitHub 克隆") {
 		t.Fatalf("克隆面板缺少目录提示或标题: %q", tt.Texts())
@@ -199,7 +199,7 @@ func TestGitHubClonePanelOpenAndClose(t *testing.T) {
 		t.Fatalf("点击关闭按钮失败: %v", err)
 	}
 	tt.Frame()
-	if tt.HasText("选择仓库，克隆到你指定的目录并作为项目打开。") {
+	if tt.HasText("从 GitHub 克隆") {
 		t.Fatalf("关闭后不应再渲染克隆面板")
 	}
 	if cs.open {
@@ -282,7 +282,7 @@ func TestGitHubClonePanelOpensFromEmptyState(t *testing.T) {
 		t.Fatalf("点击浮层克隆入口失败: %v", err)
 	}
 	waitFor(t, tt, func() bool {
-		return tt.HasText("选择仓库，克隆到你指定的目录并作为项目打开。")
+		return tt.HasText("从 GitHub 克隆")
 	})
 	if cs := getGitHubCloneState(state); cs == nil || !cs.open {
 		t.Fatalf("空态入口应打开克隆面板")

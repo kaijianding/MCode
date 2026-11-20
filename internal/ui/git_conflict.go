@@ -236,6 +236,7 @@ func renderGitConflictMenu(c *ui.Context, s *chatState, ps *gitPaneState, st *gi
 				}
 				return nil, client.GitMarkResolved(ctx, key.threadID, []string{key.path})
 			}, "")
+			st.menuOpen = false
 		}})
 		if len(paths) > 1 {
 			action := fmt.Sprintf("all-%t", side.ours)
@@ -248,6 +249,7 @@ func renderGitConflictMenu(c *ui.Context, s *chatState, ps *gitPaneState, st *gi
 					}
 					return nil, client.GitMarkResolved(ctx, key.threadID, paths)
 				}, "")
+				st.menuOpen = false
 			}})
 		}
 	}

@@ -459,20 +459,12 @@ func renderGitHubClonePanel(c *ui.Context, s *chatState) {
 					AlignItems(ui.Center).
 					Children(func() {
 						ui.Icon(c, IconGitFork()).Size(IconMD, IconMD).TextColor(ThemePrimaryText(c))
-						ui.Column(c.Key("github-clone-title-col")).
+						ui.Text(c, "从 GitHub 克隆").
 							Grow(1).
-							Gap(Space0).
-							Children(func() {
-								ui.Text(c, "从 GitHub 克隆").
-									FontSize(uiFont(TypeProse)).
-									FontWeight(600).
-									TextColor(ThemePrimaryText(c)).
-									SingleLine()
-								ui.Text(c, "选择仓库，克隆到你指定的目录并作为项目打开。").
-									FontSize(uiFont(TypeFootnote)).
-									TextColor(ThemeSecondaryText(c)).
-									SingleLine()
-							})
+							FontSize(uiFont(TypeProse)).
+							FontWeight(600).
+							TextColor(ThemePrimaryText(c)).
+							SingleLine()
 						IconButton(c.Key("github-clone-close-btn"), IconButtonProps{
 							Icon:  IconX(),
 							Label: "关闭",
