@@ -120,6 +120,10 @@ type branchPopoverItem struct {
 }
 
 func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string, width float32, open *bool) {
+	renderGitBranchPopoverBody(c, s, threadID, width, open, false)
+}
+
+func renderGitBranchPopoverBody(c *ui.Context, s *chatState, threadID string, width float32, open *bool, withCard bool) {
 	p := branchPopoverFor(s, threadID)
 	client, advanced := s.client.(gitBranchClient)
 	state := s.headerGitState(threadID)
@@ -264,7 +268,11 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 	if selected >= len(items) {
 		selected = 0
 	}
-	popoverCard(c, ui.Column(c.Key("git-branch-content"))).Label("分支列表").Width(max(280, min(width, 360))).MaxWidthPercent(100).Padding(Space2).Gap(Space1).Children(func() {
+	col := ui.Column(c.Key("git-branch-content"))
+	if withCard {
+		col = popoverCard(c, col)
+	}
+	col.Label("分支列表").Width(max(280, min(width, 360))).MaxWidthPercent(100).Padding(Space2).Gap(Space1).Children(func() {
 		SearchField(c, TextFieldProps{Key: "git-branch-search", Value: &query, Label: "搜索分支", Placeholder: "切换或新建分支…", FillWidth: true, AutoFocus: edit == "", OnChange: func(v string) { p.mu.Lock(); p.query = v; p.selected = 0; p.mu.Unlock() }, OnKeyDown: func(k ui.TextKey) bool {
 			switch k.Key {
 			case ui.KeyEscape:
@@ -576,4 +584,8 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 	})
 }
 
-func init() { gitPaneBranchPopover = renderGitBranchPopoverContent }
+func init() {
+	gitPaneBranchPopover = func(c *ui.Context, s *chatState, threadID string, width float32, open *bool) {
+		renderGitBranchPopoverBody(c, s, threadID, width, open, true)
+	}
+}

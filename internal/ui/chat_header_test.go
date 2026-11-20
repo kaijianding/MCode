@@ -712,7 +712,7 @@ func TestChatHeaderOpenInMenu(t *testing.T) {
 		t.Fatalf("click open-in button failed: %v", err)
 	}
 	waitFor(t, tt, func() bool {
-		_, ok := tt.Find("打开方式")
+		_, ok := tt.Find("访达")
 		return ok
 	})
 	if !tt.HasText("访达") || !tt.HasText("Cursor") {
@@ -901,17 +901,7 @@ func TestChatHeaderScriptsMenu(t *testing.T) {
 	}
 	lintIdx, devIdx := -1, -1
 	texts := tt.Texts()
-	menuStart := -1
 	for i, txt := range texts {
-		if txt == "执行命令" {
-			menuStart = i
-			break
-		}
-	}
-	if menuStart < 0 {
-		t.Fatalf("菜单应包含「执行命令」标题, texts: %q", texts)
-	}
-	for i, txt := range texts[menuStart:] {
 		switch txt {
 		case "lint":
 			if lintIdx < 0 {
@@ -958,7 +948,7 @@ func TestChatHeaderScriptsMenuScroll(t *testing.T) {
 	if err := tt.Click("运行项目脚本"); err != nil {
 		t.Fatalf("打开脚本菜单失败: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("执行命令") })
+	waitFor(t, tt, func() bool { return tt.HasText("全部脚本（30）") })
 
 	if err := tt.Click("全部脚本（30）"); err != nil {
 		t.Fatalf("展开全部脚本失败: %v", err)
@@ -1714,5 +1704,131 @@ func TestFileManagerPlatformLabels(t *testing.T) {
 		if got := trashActionLabel(); got != tc.trash {
 			t.Errorf("%s: %q", tc.goos, got)
 		}
+	}
+}
+
+func TestUIReview2MoveWorktreeTransferLabelOnce(t *testing.T) {
+	fake := newGitFakeClient()
+	fake.SetMessages("t1", []Message{{ID: "m1", Role: "user", Text: "hi"}})
+	tt := ui.NewTesterWith(Root(fake), 1000, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	waitFor(t, tt, func() bool { return tt.HasText("feature/login") })
+
+	if err := tt.Click("Git 分支"); err != nil {
+		t.Fatalf("click branch capsule failed: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("迁入 Worktree…")
+		return ok
+	})
+	if err := tt.Click("迁入 Worktree…"); err != nil {
+		t.Fatalf("click move worktree failed: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("同时迁移未提交的改动") })
+
+	count := 0
+	for _, txt := range tt.Texts() {
+		if txt == "同时迁移未提交的改动" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("「同时迁移未提交的改动」出现次数 = %d，期望 1，texts: %q", count, tt.Texts())
+	}
+}
+
+func TestUIReview2BranchPopoverSingleCard(t *testing.T) {
+	fake := newGitFakeClient()
+	tt := ui.NewTesterWith(Root(fake), 1000, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	waitFor(t, tt, func() bool { return tt.HasText("feature/login") })
+
+	if err := tt.Click("Git 分支"); err != nil {
+		t.Fatalf("click branch capsule failed: %v", err)
+	}
+	waitFor(t, tt, func() bool {
+		_, ok := tt.Find("分支列表")
+		return ok
+	})
+	card, ok := tt.Find("分支列表")
+	if !ok {
+		t.Fatal("找不到分支列表容器")
+	}
+
+	img := tt.Image()
+	y := int(card.Y + card.H/2)
+	outerPad := img.At(int(card.X)-2, y)
+	innerEdge := img.At(int(card.X), y)
+	innerPad := img.At(int(card.X)+2, y)
+	outside := img.At(int(card.X+card.W+Space1)+20, y)
+	if outerPad != innerEdge || innerEdge != innerPad {
+		t.Fatalf("分支浮层存在内层卡片边框或阴影：outerPad=%v innerEdge=%v innerPad=%v", outerPad, innerEdge, innerPad)
+	}
+	if outerPad == outside {
+		t.Fatalf("分支浮层外层缺少 popoverCard 底色：outerPad=%v outside=%v", outerPad, outside)
+	}
+
+	// 单独通过 gitPaneBranchPopover 打开时仍应保留一层 popoverCard。
+	s := newChatState(fake)
+	defer s.close()
+	open := true
+	paneTT := ui.NewTesterWith(func(c *ui.Context) {
+		ui.Box(c).Fill().Padding(24).Children(func() {
+			gitPaneBranchPopover(c, s, "t1", 320, &open)
+		})
+	}, 600, 500, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	paneCard, ok := paneTT.Find("分支列表")
+	if !ok {
+		t.Fatal("gitPaneBranchPopover 未渲染分支列表")
+	}
+	paneImg := paneTT.Image()
+	py := int(paneCard.Y + paneCard.H/2)
+	if paneImg.At(int(paneCard.X), py) == paneImg.At(int(paneCard.X)+2, py) || paneImg.At(int(paneCard.X)+2, py) == paneImg.At(int(paneCard.X)-20, py) {
+		t.Fatal("gitPaneBranchPopover 单独打开时应保留一层 popoverCard 边框与底色")
+	}
+}
+
+func TestUIReview2NoRedundantHeadersOrWorktreeSuffix(t *testing.T) {
+	origGOOS := openInGOOS
+	defer func() { openInGOOS = origGOOS }()
+	openInGOOS = "darwin"
+	testenv.TempHome(t)
+
+	fake := newGitFakeClient()
+	s, root := buildRoot(fake)
+	t.Cleanup(s.close)
+	tt := ui.NewTesterWith(root, 1000, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1}})
+	waitFor(t, tt, func() bool { return tt.HasText("feature/login") })
+
+	if err := tt.Click("在其它应用中打开"); err != nil {
+		t.Fatalf("click open-in button failed: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("访达") })
+	if tt.HasText("打开方式") {
+		t.Fatalf("打开方式菜单不应再渲染顶部标题，texts: %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	waitFor(t, tt, func() bool { return !tt.HasText("访达") })
+
+	if err := tt.Click("运行项目脚本"); err != nil {
+		t.Fatalf("click scripts button failed: %v", err)
+	}
+	waitFor(t, tt, func() bool { return tt.HasText("添加脚本…") })
+	if tt.HasText("执行命令") {
+		t.Fatalf("执行命令菜单不应再渲染顶部标题，texts: %q", tt.Texts())
+	}
+
+	aw := getAIWorktreeState(s)
+	s.mu.Lock()
+	rev := s.messagesRev
+	s.mu.Unlock()
+	aw.mu.Lock()
+	aw.gens["t1"]++
+	aw.found["t1"] = aiWorktreeInfo{Path: "/tmp/ai-wt", Branch: "feat/ai-wt"}
+	aw.revs["t1"] = rev
+	aw.mu.Unlock()
+	s.invalidate()
+
+	waitFor(t, tt, func() bool { return tt.HasText("feat/ai-wt") })
+	if tt.HasText("AI Worktree") {
+		t.Fatalf("分支胶囊不应包含「AI Worktree」后缀，texts: %q", tt.Texts())
 	}
 }

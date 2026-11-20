@@ -644,7 +644,7 @@ func visibleHeaderWorktree(branch string) bool {
 // renderGitBranchCapsule 渲染分支胶囊及分支/Worktree 菜单：切换与新建分支在独立窗口里完成
 // （见 git_form_windows_ui.go），Worktree 切换仍在菜单内直接执行。
 func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, threadID string, st GitState) {
-	// 会话在自建 worktree 里干活时，改用该 worktree 的分支名并标注来源，Tooltip 带上完整路径。
+	// 会话在自建 worktree 里干活时，改用该 worktree 的分支名，Tooltip 带上完整路径。
 	label := gitBranchLabel(st)
 	aiWT := s.aiWorktree(threadID)
 	if aiWT.Path != "" {
@@ -652,7 +652,7 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 		if name == "" {
 			name = filepath.Base(aiWT.Path)
 		}
-		label = name + " · AI Worktree"
+		label = name
 	}
 
 	trigger := ui.ButtonBase(c.Key("chat-header-git-branch-btn")).Label("Git 分支").Height(ControlSM).Padding(0, Space3).Radius(RadiusSM).Gap(Space2).AlignItems(ui.Center).Border(Hairline, ThemeBorder(c)).Background(ThemeOverlay(c, OverlaySubtle)).Transition(motionFeedback(c)).OnClick(func() {
@@ -865,10 +865,9 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 													Gap(Space2).
 													AlignItems(ui.Center).
 													Children(func() {
-														ui.Toggle(c.Key("chat-header-git-move-wt-transfer-check"), &hs.wtTransfer, "同时迁移未提交的改动")
-														ui.Text(c, "同时迁移未提交的改动").
-															FontSize(uiFont(TypeFootnote)).
-															TextColor(ThemePrimaryText(c))
+														if cb := ui.Checkbox(c.Key("chat-header-git-move-wt-transfer-check"), &hs.wtTransfer, "同时迁移未提交的改动"); cb.Changed() {
+															s.invalidate()
+														}
 													})
 												Button(c.Key("chat-header-git-move-wt-confirm"), ButtonOpts{
 													Text:     "迁入",

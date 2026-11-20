@@ -101,11 +101,6 @@ func renderHeaderScriptsMenuButton(c *ui.Context, s *chatState, threadID string)
 							Gap(Space0).
 							FillWidth().
 							Children(func() {
-								ui.Text(c, "执行命令").
-									FontSize(uiFont(TypeCaption)).
-									Bold().
-									TextColor(ThemeSecondaryText(c)).
-									Padding(Space1, Space3, Space0, Space3)
 								if loaded && len(scripts) == 0 {
 									ui.Text(c, "暂无可用脚本").
 										FontSize(uiFont(TypeFootnote)).
@@ -320,11 +315,6 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 			MinWidth(200).
 			MaxWidth(300).
 			Children(func() {
-				ui.Text(c, "打开方式").
-					FontSize(uiFont(TypeCaption)).
-					Bold().
-					TextColor(ThemeSecondaryText(c)).
-					Padding(Space1, Space3, Space0, Space3)
 				menuRow(c, menuRowProps{
 					Key:   "chat-header-open-in-unified-finder",
 					Label: openInFileManagerName(),
