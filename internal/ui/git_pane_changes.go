@@ -572,52 +572,46 @@ func renderGitChangesDialogs(c *ui.Context, ps *gitPaneState, st *gitChangesStat
 	st.mu.Lock()
 	confirm, pendingCommit := st.confirm, st.confirmCommit
 	st.mu.Unlock()
-	if confirm {
-		open := true
-		modalDragModal(c, "git-changes-discard-confirm", &open, func() {
-			ui.Column(c.Key("git-changes-discard-card")).Width(KanbanDetailMinWidth).Padding(Space6).Gap(Space5).Radius(RadiusLG).Background(ThemeSurface(c)).Children(func() {
-				ui.Text(c, fmt.Sprintf("撤销全部 %d 个文件的改动？", len(groups[2].entries))).FontSize(uiFont(TypeTitle)).TextColor(ThemePrimaryText(c))
-				ui.Row(c).FillWidth().Justify(ui.End).Gap(Space3).Children(func() {
-					Button(c.Key("git-changes-discard-cancel"), ButtonOpts{Text: "取消", Variant: ButtonSecondary, OnClick: func() { st.mu.Lock(); st.confirm = false; st.mu.Unlock() }}).AutoFocus()
-					Button(c.Key("git-changes-discard-confirm-button"), ButtonOpts{Text: "撤销", Variant: ButtonDanger, OnClick: func() {
-						st.mu.Lock()
-						st.confirm = false
-						st.mu.Unlock()
-						gitChangesDiscard(ps, st, client, threadID, gitChangesPaths(groups[2].entries))
-					}})
-				})
-			})
-		})
-		if !open {
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:             "git-changes-discard-confirm",
+		Open:            confirm,
+		Tone:            ConfirmDanger,
+		Title:           fmt.Sprintf("撤销全部 %d 个文件的改动？", len(groups[2].entries)),
+		ConfirmLabel:    "撤销",
+		CancelLabel:     "取消",
+		CancelAutoFocus: true,
+		OnConfirm: func() {
 			st.mu.Lock()
 			st.confirm = false
 			st.mu.Unlock()
-		}
-	} else {
-		modalDragReset("git-changes-discard-confirm")
-	}
-	if pendingCommit != nil {
-		open := true
-		modalDragModal(c, "git-changes-commit-confirm", &open, func() {
-			ui.Column(c.Key("git-changes-commit-confirm-card")).Width(KanbanDetailMinWidth).Padding(Space6).Gap(Space5).Radius(RadiusLG).Background(ThemeSurface(c)).Children(func() {
-				ui.Text(c, "Agent 仍在修改，仍要提交？").FontSize(uiFont(TypeTitle)).TextColor(ThemePrimaryText(c))
-				ui.Row(c).FillWidth().Justify(ui.End).Gap(Space3).Children(func() {
-					Button(c.Key("git-changes-commit-confirm-cancel"), ButtonOpts{Text: "取消", Variant: ButtonSecondary, OnClick: func() { st.mu.Lock(); st.confirmCommit = nil; st.mu.Unlock() }}).AutoFocus()
-					Button(c.Key("git-changes-commit-confirm-submit"), ButtonOpts{Text: "提交", Variant: ButtonPrimary, OnClick: func() {
-						st.mu.Lock()
-						st.confirmCommit = nil
-						st.mu.Unlock()
-						pendingCommit()
-					}})
-				})
-			})
-		})
-		if !open {
+			gitChangesDiscard(ps, st, client, threadID, gitChangesPaths(groups[2].entries))
+		},
+		OnCancel: func() {
+			st.mu.Lock()
+			st.confirm = false
+			st.mu.Unlock()
+		},
+	})
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:             "git-changes-commit-confirm",
+		Open:            pendingCommit != nil,
+		Tone:            ConfirmSafe,
+		Title:           "Agent 仍在修改，仍要提交？",
+		ConfirmLabel:    "提交",
+		CancelLabel:     "取消",
+		CancelAutoFocus: true,
+		OnConfirm: func() {
 			st.mu.Lock()
 			st.confirmCommit = nil
 			st.mu.Unlock()
-		}
-	} else {
-		modalDragReset("git-changes-commit-confirm")
-	}
+			if pendingCommit != nil {
+				pendingCommit()
+			}
+		},
+		OnCancel: func() {
+			st.mu.Lock()
+			st.confirmCommit = nil
+			st.mu.Unlock()
+		},
+	})
 }

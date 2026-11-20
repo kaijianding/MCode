@@ -58,6 +58,8 @@ type ConfirmDialog struct {
 	ExtraLabel      string // 可选的第三个动作（如「放弃」），排在确认与取消之间
 	OnExtra         func()
 	ConfirmDisabled bool   // 确认按钮禁用（如提交进行中）
+	ConfirmTooltip  string // 确认按钮禁用时的说明
+	CancelAutoFocus bool   // 默认焦点放在「取消」：不可撤销的 git 操作用它防误按 Enter
 	Footer          func() // 明细之后、按钮行之前的自定义内容（错误提示、必须勾选的复选框）
 }
 
@@ -131,6 +133,8 @@ func RenderConfirmDialog(c *ui.Context, d ConfirmDialog) {
 		if c.Shortcut(0, ui.KeyEnter) {
 			if d.Tone == ConfirmNotice {
 				closeNotice()
+			} else if d.CancelAutoFocus {
+				run(d.OnCancel)
 			} else if !d.ConfirmDisabled {
 				run(d.OnConfirm)
 			}
@@ -191,12 +195,15 @@ func RenderConfirmDialog(c *ui.Context, d ConfirmDialog) {
 					Children(func() {
 						// 提示态没有取消与第三个动作，只有「知道了」。
 						if d.Tone != ConfirmNotice {
-							Button(c.Key("confirm-"+key+"-cancel"), ButtonOpts{
+							cancelBtn := Button(c.Key("confirm-"+key+"-cancel"), ButtonOpts{
 								Text:    cancelText,
 								Label:   d.CancelA11y,
 								Variant: ButtonSecondary,
 								OnClick: func() { run(d.OnCancel) },
 							})
+							if d.CancelAutoFocus {
+								cancelBtn.AutoFocus()
+							}
 							if d.ExtraLabel != "" && d.OnExtra != nil {
 								extraVariant := ButtonSecondary
 								if d.Tone == ConfirmDanger {
@@ -209,16 +216,19 @@ func RenderConfirmDialog(c *ui.Context, d ConfirmDialog) {
 								})
 							}
 						}
-						// 确认按钮是弹窗的默认焦点：框架里获得焦点的按钮会先吃掉 Enter
-						// （ui/input.go 的按钮点击分支），若焦点落在先渲染的「取消」上，
-						// Enter 就会被当成取消；AutoFocus 让 Enter 走确认。
-						Button(c.Key("confirm-"+key+"-confirm"), ButtonOpts{
+						// 默认焦点通常在确认按钮上，让 Enter 直接确认；
+						// CancelAutoFocus 为 true 时把焦点放到「取消」上，防止不可撤销操作误按 Enter。
+						confirmBtn := Button(c.Key("confirm-"+key+"-confirm"), ButtonOpts{
 							Text:     confirmText,
 							Label:    d.ConfirmA11y,
 							Variant:  confirmVariant,
 							Disabled: d.ConfirmDisabled,
+							Tooltip:  d.ConfirmTooltip,
 							OnClick:  func() { run(d.OnConfirm) },
-						}).AutoFocus()
+						})
+						if !d.CancelAutoFocus || d.Tone == ConfirmNotice {
+							confirmBtn.AutoFocus()
+						}
 					})
 			})
 	})

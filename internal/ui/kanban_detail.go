@@ -173,19 +173,20 @@ func renderTaskDetailContent(c *ui.Context, s *chatState, ks *kanbanState) {
 				ks.detailEditHadFocus = false
 			}
 		}
-		if ks.detailDeleteOpen {
-			ui.DialogBase(c.Key("kanban-detail-delete-dialog"), &ks.detailDeleteOpen, func(backdrop, panel ui.Element) {
-				backdrop.Absolute().Left(0).Top(0).Right(0).Bottom(0).Center().Background(ui.Color{}.Alpha(ScrimOpacity))
-				panel.MaxWidth(settingsSheetWidth).Padding(0)
-				ui.Column(c.Key("kanban-detail-delete-card")).Padding(Space5).Gap(Space3).Background(ThemeSurface(c)).Radius(RadiusLG).Transition(motionDialog(c)).Children(func() {
-					ui.Text(c, "确认删除该任务？此操作不可撤销").TextColor(ThemePrimaryText(c))
-					ui.Row(c).Gap(Space2).Children(func() {
-						Button(c.Key("kanban-detail-delete-cancel"), ButtonOpts{Text: "取消", Label: "kanban-detail-delete-cancel", OnClick: func() { ks.detailDeleteOpen = false }})
-						Button(c.Key("kanban-detail-delete-confirm"), ButtonOpts{Text: "确认删除", Label: "kanban-detail-delete-confirm", Variant: ButtonDanger, Disabled: kanbanTaskBusy(ks, task.ID), OnClick: func() { ks.detailDeleteOpen = false; s.deleteKanbanTask(*task) }})
-					})
-				})
-			})
-		}
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:             "kanban-detail-delete-dialog",
+			Open:            ks.detailDeleteOpen,
+			Tone:            ConfirmDanger,
+			Title:           "删除该任务？",
+			Body:            "此操作不可撤销",
+			ConfirmLabel:    "删除",
+			ConfirmA11y:     "kanban-detail-delete-confirm",
+			CancelLabel:     "取消",
+			CancelA11y:      "kanban-detail-delete-cancel",
+			ConfirmDisabled: kanbanTaskBusy(ks, task.ID),
+			OnConfirm:       func() { ks.detailDeleteOpen = false; s.deleteKanbanTask(*task) },
+			OnCancel:        func() { ks.detailDeleteOpen = false },
+		})
 		if task.ThreadID != threadID || task.Revision != revision {
 			s.loadTaskDetail(*task, false)
 		}

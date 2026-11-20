@@ -283,6 +283,28 @@ func trashActionLabel() string {
 	return "移到废纸篓"
 }
 
+func renderFileManagerOpsError(c *ui.Context, msg string) {
+	if msg == "" {
+		return
+	}
+	ui.Row(c.Key("file-manager-ops-error")).
+		FillWidth().
+		Padding(Space2, Space3).
+		Radius(RadiusSM).
+		Background(ThemeDanger(c).Alpha(0.12)).
+		Gap(Space2).
+		AlignItems(ui.Center).
+		Children(func() {
+			ui.Icon(c, IconOctagonAlert()).
+				Size(IconSM, IconSM).
+				TextColor(ThemeDanger(c))
+			ui.Text(c, msg).
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(ThemeDanger(c)).
+				Wrap()
+		})
+}
+
 // renderFileManagerOpsDialog 渲染新建 / 重命名 / 移到废纸篓的弹窗卡片。
 func renderFileManagerOpsDialog(c *ui.Context, s *chatState) {
 	st := getFileManagerState(s)
@@ -294,11 +316,34 @@ func renderFileManagerOpsDialog(c *ui.Context, s *chatState) {
 	ops := st.ops
 	fileManagerMu.Unlock()
 	if !ops.open {
+		RenderConfirmDialog(c, ConfirmDialog{Key: modalDragFileManagerOp, Open: false})
+		return
+	}
+
+	if ops.kind == fileManagerOpsTrash {
+		action := trashActionLabel()
+		var footer func()
+		if ops.err != "" {
+			footer = func() { renderFileManagerOpsError(c, ops.err) }
+		}
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:             modalDragFileManagerOp,
+			Open:            true,
+			Tone:            ConfirmDanger,
+			Title:           action + "？",
+			Body:            "确定把 " + ops.targetPath + " " + action + "吗？",
+			ConfirmLabel:    action,
+			ConfirmA11y:     "确认" + action,
+			CancelLabel:     "取消",
+			ConfirmDisabled: ops.busy,
+			Footer:          footer,
+			OnConfirm:       func() { s.submitFileManagerOpsDialog() },
+			OnCancel:        func() { s.closeFileManagerOpsDialog() },
+		})
 		return
 	}
 
 	title, confirm, inputLabel, placeholder := "", "", "", ""
-	destructive := false
 	switch ops.kind {
 	case fileManagerOpsNewFile:
 		title, confirm, inputLabel, placeholder = "新建文件", "创建", "文件名", "如：new.txt"
@@ -306,8 +351,6 @@ func renderFileManagerOpsDialog(c *ui.Context, s *chatState) {
 		title, confirm, inputLabel, placeholder = "新建文件夹", "创建", "文件夹名", "如：docs"
 	case fileManagerOpsRename:
 		title, confirm, inputLabel, placeholder = "重命名", "重命名", "新名称", "输入新名称"
-	case fileManagerOpsTrash:
-		title, confirm, destructive = trashActionLabel(), trashActionLabel(), true
 	default:
 		return
 	}
@@ -326,43 +369,19 @@ func renderFileManagerOpsDialog(c *ui.Context, s *chatState) {
 					FontWeight(600).
 					TextColor(ThemePrimaryText(c))
 
-				if destructive {
-					ui.Text(c, "确定把 "+ops.targetPath+" "+trashActionLabel()+"吗？").
-						FontSize(uiFont(TypeBody)).
-						TextColor(ThemePrimaryText(c)).
-						Wrap()
-				} else {
-					TextField(c, TextFieldProps{Key: "file-manager-ops-input", Value: &st.ops.name, Label: inputLabel, Placeholder: placeholder, FillWidth: true, AutoFocus: true, OnKeyDown: func(k ui.TextKey) bool {
-						if k.Key == ui.KeyEscape {
-							s.closeFileManagerOpsDialog()
-							return true
-						}
-						if k.Key == ui.KeyEnter {
-							s.submitFileManagerOpsDialog()
-							return true
-						}
-						return false
-					}})
-				}
+				TextField(c, TextFieldProps{Key: "file-manager-ops-input", Value: &st.ops.name, Label: inputLabel, Placeholder: placeholder, FillWidth: true, AutoFocus: true, OnKeyDown: func(k ui.TextKey) bool {
+					if k.Key == ui.KeyEscape {
+						s.closeFileManagerOpsDialog()
+						return true
+					}
+					if k.Key == ui.KeyEnter {
+						s.submitFileManagerOpsDialog()
+						return true
+					}
+					return false
+				}})
 
-				if ops.err != "" {
-					ui.Row(c.Key("file-manager-ops-error")).
-						FillWidth().
-						Padding(Space2, Space3).
-						Radius(RadiusSM).
-						Background(ThemeDanger(c).Alpha(0.12)).
-						Gap(Space2).
-						AlignItems(ui.Center).
-						Children(func() {
-							ui.Icon(c, IconOctagonAlert()).
-								Size(IconSM, IconSM).
-								TextColor(ThemeDanger(c))
-							ui.Text(c, ops.err).
-								FontSize(uiFont(TypeFootnote)).
-								TextColor(ThemeDanger(c)).
-								Wrap()
-						})
-				}
+				renderFileManagerOpsError(c, ops.err)
 
 				FormActions(c, "file-manager-ops-actions", func() {
 					Button(c.Key("file-manager-ops-cancel"), ButtonOpts{
@@ -372,17 +391,10 @@ func renderFileManagerOpsDialog(c *ui.Context, s *chatState) {
 							s.closeFileManagerOpsDialog()
 						},
 					})
-					variant := ButtonPrimary
-					label := confirm
-					if destructive {
-						variant = ButtonDanger
-						// 弹窗标题也是「移到废纸篓」，给确认按钮单独一个无障碍标签便于区分。
-						label = "确认" + confirm
-					}
 					Button(c.Key("file-manager-ops-confirm"), ButtonOpts{
 						Text:     confirm,
-						Label:    label,
-						Variant:  variant,
+						Label:    confirm,
+						Variant:  ButtonPrimary,
 						Disabled: ops.busy,
 						OnClick: func() {
 							s.submitFileManagerOpsDialog()

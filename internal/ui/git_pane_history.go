@@ -962,54 +962,59 @@ func renderGitHistoryDialog(c *ui.Context, s *chatState, ps *gitPaneState, h *gi
 	kind, sha, name := h.dialog, h.dialogSHA, h.dialogName
 	h.mu.Unlock()
 	if kind == "" {
+		RenderConfirmDialog(c, ConfirmDialog{Key: "git-history-dialog", Open: false})
+		return
+	}
+	close := func() { h.mu.Lock(); h.dialog = ""; h.mu.Unlock(); gitHistoryInvalidate(ps) }
+	if kind == "hard" {
+		disabled, tip := gitHistoryWriteBlocked(s, ps, h, true)
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:             "git-history-dialog",
+			Open:            true,
+			Tone:            ConfirmDanger,
+			Title:           "重置到 " + gitHistoryShortSHA(sha) + " 并丢弃全部改动？",
+			ConfirmLabel:    "丢弃并重置",
+			CancelLabel:     "取消",
+			CancelAutoFocus: true,
+			ConfirmDisabled: disabled,
+			ConfirmTooltip:  tip,
+			OnConfirm: func() {
+				close()
+				h.write(ps, client, true, "已重置", func(ctx context.Context) error {
+					return client.GitReset(ctx, ps.threadID, sha, "hard")
+				})
+			},
+			OnCancel: close,
+		})
 		return
 	}
 	open := true
-	close := func() { h.mu.Lock(); h.dialog = ""; h.mu.Unlock(); gitHistoryInvalidate(ps) }
 	modalDragModal(c, "git-history-dialog", &open, func() {
-		title, confirm := "基于此新建分支", "创建"
+		title := "基于此新建分支"
 		if kind == "tag" {
 			title = "打标签"
-		} else if kind == "hard" {
-			title = "重置到 " + gitHistoryShortSHA(sha) + " 并丢弃全部改动？"
-			confirm = "丢弃并重置"
 		}
 		ui.Column(c.Key("git-history-dialog-card")).Width(KanbanDetailMinWidth).MaxWidth(KanbanDetailMaxWidth).Padding(Space5).Gap(Space4).Radius(RadiusLG).Background(ThemeSurface(c)).BorderWidth(Hairline).BorderColor(ThemeBorder(c)).Transition(motionDialog(c)).Children(func() {
 			ui.Text(c, title).FontSize(uiFont(TypeTitle)).TextColor(ThemePrimaryText(c))
-			if kind != "hard" {
-				TextField(c, TextFieldProps{Key: "git-history-name", Label: "名称", Value: &name, AutoFocus: true, FillWidth: true, OnChange: func(value string) { h.mu.Lock(); h.dialogName = value; h.mu.Unlock() }})
-			}
+			TextField(c, TextFieldProps{Key: "git-history-name", Label: "名称", Value: &name, AutoFocus: true, FillWidth: true, OnChange: func(value string) { h.mu.Lock(); h.dialogName = value; h.mu.Unlock() }})
 			ui.Row(c.Key("git-history-dialog-actions")).FillWidth().Justify(ui.End).Gap(Space2).Children(func() {
-				cancel := Button(c, ButtonOpts{Key: "git-history-dialog-cancel", Text: "取消", Variant: ButtonSecondary, OnClick: close})
-				if kind == "hard" {
-					cancel.AutoFocus()
-				}
-				disabled, tip := gitHistoryWriteBlocked(s, ps, h, kind == "hard")
-				if kind != "hard" && strings.TrimSpace(name) == "" {
+				Button(c, ButtonOpts{Key: "git-history-dialog-cancel", Text: "取消", Variant: ButtonSecondary, OnClick: close})
+				disabled, tip := gitHistoryWriteBlocked(s, ps, h, false)
+				if strings.TrimSpace(name) == "" {
 					disabled = true
 					tip = "请输入名称"
 				}
-				variant := ButtonPrimary
-				if kind == "hard" {
-					variant = ButtonDanger
-				}
-				Button(c, ButtonOpts{Key: "git-history-dialog-confirm", Text: confirm, Variant: variant, Disabled: disabled, OnClick: func() {
+				Button(c, ButtonOpts{Key: "git-history-dialog-confirm", Text: "创建", Variant: ButtonPrimary, Disabled: disabled, OnClick: func() {
 					close()
-					toast := "已重置"
-					if kind == "branch" {
-						toast = "已创建分支 " + strings.TrimSpace(name)
-					} else if kind == "tag" {
+					toast := "已创建分支 " + strings.TrimSpace(name)
+					if kind == "tag" {
 						toast = "已创建标签 " + strings.TrimSpace(name)
 					}
-					h.write(ps, client, kind == "hard", toast, func(ctx context.Context) error {
-						switch kind {
-						case "hard":
-							return client.GitReset(ctx, ps.threadID, sha, "hard")
-						case "branch":
+					h.write(ps, client, false, toast, func(ctx context.Context) error {
+						if kind == "branch" {
 							return client.GitCreateBranchAt(ctx, ps.threadID, strings.TrimSpace(name), sha, false)
-						default:
-							return client.GitTagCreate(ctx, ps.threadID, strings.TrimSpace(name), sha, "")
 						}
+						return client.GitTagCreate(ctx, ps.threadID, strings.TrimSpace(name), sha, "")
 					})
 				}}).Tooltip(tip)
 			})

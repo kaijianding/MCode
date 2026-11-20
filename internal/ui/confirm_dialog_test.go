@@ -404,3 +404,103 @@ func TestConfirmDialogWidthFollowsContent(t *testing.T) {
 		})
 	}
 }
+
+// TestConfirmDialogCancelAutoFocus CancelAutoFocus=true 时取消按钮获焦、按 Enter 调用 OnCancel 而不调用 OnConfirm；
+// 默认情况下确认按钮获焦。
+func TestConfirmDialogCancelAutoFocus(t *testing.T) {
+	t.Run("CancelAutoFocus 为 true 时取消按钮获焦且 Enter 走取消", func(t *testing.T) {
+		cnt := &confirmCounters{}
+		d := ConfirmDialog{
+			Key:             "test-cancel-autofocus",
+			Open:            true,
+			Tone:            ConfirmDanger,
+			Title:           "强制推送？",
+			ConfirmLabel:    "强制推送",
+			CancelLabel:     "取消",
+			CancelAutoFocus: true,
+			OnConfirm:       func() { cnt.confirm++ },
+			OnCancel:        func() { cnt.cancel++ },
+		}
+		tt := ui.NewTester(func(c *ui.Context) {
+			cur := d
+			cur.Footer = func() {
+				ui.Box(c.Key("confirm-test-cancel-autofocus-target")).
+					Width(40).
+					Height(12).
+					Focusable().
+					Label("focus-target")
+			}
+			RenderConfirmDialog(c, cur)
+		}, 800, 600)
+		tt.Frame()
+
+		if !tt.Focused("取消") {
+			t.Fatal("CancelAutoFocus=true 时取消按钮应获焦")
+		}
+		if tt.Focused("强制推送") {
+			t.Fatal("CancelAutoFocus=true 时确认按钮不应获焦")
+		}
+		tt.Key(0, ui.KeyEnter)
+		if cnt.cancel != 1 || cnt.confirm != 0 {
+			t.Fatalf("Enter 应调用 OnCancel 且不调用 OnConfirm: cancel=%d confirm=%d", cnt.cancel, cnt.confirm)
+		}
+
+		// 即使焦点移出按钮，CancelAutoFocus 时按 Enter 也必须走取消。
+		if err := tt.Click("focus-target"); err != nil {
+			t.Fatalf("点击焦点目标失败: %v", err)
+		}
+		cnt.cancel, cnt.confirm = 0, 0
+		tt.Key(0, ui.KeyEnter)
+		if cnt.cancel != 1 || cnt.confirm != 0 {
+			t.Fatalf("焦点移出后 Enter 也应调用 OnCancel: cancel=%d confirm=%d", cnt.cancel, cnt.confirm)
+		}
+	})
+
+	t.Run("默认情况下确认按钮获焦", func(t *testing.T) {
+		d := ConfirmDialog{
+			Key:          "test-default-autofocus",
+			Open:         true,
+			Tone:         ConfirmDanger,
+			Title:        "删除记录？",
+			ConfirmLabel: "删除",
+			CancelLabel:  "取消",
+		}
+		tt := ui.NewTester(func(c *ui.Context) { RenderConfirmDialog(c, d) }, 800, 600)
+		tt.Frame()
+
+		if !tt.Focused("删除") {
+			t.Fatal("默认情况下确认按钮应获焦")
+		}
+		if tt.Focused("取消") {
+			t.Fatal("默认情况下取消按钮不应获焦")
+		}
+	})
+}
+
+// TestConfirmDialogConfirmTooltip 禁用的确认按钮无障碍描述等于 ConfirmTooltip。
+func TestConfirmDialogConfirmTooltip(t *testing.T) {
+	const tip = "Agent 正在修改此工作区"
+	d := ConfirmDialog{
+		Key:             "test-confirm-tooltip",
+		Open:            true,
+		Tone:            ConfirmDanger,
+		Title:           "丢弃全部改动？",
+		ConfirmLabel:    "丢弃并重置",
+		CancelLabel:     "取消",
+		ConfirmDisabled: true,
+		ConfirmTooltip:  tip,
+	}
+	tt := ui.NewTester(func(c *ui.Context) { RenderConfirmDialog(c, d) }, 800, 600)
+	tt.Frame()
+
+	node, ok := tt.Access("丢弃并重置")
+	if !ok {
+		t.Fatal("没找到确认按钮")
+	}
+	if !node.Disabled {
+		t.Fatal("确认按钮应处于禁用状态")
+	}
+	if node.Description != tip {
+		t.Fatalf("确认按钮无障碍描述 = %q，期望 %q", node.Description, tip)
+	}
+}

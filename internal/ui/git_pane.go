@@ -1009,28 +1009,25 @@ func renderGitPaneSwitchStash(c *ui.Context, ps *gitPaneState) {
 }
 
 func renderGitPaneForceConfirm(c *ui.Context, ps *gitPaneState) {
-	if !ps.forceOpen {
-		return
+	ps.mu.Lock()
+	blocked := ps.syncing || ps.state.Detached || ps.state.Branch != ps.forceBranch
+	ps.mu.Unlock()
+	tip := ""
+	if blocked {
+		tip = "Git 操作进行中或分支已变化"
 	}
-	ui.DialogBase(c.Key("git-pane-force-dialog"), &ps.forceOpen, func(backdrop, panel ui.Element) {
-		backdrop.Background(ui.Color{}.Alpha(ScrimOpacity))
-		winW, winH := c.Size()
-		panel.MaxWidth(min(inspectorDefaultWidth, winW-Space8)).MaxHeight(winH - Space8).Children(func() {
-			ui.Column(c.Key("git-pane-force-card")).MaxWidth(inspectorDefaultWidth).Padding(Space6).Gap(Space4).Radius(RadiusLG).Background(ThemeSurfaceCard(c)).Transition(motionDialog(c)).Children(func() {
-				ui.Text(c, "强制推送 "+ps.forceBranch+"？").FontSize(uiFont(TypeTitle))
-				ui.Row(c).Gap(Space3).Justify(ui.End).Children(func() {
-					Button(c, ButtonOpts{Key: "git-pane-force-cancel", Text: "取消", Variant: ButtonSecondary, OnClick: func() { ps.forceOpen = false }}).AutoFocus()
-					ps.mu.Lock()
-					blocked := ps.syncing || ps.state.Detached || ps.state.Branch != ps.forceBranch
-					tip := ""
-					if blocked {
-						tip = "Git 操作进行中或分支已变化"
-					}
-					ps.mu.Unlock()
-					Button(c, ButtonOpts{Key: "git-pane-force-confirm", Text: "强制推送", Variant: ButtonDanger, Disabled: blocked, Tooltip: tip, OnClick: func() { ps.forceOpen = false; ps.run("force") }})
-				})
-			})
-		})
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:             "git-pane-force-dialog",
+		Open:            ps.forceOpen,
+		Tone:            ConfirmDanger,
+		Title:           "强制推送 " + ps.forceBranch + "？",
+		ConfirmLabel:    "强制推送",
+		CancelLabel:     "取消",
+		CancelAutoFocus: true,
+		ConfirmDisabled: blocked,
+		ConfirmTooltip:  tip,
+		OnConfirm:       func() { ps.forceOpen = false; ps.run("force") },
+		OnCancel:        func() { ps.forceOpen = false },
 	})
 }
 

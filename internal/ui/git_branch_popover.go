@@ -534,37 +534,37 @@ func renderGitBranchPopoverContent(c *ui.Context, s *chatState, threadID string,
 			}
 		}
 	})
-	if strings.HasPrefix(confirm, "branch:") || strings.HasPrefix(confirm, "tag:") {
-		kind, name, _ := strings.Cut(confirm, ":")
-		label := "删除"
-		title := "删除标签 " + name + "？"
-		if kind == "branch" {
-			label = "强制删除"
-			title = "强制删除 " + name + "？"
-		}
-		dialogOpen := true
-		cancel := func() { p.mu.Lock(); p.confirm = ""; p.mu.Unlock() }
-		modalDragModal(c, "git-branch-confirm", &dialogOpen, func() {
-			ui.Column(c.Key("git-branch-confirm-card")).Width(360).Padding(Space6).Gap(Space4).Radius(RadiusLG).Background(ThemeSurface(c)).Children(func() {
-				ui.Text(c, title).FontSize(uiFont(TypeTitle)).TextColor(ThemePrimaryText(c))
-				ui.Row(c.Key("git-branch-confirm-actions")).FillWidth().Justify(ui.End).Gap(Space3).Children(func() {
-					Button(c, ButtonOpts{Key: "git-branch-confirm-cancel", Text: "取消", Variant: ButtonSecondary, OnClick: cancel}).AutoFocus()
-					Button(c, ButtonOpts{Key: "git-branch-confirm-accept", Text: label, Variant: ButtonDanger, OnClick: func() {
-						cancel()
-						run(false, name, "已删除 "+name, func(ctx context.Context) error {
-							if kind == "branch" {
-								return client.GitBranchDelete(ctx, threadID, name, true)
-							}
-							return client.GitTagDelete(ctx, threadID, name)
-						})
-					}})
-				})
-			})
-		})
-		if !dialogOpen {
-			cancel()
+	var branchKind, branchName, confirmLabel, confirmTitle string
+	dialogOpen := strings.HasPrefix(confirm, "branch:") || strings.HasPrefix(confirm, "tag:")
+	if dialogOpen {
+		branchKind, branchName, _ = strings.Cut(confirm, ":")
+		confirmLabel = "删除"
+		confirmTitle = "删除标签 " + branchName + "？"
+		if branchKind == "branch" {
+			confirmLabel = "强制删除"
+			confirmTitle = "强制删除 " + branchName + "？"
 		}
 	}
+	cancelConfirm := func() { p.mu.Lock(); p.confirm = ""; p.mu.Unlock() }
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:             "git-branch-confirm",
+		Open:            dialogOpen,
+		Tone:            ConfirmDanger,
+		Title:           confirmTitle,
+		ConfirmLabel:    confirmLabel,
+		CancelLabel:     "取消",
+		CancelAutoFocus: true,
+		OnConfirm: func() {
+			cancelConfirm()
+			run(false, branchName, "已删除 "+branchName, func(ctx context.Context) error {
+				if branchKind == "branch" {
+					return client.GitBranchDelete(ctx, threadID, branchName, true)
+				}
+				return client.GitTagDelete(ctx, threadID, branchName)
+			})
+		},
+		OnCancel: cancelConfirm,
+	})
 }
 
 func init() { gitPaneBranchPopover = renderGitBranchPopoverContent }

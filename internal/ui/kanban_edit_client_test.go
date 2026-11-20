@@ -288,7 +288,7 @@ func TestKanbanDeleteConfirmCallsClient(t *testing.T) {
 	if err := tt.Click("kanban-task-rescue-delete-" + task.ID); err != nil {
 		t.Fatalf("click delete failed: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("确认删除该任务？此操作不可撤销") })
+	waitFor(t, tt, func() bool { return tt.HasText("删除该任务？") && tt.HasText("此操作不可撤销") })
 	callsBefore := fake.KanbanBoardCalls()
 	if err := tt.Click("kanban-task-delete-confirm-yes-" + task.ID); err != nil {
 		t.Fatalf("click delete confirm failed: %v", err)
@@ -342,7 +342,7 @@ func TestKanbanDoneTaskDeleteConfirmCallsClient(t *testing.T) {
 	if err := tt.Click("kanban-task-rescue-delete-" + task.ID); err != nil {
 		t.Fatalf("click delete failed: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("确认删除该任务？此操作不可撤销") })
+	waitFor(t, tt, func() bool { return tt.HasText("删除该任务？") && tt.HasText("此操作不可撤销") })
 	if err := tt.Click("kanban-task-delete-confirm-yes-" + task.ID); err != nil {
 		t.Fatalf("click delete confirm failed: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestKanbanDeleteFailureToast(t *testing.T) {
 	if err := tt.Click("kanban-task-rescue-delete-" + task.ID); err != nil {
 		t.Fatalf("click delete failed: %v", err)
 	}
-	waitFor(t, tt, func() bool { return tt.HasText("确认删除该任务？此操作不可撤销") })
+	waitFor(t, tt, func() bool { return tt.HasText("删除该任务？") && tt.HasText("此操作不可撤销") })
 	if err := tt.Click("kanban-task-delete-confirm-yes-" + task.ID); err != nil {
 		t.Fatalf("click delete confirm failed: %v", err)
 	}

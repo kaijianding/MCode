@@ -689,54 +689,26 @@ func renderTaskCard(c *ui.Context, s *chatState, ks *kanbanState, task KanbanTas
 		}
 
 		// 删除二次确认：确认后调用客户端删除任务，成功时刷新看板。
-		if st.deleteTaskID == task.ID {
-			open := true
-			ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
-				backdrop.Background(ui.Color{}.Alpha(ScrimOpacity))
-				w, h := c.Size()
-				panel.MaxWidth(w - Space8).MaxHeight(h - Space8)
-				ui.Row(c.Key("kanban-task-delete-confirm-"+task.ID)).
-					Wrap().
-					AlignItems(ui.Center).
-					Padding(Space1, Space2).
-					Radius(RadiusSM).
-					Background(ThemeSurfaceCard(c)).
-					Gap(Space2).
-					Children(func() {
-						ui.Text(c, "确认删除该任务？此操作不可撤销").
-							FontSize(uiFont(TypeCaption)).
-							TextColor(ThemeDanger(c)).
-							Grow(1)
-						Button(c.Key("kanban-task-delete-cancel-"+task.ID), ButtonOpts{
-							Text:    "取消",
-							Label:   "kanban-task-delete-cancel-" + task.ID,
-							Size:    ControlXS,
-							Variant: ButtonSecondary,
-							OnClick: func() {
-								kanbanMu.Lock()
-								ks.deleteTaskID = ""
-								kanbanMu.Unlock()
-								s.invalidate()
-							},
-						})
-						Button(c.Key("kanban-task-delete-confirm-yes-"+task.ID), ButtonOpts{
-							Text:    "确认删除",
-							Label:   "kanban-task-delete-confirm-yes-" + task.ID,
-							Size:    ControlXS,
-							Variant: ButtonDanger,
-							OnClick: func() {
-								s.deleteKanbanTask(task)
-							},
-						})
-					})
-			})
-			if !open {
+		RenderConfirmDialog(c, ConfirmDialog{
+			Key:          "kanban-task-delete-" + task.ID,
+			Open:         st.deleteTaskID == task.ID,
+			Tone:         ConfirmDanger,
+			Title:        "删除该任务？",
+			Body:         "此操作不可撤销",
+			ConfirmLabel: "删除",
+			ConfirmA11y:  "kanban-task-delete-confirm-yes-" + task.ID,
+			CancelLabel:  "取消",
+			CancelA11y:   "kanban-task-delete-cancel-" + task.ID,
+			OnConfirm: func() {
+				s.deleteKanbanTask(task)
+			},
+			OnCancel: func() {
 				kanbanMu.Lock()
 				ks.deleteTaskID = ""
 				kanbanMu.Unlock()
 				s.invalidate()
-			}
-		}
+			},
+		})
 
 		// 验收驳回反馈输入框
 		if st.reviewTaskID == task.ID {
