@@ -2839,6 +2839,10 @@
             "null"
           ]
         },
+        "account": {
+          "type": "string",
+          "description": "显式指定的 agy 账号 ID；缺失或空串表示沿用自动路由"
+        },
         "isRunning": {
           "type": "boolean"
         },
@@ -3601,6 +3605,10 @@
         },
         "effort": {
           "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "description": "显式指定的 agy 账号 ID；空串表示恢复自动路由"
         }
       },
       "required": [
@@ -4568,6 +4576,10 @@
         },
         "effort": {
           "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "description": "显式指定的 agy 账号 ID；空串表示沿用自动路由"
         },
         "runtimeMode": {
           "type": "string",

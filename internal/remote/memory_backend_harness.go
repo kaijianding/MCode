@@ -140,6 +140,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 	// 本轮快速模式与速率档位取自会话摘要，与 effort 一样在启动锁内固定。
 	fastMode := td.summary.FastMode
 	speedTier := derefString(td.summary.SpeedTier)
+	account := td.summary.Account
 	transient := isHelperThread(td.summary)
 	h := b.threadHarnessLocked(td.summary.Provider)
 	workDir := b.harnessWorkDir
@@ -465,6 +466,7 @@ func (b *MemoryBackend) runHarness(runCtx context.Context, threadID string, turn
 			InteractionMode:  interactionMode,
 			PlanExitMode:     planExitMode,
 			Effort:           effort,
+			Account:          account,
 			FastMode:         fastMode,
 			SpeedTier:        speedTier,
 			Transient:        transient,

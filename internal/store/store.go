@@ -559,6 +559,8 @@ var migrations = []string{
 	FROM refs WHERE refs.rank = 1 AND refs.thread_id <> '' AND threads.id = refs.thread_id
 	  AND (threads.parent_thread_id IS NULL OR threads.parent_thread_id = '')
 	`,
+	// 会话显式指定的 agy 账号 ID：空串表示沿用自动路由。
+	`ALTER TABLE threads ADD COLUMN account TEXT NOT NULL DEFAULT '';`,
 }
 
 // Store 封装 SQLite 数据库操作。
@@ -1140,7 +1142,7 @@ const threadSelectCols = `
 	worktree_requested, COALESCE(hydra_pair_id, ''), COALESCE(head_tiers, ''), COALESCE(hydra_mode, 'inherited'),
 	COALESCE(parent_thread_id, ''), is_helper, has_unread, COALESCE(last_status, ''),
 	COALESCE(provider_resume_at, ''), COALESCE(provider_anchor, ''), COALESCE(last_user_message_at, ''),
-	COALESCE(forked_from_thread_id, ''), COALESCE(forked_from_message_id, ''), persona, COALESCE(mcp_disabled, '')
+	COALESCE(forked_from_thread_id, ''), COALESCE(forked_from_message_id, ''), persona, COALESCE(mcp_disabled, ''), account
 `
 
 func scanThread(s rowScanner) (Thread, error) {
@@ -1195,6 +1197,7 @@ func scanThread(s rowScanner) (Thread, error) {
 		&t.ForkedFromMessageID,
 		&t.Persona,
 		&mcpDisabledStr,
+		&t.Account,
 	)
 	if err != nil {
 		return Thread{}, err
@@ -1280,7 +1283,7 @@ func (s *Store) CreateThread(ctx context.Context, t Thread) error {
 		is_settled, settled_at, is_provisional, worktree_path, branch, worktree_requested,
 		hydra_pair_id, head_tiers, hydra_mode, parent_thread_id, is_helper, has_unread, last_status,
 		provider_resume_at, provider_anchor, last_user_message_at, forked_from_thread_id, forked_from_message_id, persona,
-		mcp_disabled
+		mcp_disabled, account
 	)
 	VALUES (
 		?, ?, ?, ?, ?, ?, ?, ?,
@@ -1288,7 +1291,7 @@ func (s *Store) CreateThread(ctx context.Context, t Thread) error {
 		?, ?, ?, ?, ?, ?, ?,
 		?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?,
 		NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''),
-		NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, '')
+		NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?
 	)
 	`
 	_, err = s.db.ExecContext(ctx, query,
@@ -1333,6 +1336,7 @@ func (s *Store) CreateThread(ctx context.Context, t Thread) error {
 		t.ForkedFromMessageID,
 		t.Persona,
 		mcpDisabled,
+		t.Account,
 	)
 	if err != nil {
 		return fmt.Errorf("create thread %s: %w", t.ID, err)
@@ -1722,6 +1726,22 @@ func (s *Store) UpdateThreadProvider(ctx context.Context, id, provider string) e
 	res, err := s.db.ExecContext(ctx, "UPDATE threads SET provider = ? WHERE id = ?", provider, id)
 	if err != nil {
 		return fmt.Errorf("update thread provider %s: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateThreadAccount 更新线程显式指定的 agy 账号 ID；空串表示沿用自动路由。若线程不存在返回 ErrNotFound。
+func (s *Store) UpdateThreadAccount(ctx context.Context, id, account string) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE threads SET account = ? WHERE id = ?", account, id)
+	if err != nil {
+		return fmt.Errorf("update thread account %s: %w", id, err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {

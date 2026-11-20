@@ -90,10 +90,26 @@ func prependIsolatedHomeHint(accountID, prompt string) string {
 type Router interface {
 	// Route 为本轮选择账号。conversationID 为空表示新会话；exclude 是本轮已因限流换掉的账号 id。
 	Route(conversationID, model string, exclude []string) (accountID string, env []string, args []string, err error)
+	// RouteExplicit 按显式指定的 accountID 校验并生成运行环境；账号不可用时直接报错，不回退其他账号。
+	RouteExplicit(conversationID, accountID, model string) (env []string, args []string, err error)
 	// Bind 在拿到 agy 的 conversation id 后记录它与账号的绑定。
 	Bind(conversationID, accountID string)
 	// MarkLimited 报告账号被限流或额度耗尽，resetAt 未知时传零值；返回 false 表示不允许自动换号（strict 模式）。
 	MarkLimited(conversationID, accountID string, resetAt time.Time) bool
+}
+
+func explicitAccountRateLimitError(router Router, accountID string, resetAt time.Time, err error, retrySuffix string) error {
+	name := accountID
+	if namer, ok := router.(interface{ AccountDisplayName(string) string }); ok {
+		if display := namer.AccountDisplayName(accountID); display != "" {
+			name = display
+		}
+	}
+	resetInfo := "重置时间未知"
+	if !resetAt.IsZero() {
+		resetInfo = "重置时间：" + resetAt.Format(time.RFC3339)
+	}
+	return fmt.Errorf("agy: 指定账号「%s」已限流，严格锁定模式下不会换号（%s）%s：%w", name, resetInfo, retrySuffix, err)
 }
 
 type Options struct {
@@ -660,7 +676,12 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 			if routeKey == "" {
 				routeKey = threadKey
 			}
-			accountID, routeEnv, routeArgs, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
+			if turn.Account != "" {
+				accountID = turn.Account
+				routeEnv, routeArgs, err = h.opts.Router.RouteExplicit(routeKey, turn.Account, turn.Model)
+			} else {
+				accountID, routeEnv, routeArgs, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
+			}
 			if err != nil {
 				return err
 			}
@@ -1145,6 +1166,17 @@ func (h *Harness) runRound(ctx context.Context, turn harness.Turn, emit func(har
 				resetAt := parseResetTime(combinedErr)
 				if h.opts.Router != nil {
 					allowSwitch := h.opts.Router.MarkLimited(conversationID, accountID, resetAt)
+					if turn.Account != "" {
+						underlying := errors.New(resultErr)
+						if waitErr != nil {
+							if stderrStr != "" {
+								underlying = fmt.Errorf("%w (stderr: %s)", waitErr, stderrStr)
+							} else {
+								underlying = waitErr
+							}
+						}
+						return explicitAccountRateLimitError(h.opts.Router, accountID, resetAt, underlying, retrySuffix)
+					}
 					if !allowSwitch {
 						// 严格单号模式或其他禁止自动换号情况：直接报错
 						if waitErr != nil {

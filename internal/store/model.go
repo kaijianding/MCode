@@ -29,6 +29,7 @@ type Thread struct {
 	Continuation      string     `json:"continuation"`
 	InteractionMode   string     `json:"interaction_mode"`
 	Effort            string     `json:"effort"`
+	Account           string     `json:"account"` // 显式指定的 agy 账号 ID；空串表示沿用自动路由
 	Persona           string     `json:"persona"` // 线程人设 id：空串表示从未设置，"none" 表示用户选了无人设
 	BeesProvider      string     `json:"heads_provider"`
 	BeesModel         string     `json:"heads_model"`

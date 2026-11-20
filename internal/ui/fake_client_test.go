@@ -811,6 +811,7 @@ func (f *FakeClient) CreateThreadWithOptions(ctx context.Context, projectID stri
 		IsProvisional:   opts.Provisional,
 		InteractionMode: "build",
 		Effort:          opts.Effort,
+		Account:         opts.Account,
 		FastMode:        opts.Fast,
 		BeesEffort:      opts.BeesEffort,
 		PairID:          opts.PairID,
@@ -1428,6 +1429,19 @@ func (f *FakeClient) SetThreadAgent(threadID, provider, model string) error {
 					list[i].Provider = provider
 				}
 				list[i].Model = model
+			}
+		}
+	}
+	return nil
+}
+
+func (f *FakeClient) SetThreadAccount(threadID, accountID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, list := range f.threads {
+		for i := range list {
+			if list[i].ID == threadID {
+				list[i].Account = accountID
 			}
 		}
 	}

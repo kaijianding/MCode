@@ -69,6 +69,7 @@ func ThreadSummaryToUI(s wire.ThreadSummary) mcodeui.Thread {
 		RuntimeMode:       s.RuntimeMode,
 		InteractionMode:   interactionMode,
 		Effort:            derefString(s.Effort),
+		Account:           s.Account,
 		Persona:           s.Persona,
 		BeesProvider:      derefString(s.SwarmBeesProvider),
 		BeesModel:         derefString(s.SwarmBeesModel),

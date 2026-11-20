@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"time"
 
 	"mcode/internal/providers/agy/quota"
@@ -32,6 +33,102 @@ func (m *Manager) Route(conversationID, model string, exclude []string) (account
 	}
 
 	return m.buildRuntimeEnv(chosenID)
+}
+
+// RouteExplicit 实现 agy.Router 接口中的 RouteExplicit 方法。
+// 校验显式指定的账号存在、启用、未冷却且未满额，否则返回带账号显示名的中文错误；
+// 通过后返回该账号的运行环境，并将 conversationID（非空时）绑定到该账号。
+func (m *Manager) RouteExplicit(conversationID, accountID, model string) (env []string, args []string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	acc, exists := m.findAccountLocked(accountID)
+	if !exists {
+		return nil, nil, fmt.Errorf("agy: 指定的账号「%s」不存在或已删除", accountID)
+	}
+
+	name := accountDisplayName(acc)
+	override := m.routing.Accounts[acc.ID]
+	enabled := acc.On
+	if override.On != nil {
+		enabled = *override.On
+	}
+	if !enabled || acc.Status == StatusDisabled {
+		return nil, nil, fmt.Errorf("agy: 指定的账号「%s」已停用", name)
+	}
+	if acc.Status != StatusActive {
+		return nil, nil, fmt.Errorf("agy: 指定的账号「%s」不可用（状态：%s）", name, acc.Status)
+	}
+
+	now := m.opts.Now()
+	if m.router != nil && m.router.Cooling(acc.ID, now) {
+		until := m.router.CoolingUntil(acc.ID)
+		return nil, nil, fmt.Errorf("agy: 指定的账号「%s」正在冷却中，预计重置时间：%s", name, until.Local().Format(time.RFC3339))
+	}
+
+	usedPercent, resetAt := evaluateCandidateQuota(acc, quota.ModelGroup(model), now)
+	if usedPercent >= 100 {
+		if !resetAt.IsZero() {
+			return nil, nil, fmt.Errorf("agy: 指定的账号「%s」额度已满，预计重置时间：%s", name, resetAt.Local().Format(time.RFC3339))
+		}
+		return nil, nil, fmt.Errorf("agy: 指定的账号「%s」额度已满", name)
+	}
+
+	_, env, args, err = m.buildRuntimeEnv(acc.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if conversationID != "" && m.router != nil {
+		_ = m.router.Bind(conversationID, acc.ID)
+	}
+	return env, args, nil
+}
+
+// AccountDisplayName 返回账号的展示名称（供限流或状态报错提示使用），账号不存在时回退为 accountID。
+func (m *Manager) AccountDisplayName(accountID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acc, exists := m.findAccountLocked(accountID)
+	if !exists {
+		return accountID
+	}
+	return accountDisplayName(acc)
+}
+
+func accountDisplayName(acc Account) string {
+	if acc.Label != "" && !(acc.Email != "" && looksLikeUUID(acc.Label)) {
+		return acc.Label
+	}
+	if acc.Email != "" {
+		return acc.Email
+	}
+	if acc.Name != "" {
+		return acc.Name
+	}
+	if acc.Label != "" {
+		return acc.Label
+	}
+	return acc.ID
+}
+
+func looksLikeUUID(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ModelsEnv 只读选择模型目录查询账号，不推进调度状态或写入会话绑定。

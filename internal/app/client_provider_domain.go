@@ -463,14 +463,23 @@ func (c *Client) ProviderQuota(ctx context.Context, provider string) ([]mcodeui.
 	return windows, nil
 }
 
-// agyBoundAccountForThread 返回当前会话已绑定的 agy 账号 ID。会话还没跑过一轮（没有会话 ID）、
-// 装配层没注解析函数，或该会话尚未绑定账号时返回 false，调用方退回新会话的目标账号。
+// agyBoundAccountForThread 返回当前会话已绑定的 agy 账号 ID。
+// 优先返回线程上显式指定的 Account（非空时直接返回，首轮前 SessionID 为空也有效），
+// 否则通过 SessionID 查询路由绑定；均未命中时返回 false，调用方退回新会话的目标账号。
 func (c *Client) agyBoundAccountForThread(ctx context.Context) (string, bool) {
-	if c == nil || c.agy == nil || c.agySessionForThread == nil {
+	if c == nil || c.agy == nil {
 		return "", false
 	}
 	threadID := mcodeui.QuotaThread(ctx)
 	if threadID == "" {
+		return "", false
+	}
+	if c.agyAccountForThread != nil {
+		if accountID := c.agyAccountForThread(ctx, threadID); accountID != "" {
+			return accountID, true
+		}
+	}
+	if c.agySessionForThread == nil {
 		return "", false
 	}
 	conversationID := c.agySessionForThread(ctx, threadID)

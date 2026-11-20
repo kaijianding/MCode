@@ -63,6 +63,8 @@ type Client struct {
 	// agySessionForThread 把界面会话 ID 解析成 agy 的 provider 会话 ID（路由绑定的键），
 	// 由装配层注入；未注入时额度弹窗退回「新会话目标账号」。
 	agySessionForThread func(ctx context.Context, threadID string) string
+	// agyAccountForThread 读取会话显式指定的 agy 账号 ID，优先于 SessionID 查找。
+	agyAccountForThread func(ctx context.Context, threadID string) string
 
 	// quotaTracker 是「会话 → 实际应答账号」的进程内映射，懒创建；监听只对本机
 	// Magpie 端点启动，测试里可替换 tracker 的 readTrace。
@@ -384,6 +386,12 @@ func (c *Client) SetAgyAccounts(m *accounts.Manager) {
 // 额度弹窗靠它把「在用」标在当前会话实际绑定的账号上。
 func (c *Client) SetAgySessionLookup(fn func(ctx context.Context, threadID string) string) {
 	c.agySessionForThread = fn
+}
+
+// SetAgyAccountLookup 注入「界面会话 ID → 显式指定 agy 账号 ID」查询函数：
+// 额度弹窗优先据此标出用户锁定的账号，首轮前 SessionID 为空时同样生效。
+func (c *Client) SetAgyAccountLookup(fn func(ctx context.Context, threadID string) string) {
+	c.agyAccountForThread = fn
 }
 
 // sessionTracker 返回进程内共享的会话账号跟踪器，首次调用时创建。

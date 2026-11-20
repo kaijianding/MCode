@@ -1510,6 +1510,13 @@ func Open(opts Options) (*App, error) {
 		}
 		return th.SessionID
 	})
+	client.SetAgyAccountLookup(func(ctx context.Context, threadID string) string {
+		th, err := dbStore.GetThread(ctx, threadID)
+		if err != nil {
+			return ""
+		}
+		return th.Account
+	})
 	if swarmMgr != nil {
 		swarmMgr.Start()
 		if swarmRestored {

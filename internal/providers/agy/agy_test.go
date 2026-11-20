@@ -930,6 +930,12 @@ func (r *fakeEnvRouter) Route(conversationID, model string, exclude []string) (s
 		nil
 }
 
+func (r *fakeEnvRouter) RouteExplicit(conversationID, accountID, model string) ([]string, []string, error) {
+	return []string{"HOME=/mock/isolated/home", "GEMINI_FORCE_FILE_STORAGE=true"},
+		[]string{"--gemini_dir=/mock/isolated/home/.gemini"},
+		nil
+}
+
 func (r *fakeEnvRouter) Bind(conversationID, accountID string) {
 	r.boundConvID = conversationID
 	r.boundAccountID = accountID
@@ -991,6 +997,10 @@ func (r *failoverRouter) Route(conversationID, model string, exclude []string) (
 		return "acc-first", nil, nil, nil
 	}
 	return "acc-second", nil, nil, nil
+}
+
+func (r *failoverRouter) RouteExplicit(conversationID, accountID, model string) ([]string, []string, error) {
+	return nil, nil, nil
 }
 
 func (r *failoverRouter) Bind(conversationID, accountID string) {
@@ -1077,6 +1087,10 @@ func (r *strictRouter) Route(conversationID, model string, exclude []string) (st
 	defer r.mu.Unlock()
 	r.routeCalls++
 	return "acc-strict", nil, nil, nil
+}
+
+func (r *strictRouter) RouteExplicit(conversationID, accountID, model string) ([]string, []string, error) {
+	return nil, nil, nil
 }
 
 func (r *strictRouter) Bind(conversationID, accountID string) {}
@@ -1669,6 +1683,10 @@ func (r *trackingRouter) Route(conversationID, model string, exclude []string) (
 	return "acc-primary", nil, nil, nil
 }
 
+func (r *trackingRouter) RouteExplicit(conversationID, accountID, model string) ([]string, []string, error) {
+	return nil, nil, nil
+}
+
 func (r *trackingRouter) Bind(conversationID, accountID string) {}
 
 func (r *trackingRouter) MarkLimited(conversationID, accountID string, resetAt time.Time) bool {
@@ -2073,6 +2091,13 @@ func (r *staticAccountRouter) Route(conversationID, model string, exclude []stri
 		return accounts.SystemAccountID, []string{"AGY_CLI_DISABLE_AUTO_UPDATE=true"}, nil, nil
 	}
 	return r.accountID, []string{"HOME=/mock/isolated/home"}, []string{"--gemini_dir=/mock/isolated/home/.gemini"}, nil
+}
+
+func (r *staticAccountRouter) RouteExplicit(conversationID, accountID, model string) ([]string, []string, error) {
+	if accountID == accounts.SystemAccountID {
+		return []string{"AGY_CLI_DISABLE_AUTO_UPDATE=true"}, nil, nil
+	}
+	return []string{"HOME=/mock/isolated/home"}, []string{"--gemini_dir=/mock/isolated/home/.gemini"}, nil
 }
 
 func (r *staticAccountRouter) Bind(conversationID, accountID string) {}

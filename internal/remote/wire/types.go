@@ -263,6 +263,7 @@ type ThreadSummary struct {
 	Provider         string  `json:"provider"`
 	Model            *string `json:"model"`
 	Effort           *string `json:"effort"`
+	Account          string  `json:"account,omitempty"`
 	IsRunning        bool    `json:"isRunning"`
 	IsArchived       bool    `json:"isArchived"`
 	IsPinned         bool    `json:"isPinned"`
@@ -381,6 +382,7 @@ type ThreadUpdateParams struct {
 	Provider    *string `json:"provider,omitempty"`
 	Model       *string `json:"model,omitempty"`
 	Effort      *string `json:"effort,omitempty"`
+	Account     *string `json:"account,omitempty"`
 }
 
 // ThreadUpdateResult 对应 threads.update 成功结果
@@ -509,6 +511,7 @@ type ComposerOptions struct {
 	Provider          *string `json:"provider,omitempty"`
 	Model             *string `json:"model,omitempty"`
 	Effort            *string `json:"effort,omitempty"`
+	Account           *string `json:"account,omitempty"`
 	RuntimeMode       *string `json:"runtimeMode,omitempty"`
 	InteractionMode   *string `json:"interactionMode,omitempty"`
 	WorkspaceMode     *string `json:"workspaceMode,omitempty"`

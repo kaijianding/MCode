@@ -107,6 +107,7 @@ type Turn struct {
 	InteractionMode string         // "build" 或 "plan"，空等同 build
 	PlanExitMode    PermissionMode // Plan 回合里计划获批后切到的运行模式（用户选的档位）；非 Plan 回合为空
 	Effort          string         // low/medium/high，空表示供应商默认
+	Account         string         // 非空表示用户指定的 agy 账号，严格锁定
 	FastMode        bool           // 快速模式，按各供应商规则映射，false 表示供应商默认
 	SpeedTier       string         // 快速模式下的速率档位 ID，空表示由供应商按模型默认快速档位
 

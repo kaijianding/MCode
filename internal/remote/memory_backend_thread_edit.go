@@ -21,6 +21,28 @@ func (b *MemoryBackend) CreateThread(ctx context.Context, params wire.ThreadCrea
 	return b.createThread(ctx, params, true, threadInit{})
 }
 
+func (b *MemoryBackend) validateExplicitAccountLocked(provider, accountID string) *wire.RPCError {
+	if provider != "agy" {
+		return &wire.RPCError{
+			Code:    wire.InvalidParams,
+			Message: fmt.Sprintf("account can only be set for agy provider, got %q", provider),
+		}
+	}
+	if b.agyAccounts == nil {
+		return &wire.RPCError{
+			Code:    wire.InvalidParams,
+			Message: "agy accounts manager is not configured",
+		}
+	}
+	if _, exists := b.agyAccounts.Get(accountID); !exists {
+		return &wire.RPCError{
+			Code:    wire.InvalidParams,
+			Message: fmt.Sprintf("unknown agy account %q", accountID),
+		}
+	}
+	return nil
+}
+
 type threadInit struct {
 	parentThreadID string
 	isHelper       bool
@@ -174,6 +196,28 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 		modelVal = *reqModel
 	}
 
+	var accountVal string
+	if params.Options != nil && params.Options.Account != nil {
+		reqAccount := *params.Options.Account
+		if reqAccount != "" {
+			if rpcErr := b.validateExplicitAccountLocked(provider, reqAccount); rpcErr != nil {
+				b.mu.Unlock()
+				if params.ActionID != "" {
+					b.actions.record(wire.ActionStatusResult{
+						ActionID: params.ActionID,
+						State:    wire.ActionStateFailed,
+						Error: &wire.ActionError{
+							Code:    rpcErr.Code,
+							Message: rpcErr.Message,
+						},
+					})
+				}
+				return wire.ThreadCreateResult{}, rpcErr
+			}
+			accountVal = reqAccount
+		}
+	}
+
 	swarmEnabled := false
 	if b.swarmEnabledFor != nil {
 		swarmEnabled = b.swarmEnabledFor(threadID)
@@ -215,6 +259,7 @@ func (b *MemoryBackend) createThread(ctx context.Context, params wire.ThreadCrea
 		IsHelper:          init.isHelper,
 		Provider:          provider,
 		Model:             &modelVal,
+		Account:           accountVal,
 		IsRunning:         false,
 		IsArchived:        false,
 		IsPinned:          false,
@@ -414,6 +459,34 @@ func (b *MemoryBackend) UpdateThread(ctx context.Context, params wire.ThreadUpda
 		targetModel = DefaultModel(targetProvider)
 		modelChanged = true
 	}
+
+	accountChanged := false
+	targetAccount := td.summary.Account
+	if params.Account != nil {
+		if td.summary.IsRunning || td.takingBack {
+			b.mu.Unlock()
+			return wire.ThreadUpdateResult{}, &wire.RPCError{
+				Code:    wire.InvalidParams,
+				Message: "运行或撤回期间无法更换账号",
+			}
+		}
+		reqAccount := *params.Account
+		if reqAccount != "" {
+			if rpcErr := b.validateExplicitAccountLocked(targetProvider, reqAccount); rpcErr != nil {
+				b.mu.Unlock()
+				return wire.ThreadUpdateResult{}, rpcErr
+			}
+		}
+		if reqAccount != td.summary.Account {
+			targetAccount = reqAccount
+			accountChanged = true
+		}
+	} else if providerChanged && targetProvider != "agy" && td.summary.Account != "" {
+		// 离开 agy 供应商时清空原指定的 agy 账号，避免非 agy 会话残留脏账号。
+		targetAccount = ""
+		accountChanged = true
+	}
+
 	effortChanged := params.Effort != nil && *params.Effort != derefString(td.summary.Effort)
 	if effortChanged && b.store != nil {
 		if err := b.store.UpdateThreadComposerPrefs(ctx, params.ThreadID, td.summary.InteractionMode, *params.Effort, derefString(td.summary.SwarmBeesProvider), derefString(td.summary.SwarmBeesModel), derefString(td.summary.SwarmBeesEffort), td.summary.Persona); err != nil {
@@ -589,9 +662,12 @@ func (b *MemoryBackend) UpdateThread(ctx context.Context, params wire.ThreadUpda
 	if effortChanged {
 		td.summary.Effort = optionalString(*params.Effort)
 	}
+	if accountChanged {
+		td.summary.Account = targetAccount
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if titleChanged || runtimeModeChanged || providerChanged || modelChanged || effortChanged || pinnedChanged || archivedChanged || dormantChanged || unreadChanged {
+	if titleChanged || runtimeModeChanged || providerChanged || modelChanged || effortChanged || accountChanged || pinnedChanged || archivedChanged || dormantChanged || unreadChanged {
 		td.summary.UpdatedAt = now
 	}
 
@@ -616,6 +692,9 @@ func (b *MemoryBackend) UpdateThread(ctx context.Context, params wire.ThreadUpda
 			m = *currentSummary.Model
 		}
 		b.persistThreadModel(params.ThreadID, m)
+	}
+	if accountChanged {
+		b.persistThreadAccount(params.ThreadID, currentSummary.Account)
 	}
 	if pinnedChanged {
 		b.persistThreadPinned(params.ThreadID, currentSummary.IsPinned)

@@ -110,6 +110,7 @@ func threadToStore(t wire.ThreadSummary, sessionID string, sortOrder int64, cont
 
 		InteractionMode: normalizeInteractionMode(t.InteractionMode),
 		Effort:          derefString(t.Effort),
+		Account:         t.Account,
 		Persona:         t.Persona,
 		BeesProvider:    derefString(t.SwarmBeesProvider),
 		BeesModel:       derefString(t.SwarmBeesModel),
@@ -211,6 +212,7 @@ func threadFromStore(t store.Thread) wire.ThreadSummary {
 		RuntimeMode:       runtimeMode,
 		InteractionMode:   normalizeInteractionMode(t.InteractionMode),
 		Effort:            optionalString(t.Effort),
+		Account:           t.Account,
 		Persona:           t.Persona,
 		SwarmBeesProvider: optionalString(t.BeesProvider),
 		SwarmBeesModel:    optionalString(t.BeesModel),
@@ -1036,6 +1038,22 @@ func (b *MemoryBackend) persistThreadProvider(threadID, provider string) {
 	defer cancel()
 	if err := s.UpdateThreadProvider(ctx, threadID, provider); err != nil {
 		log.Printf("store update thread provider error (thread %s): %v", threadID, err)
+	}
+}
+
+// persistThreadAccount 把指定会话的指定账号写穿到 store。
+func (b *MemoryBackend) persistThreadAccount(threadID, account string) {
+	b.mu.Lock()
+	s := b.store
+	b.mu.Unlock()
+	if s == nil {
+		return
+	}
+
+	ctx, cancel := persistCtx()
+	defer cancel()
+	if err := s.UpdateThreadAccount(ctx, threadID, account); err != nil {
+		log.Printf("store update thread account error (thread %s): %v", threadID, err)
 	}
 }
 

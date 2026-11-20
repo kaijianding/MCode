@@ -161,7 +161,7 @@ func (c *Client) CreateThreadWithOptions(ctx context.Context, projectID string, 
 		ProjectID: projectID,
 		ActionID:  newUUID(),
 	}
-	if opts.Provider != "" || opts.Model != "" || opts.Effort != "" || opts.Fast || opts.BeesProvider != "" || opts.BeesModel != "" || opts.BeesEffort != "" || opts.PairID != "" {
+	if opts.Provider != "" || opts.Model != "" || opts.Effort != "" || opts.Account != "" || opts.Fast || opts.BeesProvider != "" || opts.BeesModel != "" || opts.BeesEffort != "" || opts.PairID != "" {
 		cOpts := &wire.ComposerOptions{}
 		if opts.Provider != "" {
 			p := opts.Provider
@@ -174,6 +174,10 @@ func (c *Client) CreateThreadWithOptions(ctx context.Context, projectID string, 
 		if opts.Effort != "" {
 			e := opts.Effort
 			cOpts.Effort = &e
+		}
+		if opts.Account != "" {
+			acc := opts.Account
+			cOpts.Account = &acc
 		}
 		if opts.Fast {
 			f := true
@@ -637,6 +641,17 @@ func (c *Client) SetThreadAgent(threadID, provider, model string) error {
 		params.Model = &model
 	}
 	_, err := c.backend.UpdateThread(ctx, params)
+	return err
+}
+
+// SetThreadAccount 调用 backend.UpdateThread 设置指定会话显式绑定的账号 ID；
+// accountID 为空串表示恢复自动路由。
+func (c *Client) SetThreadAccount(threadID, accountID string) error {
+	ctx := context.Background()
+	_, err := c.backend.UpdateThread(ctx, wire.ThreadUpdateParams{
+		ThreadID: threadID,
+		Account:  &accountID,
+	})
 	return err
 }
 

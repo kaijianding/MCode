@@ -116,6 +116,7 @@ type Thread struct {
 	RuntimeMode                  string
 	InteractionMode              string // "build" 或 "plan"，空视为 build
 	Effort                       string // Lead 推理强度：low/medium/high，空为默认
+	Account                      string // 显式指定的 agy 账号 ID，空表示沿用自动路由
 	BeesProvider                 string // Swarm bee 使用的供应商，空为跟随 Lead
 	BeesModel                    string // Swarm bee 使用的模型，空为默认
 	BeesEffort                   string // Swarm bee 推理强度，空为默认
@@ -641,6 +642,7 @@ type NewThreadOptions struct {
 	Provider     string
 	Model        string
 	Effort       string
+	Account      string // 显式指定的 agy 账号 ID，空表示沿用自动路由
 	Fast         bool
 	BeesProvider string
 	BeesModel    string
@@ -1111,6 +1113,8 @@ type Client interface {
 	SetThreadRuntimeMode(threadID, mode string) error
 	// SetThreadAgent 设置指定会话的 Agent 与模型，provider 为空时表示不修改供应商。
 	SetThreadAgent(threadID, provider, model string) error
+	// SetThreadAccount 设置指定会话显式使用的账号 ID，空串表示恢复自动路由。
+	SetThreadAccount(threadID, accountID string) error
 	// RenameThread 重命名指定会话。
 	RenameThread(threadID, title string) error
 	// SetThreadPinned 设置指定会话的置顶状态。

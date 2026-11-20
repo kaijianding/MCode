@@ -172,6 +172,12 @@ func (r *acpTestRouter) Route(session, _ string, _ []string) (string, []string, 
 	r.mu.Unlock()
 	return session, []string{fakeAgyEnv + "=acp_transport", "MCODE_TEST_ROUTED_ACCOUNT=" + session}, []string{"--gemini_dir", session}, nil
 }
+func (r *acpTestRouter) RouteExplicit(session, account, _ string) ([]string, []string, error) {
+	r.mu.Lock()
+	r.routes++
+	r.mu.Unlock()
+	return []string{fakeAgyEnv + "=acp_transport", "MCODE_TEST_ROUTED_ACCOUNT=" + account}, []string{"--gemini_dir", account}, nil
+}
 func (r *acpTestRouter) Bind(session, account string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -361,6 +367,21 @@ func (r *acpRetryRouter) Route(session, _ string, exclude []string) (string, []s
 		dir = filepath.Join(r.geminiDir, id)
 	}
 	return id, env, []string{"--gemini_dir", dir}, nil
+}
+
+func (r *acpRetryRouter) RouteExplicit(session, account, _ string) ([]string, []string, error) {
+	if r.onRoute != nil {
+		r.onRoute()
+	}
+	r.mu.Lock()
+	r.routes = append(r.routes, session)
+	r.mu.Unlock()
+	env := []string{"MCODE_TEST_ROUTED_ACCOUNT=" + account}
+	dir := account
+	if r.geminiDir != "" {
+		dir = filepath.Join(r.geminiDir, account)
+	}
+	return env, []string{"--gemini_dir", dir}, nil
 }
 
 func (r *acpRetryRouter) Bind(session, account string) {

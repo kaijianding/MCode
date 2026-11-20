@@ -92,6 +92,11 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 	if turn.Attach && !h.acp.HasUnsolicitedOutput(turn.ThreadID) {
 		return nil
 	}
+	if turn.Account != "" && h.acp.HasResidentProcess(turn.ThreadID) {
+		if boundAcc, ok := h.acpAccounts.Load(turn.ThreadID); !ok || boundAcc.(string) != turn.Account {
+			h.EvictThread(turn.ThreadID)
+		}
+	}
 	reused, err := func() (bool, error) {
 		if accountID, ok := h.acpAccounts.Load(turn.ThreadID); ok {
 			if tracker, ok := h.opts.Router.(interface{ QuotaUse(string) func() }); ok {
@@ -127,7 +132,12 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		var args, env []string
 		if h.opts.Router != nil {
 			var err error
-			accountID, env, args, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
+			if turn.Account != "" {
+				accountID = turn.Account
+				env, args, err = h.opts.Router.RouteExplicit(routeKey, turn.Account, turn.Model)
+			} else {
+				accountID, env, args, err = h.opts.Router.Route(routeKey, turn.Model, exclude)
+			}
 			if err != nil {
 				if unknownModelErr != nil {
 					return unknownModelErr
@@ -184,7 +194,7 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 		streamed := streamedText
 		eventMu.Unlock()
 		if isUnknownModel(err.Error()) {
-			if turn.SessionID == "" && !streamed && !turn.Attach && retryCount < maxRetries {
+			if turn.Account == "" && turn.SessionID == "" && !streamed && !turn.Attach && retryCount < maxRetries {
 				if unknownModelErr == nil {
 					unknownModelErr = err
 				}
@@ -203,7 +213,11 @@ func (h *Harness) runACP(ctx context.Context, turn harness.Turn, emit func(harne
 			return err
 		}
 		resetAt := parseResetTime(err.Error())
-		if !h.opts.Router.MarkLimited(routeKey, accountID, resetAt) {
+		allowSwitch := h.opts.Router.MarkLimited(routeKey, accountID, resetAt)
+		if turn.Account != "" {
+			return explicitAccountRateLimitError(h.opts.Router, accountID, resetAt, err, "")
+		}
+		if !allowSwitch {
 			resetInfo := ""
 			if !resetAt.IsZero() {
 				resetInfo = "，重置时间：" + resetAt.Format(time.RFC3339)
