@@ -1308,18 +1308,44 @@ func renderProviderAddSheetBody(c *ui.Context, st *SettingsState, cliCandidates 
 	if load {
 		loadPresetProviders(st)
 	}
+	if kind == 2 {
+		Button(c.Key("provider-add-back"), ButtonOpts{
+			Text:    "← API Key",
+			Variant: ButtonGhost,
+			OnClick: func() {
+				st.mu.Lock()
+				st.presets.addType = 1
+				st.presets.addPresetID = ""
+				st.presets.apiKeyDraft = ""
+				closeCustomEndpointForm(st)
+				st.mu.Unlock()
+				st.invalidate()
+			},
+		})
+	}
+	choice := kind
+	if choice == 2 {
+		choice = 1
+	}
 	renderSettingsSection(c, "sec-provider-add-type", "类型", func() {
 		renderSettingRow(c, "row-provider-add-type", "类型", func() {
 			choiceFunc(
-				[]string{"智能体", "API Key", "自定义端点"},
-				func(*SettingsState) (int, bool) { return kind, false },
+				[]string{"智能体", "API Key"},
+				func(*SettingsState) (int, bool) { return choice, false },
 				func(st *SettingsState, index int) {
 					st.mu.Lock()
-					st.presets.addType = index
-					st.presets.addPresetID = ""
-					st.presets.apiKeyDraft = ""
-					if index == 2 {
-						openCustomEndpointForm(st, nil, endpointFormScopeCustom)
+					if st.presets.addType == 2 && index == 1 {
+						st.presets.addType = 1
+						st.presets.addPresetID = ""
+						st.presets.apiKeyDraft = ""
+						closeCustomEndpointForm(st)
+					} else {
+						if st.presets.addType == 2 {
+							closeCustomEndpointForm(st)
+						}
+						st.presets.addType = index
+						st.presets.addPresetID = ""
+						st.presets.apiKeyDraft = ""
 					}
 					st.mu.Unlock()
 					st.invalidate()

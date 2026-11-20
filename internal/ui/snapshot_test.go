@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func snapshotViews() []snapshotView {
 	return []snapshotView{
 		{name: "main", w: 1100, h: 720, text: "侧边栏状态位", build: buildSnapshotMain},
 		{name: "composer-complete", w: 900, h: 500, text: "/plan", build: buildSnapshotComposer},
-		{name: "settings-quick-replies", w: 900, h: 900, text: "快捷回复", build: buildSnapshotQuickReplies},
+		{name: "settings-quick-replies", w: 900, h: 900, text: "总结改动", build: buildSnapshotQuickReplies},
 		{name: "settings-archive", w: 1000, h: 760, text: "已归档", build: buildSnapshotArchive},
 		{name: "confirm-dialog", w: 800, h: 600, text: "删除这个会话？", build: buildSnapshotConfirm},
 	}
@@ -82,7 +83,7 @@ func TestSnapshotViews(t *testing.T) {
 				if setup != nil {
 					setup(tt)
 				}
-				waitFor(t, tt, func() bool { return tt.HasText(tc.text) })
+				waitFor(t, tt, func() bool { return snapshotHasText(tt, tc.text) })
 				tt.Advance(snapshotSettle)
 				tt.Frame()
 
@@ -111,6 +112,19 @@ func TestSnapshotViews(t *testing.T) {
 			}
 		})
 	}
+}
+
+// snapshotHasText 检查当前帧文本或无障碍控件值（如输入框内容）是否包含 want。
+func snapshotHasText(tt *ui.Tester, want string) bool {
+	if tt.HasText(want) {
+		return true
+	}
+	for _, info := range tt.AccessAll() {
+		if strings.Contains(info.Value, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // snapshotDir 返回快照输出目录：环境变量为空或 "1" 时退回临时目录下的子目录。
@@ -205,18 +219,32 @@ func buildSnapshotComposer(t *testing.T) (func(c *ui.Context), func(tt *ui.Teste
 	return view, setup
 }
 
-// buildSnapshotQuickReplies 设置页「工作台」页里的快捷回复分节。
+// buildSnapshotQuickReplies 设置页「会话」页打开的快捷回复面板。
 func buildSnapshotQuickReplies(t *testing.T) (func(c *ui.Context), func(tt *ui.Tester)) {
 	t.Helper()
 	st := NewSettingsState(settingsTestDir(t), nil, nil)
-	st.currentPage = "workbench"
+	st.currentPage = "conversation"
 	st.cfg.QuickReplies = []config.QuickReply{
 		{Label: "总结改动", Message: "用要点总结这次改动，并指出风险点。"},
 		{Label: "补测试", Message: "为这段逻辑补单元测试，覆盖边界情况。"},
 		{Label: "解释报错", Message: "解释这个报错的原因并给出修复方案。"},
 	}
-	view := func(c *ui.Context) { renderSettingsDetail(c, st) }
-	return view, nil
+	view := func(c *ui.Context) {
+		renderSettingsDetail(c, st)
+		if id, _ := settingsTreeSheetState(st); id != "" {
+			if sheet, ok := settingsTreeSheetOf(id); ok {
+				renderSettingsTreeSheet(c, st, sheet)
+			}
+		}
+	}
+	setup := func(tt *ui.Tester) {
+		if err := settingsClick(t, tt, "快捷回复 3 个"); err != nil {
+			t.Fatalf("打开快捷回复面板失败: %v", err)
+		}
+		tt.Advance(snapshotSettle)
+		tt.Frame()
+	}
+	return view, setup
 }
 
 // buildSnapshotArchive 设置页的「归档」页，预置三条已归档会话。

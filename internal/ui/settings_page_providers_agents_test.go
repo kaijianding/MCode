@@ -299,7 +299,7 @@ func TestProviders_MultiAccountSwitchDeleteAdd(t *testing.T) {
 	})
 
 	// 2. 删除确认后断言 AgyRemove 被调用（删除 acc-2）
-	clickWhenSettled(t, tt, "btn-del-acc-2")
+	clickWhenSettled(t, tt, "删除账号 user2@example.com")
 	waitFor(t, tt, func() bool {
 		return tt.HasText("确认删除")
 	})
