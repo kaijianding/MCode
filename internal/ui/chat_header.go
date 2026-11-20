@@ -135,6 +135,8 @@ func renderChatHeaderTitle(c *ui.Context, s *chatState, th Thread) {
 			Radius(RadiusSM).
 			Padding(Space0, Space3).
 			Grow(1).
+			Shrink(1).
+			MinWidth(0).
 			AutoFocus()
 
 		in.OnTextKey(func(k ui.TextKey) bool {
@@ -192,6 +194,9 @@ func renderChatHeaderTitle(c *ui.Context, s *chatState, th Thread) {
 	titleArea := ui.Row(c.Key("chat-header-title-btn")).
 		Label("会话标题拖动区").
 		Grow(1).
+		Shrink(1).
+		MinWidth(0).
+		ClipX().
 		Justify(ui.Start).
 		Padding(Space0, Space2).
 		DragWindow()
@@ -218,7 +223,10 @@ func renderChatHeaderTitle(c *ui.Context, s *chatState, th Thread) {
 			TextColor(textColor).
 			FontSize(uiFont(TypeTitle)).
 			FontWeight(600).
-			SingleLine()
+			Shrink(1).
+			MinWidth(0).
+			SingleLine().
+			Ellipsis("…")
 	})
 }
 
@@ -681,7 +689,7 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 		} else {
 			ui.Icon(c, IconGitBranch()).Size(IconSM, IconSM).TextColor(ThemePrimaryText(c))
 		}
-		ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c))
+		ui.Text(c, label).FontSize(uiFont(TypeFootnote)).TextColor(ThemePrimaryText(c)).SingleLine().Ellipsis("…").MaxWidth(160)
 		if st.Ahead > 0 {
 			ui.Text(c, fmt.Sprintf("↑%d", st.Ahead)).FontSize(uiFont(TypeCaption)).TextColor(ThemeSuccess(c))
 		}
@@ -691,6 +699,8 @@ func renderGitBranchCapsule(c *ui.Context, s *chatState, hs *chatHeaderState, th
 	})
 	if aiWT.Path != "" {
 		trigger = trigger.Tooltip(label + "\n" + aiWT.Path)
+	} else {
+		trigger = trigger.Tooltip(label)
 	}
 
 	chatHeaderMu.Lock()
@@ -1714,7 +1724,7 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 		rightInset += titleBarTrailingInset(c)
 	}
 	ts := getChatToolbarState(s)
-	header := ui.Row(c.Key("chat-header")).DragWindow().FillWidth().Height(HeaderHeight).
+	header := ui.Row(c.Key("chat-header")).DragWindow().FillWidth().MinWidth(0).Height(HeaderHeight).
 		Padding(Space3, rightInset, Space3, chatHeaderLeadingInsetFrom(titleBarLeadingInset(c), sidebarSlide)).
 		BorderWidth(0, 0, 1, 0).BorderColor(ThemeBorder(c)).AlignItems(ui.Center).Gap(Space2)
 	windowWidth, _ := c.Size()
@@ -1722,7 +1732,7 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 	header.Children(func() {
 		// 左侧依次是父芯片、侧栏开关、会话列表（侧栏收起时）、新建会话、编排、权限与分支胶囊，
 		// 之后是占满剩余宽度的标题；右侧只留动作胶囊组与辅助面板胶囊组。
-		ui.Row(c.Key("chat-header-left")).Gap(Space4).AlignItems(ui.Center).Grow(1).Children(func() {
+		ui.Row(c.Key("chat-header-left")).Gap(Space4).AlignItems(ui.Center).Grow(1).Shrink(1).MinWidth(0).ClipX().Children(func() {
 			renderChatHeaderParentChip(c, s)
 			IconButton(c, IconButtonProps{Key: "chat-header-toggle-sidebar-btn", Icon: IconPanelLeft(), Size: ControlMD, Variant: ButtonGhost,
 				Label: "显示/隐藏侧边栏 " + shortcutDisplay("⌘B"), OnClick: func() { toggleSidebarPersisted(s) }})
@@ -1740,7 +1750,7 @@ func renderChatHeader(c *ui.Context, s *chatState, selectedID string, _ ThreadUs
 			renderChatHeaderGit(c, s, selectedID)
 			renderChatHeaderTitle(c, s, selectedThread)
 		})
-		ui.Row(c.Key("chat-header-right")).Gap(Space2).AlignItems(ui.Center).Children(func() {
+		ui.Row(c.Key("chat-header-right")).Gap(Space2).AlignItems(ui.Center).Shrink(0).Children(func() {
 			if stewardSelected(s, selectedID) && !stewardBoardWide(chatAreaWidth(c, s)) {
 				renderStewardBoardBadge(c, s)
 			}
