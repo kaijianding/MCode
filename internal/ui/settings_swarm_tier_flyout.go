@@ -169,6 +169,7 @@ func openSwarmTierEditor(c *ui.Context, st *SettingsState, state *swarmTiersUISt
 		state.draft.WritePaths = append([]string(nil), tier.WritePaths...)
 		state.writePathsText = formatWritePaths(tier.WritePaths)
 		state.saveError = ""
+		state.deleteConfirmID = ""
 	}
 	if parent == nil {
 		st.mu.Unlock()
@@ -288,6 +289,7 @@ func detachSwarmTierEditorLocked(st *SettingsState) func() {
 	state.editor = nil
 	state.openPopoverKey = ""
 	state.saveError = ""
+	state.deleteConfirmID = ""
 	if session == nil {
 		return nil
 	}

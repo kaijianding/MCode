@@ -1,11 +1,19 @@
 package mcodeui
 
 import (
+	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// magpieMatrixBuilds 仅用于测试观测 magpieMatrixData 的实际构建次数。
+var magpieMatrixBuilds atomic.Uint64
+
+// magpieMatrixVersion 在矩阵数据源版本递增时使缓存失效。
+var magpieMatrixVersion atomic.Uint64
 
 // magpieBuiltinAgent 是内置引擎的 agent id：矩阵列始终存在且始终可勾选，
 // 没有安装状态，也没有 inject、global、off 的模式区分。
@@ -78,33 +86,113 @@ type magpieMatrixGateway struct {
 	families  []magpieMatrixFamily
 }
 
+type magpieMatrixGatewaySig struct {
+	id   string
+	name string
+}
+
+type magpieMatrixEndpointSig struct {
+	id       string
+	name     string
+	err      string
+	models   []PiMagpieModel
+	selected []string
+}
+
+type magpieMatrixCacheEntry struct {
+	version  uint64
+	query    string
+	agents   []string
+	gateways []magpieMatrixGatewaySig
+	epSigs   map[string][]magpieMatrixEndpointSig
+	result   []magpieMatrixGateway
+}
+
+// magpieMatrixMatchesCache 在持有 st.mu 时对比缓存条目是否仍然有效，避免无变化的深拷贝与排序。
+func magpieMatrixMatchesCache(entry *magpieMatrixCacheEntry, version uint64, query string, agents []string, gateways []CustomEndpoint, st *SettingsState) bool {
+	if entry == nil || entry.version != version || entry.query != query || !slices.Equal(entry.agents, agents) {
+		return false
+	}
+	if len(entry.gateways) != len(gateways) {
+		return false
+	}
+	for i, gw := range gateways {
+		if entry.gateways[i].id != gw.ID || entry.gateways[i].name != gw.Name {
+			return false
+		}
+	}
+	for _, agent := range agents {
+		eps := st.agentMagpieFor(agent).setting.Endpoints
+		sigs := entry.epSigs[agent]
+		if len(eps) != len(sigs) {
+			return false
+		}
+		for i, ep := range eps {
+			if ep.ID != sigs[i].id || ep.Name != sigs[i].name || ep.Err != sigs[i].err {
+				return false
+			}
+			if !slices.Equal(ep.Models, sigs[i].models) || !slices.Equal(ep.Selected, sigs[i].selected) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // magpieMatrixData 汇总各 agent 的 Magpie 端点，按网关配置顺序返回模型矩阵。
 func magpieMatrixData(st *SettingsState, query string) []magpieMatrixGateway {
+	if st == nil {
+		return nil
+	}
+	version := magpieMatrixVersion.Load()
 	gateways, _ := magpieGateways(st)
+	agents := magpieInstalledAgents(st)
+
+	var needLoad []string
+	byID := make(map[string]*magpieMatrixGateway)
+
+	st.mu.Lock()
+	for _, agent := range agents {
+		state := st.agentMagpieFor(agent)
+		if !state.loaded && !state.loading && state.err == "" {
+			needLoad = append(needLoad, agent)
+		}
+	}
+	if magpieMatrixMatchesCache(st.magpieHub.matrixCache, version, query, agents, gateways, st) {
+		cached := st.magpieHub.matrixCache.result
+		st.mu.Unlock()
+		for _, agent := range needLoad {
+			st.loadAgentMagpie(agent)
+		}
+		return cached
+	}
+
 	names := make(map[string]string, len(gateways))
 	order := make(map[string]int, len(gateways))
+	gwSigs := make([]magpieMatrixGatewaySig, len(gateways))
 	for i, gw := range gateways {
 		names[gw.ID] = gw.Name
 		order[gw.ID] = i
+		gwSigs[i] = magpieMatrixGatewaySig{id: gw.ID, name: gw.Name}
 	}
 
-	agents := magpieInstalledAgents(st)
-	byID := make(map[string]*magpieMatrixGateway)
+	epSigs := make(map[string][]magpieMatrixEndpointSig, len(agents))
 	for _, agent := range agents {
-		st.mu.Lock()
 		state := st.agentMagpieFor(agent)
-		loaded, loading, loadErr := state.loaded, state.loading, state.err
-		endpoints := make([]PiMagpieEndpoint, len(state.setting.Endpoints))
-		for i, ep := range state.setting.Endpoints {
-			ep.Models = append([]PiMagpieModel(nil), ep.Models...)
-			ep.Selected = append([]string(nil), ep.Selected...)
-			endpoints[i] = ep
-		}
-		st.mu.Unlock()
-		if !loaded && !loading && loadErr == "" {
-			st.loadAgentMagpie(agent)
-		}
-		for _, ep := range endpoints {
+		src := state.setting.Endpoints
+		sigs := make([]magpieMatrixEndpointSig, len(src))
+		for i, ep := range src {
+			modelsCopy := append([]PiMagpieModel(nil), ep.Models...)
+			selectedCopy := append([]string(nil), ep.Selected...)
+			sigs[i] = magpieMatrixEndpointSig{
+				id:       ep.ID,
+				name:     ep.Name,
+				err:      ep.Err,
+				models:   modelsCopy,
+				selected: selectedCopy,
+			}
+			ep.Models = modelsCopy
+			ep.Selected = selectedCopy
 			gateway := byID[ep.ID]
 			if gateway == nil {
 				name := strings.TrimSpace(names[ep.ID])
@@ -116,7 +204,15 @@ func magpieMatrixData(st *SettingsState, query string) []magpieMatrixGateway {
 			}
 			gateway.endpoints[agent] = ep
 		}
+		epSigs[agent] = sigs
 	}
+	st.mu.Unlock()
+
+	for _, agent := range needLoad {
+		st.loadAgentMagpie(agent)
+	}
+
+	magpieMatrixBuilds.Add(1)
 
 	var result []magpieMatrixGateway
 	for _, gateway := range byID {
@@ -193,6 +289,17 @@ func magpieMatrixData(st *SettingsState, query string) []magpieMatrixGateway {
 		}
 		return result[i].id < result[j].id
 	})
+	entry := &magpieMatrixCacheEntry{
+		version:  version,
+		query:    query,
+		agents:   append([]string(nil), agents...),
+		gateways: gwSigs,
+		epSigs:   epSigs,
+		result:   result,
+	}
+	st.mu.Lock()
+	st.magpieHub.matrixCache = entry
+	st.mu.Unlock()
 	return result
 }
 
@@ -265,6 +372,7 @@ func magpieMatrixErrorLines(agents []string, errs map[string]string) []string {
 
 // retryMagpieMatrixAgent 重新加载某个 agent 的 Magpie 端点，沿用各 agent 原有的加载入口。
 func retryMagpieMatrixAgent(st *SettingsState, agent string) {
+	magpieMatrixVersion.Add(1)
 	if agent == "pi" {
 		st.mu.Lock()
 		st.piMagpie.err = ""
@@ -297,10 +405,16 @@ func renderMagpieModelMatrix(c *ui.Context, st *SettingsState) {
 		loadErrs := make(map[string]string, len(agents))
 		matrixErrs := make(map[string]string, len(agents))
 		allLoaded := true
+		anyLoading := false
 		for _, agent := range agents {
-			_, loading, loaded, loadErr, _ := magpieEndpointsFor(st, agent)
 			st.mu.Lock()
 			state := st.agentMagpieFor(agent)
+			loading, loaded, loadErr := state.loading, state.loaded, state.err
+			if agent == "pi" {
+				loading = st.piMagpie.loading
+				loaded = st.piMagpie.loaded
+				loadErr = st.piMagpie.err
+			}
 			matrixErr := state.matrixErr
 			if state.loading || !state.loaded || state.err != "" {
 				allLoaded = false
@@ -310,10 +424,7 @@ func renderMagpieModelMatrix(c *ui.Context, st *SettingsState) {
 				allLoaded = false
 			}
 			if !loaded {
-				ui.Text(c, "正在加载…").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c)).
-					PaddingX(settingsRowPadX)
+				anyLoading = true
 			}
 			if loadErr != "" {
 				loadErrs[agent] = "加载失败：" + loadErr
@@ -321,6 +432,12 @@ func renderMagpieModelMatrix(c *ui.Context, st *SettingsState) {
 			if matrixErr != "" {
 				matrixErrs[agent] = matrixErr
 			}
+		}
+		if anyLoading {
+			ui.Text(c, "正在加载…").
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(ThemeSecondaryText(c)).
+				PaddingX(settingsRowPadX)
 		}
 		if lines := magpieMatrixErrorLines(agents, loadErrs); len(lines) > 0 {
 			ui.Row(c.Key("magpie-matrix-load-err")).Gap(Space2).PaddingX(settingsRowPadX).Children(func() {

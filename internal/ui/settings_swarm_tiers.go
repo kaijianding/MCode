@@ -15,8 +15,9 @@ type swarmTiersUIState struct {
 	isNew          bool
 	draft          config.SwarmTier
 	// writePathsText 是写入白名单的多行文本缓冲，保存时解析回 draft.WritePaths。
-	writePathsText string
-	saveError      string
+	writePathsText  string
+	saveError       string
+	deleteConfirmID string
 }
 
 // formatWritePaths 把写入白名单按行拼接，供多行输入框展示。
@@ -330,9 +331,6 @@ func renderSwarmTierEditorForm(c *ui.Context, st *SettingsState, uiSt *swarmTier
 						FontSize(uiFont(TypeFootnote)).
 						FontWeight(500).
 						TextColor(ThemePrimaryText(c))
-					ui.Text(c, "每行一个路径通配，留空则不限制").
-						FontSize(uiFont(TypeCaption)).
-						TextColor(ThemeSecondaryText(c))
 					TextField(c, TextFieldProps{
 						Key:         "area-swarm-tier-writepaths-" + popKey,
 						Value:       &uiSt.writePathsText,
@@ -464,9 +462,7 @@ func renderSwarmTierEditorForm(c *ui.Context, st *SettingsState, uiSt *swarmTier
 							btnDelete.Background(ThemeDanger(c).Alpha(0.12))
 						}
 						if (!deleteDisabled) && btnDelete.Clicked() {
-							if !deleteTier(st, uiSt.draft.ID) {
-								uiSt.saveError = "删除档位失败：至少保留一个可写档位"
-							}
+							uiSt.deleteConfirmID = uiSt.draft.ID
 							st.invalidate()
 						}
 						btnDelete.Children(func() {
@@ -559,6 +555,35 @@ func renderSwarmTierEditorForm(c *ui.Context, st *SettingsState, uiSt *swarmTier
 						})
 					})
 			})
+	})
+
+	confirmOpen := !uiSt.isNew && uiSt.deleteConfirmID != "" && uiSt.deleteConfirmID == uiSt.draft.ID
+	tierLabel := strings.TrimSpace(uiSt.draft.Name)
+	if tierLabel == "" {
+		tierLabel = uiSt.draft.ID
+	}
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:          "modal-drag-swarm-tier-delete",
+		Open:         confirmOpen,
+		Tone:         ConfirmDanger,
+		Title:        "删除档位「" + tierLabel + "」？",
+		Body:         "删除后将同时从模型配对的档位映射中移除此档位。",
+		ConfirmLabel: "删除",
+		ConfirmA11y:  "确认删除档位",
+		CancelLabel:  "取消",
+		CancelA11y:   "取消删除档位",
+		OnConfirm: func() {
+			id := uiSt.deleteConfirmID
+			uiSt.deleteConfirmID = ""
+			if !deleteTier(st, id) {
+				uiSt.saveError = "删除档位失败：至少保留一个可写档位"
+			}
+			st.invalidate()
+		},
+		OnCancel: func() {
+			uiSt.deleteConfirmID = ""
+			st.invalidate()
+		},
 	})
 }
 

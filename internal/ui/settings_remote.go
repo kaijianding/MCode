@@ -62,8 +62,13 @@ type remotePageState struct {
 	tlsFieldsInit    bool
 	tlsDomainText    string
 	tlsPortText      string
-	tlsTokenInput    string
-	tlsHasToken      bool
+	tlsTokenInput        string
+	tlsHasToken          bool
+	tlsTokenClearConfirm bool
+
+	lanIP           string
+	lanIPFetchedAt  time.Time
+	lanIPRefreshing bool
 
 	tailscaleStatus       RemoteTailscaleStatus
 	tailscaleLoaded       bool
@@ -184,12 +189,50 @@ func remoteTLSListenWithPort(listen string, port int) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
+// remoteLANIPsFunc 枚举本机局域网 IPv4 地址；测试时可替换以统计调用次数。
+var remoteLANIPsFunc = remotepkg.LANIPv4s
+
+const remoteLANIPCacheTTL = 10 * time.Second
+
 func remoteCurrentLANIP() string {
-	ips := remotepkg.LANIPv4s()
+	ips := remoteLANIPsFunc()
 	if len(ips) == 0 {
 		return ""
 	}
 	return ips[0]
+}
+
+// remoteCachedLANIP 只读状态里缓存的局域网 IP；缓存超过 10 秒时在后台刷新一次，
+// 同一时间最多只有一个刷新任务，值变化时触发重绘。
+func remoteCachedLANIP(st *SettingsState) string {
+	if st == nil {
+		return ""
+	}
+	st.mu.Lock()
+	ip := st.remote.lanIP
+	fetchedAt := st.remote.lanIPFetchedAt
+	refreshing := st.remote.lanIPRefreshing
+	needRefresh := !refreshing && (fetchedAt.IsZero() || time.Since(fetchedAt) >= remoteLANIPCacheTTL)
+	if needRefresh {
+		st.remote.lanIPRefreshing = true
+	}
+	st.mu.Unlock()
+
+	if needRefresh {
+		go func() {
+			next := remoteCurrentLANIP()
+			st.mu.Lock()
+			changed := st.remote.lanIP != next
+			st.remote.lanIP = next
+			st.remote.lanIPFetchedAt = time.Now()
+			st.remote.lanIPRefreshing = false
+			st.mu.Unlock()
+			if changed {
+				st.invalidate()
+			}
+		}()
+	}
+	return ip
 }
 
 func remoteURLHost(raw string) string {
@@ -1109,7 +1152,7 @@ func (remoteEntryControl) render(c *ui.Context, st *SettingsState, s setting) {
 	st.mu.Unlock()
 
 	running := remoteServiceRunning(status)
-	currentLAN := remoteCurrentLANIP()
+	currentLAN := remoteCachedLANIP(st)
 	startedPort := status.Port
 	if status.StartedListen != "" {
 		startedPort = remoteListenPort(status.StartedListen)
@@ -1138,7 +1181,7 @@ func (remoteEntryControl) render(c *ui.Context, st *SettingsState, s setting) {
 		AlignItems(ui.Center).
 		Children(func() {
 			ui.Text(c, entryURL).FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).SingleLine()
-			if !running || currentLAN == "" {
+			if !running || (currentLAN == "" && remoteServingHost(status) == "") {
 				// 没有局域网地址时不提供可复制入口，避免复制出打不开的 loopback 地址。
 				return
 			}
@@ -1157,32 +1200,57 @@ func (remotePortControl) render(c *ui.Context, st *SettingsState, s setting) {
 	remotePortControl{}.renderDisabled(c, st, s, false)
 }
 
-func (remotePortControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
-	textFunc(
-		func(st *SettingsState) (string, bool) {
-			st.mu.Lock()
-			defer st.mu.Unlock()
-			return st.remote.portText, false
-		},
-		func(st *SettingsState, text string) {
-			st.mu.Lock()
-			st.remote.portText = text
-			st.mu.Unlock()
-			port, err := strconv.Atoi(strings.TrimSpace(text))
-			if err != nil || port < 1024 || port > 65535 {
-				return
-			}
-			commitSettingsControl(st, func(cfg *config.Config) {
-				cfg.Remote.Listen = remoteListenWithPort(cfg.Remote.Listen, port)
-			})
-		},
-		strconv.Itoa(config.DefaultRemoteHTTPPort),
-	).renderDisabled(c, st, s, disabled)
+// remotePortErrorText 校验端口文本是否为 1–65535 的整数；未初始化的空草稿不报错。
+func remotePortErrorText(text string, initialized bool) string {
+	if !initialized && text == "" {
+		return ""
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil || port < 1 || port > 65535 {
+		return "端口需为 1–65535"
+	}
+	return ""
+}
 
+func (remotePortControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
 	st.mu.Lock()
+	portText := st.remote.portText
+	portInit := st.remote.portInit
 	busy := st.remote.busy
 	st.mu.Unlock()
-	renderRemoteRestartButton(c, st, busy)
+	errText := remotePortErrorText(portText, portInit)
+
+	ui.Row(c.Key("row-remote-port-control")).Gap(Space3).AlignItems(ui.Start).Children(func() {
+		ui.Column(c.Key("col-remote-port-input")).Gap(Space1).Children(func() {
+			textFunc(
+				func(st *SettingsState) (string, bool) {
+					st.mu.Lock()
+					defer st.mu.Unlock()
+					return st.remote.portText, false
+				},
+				func(st *SettingsState, text string) {
+					st.mu.Lock()
+					st.remote.portText = text
+					st.remote.portInit = true
+					st.mu.Unlock()
+					port, err := strconv.Atoi(strings.TrimSpace(text))
+					if err != nil || port < 1 || port > 65535 {
+						return
+					}
+					commitSettingsControl(st, func(cfg *config.Config) {
+						cfg.Remote.Listen = remoteListenWithPort(cfg.Remote.Listen, port)
+					})
+				},
+				strconv.Itoa(config.DefaultRemoteHTTPPort),
+			).renderDisabled(c, st, s, disabled)
+			if errText != "" {
+				ui.Text(c, errText).
+					FontSize(uiFont(TypeFootnote)).
+					TextColor(ThemeDanger(c))
+			}
+		})
+		renderRemoteRestartButton(c, st, busy)
+	})
 }
 
 func (remotePortControl) reset(cfg *config.Config) { cfg.Remote.Listen = config.DefaultRemoteListen }
@@ -1435,7 +1503,7 @@ func renderRemoteDeviceRow(c *ui.Context, st *SettingsState, dev RemoteDevice, r
 						delLabel = "确认撤销"
 					}
 					delBtn := ui.ButtonBase(c.Key("btn-revoke-"+devVal.ID)).
-						Label("btn-revoke-"+devVal.ID).
+						Label("撤销设备 "+name).
 						Tooltip(delLabel).
 						Disabled(isBusy).
 						Radius(RadiusSM).

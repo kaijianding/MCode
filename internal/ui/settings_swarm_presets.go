@@ -434,9 +434,6 @@ func renderSwarmPresetsPanel(c *ui.Context, st *SettingsState, providers []Provi
 									FontSize(uiFont(TypeTitle)).
 									FontWeight(600).
 									TextColor(ThemePrimaryText(c))
-								ui.Text(c, "预置的高效协作配对模式，一键添加到当前设置。").
-									FontSize(uiFont(TypeFootnote)).
-									TextColor(ThemeSecondaryText(c))
 							})
 
 						closeBtn := ui.ButtonBase(c.Key("swarm-preset-close-btn")).

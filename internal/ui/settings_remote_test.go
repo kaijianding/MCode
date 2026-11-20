@@ -404,13 +404,13 @@ func TestSettingsRemote_RevokeDevice(t *testing.T) {
 	})
 
 	// 第一次点击进入二次确认态
-	clickRemoteSettingsLabel(t, tt, "btn-revoke-dev-1")
+	clickRemoteSettingsLabel(t, tt, "撤销设备 iPhone 15")
 	waitFor(t, tt, func() bool {
 		return tt.HasText("确认撤销")
 	})
 
 	// 二次确认撤销
-	clickRemoteSettingsLabel(t, tt, "btn-revoke-dev-1")
+	clickRemoteSettingsLabel(t, tt, "撤销设备 iPhone 15")
 
 	waitFor(t, tt, func() bool {
 		fake.mu.Lock()
@@ -1430,7 +1430,7 @@ func TestSettingsRemote_PortDraftDebounce(t *testing.T) {
 	}
 
 	tt.Command("selectAll")
-	tt.Type("80")
+	tt.Type("0")
 	tt.Frame()
 	tt.Frame()
 	loaded, err := config.Load(dataDir)
@@ -1442,7 +1442,7 @@ func TestSettingsRemote_PortDraftDebounce(t *testing.T) {
 	}
 	tt.Command("selectAll")
 	tt.Command("copy")
-	if got := tt.Clipboard(); got != "80" {
+	if got := tt.Clipboard(); got != "0" {
 		t.Fatalf("越界输入应留在草稿里等待修改，got %q", got)
 	}
 }

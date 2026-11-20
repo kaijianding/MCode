@@ -892,10 +892,6 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 										FontSize(uiFont(TypeFootnote)).
 										TextColor(ThemeAccent(c))
 								})
-
-								ui.Text(c, "只修改 MCode 自己的账号配置，不改动系统 ~/.gemini").
-									FontSize(uiFont(TypeCaption)).
-									TextColor(ThemeSecondaryText(c))
 							}
 
 							// 重新登录：复用浏览器登录，系统账号的凭证来自宿主机，不提供。
@@ -1017,7 +1013,7 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 							} else {
 								// 正常删除按钮
 								delBtn := ui.ButtonBase(c.Key("btn-del-"+accVal.ID)).
-									Label("btn-del-"+accVal.ID).
+									Label("删除账号 "+displayName).
 									Radius(RadiusSM).
 									Padding(Space1, Space3)
 								if delBtn.Hovered() {

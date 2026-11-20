@@ -152,31 +152,45 @@ func (remoteTLSPortControl) render(c *ui.Context, st *SettingsState, s setting) 
 }
 
 func (remoteTLSPortControl) renderDisabled(c *ui.Context, st *SettingsState, s setting, disabled bool) {
-	textFunc(
-		func(st *SettingsState) (string, bool) {
-			st.mu.Lock()
-			defer st.mu.Unlock()
-			return st.remote.tlsPortText, false
-		},
-		func(st *SettingsState, text string) {
-			st.mu.Lock()
-			st.remote.tlsPortText = text
-			enabled := strings.TrimSpace(st.cfg.Remote.TLSListen) != ""
-			st.mu.Unlock()
-			port, err := strconv.Atoi(strings.TrimSpace(text))
-			if err != nil || port < 1 || port > 65535 {
-				return
-			}
-			// 只在 HTTPS 已启用时写回：否则改端口会隐式开启 TLS 监听。
-			if !enabled {
-				return
-			}
-			commitSettingsControl(st, func(cfg *config.Config) {
-				cfg.Remote.TLSListen = remoteTLSListenWithPort(cfg.Remote.TLSListen, port)
-			})
-		},
-		strconv.Itoa(config.DefaultRemoteTLSPort),
-	).renderDisabled(c, st, s, disabled)
+	st.mu.Lock()
+	portText := st.remote.tlsPortText
+	fieldsInit := st.remote.tlsFieldsInit
+	st.mu.Unlock()
+	errText := remotePortErrorText(portText, fieldsInit)
+
+	ui.Column(c.Key("col-remote-tls-port-control")).Gap(Space1).Children(func() {
+		textFunc(
+			func(st *SettingsState) (string, bool) {
+				st.mu.Lock()
+				defer st.mu.Unlock()
+				return st.remote.tlsPortText, false
+			},
+			func(st *SettingsState, text string) {
+				st.mu.Lock()
+				st.remote.tlsPortText = text
+				st.remote.tlsFieldsInit = true
+				enabled := strings.TrimSpace(st.cfg.Remote.TLSListen) != ""
+				st.mu.Unlock()
+				port, err := strconv.Atoi(strings.TrimSpace(text))
+				if err != nil || port < 1 || port > 65535 {
+					return
+				}
+				// 只在 HTTPS 已启用时写回：否则改端口会隐式开启 TLS 监听。
+				if !enabled {
+					return
+				}
+				commitSettingsControl(st, func(cfg *config.Config) {
+					cfg.Remote.TLSListen = remoteTLSListenWithPort(cfg.Remote.TLSListen, port)
+				})
+			},
+			strconv.Itoa(config.DefaultRemoteTLSPort),
+		).renderDisabled(c, st, s, disabled)
+		if errText != "" {
+			ui.Text(c, errText).
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(ThemeDanger(c))
+		}
+	})
 }
 
 func (remoteTLSPortControl) reset(cfg *config.Config) { cfg.Remote.TLSListen = "" }
@@ -192,6 +206,7 @@ func (remoteTLSTokenControl) renderDisabled(c *ui.Context, st *SettingsState, s 
 	st.mu.Lock()
 	hasToken := st.remote.tlsHasToken
 	busy := st.remote.tlsBusy
+	clearConfirm := st.remote.tlsTokenClearConfirm
 	st.mu.Unlock()
 
 	ui.Row(c.Key("row-remote-tls-token-controls")).
@@ -260,13 +275,40 @@ func (remoteTLSTokenControl) renderDisabled(c *ui.Context, st *SettingsState, s 
 					clearBtn.Disabled(true)
 				}
 				if clearBtn.Clicked() && !disabled && !busy {
-					saveRemoteCloudflareToken(st, "")
+					st.mu.Lock()
+					st.remote.tlsTokenClearConfirm = true
+					st.mu.Unlock()
+					st.invalidate()
 				}
 				clearBtn.Children(func() {
 					ui.Text(c, "清除").FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
 				})
 			}
 		})
+
+	RenderConfirmDialog(c, ConfirmDialog{
+		Key:          "modal-drag-remote-tls-token-clear",
+		Open:         clearConfirm,
+		Tone:         ConfirmDanger,
+		Title:        "清除 Cloudflare API Token？",
+		Body:         "清除后自动申请或续期证书时将无法使用 Cloudflare DNS 验证。",
+		ConfirmLabel: "清除",
+		ConfirmA11y:  "确认清除 Cloudflare API Token",
+		CancelLabel:  "取消",
+		CancelA11y:   "取消清除 Cloudflare API Token",
+		OnConfirm: func() {
+			st.mu.Lock()
+			st.remote.tlsTokenClearConfirm = false
+			st.mu.Unlock()
+			saveRemoteCloudflareToken(st, "")
+		},
+		OnCancel: func() {
+			st.mu.Lock()
+			st.remote.tlsTokenClearConfirm = false
+			st.mu.Unlock()
+			st.invalidate()
+		},
+	})
 }
 
 // remoteTLSEntryControl 是 HTTPS 入口：没真正启动监听时不给可复制地址。

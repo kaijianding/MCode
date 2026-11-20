@@ -11,10 +11,11 @@ import (
 // 这里保留一份字面量，改默认地址时两处要一起改。
 const magpieDefaultBaseURL = "http://127.0.0.1:3425/v1"
 
-// magpieHubState 记录网关弹窗的当前网关和保存状态。
+// magpieHubState 记录网关弹窗的当前网关和保存状态，以及模型矩阵的构建缓存。
 type magpieHubState struct {
 	sheetGatewayID string
 	sheetSaving    bool
+	matrixCache    *magpieMatrixCacheEntry
 }
 
 // magpieGatewayStatusKind 决定网关状态胶囊的语义颜色。
@@ -181,9 +182,6 @@ func renderMagpieGatewayForm(c *ui.Context, st *SettingsState, id, keyDraft, web
 							FontSize(uiFont(TypeProse)).
 							FontWeight(600).
 							TextColor(ThemePrimaryText(c))
-						ui.Text(c, "本机 magpie 会自动读取；远端 magpie 请配置 web 管理接口，或粘贴人设列表").
-							FontSize(uiFont(TypeFootnote)).
-							TextColor(ThemeSecondaryText(c))
 					})
 
 			}
