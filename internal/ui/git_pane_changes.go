@@ -537,7 +537,7 @@ func renderGitCommitComposer(c *ui.Context, s *chatState, threadID string, ps *g
 				}
 			})
 			appPopover(c, more, &st.menu, nil, func() {
-				popoverCard(c, ui.Column(c.Key("git-changes-commit-menu"))).Padding(Space1).Children(func() {
+				popoverCard(c, ui.Column(c.Key("git-changes-commit-menu"))).Padding(Space1).FocusGroup(ui.Vertical).Children(func() {
 					menuRow(c, menuRowProps{
 						Key:      "git-changes-commit-push",
 						Label:    "提交并推送",

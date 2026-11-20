@@ -1371,6 +1371,7 @@ func renderHeaderPermissionCapsule(c *ui.Context, s *chatState, threadID string)
 						ui.Column(c.Key("chat-header-permission-menu-list")).
 							Gap(Space0).
 							FillWidth().
+							FocusGroup(ui.Vertical).
 							Children(func() {
 								ui.Text(c, "权限").
 									FontSize(uiFont(TypeCaption)).
@@ -1896,7 +1897,7 @@ func renderChatHeaderAuxGroup(c *ui.Context, s *chatState) {
 					renderGitCountBadge(c, "chat-header-memory-badge", pendingProposals)
 				}
 				appPopover(c.Key("chat-header-aux-more-popover"), trigger, &hs.auxMenuOpen, nil, func() {
-					popoverCard(c, ui.Column(c.Key("chat-header-aux-more-menu")).Width(180).Padding(Space1).Children(func() {
+					popoverCard(c, ui.Column(c.Key("chat-header-aux-more-menu")).Width(180).Padding(Space1).FocusGroup(ui.Vertical).Children(func() {
 						item := func(key, title, detail string, action func()) {
 							menuRow(c, menuRowProps{
 								Key:      key,

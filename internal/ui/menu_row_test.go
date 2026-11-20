@@ -209,3 +209,71 @@ func TestMenuRowLongTrailingKeepsTitle(t *testing.T) {
 		})
 	})
 }
+
+func TestUIReview8MenuFocusGroupArrows(t *testing.T) {
+	open := true
+	clicked2 := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c.Key("menu-focus-group-wrap")).
+			Width(320).
+			Padding(Space2).
+			Children(func() {
+				trigger := Button(c.Key("menu-focus-group-trigger"), ButtonOpts{
+					Text:  "菜单",
+					Label: "菜单",
+				})
+				anchoredMenu(c, "menu-focus-group", trigger, &open, nil, 180, 240, 200, func() {
+					popoverCard(c, ui.Column(c.Key("menu-focus-group-card")).Padding(Space1).Gap(Space0).Children(func() {
+						menuRow(c, menuRowProps{Key: "row-1", Title: "第一项"})
+						menuRow(c, menuRowProps{
+							Key:   "row-2",
+							Title: "第二项",
+							OnClick: func() {
+								clicked2++
+							},
+						})
+						menuRow(c, menuRowProps{Key: "row-3", Title: "第三项"})
+					}))
+				})
+			})
+	}, 400, 300)
+	tt.Frame()
+
+	for i := 0; i < 8 && !tt.Focused("第一项"); i++ {
+		tt.Key(0, ui.KeyTab)
+		tt.Frame()
+	}
+	if !tt.Focused("第一项") {
+		t.Fatal("按 Tab 后未能聚焦到第 1 项")
+	}
+
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	if !tt.Focused("第二项") {
+		t.Fatal("按 KeyDown 后第 2 项未聚焦")
+	}
+
+	tt.Key(0, ui.KeyUp)
+	tt.Frame()
+	if !tt.Focused("第一项") {
+		t.Fatal("按 KeyUp 后未能回到第 1 项")
+	}
+
+	tt.Key(0, ui.KeyUp)
+	tt.Frame()
+	if !tt.Focused("第三项") {
+		t.Fatal("在第 1 项按 KeyUp 后未能绕到第 3 项")
+	}
+
+	tt.Key(0, ui.KeyUp)
+	tt.Frame()
+	if !tt.Focused("第二项") {
+		t.Fatal("在第 3 项按 KeyUp 后第 2 项未聚焦")
+	}
+
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if clicked2 != 1 {
+		t.Fatalf("第 2 项聚焦时按 Enter 应触发一次 OnClick，实际=%d", clicked2)
+	}
+}

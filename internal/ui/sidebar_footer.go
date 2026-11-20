@@ -181,6 +181,7 @@ func renderAddProjectPopover(c *ui.Context, s *chatState) {
 		Gap(Space0).
 		Padding(Space1).
 		MinWidth(190).
+		FocusGroup(ui.Vertical).
 		Children(func() {
 			menuRow(c, menuRowProps{
 				Key:   "sidebar-add-project-folder",

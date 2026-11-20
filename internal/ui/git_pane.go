@@ -802,71 +802,73 @@ func renderGitPaneToolbar(c *ui.Context, s *chatState, ps *gitPaneState, state G
 						el.Tooltip(tip)
 					}
 				}
-				syncTip := ""
-				switch {
-				case syncing:
-					syncTip = "Git 操作进行中"
-				case state.WorkDir == "":
-					syncTip = "Git 状态不可用"
-				case state.Detached:
-					syncTip = "分离 HEAD 时无法执行此操作"
-				}
-				option("pull", "拉取", syncTip != "", syncTip, func() { ps.run("pull") })
-				option("force", "强制推送…", syncTip != "", syncTip, func() { ps.forceBranch, ps.forceOpen = state.Branch, true })
-				gitMenuDivider(c)
-				stashTip := ""
-				switch {
-				case syncing:
-					stashTip = "Git 操作进行中"
-				case state.WorkDir == "":
-					stashTip = "Git 状态不可用"
-				}
-				option("stash", "贮藏…", stashTip != "", stashTip, func() {
-					if ps.stash == nil {
-						ps.stash = &gitStashDialog{s: s, threadID: ps.threadID, confirmAt: -1}
+				ui.Column(c.Key("git-pane-menu-rows")).FillWidth().Gap(Space0).FocusGroup(ui.Vertical).Children(func() {
+					syncTip := ""
+					switch {
+					case syncing:
+						syncTip = "Git 操作进行中"
+					case state.WorkDir == "":
+						syncTip = "Git 状态不可用"
+					case state.Detached:
+						syncTip = "分离 HEAD 时无法执行此操作"
 					}
-					ps.stash.openStashDialog()
-				})
-				gitMenuDivider(c)
-				prTip := ""
-				if repoURL == "" {
-					prTip = "没有可用的远端仓库地址"
-				}
-				option("pr-create", "创建 PR…", prTip != "", prTip, func() {
-					openGitPRCreateDialog(s, ps.threadID)
-					s.invalidate()
-				})
-				if canMergeBees {
-					mergeTip := ""
-					if syncing || pushBusy || state.WorkDir == "" || state.Detached {
-						mergeTip = "Git 操作进行中或分支不可用"
+					option("pull", "拉取", syncTip != "", syncTip, func() { ps.run("pull") })
+					option("force", "强制推送…", syncTip != "", syncTip, func() { ps.forceBranch, ps.forceOpen = state.Branch, true })
+					gitMenuDivider(c)
+					stashTip := ""
+					switch {
+					case syncing:
+						stashTip = "Git 操作进行中"
+					case state.WorkDir == "":
+						stashTip = "Git 状态不可用"
 					}
-					option("push-pr", "合并子代理改动（PR）", mergeTip != "", mergeTip, func() {
-						ps.menuOpen = true
-						s.requestPushPRConfirm()
+					option("stash", "贮藏…", stashTip != "", stashTip, func() {
+						if ps.stash == nil {
+							ps.stash = &gitStashDialog{s: s, threadID: ps.threadID, confirmAt: -1}
+						}
+						ps.stash.openStashDialog()
+					})
+					gitMenuDivider(c)
+					prTip := ""
+					if repoURL == "" {
+						prTip = "没有可用的远端仓库地址"
+					}
+					option("pr-create", "创建 PR…", prTip != "", prTip, func() {
+						openGitPRCreateDialog(s, ps.threadID)
 						s.invalidate()
 					})
-				}
-				option("pr-view", "查看 Pull Request…", false, "", func() {
-					s.openGitPRDialog()
-					s.invalidate()
+					if canMergeBees {
+						mergeTip := ""
+						if syncing || pushBusy || state.WorkDir == "" || state.Detached {
+							mergeTip = "Git 操作进行中或分支不可用"
+						}
+						option("push-pr", "合并子代理改动（PR）", mergeTip != "", mergeTip, func() {
+							ps.menuOpen = true
+							s.requestPushPRConfirm()
+							s.invalidate()
+						})
+					}
+					option("pr-view", "查看 Pull Request…", false, "", func() {
+						s.openGitPRDialog()
+						s.invalidate()
+					})
+					showRepo, showRemotes := repoURL != "", gitPaneRemotesDialog != nil
+					if showRepo || showRemotes {
+						gitMenuDivider(c)
+						if showRepo {
+							option("repo", "打开仓库", false, "", func() {
+								c.OpenURL(repoURL)
+								s.invalidate()
+							})
+						}
+						if showRemotes {
+							option("remotes", "远端…", false, "", func() {
+								ps.remotesOpen = true
+								s.invalidate()
+							})
+						}
+					}
 				})
-				showRepo, showRemotes := repoURL != "", gitPaneRemotesDialog != nil
-				if showRepo || showRemotes {
-					gitMenuDivider(c)
-					if showRepo {
-						option("repo", "打开仓库", false, "", func() {
-							c.OpenURL(repoURL)
-							s.invalidate()
-						})
-					}
-					if showRemotes {
-						option("remotes", "远端…", false, "", func() {
-							ps.remotesOpen = true
-							s.invalidate()
-						})
-					}
-				}
 				if pushConfirm {
 					renderGitPushPRConfirm(c, s, state)
 				}

@@ -257,6 +257,7 @@ func renderSidebarFilterControl(c *ui.Context, s *chatState) {
 			Padding(Space1).
 			Gap(Space0).
 			MinWidth(200).
+			FocusGroup(ui.Vertical).
 			Children(func() {
 				current := s.sidebarFilter
 				for _, opt := range sidebarThreadFilterOptions {

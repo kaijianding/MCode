@@ -1545,7 +1545,8 @@ func renderModelPickerMaxBeesCapsule(c *ui.Context, p ModelPickerProps, state *M
 	}, appFlyoutProps{Width: 230, Background: &ColorSurfaceRaisedDark}, func(fc *ui.Context) {
 		c := fc
 		optionsCol := ui.Column(c.Key(p.KeyPrefix + "bees-max-options")).
-			Padding(Space1)
+			Padding(Space1).
+			FocusGroup(ui.Vertical)
 		// 选项面板是固定深色面上的第二层浮层，阴影取 ElevPopover。
 		if flyoutHostWindow(c.Services()) == nil {
 			optionsCol = applyElevation(c, optionsCol.Radius(RadiusMD).Background(ColorSurfaceRaisedDark).Border(1, ColorBorderDark), ElevPopover)

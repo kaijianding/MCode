@@ -100,6 +100,7 @@ func renderHeaderScriptsMenuButton(c *ui.Context, s *chatState, threadID string)
 						ui.Column(c.Key("chat-header-scripts-menu-list")).
 							Gap(Space0).
 							FillWidth().
+							FocusGroup(ui.Vertical).
 							Children(func() {
 								if loaded && len(scripts) == 0 {
 									ui.Text(c, "暂无可用脚本").
@@ -314,6 +315,7 @@ func renderHeaderOpenInButton(c *ui.Context, s *chatState, threadID string) {
 			Padding(Space1).
 			MinWidth(200).
 			MaxWidth(300).
+			FocusGroup(ui.Vertical).
 			Children(func() {
 				menuRow(c, menuRowProps{
 					Key:   "chat-header-open-in-unified-finder",

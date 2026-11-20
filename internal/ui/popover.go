@@ -53,7 +53,7 @@ func appPopoverAbove(c *ui.Context, anchor ui.Element, open *bool, onDismiss fun
 // 点外部或 Esc 关闭时写回 open 并调用 onDismiss（可为 nil）。
 func anchoredMenu(c *ui.Context, key string, trigger ui.Element, open *bool, onDismiss func(), minWidth, maxWidth, maxHeight float32, children func()) {
 	anchoredPopover(c, trigger, anchoredPopoverProps{Key: key, Open: open, MinWidth: minWidth, MaxWidth: maxWidth, MaxHeight: maxHeight, OnDismiss: onDismiss}, func(panel ui.Element) {
-		panel.Label(key)
+		panel.Label(key).FocusGroup(ui.Vertical)
 		children()
 	})
 }

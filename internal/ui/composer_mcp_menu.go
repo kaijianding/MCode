@@ -326,6 +326,7 @@ func renderMCPSelectionPanel(c *ui.Context, s *chatState, threadID string, onBac
 					ui.Column(c.Key("composer-mcp-rows")).
 						FillWidth().
 						Gap(2).
+						FocusGroup(ui.Vertical).
 						Children(func() {
 							for i := range servers {
 								renderMCPSelectionRow(c, s, servers[i])

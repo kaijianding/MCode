@@ -439,7 +439,7 @@ func renderGitBranchPopoverBody(c *ui.Context, s *chatState, threadID string, wi
 								}
 								p.mu.Unlock()
 							}, func() {
-								popoverCard(c, ui.Column(c.Key(key+"-menu-content"))).Padding(Space1).Gap(Space0).Children(func() {
+								popoverCard(c, ui.Column(c.Key(key+"-menu-content"))).Padding(Space1).Gap(Space0).FocusGroup(ui.Vertical).Children(func() {
 									for _, a := range actions {
 										a := a
 										opt := menuRow(c, menuRowProps{

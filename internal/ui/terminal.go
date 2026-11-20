@@ -1398,6 +1398,7 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 												Gap(Space0).
 												Padding(Space1).
 												MinWidth(140).
+												FocusGroup(ui.Vertical).
 												Children(func() {
 													menuRow(c, menuRowProps{
 														Key:   "terminal-tab-new-worktree",
