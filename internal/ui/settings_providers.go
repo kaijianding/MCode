@@ -73,6 +73,9 @@ const (
 	customEndpointsRetryDelay = 30 * time.Second
 )
 
+// settingsRPCTimeout 是设置页常规 RPC 的超时上限；包级变量便于测试缩短验证超时收尾。
+var settingsRPCTimeout = 10 * time.Second
+
 // clearCustomEndpointPersonaDrafts 清空人设来源与额度供应商草稿（含明文 web key）；调用方需持有 st.mu。
 func clearCustomEndpointPersonaDrafts(st *SettingsState) {
 	st.endpoints.editPersonaWebURL = ""
@@ -260,7 +263,9 @@ func loadCustomEndpoints(st *SettingsState) {
 	st.invalidate()
 
 	go func() {
-		list, err := client.CustomEndpoints(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		list, err := client.CustomEndpoints(ctx)
+		cancel()
 		st.mu.Lock()
 		st.endpoints.loading = false
 		st.endpoints.loaded = true
@@ -308,7 +313,9 @@ func saveCustomEndpoint(st *SettingsState) {
 			return
 		}
 
-		list, lErr := client.CustomEndpoints(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		list, lErr := client.CustomEndpoints(ctx)
+		cancel()
 		if !saved.Magpie {
 			refreshCustomEndpointProviders(st, client)
 		}
@@ -369,7 +376,9 @@ func deleteCustomEndpoint(st *SettingsState, id string) {
 			return
 		}
 
-		list, lErr := client.CustomEndpoints(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		list, lErr := client.CustomEndpoints(ctx)
+		cancel()
 		if !wasMagpie {
 			refreshCustomEndpointProviders(st, client)
 		}
@@ -449,7 +458,9 @@ func toggleCustomEndpointEnabled(st *SettingsState, ep CustomEndpoint, enabled b
 			return
 		}
 
-		list, lErr := client.CustomEndpoints(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		list, lErr := client.CustomEndpoints(ctx)
+		cancel()
 		if !ep.Magpie {
 			refreshCustomEndpointProviders(st, client)
 		}

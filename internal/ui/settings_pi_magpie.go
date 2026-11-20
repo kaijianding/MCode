@@ -21,6 +21,9 @@ type piMagpieState struct {
 	saveErr        map[string]string  // 端点 ID → 最近一次保存失败信息
 }
 
+// piMagpieRefreshRPCTimeout 是强制刷新 Magpie 端点的超时上限（会访问远端）；包级变量便于测试缩短。
+var piMagpieRefreshRPCTimeout = 30 * time.Second
+
 // loadPiMagpieEndpoints 异步拉取 Magpie 端点与已勾选模型；重复调用时保持单次在途。
 func (st *SettingsState) loadPiMagpieEndpoints() {
 	client := st.agyClient()
@@ -49,9 +52,13 @@ func (st *SettingsState) loadPiMagpieEndpoints() {
 			var endpoints []PiMagpieEndpoint
 			var err error
 			if force {
-				endpoints, err = client.RefreshPiMagpieEndpoints(context.Background())
+				ctx, cancel := context.WithTimeout(context.Background(), piMagpieRefreshRPCTimeout)
+				endpoints, err = client.RefreshPiMagpieEndpoints(ctx)
+				cancel()
 			} else {
-				endpoints, err = client.PiMagpieEndpoints(context.Background())
+				ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+				endpoints, err = client.PiMagpieEndpoints(ctx)
+				cancel()
 			}
 			if force && err == nil {
 				// 缓存已是最新，让各 agent 的快照与供应商目录读到同一份。

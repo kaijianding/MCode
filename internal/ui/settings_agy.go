@@ -123,7 +123,9 @@ func (st *SettingsState) loadAgy(refreshQuota bool) {
 		autoWarmup, errAuto := client.AgyAutoWarmup()
 		// 本机登录状态：只看宿主凭证（钥匙串 / antigravity-oauth-token），
 		// 账号管理器未接线时也能正确报告 Antigravity 已登录。
-		localLogin := accounts.SystemLoginAvailable(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+		localLogin := accounts.SystemLoginAvailable(ctx)
+		cancel()
 
 		st.mu.Lock()
 		st.agy.loading = false
