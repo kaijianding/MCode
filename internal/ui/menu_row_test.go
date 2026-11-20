@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -95,4 +96,52 @@ func TestMenuRow(t *testing.T) {
 			t.Fatalf("Trailing 文字「⇧⌘E」应可见，实际 Texts=%v", tt.Texts())
 		}
 	})
+}
+
+func TestUIReview5MenuRowFocusRing(t *testing.T) {
+	var focusVisible bool
+	tt := newMenuRowTester(func(c *ui.Context) {
+		btn := menuRow(c, menuRowProps{
+			Key:   "row-focus",
+			Title: "焦点行",
+		})
+		focusVisible = btn.FocusVisible()
+	})
+
+	if tt.Focused("焦点行") || focusVisible {
+		t.Fatal("未聚焦时菜单行不应处于键盘焦点可见状态")
+	}
+	rect, ok := tt.Find("焦点行")
+	if !ok {
+		t.Fatal("未找到菜单行")
+	}
+	unfocusedImg := tt.Image()
+	unfocusedPix := append([]byte(nil), unfocusedImg.Pix...)
+	bg := unfocusedImg.At(0, 0)
+	midY := int(rect.Y + rect.H/2)
+	for dx := 1; dx <= 2; dx++ {
+		if got := unfocusedImg.At(int(rect.X)-dx, midY); got != bg {
+			t.Fatalf("未聚焦时菜单行外缘 x-%d 不应出现焦点环，got=%v want=%v", dx, got, bg)
+		}
+	}
+
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if !tt.Focused("焦点行") || !focusVisible {
+		t.Fatalf("按 Tab 后菜单行应获得 FocusVisible 键盘焦点，focused=%v focusVisible=%v", tt.Focused("焦点行"), focusVisible)
+	}
+	focusedImg := tt.Image()
+	if bytes.Equal(unfocusedPix, focusedImg.Pix) {
+		t.Fatal("按 Tab 聚焦后渲染帧应出现焦点环阴影，但像素未变化")
+	}
+	ringVisible := false
+	for dx := 1; dx <= 2; dx++ {
+		if focusedImg.At(int(rect.X)-dx, midY) != bg {
+			ringVisible = true
+			break
+		}
+	}
+	if !ringVisible {
+		t.Fatal("按 Tab 聚焦后菜单行外缘 1-2px 未检测到焦点环阴影像素")
+	}
 }
