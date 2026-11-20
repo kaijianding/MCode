@@ -3,6 +3,7 @@ package mcodeui
 import (
 	"context"
 	"strings"
+	"sync"
 )
 
 // provisionalRetain 合并同一会话的转正请求，发送前也等待 Worktree 迁入完成。
@@ -148,13 +149,21 @@ func (s *chatState) retainProvisionalThread(threadID string) error {
 		s.mu.Unlock()
 		return nil
 	}
+	op := s.beginRetainProvisionalLocked(threadID)
+	s.mu.Unlock()
+	return s.finishRetainProvisional(threadID, op)
+}
+
+func (s *chatState) beginRetainProvisionalLocked(threadID string) *provisionalRetain {
 	op := &provisionalRetain{done: make(chan struct{})}
 	if s.provisionalRetains == nil {
 		s.provisionalRetains = make(map[string]*provisionalRetain)
 	}
 	s.provisionalRetains[threadID] = op
-	s.mu.Unlock()
+	return op
+}
 
+func (s *chatState) finishRetainProvisional(threadID string, op *provisionalRetain) error {
 	err := s.client.RetainThread(threadID)
 	s.mu.Lock()
 	op.err = err
@@ -181,16 +190,141 @@ func (s *chatState) retainProvisionalThread(threadID string) error {
 	return err
 }
 
+var (
+	provisionalDemoteMu sync.Mutex
+	provisionalDemotes  = make(map[*chatState]map[string]bool)
+)
+
+func (s *chatState) tryBeginProvisionalDemote(threadID string) bool {
+	provisionalDemoteMu.Lock()
+	defer provisionalDemoteMu.Unlock()
+	byThread := provisionalDemotes[s]
+	if byThread[threadID] {
+		return false
+	}
+	if byThread == nil {
+		byThread = make(map[string]bool)
+		provisionalDemotes[s] = byThread
+	}
+	byThread[threadID] = true
+	return true
+}
+
+func (s *chatState) endProvisionalDemote(threadID string) {
+	provisionalDemoteMu.Lock()
+	defer provisionalDemoteMu.Unlock()
+	byThread := provisionalDemotes[s]
+	if byThread == nil {
+		return
+	}
+	delete(byThread, threadID)
+	if len(byThread) == 0 {
+		delete(provisionalDemotes, s)
+	}
+}
+
+func (s *chatState) composerDraftEmptyLocked(threadID string) bool {
+	draft := s.drafts[threadID]
+	if strings.TrimSpace(draft.Text) != "" || len(draft.Attachments) != 0 || len(draft.Snippets) != 0 {
+		return false
+	}
+	if s.selectedThreadID == threadID {
+		text, atts, snippets := s.draft, s.attachments, s.snippets
+		if s.editingFollowUpID != "" {
+			text, atts, snippets = s.editStashDraft, s.editStashAttachments, s.editStashSnippets
+		}
+		if strings.TrimSpace(text) != "" || len(atts) != 0 || len(snippets) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// demoteEmptyThread 在草稿被清空后把空正式会话退回临时态，从侧栏隐藏但保持当前选中。
+func (s *chatState) demoteEmptyThread(threadID string) {
+	if s == nil || s.client == nil || threadID == "" || !s.tryBeginProvisionalDemote(threadID) {
+		return
+	}
+	cleaned := false
+	var reRetain *provisionalRetain
+	defer func() {
+		if !cleaned {
+			s.endProvisionalDemote(threadID)
+		}
+		if reRetain != nil {
+			_ = s.finishRetainProvisional(threadID, reRetain)
+		}
+	}()
+
+	s.mu.Lock()
+	op := s.provisionalRetains[threadID]
+	s.mu.Unlock()
+	if op != nil {
+		<-op.done
+	}
+
+	s.mu.Lock()
+	th, ok := s.threadSnapshotLocked(threadID)
+	if s.closed || !ok || th.IsProvisional || th.IsRunning || s.sending ||
+		s.optimisticRunning[threadID] || s.composerDockPromoArmed(threadID) ||
+		!s.composerDraftEmptyLocked(threadID) {
+		s.endProvisionalDemote(threadID)
+		cleaned = true
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	demoted, err := s.client.DemoteEmptyThread(threadID)
+	if err != nil {
+		s.endProvisionalDemote(threadID)
+		cleaned = true
+		s.setToast("退回临时会话失败: " + err.Error())
+		return
+	}
+	if !demoted {
+		s.endProvisionalDemote(threadID)
+		cleaned = true
+		return
+	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.endProvisionalDemote(threadID)
+		cleaned = true
+		s.mu.Unlock()
+		return
+	}
+	s.markThreadProvisionalLocked(threadID)
+	delete(s.provisionalRetains, threadID)
+	if !s.composerDraftEmptyLocked(threadID) {
+		// 降级 RPC 期间用户又输入了草稿：在同一把锁内占位并发起重新转正，避免与后续清空乱序。
+		reRetain = s.beginRetainProvisionalLocked(threadID)
+	}
+	s.endProvisionalDemote(threadID)
+	cleaned = true
+	s.mu.Unlock()
+	s.invalidate()
+}
+
 func (s *chatState) markThreadRetainedLocked(threadID string) {
+	s.setThreadProvisionalLocked(threadID, false)
+}
+
+func (s *chatState) markThreadProvisionalLocked(threadID string) {
+	s.setThreadProvisionalLocked(threadID, true)
+}
+
+func (s *chatState) setThreadProvisionalLocked(threadID string, provisional bool) {
 	for i := range s.threads {
 		if s.threads[i].ID == threadID {
-			s.threads[i].IsProvisional = false
+			s.threads[i].IsProvisional = provisional
 		}
 	}
 	for _, list := range s.threadsByProj {
 		for i := range list {
 			if list[i].ID == threadID {
-				list[i].IsProvisional = false
+				list[i].IsProvisional = provisional
 			}
 		}
 	}

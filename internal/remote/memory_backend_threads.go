@@ -492,18 +492,9 @@ func (b *MemoryBackend) SetProvisionalCleanupDelay(d time.Duration) {
 	b.provisionalCleanupDelay = d
 }
 
-// CanDiscardEmptyProvisional 判断临时线程是否为空且可被自动废弃清理。
-// 同时满足以下条件才为 true：是临时线程、没有任何消息、没有进行中的轮次（IsRunning）、Follow-Up 队列为空。
-func (b *MemoryBackend) CanDiscardEmptyProvisional(threadID string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	td, ok := b.threads[threadID]
-	if !ok {
-		return false
-	}
-	if !td.summary.IsProvisional {
-		return false
-	}
+// isEmptyStandaloneThreadLocked 判断线程是否为空且没有子会话、不在运行、没有排队消息。
+// 调用方必须持有 b.mu。
+func (b *MemoryBackend) isEmptyStandaloneThreadLocked(td *memoryThread, threadID string) bool {
 	// 消息被淘汰时按需回载，避免把有历史的会话误判为空。
 	if err := b.ensureMessagesLocked(td, threadID); err != nil {
 		return false
@@ -534,9 +525,90 @@ func (b *MemoryBackend) CanDiscardEmptyProvisional(threadID string) bool {
 	return true
 }
 
+// threadHasWorktreeLocked 判断线程是否已绑定独立的 Git worktree；调用方必须持有 b.mu。
+func (b *MemoryBackend) threadHasWorktreeLocked(td *memoryThread, threadID string) bool {
+	if td.summary.WorktreeRequested {
+		return true
+	}
+	if td.workDir != "" {
+		if proj, ok := b.projects[td.summary.ProjectID]; !ok || proj.Path == "" || !samePath(td.workDir, proj.Path) {
+			return true
+		}
+	}
+	if b.store != nil {
+		pCtx, pCancel := persistCtx()
+		st, err := b.store.GetThread(pCtx, threadID)
+		pCancel()
+		if err == nil && st.WorktreePath != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// CanDiscardEmptyProvisional 判断临时线程是否为空且可被自动废弃清理。
+// 同时满足以下条件才为 true：是临时线程、没有任何消息、没有进行中的轮次（IsRunning）、Follow-Up 队列为空。
+func (b *MemoryBackend) CanDiscardEmptyProvisional(threadID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	td, ok := b.threads[threadID]
+	if !ok || !td.summary.IsProvisional {
+		return false
+	}
+	return b.isEmptyStandaloneThreadLocked(td, threadID)
+}
+
 // RetainThread 将临时线程转为正式线程（IsProvisional=false，落盘，取消待执行的清理定时器，广播 threads.changed）；对非临时线程不做任何事。
 func (b *MemoryBackend) RetainThread(ctx context.Context, threadID string) error {
 	return b.retainThreadInternal(ctx, threadID)
+}
+
+// DemoteEmptyThread 将无消息且未绑定 worktree 的正式线程退回临时态（IsProvisional=true），落盘并广播 threads.changed。
+// 线程不存在返回 store.ErrNotFound；已是临时线程返回 (true, nil)；不满足降级条件返回 (false, nil)。
+func (b *MemoryBackend) DemoteEmptyThread(ctx context.Context, threadID string) (bool, error) {
+	b.mu.Lock()
+	td, ok := b.threads[threadID]
+	if !ok {
+		b.mu.Unlock()
+		return false, store.ErrNotFound
+	}
+	if td.summary.IsProvisional {
+		b.mu.Unlock()
+		return true, nil
+	}
+	if !b.isEmptyStandaloneThreadLocked(td, threadID) || td.runTurnID != "" || td.runCancel != nil || td.stewardBusy || b.threadHasWorktreeLocked(td, threadID) {
+		b.mu.Unlock()
+		return false, nil
+	}
+	td.summary.IsProvisional = true
+	nowStr := b.nowLocked().Format(time.RFC3339Nano)
+	td.summary.UpdatedAt = nowStr
+	currentSummary := b.summaryForPublishLocked(td)
+	hook := b.threadsChangedHook
+	s := b.store
+	dormantAt := td.dormantAt
+	b.mu.Unlock()
+
+	b.persistAndPublishThreadLifecycle(threadID, currentSummary, dormantAt, hook, s)
+	return true, nil
+}
+
+func (b *MemoryBackend) persistAndPublishThreadLifecycle(threadID string, currentSummary wire.ThreadSummary, dormantAt *time.Time, hook func(wire.ThreadsChanged), s *store.Store) {
+	if s != nil {
+		pCtx, pCancel := persistCtx()
+		if err := s.UpdateThreadLifecycle(pCtx, threadID, currentSummary.IsDormant, dormantAt, currentSummary.IsProvisional, currentSummary.HasUnread); err != nil {
+			log.Printf("store update thread lifecycle error (thread %s): %v", threadID, err)
+		}
+		pCancel()
+	}
+
+	payload := wire.ThreadsChanged{
+		Threads: []wire.ThreadSummary{currentSummary},
+	}
+	b.hub.Publish(threadID, nil, nil, currentSummary)
+	if hook != nil {
+		hook(payload)
+	}
 }
 
 func (b *MemoryBackend) retainThreadInternal(ctx context.Context, threadID string) error {
@@ -563,21 +635,7 @@ func (b *MemoryBackend) retainThreadInternal(ctx context.Context, threadID strin
 	dormantAt := td.dormantAt
 	b.mu.Unlock()
 
-	if s != nil {
-		pCtx, pCancel := persistCtx()
-		if err := s.UpdateThreadLifecycle(pCtx, threadID, currentSummary.IsDormant, dormantAt, currentSummary.IsProvisional, currentSummary.HasUnread); err != nil {
-			log.Printf("store update thread lifecycle error (thread %s): %v", threadID, err)
-		}
-		pCancel()
-	}
-
-	payload := wire.ThreadsChanged{
-		Threads: []wire.ThreadSummary{currentSummary},
-	}
-	b.hub.Publish(threadID, nil, nil, currentSummary)
-	if hook != nil {
-		hook(payload)
-	}
+	b.persistAndPublishThreadLifecycle(threadID, currentSummary, dormantAt, hook, s)
 	return nil
 }
 

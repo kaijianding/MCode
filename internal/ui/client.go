@@ -1435,6 +1435,8 @@ type Client interface {
 	MarkDormantWithUndo(threadID string) (token string, err error)
 	// RetainThread 将临时会话转为正式会话。
 	RetainThread(threadID string) error
+	// DemoteEmptyThread 将无消息的正式会话退回临时态，不满足条件时返回 false。
+	DemoteEmptyThread(threadID string) (bool, error)
 	// ReleaseProvisionalThread 释放临时会话，调度延迟自动清理。
 	ReleaseProvisionalThread(threadID string) error
 	// BulkArchive 批量归档指定会话，返回用于撤销操作的 token。

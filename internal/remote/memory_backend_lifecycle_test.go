@@ -2,11 +2,13 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"mcode/internal/remote/wire"
+	"mcode/internal/store"
 	"mcode/internal/testenv"
 )
 
@@ -345,5 +347,122 @@ func TestLifecycle_DeleteParent_CascadesFamilyAndHooks(t *testing.T) {
 	}
 	if len(changedPayload.RemovedThreadIDs) != 3 {
 		t.Fatalf("expected RemovedThreadIDs to have 3 items, got %d: %+v", len(changedPayload.RemovedThreadIDs), changedPayload.RemovedThreadIDs)
+	}
+}
+
+func TestDemoteEmptyThread(t *testing.T) {
+	testenv.TempHome(t)
+	ctx := context.Background()
+	hub := NewStreamHub(StreamHubOptions{})
+	defer hub.Close()
+	b := NewMemoryBackend(hub)
+	b.AddProject(wire.ProjectSummary{ID: "p1", Name: "Proj1", Path: t.TempDir()})
+
+	// (a) 新建临时线程 -> RetainThread -> DemoteEmptyThread 退回临时态
+	provisionalTrue := true
+	resEmpty, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID:   "p1",
+		ActionID:    "act-demote-empty",
+		Provisional: &provisionalTrue,
+	})
+	if err != nil {
+		t.Fatalf("CreateThread empty failed: %v", err)
+	}
+	if err := b.RetainThread(ctx, resEmpty.ThreadID); err != nil {
+		t.Fatalf("RetainThread failed: %v", err)
+	}
+	if b.CanDiscardEmptyProvisional(resEmpty.ThreadID) {
+		t.Fatalf("retained thread should not be discardable before demote")
+	}
+
+	var changedMu sync.Mutex
+	var changedThreads []wire.ThreadSummary
+	b.SetThreadsChangedHook(func(tc wire.ThreadsChanged) {
+		changedMu.Lock()
+		changedThreads = append(changedThreads, tc.Threads...)
+		changedMu.Unlock()
+	})
+
+	demoted, err := b.DemoteEmptyThread(ctx, resEmpty.ThreadID)
+	if err != nil {
+		t.Fatalf("DemoteEmptyThread empty failed: %v", err)
+	}
+	if !demoted {
+		t.Fatalf("expected DemoteEmptyThread to return true for retained empty thread")
+	}
+	thEmpty, err := b.GetThread(ctx, resEmpty.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThread after demote failed: %v", err)
+	}
+	if !thEmpty.IsProvisional {
+		t.Fatalf("expected thread summary IsProvisional=true after demote")
+	}
+	if !b.CanDiscardEmptyProvisional(resEmpty.ThreadID) {
+		t.Fatalf("expected CanDiscardEmptyProvisional=true after demote")
+	}
+	changedMu.Lock()
+	sawDemoteEvent := len(changedThreads) == 1 && changedThreads[0].ID == resEmpty.ThreadID && changedThreads[0].IsProvisional
+	changedMu.Unlock()
+	if !sawDemoteEvent {
+		t.Fatalf("expected threads.changed broadcast with IsProvisional=true, got %+v", changedThreads)
+	}
+	// 已是临时线程时直接返回 (true, nil)
+	already, err := b.DemoteEmptyThread(ctx, resEmpty.ThreadID)
+	if err != nil || !already {
+		t.Fatalf("expected DemoteEmptyThread on provisional thread to return (true, nil), got (%v, %v)", already, err)
+	}
+
+	// (b) 有一条消息的正式线程不可降级
+	resMsg, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID:   "p1",
+		ActionID:    "act-demote-msg",
+		Provisional: &provisionalTrue,
+	})
+	if err != nil {
+		t.Fatalf("CreateThread with message failed: %v", err)
+	}
+	if _, err := b.SendMessage(ctx, wire.SendMessageParams{ThreadID: resMsg.ThreadID, Text: "hello"}); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	demotedMsg, err := b.DemoteEmptyThread(ctx, resMsg.ThreadID)
+	if err != nil {
+		t.Fatalf("DemoteEmptyThread with message returned unexpected error: %v", err)
+	}
+	if demotedMsg {
+		t.Fatalf("expected DemoteEmptyThread to return false for thread with messages")
+	}
+	thMsg, err := b.GetThread(ctx, resMsg.ThreadID)
+	if err != nil || thMsg.IsProvisional {
+		t.Fatalf("expected thread with messages to remain non-provisional, th=%+v err=%v", thMsg, err)
+	}
+
+	// (c) 不存在的线程返回 store.ErrNotFound
+	demotedMissing, err := b.DemoteEmptyThread(ctx, "non-existent-thread")
+	if demotedMissing || !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected (false, store.ErrNotFound), got (%v, %v)", demotedMissing, err)
+	}
+
+	// (d) 绑定了 worktree 的空正式线程保留不动
+	resWT, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID: "p1",
+		ActionID:  "act-demote-wt",
+	})
+	if err != nil {
+		t.Fatalf("CreateThread worktree failed: %v", err)
+	}
+	b.mu.Lock()
+	b.threads[resWT.ThreadID].workDir = t.TempDir()
+	b.threads[resWT.ThreadID].summary.WorktreeRequested = true
+	b.mu.Unlock()
+	demotedWT, err := b.DemoteEmptyThread(ctx, resWT.ThreadID)
+	if err != nil {
+		t.Fatalf("DemoteEmptyThread worktree returned unexpected error: %v", err)
+	}
+	if demotedWT {
+		t.Fatalf("expected DemoteEmptyThread to return false for worktree thread")
+	}
+	thWT, err := b.GetThread(ctx, resWT.ThreadID)
+	if err != nil || thWT.IsProvisional {
+		t.Fatalf("expected worktree thread to remain non-provisional, th=%+v err=%v", thWT, err)
 	}
 }

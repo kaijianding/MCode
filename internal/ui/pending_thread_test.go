@@ -486,3 +486,178 @@ func TestProvisionalThreadConcurrentRetainAndLeave(t *testing.T) {
 		t.Fatalf("在途转正应合并并保留，retain=%v release=%v worktree=%v", fake.retainThreadCalls, fake.releaseProvisionalCalls, fake.moveToWorktreeCalls)
 	}
 }
+
+func containsThreadID(threads []Thread, id string) bool {
+	for _, th := range threads {
+		if th.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestProvisionalThreadClearedDraftDemotes(t *testing.T) {
+	fake, state := newPendingTestState(t)
+	id := createTestProvisionalThread(t, state, false)
+
+	// 1. 输入草稿转正，侧栏包含该会话
+	state.mu.Lock()
+	state.pendingDraftFill = nil
+	state.draft = "你好"
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "你好")
+	waitUntil(t, "输入草稿后转正", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, _ := state.threadSnapshotLocked(id)
+		return !th.IsProvisional && containsThreadID(withoutProvisional(state.threads), id)
+	})
+	state.mu.Lock()
+	selectedAfterRetain := state.selectedThreadID
+	state.mu.Unlock()
+	if selectedAfterRetain != id {
+		t.Fatalf("转正后应保持选中 %q，got %q", id, selectedAfterRetain)
+	}
+
+	// 2. 清空草稿退回临时态，从侧栏消失但仍保持选中
+	state.mu.Lock()
+	state.draft = ""
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "")
+	waitUntil(t, "清空草稿后退回临时态", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, ok := state.threadSnapshotLocked(id)
+		return ok && th.IsProvisional && !containsThreadID(withoutProvisional(state.threads), id)
+	})
+	state.mu.Lock()
+	selectedAfterDemote := state.selectedThreadID
+	state.mu.Unlock()
+	if selectedAfterDemote != id {
+		t.Fatalf("退回临时态后应保持选中 %q，got %q", id, selectedAfterDemote)
+	}
+	fake.mu.Lock()
+	demoteCalls := append([]string(nil), fake.demoteEmptyThreadCalls...)
+	fake.mu.Unlock()
+	if len(demoteCalls) != 1 || demoteCalls[0] != id {
+		t.Fatalf("清空草稿应调用一次 DemoteEmptyThread(%q)，got %v", id, demoteCalls)
+	}
+
+	// 3. 再次输入草稿重新转正并回到侧栏
+	state.mu.Lock()
+	state.draft = "再来"
+	state.mu.Unlock()
+	state.noteComposerDraft(id, "再来")
+	waitUntil(t, "再次输入后重新转正", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		th, _ := state.threadSnapshotLocked(id)
+		return !th.IsProvisional && containsThreadID(withoutProvisional(state.threads), id)
+	})
+
+	// 4. 选中线程有消息时清空草稿不调用 DemoteEmptyThread
+	state.selectThread("t1")
+	state.mu.Lock()
+	state.messages = []Message{{ID: "m1", Text: "已有消息"}}
+	state.draft = "草稿"
+	state.mu.Unlock()
+	state.noteComposerDraft("t1", "草稿")
+	state.mu.Lock()
+	state.draft = ""
+	state.mu.Unlock()
+	state.noteComposerDraft("t1", "")
+	fake.mu.Lock()
+	demoteCallsAfterMsg := append([]string(nil), fake.demoteEmptyThreadCalls...)
+	fake.mu.Unlock()
+	if len(demoteCallsAfterMsg) != 1 {
+		t.Fatalf("有消息的选中会话清空草稿不应调用 DemoteEmptyThread，got %v", demoteCallsAfterMsg)
+	}
+}
+
+type blockedDemoteClient struct {
+	*FakeClient
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (f blockedDemoteClient) DemoteEmptyThread(threadID string) (bool, error) {
+	close(f.started)
+	<-f.gate
+	return f.FakeClient.DemoteEmptyThread(threadID)
+}
+
+func TestProvisionalThreadConcurrentRetainAndDemote(t *testing.T) {
+	t.Run("retain_in_flight_then_clear_draft", func(t *testing.T) {
+		fake, state := newPendingTestState(t)
+		blocked := blockedRetainClient{FakeClient: fake, started: make(chan struct{}), gate: make(chan struct{})}
+		state.client = blocked
+		id := createTestProvisionalThread(t, state, false)
+
+		state.mu.Lock()
+		state.pendingDraftFill = nil
+		state.draft = "你好"
+		state.mu.Unlock()
+		state.noteComposerDraft(id, "你好")
+		<-blocked.started
+
+		// 转正尚未返回前立刻清空草稿
+		state.mu.Lock()
+		state.draft = ""
+		state.mu.Unlock()
+		state.noteComposerDraft(id, "")
+		close(blocked.gate)
+
+		waitUntil(t, "转正完成后顺次降级回临时态", func() bool {
+			state.mu.Lock()
+			th, ok := state.threadSnapshotLocked(id)
+			visible := containsThreadID(withoutProvisional(state.threads), id)
+			state.mu.Unlock()
+			fake.mu.Lock()
+			demoted := len(fake.demoteEmptyThreadCalls) == 1
+			fake.mu.Unlock()
+			return ok && th.IsProvisional && !visible && demoted
+		})
+	})
+
+	t.Run("demote_in_flight_then_retype", func(t *testing.T) {
+		fake, state := newPendingTestState(t)
+		id := createTestProvisionalThread(t, state, false)
+		state.mu.Lock()
+		state.pendingDraftFill = nil
+		state.draft = "你好"
+		state.mu.Unlock()
+		state.noteComposerDraft(id, "你好")
+		waitUntil(t, "首次转正", func() bool {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			th, _ := state.threadSnapshotLocked(id)
+			return !th.IsProvisional
+		})
+
+		blocked := blockedDemoteClient{FakeClient: fake, started: make(chan struct{}), gate: make(chan struct{})}
+		state.client = blocked
+		state.mu.Lock()
+		state.draft = ""
+		state.mu.Unlock()
+		state.noteComposerDraft(id, "")
+		<-blocked.started
+
+		// 降级 RPC 返回前用户又重新输入
+		state.mu.Lock()
+		state.draft = "又输入"
+		state.mu.Unlock()
+		state.noteComposerDraft(id, "又输入")
+		close(blocked.gate)
+
+		waitUntil(t, "降级期间重新输入后自动转正回侧栏", func() bool {
+			state.mu.Lock()
+			th, ok := state.threadSnapshotLocked(id)
+			visible := containsThreadID(withoutProvisional(state.threads), id)
+			state.mu.Unlock()
+			fake.mu.Lock()
+			retains := len(fake.retainThreadCalls)
+			fake.mu.Unlock()
+			return ok && !th.IsProvisional && visible && retains == 2
+		})
+	})
+}

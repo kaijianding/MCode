@@ -229,7 +229,8 @@ func (s *chatState) noteComposerDraft(threadID, text string) {
 		return
 	}
 	entry.Text = text
-	if strings.TrimSpace(text) == "" && len(draftAttachments(entry.Attachments)) == 0 && len(entry.Snippets) == 0 {
+	cleared := strings.TrimSpace(text) == "" && len(draftAttachments(entry.Attachments)) == 0 && len(entry.Snippets) == 0
+	if cleared {
 		delete(s.drafts, threadID)
 	} else {
 		s.drafts[threadID] = entry
@@ -240,8 +241,15 @@ func (s *chatState) noteComposerDraft(threadID, text string) {
 	s.draftSaveTimer = time.AfterFunc(composerDraftSaveDebounce, s.persistDraftsAsync)
 	th, ok := s.threadSnapshotLocked(threadID)
 	retain := strings.TrimSpace(text) != "" && ok && th.IsProvisional && s.provisionalRetains[threadID] == nil
+	demote := cleared && ok && (!th.IsProvisional || s.provisionalRetains[threadID] != nil) &&
+		s.selectedThreadID == threadID &&
+		!th.IsRunning && !s.sending && !s.optimisticRunning[threadID] && !s.composerDockPromoArmed(threadID) &&
+		len(s.attachments) == 0 && len(s.snippets) == 0 &&
+		composerThreadEmpty(len(s.messages), len(s.resolvedPlans[threadID]), len(s.answeredQuestions[threadID]))
 	s.mu.Unlock()
 	if retain {
 		go s.retainProvisionalThread(threadID)
+	} else if demote {
+		go s.demoteEmptyThread(threadID)
 	}
 }

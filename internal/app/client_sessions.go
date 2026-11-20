@@ -731,6 +731,14 @@ func (c *Client) RetainThread(threadID string) error {
 	return c.backend.RetainThread(context.Background(), threadID)
 }
 
+// DemoteEmptyThread 将无消息的正式会话退回临时态；不满足条件时返回 false。
+func (c *Client) DemoteEmptyThread(threadID string) (bool, error) {
+	if c.backend == nil {
+		return false, errors.New("backend 不可用")
+	}
+	return c.backend.DemoteEmptyThread(context.Background(), threadID)
+}
+
 // ReleaseProvisionalThread 释放临时会话，调度延迟自动清理。
 func (c *Client) ReleaseProvisionalThread(threadID string) error {
 	if c.backend == nil {

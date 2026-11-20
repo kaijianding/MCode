@@ -35,6 +35,8 @@ type composerViewState struct {
 	quotaPopoverProvider      string                        // 额度弹层当前锚定的 provider（关闭时清空）
 	history                   composerHistoryState          // 方向键历史导航状态
 	lastThreadID              string                        // 上一帧的选中会话，用于切换会话时重置历史导航
+	lastNotedThreadID         string                        // 上次由 UI 输入框同步给 noteComposerDraft 的会话 ID
+	lastNotedDraft            string                        // 上次由 UI 输入框同步给 noteComposerDraft 的文本
 	dockThreadID              string                        // 上一帧 Hero/Docked 判定所属的会话
 	dockDocked                bool                          // 上一帧是否停靠（仅当 dockThreadID 与当前会话一致时有效）
 	quotaLastSeen             map[string]quotaUsageSnapshot // 按 provider+账户记录上一次观察到的已用百分比
@@ -606,6 +608,8 @@ func renderComposer(c *ui.Context, s *chatState) {
 			s.draftThreadMentions = nil
 			// 草稿随发送清空，退出方向键历史导航
 			s.composerView.history.reset()
+			s.composerView.lastNotedThreadID = s.selectedThreadID
+			s.composerView.lastNotedDraft = ""
 		}
 		s.sentDraft = nil
 	}
@@ -951,8 +955,15 @@ func renderComposer(c *ui.Context, s *chatState) {
 						}
 						s.syncDraftTags()
 						// 记录当前会话草稿（防抖落盘），未切换会话直接退出时也能恢复；编辑排队项时输入框是排队项文本，跳过。
+						// 仅在输入框文本相对上一帧发生变化（或切换会话后输入框非空）时同步，避免空输入框的构建帧覆盖测试直接写入的草稿并误触发降级。
 						if s.editingQueuedID() == "" {
-							s.noteComposerDraft(currentThreadID, s.draft)
+							changed := (s.composerView.lastNotedThreadID == currentThreadID && s.composerView.lastNotedDraft != s.draft) ||
+								(s.composerView.lastNotedThreadID != currentThreadID && s.draft != "")
+							s.composerView.lastNotedThreadID = currentThreadID
+							s.composerView.lastNotedDraft = s.draft
+							if changed {
+								s.noteComposerDraft(currentThreadID, s.draft)
+							}
 						}
 						in.TextRanges(s.mentionRanges(ThemeAccent(c))...)
 
@@ -965,6 +976,8 @@ func renderComposer(c *ui.Context, s *chatState) {
 							s.syncDraftTags()
 							// 输入即记录草稿（1 秒防抖落盘），编辑排队项时不记录。
 							if s.editingQueuedID() == "" {
+								s.composerView.lastNotedThreadID = currentThreadID
+								s.composerView.lastNotedDraft = s.draft
 								s.noteComposerDraft(currentThreadID, s.draft)
 							}
 							// 光标在起始处按 Backspace：正文没东西可删时删最后一颗引用胶囊。

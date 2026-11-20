@@ -221,8 +221,10 @@ type FakeClient struct {
 	goalCalls               []GoalCall
 	reviewTaskErr           error
 	retainThreadCalls       []string
+	demoteEmptyThreadCalls  []string
 	releaseProvisionalCalls []string
 	retainThreadErr         error
+	demoteEmptyThreadErr    error
 	historyCalls            []string
 	diffCalls               []string
 
@@ -1611,6 +1613,27 @@ func (f *FakeClient) RetainThread(threadID string) error {
 		}
 	}
 	return nil
+}
+
+// DemoteEmptyThread 记录降级调用；当 fake 无消息时更新列表里的临时态并返回 true。
+func (f *FakeClient) DemoteEmptyThread(threadID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.demoteEmptyThreadCalls = append(f.demoteEmptyThreadCalls, threadID)
+	if f.demoteEmptyThreadErr != nil {
+		return false, f.demoteEmptyThreadErr
+	}
+	if len(f.messages[threadID]) > 0 {
+		return false, nil
+	}
+	for _, list := range f.threads {
+		for i := range list {
+			if list[i].ID == threadID {
+				list[i].IsProvisional = true
+			}
+		}
+	}
+	return true, nil
 }
 
 // ReleaseProvisionalThread 记录延迟清理请求。
