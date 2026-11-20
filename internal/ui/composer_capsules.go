@@ -191,7 +191,16 @@ func composerPlanCapsule(c *ui.Context, s *chatState, threadID string) (composer
 	// isThreadRunning 内部自己加锁，先取运行状态，再在锁内读消息快照。
 	running := s.isThreadRunning(threadID)
 	s.mu.Lock()
-	view := buildPlanPillView(s.messages, running)
+	var view planPillView
+	if s.planPillValid && s.planPillRev == s.messagesRev && s.planPillRunning == running {
+		view = s.planPillCache
+	} else {
+		view = buildPlanPillView(s.messages, running)
+		s.planPillRev = s.messagesRev
+		s.planPillRunning = running
+		s.planPillCache = view
+		s.planPillValid = true
+	}
 	s.mu.Unlock()
 	if !view.Visible {
 		// 胶囊消失（做完或换会话）时同步收起弹层，避免下次出现时突然弹开。

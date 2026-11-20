@@ -304,10 +304,6 @@ func renderMCPSelectionPanel(c *ui.Context, s *chatState, threadID string, onBac
 			return
 		}
 
-		ui.Text(c, "勾选仅对当前会话生效，取消勾选表示本会话不注入该服务。").
-			FontSize(uiFont(TypeCaption)).
-			TextColor(ThemeSecondaryText(c))
-
 		switch {
 		case !ready:
 			ui.Text(c, "正在读取 MCP 服务器…").

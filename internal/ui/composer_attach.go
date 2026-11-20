@@ -1321,6 +1321,8 @@ func renderAttachments(c *ui.Context, s *chatState) {
 							cat, tag := classifyAttachment(a.Name, a.MimeType)
 							if a.InspectorRef != nil {
 								cat, tag = categoryMDText, ""
+							} else if strings.TrimPrefix(filepath.Ext(a.Name), ".") != "" {
+								tag = ""
 							}
 							catCol := categoryColor(c, cat)
 

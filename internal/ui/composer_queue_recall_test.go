@@ -240,8 +240,8 @@ func TestQueuedIntentLabel(t *testing.T) {
 	}{
 		{"系统消息不显示标签", QueuedFollowUp{System: true}, ""},
 		{"被降级的插入显示插入未生效", QueuedFollowUp{Intent: "insert"}, "插入未生效"},
-		{"普通排队显示排队", QueuedFollowUp{}, "排队"},
-		{"显式 queue 显示排队", QueuedFollowUp{Intent: "queue"}, "排队"},
+		{"普通排队不显示标签", QueuedFollowUp{}, ""},
+		{"显式 queue 不显示标签", QueuedFollowUp{Intent: "queue"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -489,8 +489,8 @@ func TestComposerQueue_IntentLabels(t *testing.T) {
 	if got := countExactText(texts, "插入未生效"); got != 1 {
 		t.Fatalf("插入未生效标签出现 %d 次，want 1；texts: %q", got, texts)
 	}
-	if got := countExactText(texts, "排队"); got != 1 {
-		t.Fatalf("排队标签出现 %d 次，want 1（系统项不应有标签）；texts: %q", got, texts)
+	if got := countExactText(texts, "排队"); got != 0 {
+		t.Fatalf("排队标签出现 %d 次，want 0；texts: %q", got, texts)
 	}
 	if !tt.HasText("系统消息") {
 		t.Fatalf("系统条目应显示系统消息标签；texts: %q", texts)

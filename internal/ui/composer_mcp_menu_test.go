@@ -114,7 +114,7 @@ func TestComposerMCPMenu_UnsupportedProviderIsNoted(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("不支持的 Agent 不应下发 MCP 设置，got %d 次", calls)
 	}
-	if tt.HasText("勾选仅对当前会话生效") {
+	if tt.HasText("demo · omp") || tt.HasText("应用") {
 		t.Fatal("不支持的 Agent 不应打开勾选页")
 	}
 }

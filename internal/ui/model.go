@@ -342,6 +342,13 @@ type chatState struct {
 	composerHistoryEntries []string
 	composerHistoryValid   bool
 
+	// planPillRev/planPillRunning/planPillCache 缓存待办进度胶囊（按 messagesRev 与 running）：
+	// 每帧都会构建胶囊，命中时跳过全量消息扫描与 JSON 解析。
+	planPillRev     uint64
+	planPillRunning bool
+	planPillCache   planPillView
+	planPillValid   bool
+
 	// threadsRuntimeRev 在会话运行态/待处理请求可能变化时递增（Watch 摘要、会话列表重载）；
 	// pendingReqIDs 是按它缓存的“有待处理请求”会话 ID 集合，pendingReqIDsRev 是建立时的版本号。
 	threadsRuntimeRev uint64
@@ -1358,6 +1365,7 @@ func (s *chatState) selectThreadState(threadID string, knownEmpty bool, expected
 		s.stashDraftLocked(oldThreadID, oldText, oldAtts, oldSnippets)
 		s.releaseEmptyProvisionalLocked(oldThreadID, oldText, oldAtts, oldSnippets)
 		stopStewardTaskWatchLocked(s)
+		resetComposerModelPickerState(oldThreadID)
 	}
 	s.watchSeq++
 	seq := s.watchSeq

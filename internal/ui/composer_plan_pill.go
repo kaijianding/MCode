@@ -6,9 +6,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// planPillBuilds 仅用于测试观测 buildPlanPillView 的实际构建次数。
+var planPillBuilds atomic.Uint64
 
 // 待办进度胶囊：最新一份待办清单（TodoWrite / update_plan 工具）还没做完时，
 // 在输入框上方常驻一枚小胶囊，显示「完成数/总数 · 进行中那一项」，
@@ -248,6 +252,7 @@ func shouldShowPlanPill(msgs []Message, running bool) bool {
 
 // buildPlanPillView 汇总一帧胶囊要展示的内容。
 func buildPlanPillView(msgs []Message, running bool) planPillView {
+	planPillBuilds.Add(1)
 	if !shouldShowPlanPill(msgs, running) {
 		return planPillView{}
 	}

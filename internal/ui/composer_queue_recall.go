@@ -18,7 +18,7 @@ func queuedIntentLabel(item QueuedFollowUp) string {
 	if item.Intent == "insert" {
 		return "插入未生效"
 	}
-	return "排队"
+	return ""
 }
 
 // mergeQueuedDraftText 把多条排队消息按顺序并入草稿，消息之间用空行分隔，

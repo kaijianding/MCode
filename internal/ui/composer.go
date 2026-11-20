@@ -311,17 +311,6 @@ func renderComposerTabSlot(c *ui.Context, s *chatState, threadID string, items [
 												})
 										}
 
-										// 目标标签
-										ui.Row(c.Key("composer-queue-target-"+item.ID)).
-											Background(ThemeSurface(c)).
-											Radius(RadiusSM).
-											Padding(Space0, Space2, Space0, Space2).
-											Children(func() {
-												ui.Text(c, "主代理").
-													FontSize(uiFont(TypeCaption)).
-													TextColor(ThemeSecondaryText(c))
-											})
-
 										// 系统条目（priority 汇报/提问/通知）只读：显示标签，不提供编辑与删除。
 										if item.System {
 											ui.Row(c.Key("composer-queue-system-"+item.ID)).
@@ -1069,7 +1058,7 @@ func renderComposer(c *ui.Context, s *chatState) {
 								hasUploaded := false
 								hasUploading := false
 								for _, att := range s.attachments {
-									if att.Uploading {
+									if att.Uploading || att.Err != "" || att.ID == "" {
 										hasUploading = true
 									}
 									if att.ID != "" {
@@ -1123,7 +1112,9 @@ func renderComposer(c *ui.Context, s *chatState) {
 
 								// 正在编辑排队项时按 Return 保存修改
 								if s.editingQueuedID() != "" {
-									s.saveQueuedEdit(text)
+									if !isSendingDisabled {
+										s.saveQueuedEdit(text)
+									}
 									return true
 								}
 
@@ -1131,7 +1122,7 @@ func renderComposer(c *ui.Context, s *chatState) {
 								hasUploaded := false
 								hasUploading := false
 								for _, att := range s.attachments {
-									if att.Uploading {
+									if att.Uploading || att.Err != "" || att.ID == "" {
 										hasUploading = true
 									}
 									if att.ID != "" {
@@ -1160,7 +1151,10 @@ func renderComposer(c *ui.Context, s *chatState) {
 								}
 
 								// 空闲状态
-								if (text == "" && !hasUploaded) || hasUploading || isSendingDisabled {
+								if hasUploading {
+									return true
+								}
+								if (text == "" && !hasUploaded) || isSendingDisabled {
 									return false
 								}
 								if s.sendDraft(currentThreadID, text) {
