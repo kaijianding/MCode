@@ -110,7 +110,7 @@ func configureReviewHunkActions(c *ui.Context, s *chatState, dp *diffPanelState,
 		open, pending, actionErr := state.open, state.pending, state.err
 		state.mu.Unlock()
 		start, count := hunk.NewStart+1, hunk.NewEnd-hunk.NewStart
-		RenderConfirmDialog(c, ConfirmDialog{Key: fmt.Sprintf("review-revert-confirm-%p-%d", view, index), Open: open, Title: "撤销此块？", ConfirmLabel: "撤销", CancelLabel: "取消", ConfirmDisabled: pending,
+		RenderConfirmDialog(c, ConfirmDialog{Key: fmt.Sprintf("review-revert-confirm-%p-%d", view, index), Open: open, Title: "撤销此块？", ConfirmLabel: "撤销", CancelLabel: "取消", CancelAutoFocus: true, ConfirmDisabled: pending,
 			OnCancel: func() { state.mu.Lock(); state.open = false; state.mu.Unlock() },
 			OnConfirm: func() {
 				hash, err := reviewHunkHash(content.NewText, start, count)

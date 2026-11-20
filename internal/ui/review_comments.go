@@ -23,13 +23,14 @@ const (
 
 // 评论坐标始终属于创建时的版本；刷新只核对原位置，不搜索或迁移原文。
 type reviewComment struct {
-	id             uint64
-	key            reviewDiffKey
-	lines          editor.DiffLineRange
-	original, body string
-	stale, added   bool
-	expanded       bool
-	attachmentID   string
+	id                 uint64
+	key                reviewDiffKey
+	lines              editor.DiffLineRange
+	original, body     string
+	stale, added       bool
+	expanded           bool
+	attachmentID       string
+	failedAttachmentID string
 }
 
 type reviewCommentDraft struct {
@@ -241,14 +242,30 @@ func reconcileReviewCommentAttachments(s *chatState, dp *diffPanelState, threadI
 	diffPanelMu.Lock()
 	defer diffPanelMu.Unlock()
 	for _, comment := range dp.comments {
-		if comment.attachmentID == "" || comment.added {
+		if comment.added {
 			continue
 		}
-		att, ok := states[comment.attachmentID]
-		if ok && !att.Uploading && att.Err == "" && att.ID != "" {
-			comment.added = true
-		} else if !ok {
-			comment.attachmentID = ""
+		if comment.attachmentID != "" {
+			att, ok := states[comment.attachmentID]
+			if ok && !att.Uploading && att.Err == "" && att.ID != "" {
+				comment.added = true
+				comment.failedAttachmentID = ""
+			} else if !ok {
+				comment.attachmentID = ""
+			} else if att.Err != "" {
+				comment.failedAttachmentID = comment.attachmentID
+				comment.attachmentID = ""
+			}
+			continue
+		}
+		if comment.failedAttachmentID != "" {
+			att, ok := states[comment.failedAttachmentID]
+			if !ok {
+				comment.failedAttachmentID = ""
+			} else if !att.Uploading && att.Err == "" && att.ID != "" {
+				comment.added = true
+				comment.failedAttachmentID = ""
+			}
 		}
 	}
 }
@@ -344,6 +361,7 @@ func reviewCommentsAddToConversation(s *chatState, dp *diffPanelState, threadID 
 			for _, comment := range valid {
 				if current.id == comment.id {
 					current.attachmentID = localID
+					current.failedAttachmentID = ""
 				}
 			}
 		}
@@ -578,7 +596,7 @@ func renderReviewPRAction(c *ui.Context, s *chatState, dp *diffPanelState, tid s
 	if aiErrNumber != number {
 		aiErr = ""
 	}
-	ui.Row(c.Key("review-pr-actions")).FillWidth().Gap(Space2).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("review-pr-actions")).FillWidth().Wrap().Gap(Space2).AlignItems(ui.Center).Children(func() {
 		if ai {
 			Button(c, ButtonOpts{Key: "review-pr-ai", Text: "导入 AI 审查", Variant: ButtonSecondary, Size: ControlSM, Loading: aiBusy == number, Disabled: aiBusy != 0, OnClick: func() { startReviewPRAI(s, dp, tid) }})
 		}

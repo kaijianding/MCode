@@ -116,10 +116,14 @@ func renderToolOutputDialog(c *ui.Context, s *chatState) {
 				// 标题行同时是弹窗的拖拽把手。
 				modalDragHandle(c, toolOutputDialogKey, ui.Row(c.Key(toolOutputDialogKey+"-title-row")).FillWidth().Gap(Space3).Children(func() {
 					ui.Text(c, dlg.title).
+						SingleLine().
+						MinWidth(0).
+						Shrink(1).
+						Ellipsis("…").
 						FontSize(scaledFont(TypeTitle)).
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c))
-					ui.Text(c, fmt.Sprintf("共 %d 行", len(strings.Split(dlg.text, "\n")))).
+					ui.Text(c, fmt.Sprintf("共 %d 行", strings.Count(dlg.text, "\n")+1)).
 						FontSize(scaledFont(TypeCaption)).
 						TextColor(ThemeSecondaryText(c))
 				}))

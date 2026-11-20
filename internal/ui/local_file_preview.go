@@ -95,15 +95,12 @@ func localFileLinkPreview(c *ui.Context, dest string) func(tip ui.Element) {
 		return func(tip ui.Element) {
 			card := localPreviewCard(c, tip)
 			localPreviewPathText(c, card, dest)
-			if resolved, ok := localFileLinkPath(dest); ok {
-				path = resolved
-			}
-			src, err := loadLocalImage(path)
-			if err != nil {
+			entry := loadLocalFilePreview(dest, path, localPreviewImage)
+			if entry.err != nil || entry.src == nil {
 				return
 			}
 			card.Children(func() {
-				ui.Image(c, src).
+				ui.Image(c, entry.src).
 					MaxWidth(localPreviewThumbWidth).
 					Radius(RadiusXS)
 			})
@@ -112,14 +109,12 @@ func localFileLinkPreview(c *ui.Context, dest string) func(tip ui.Element) {
 		return func(tip ui.Element) {
 			card := localPreviewCard(c, tip)
 			localPreviewPathText(c, card, dest)
-			if resolved, ok := localFileLinkPath(dest); ok {
-				path = resolved
-			}
 			start := 1
 			if first > 0 {
 				start = max(1, first-2)
 			}
-			lines := localPreviewLineWindow(localTextPreviewLines(path), start)
+			entry := loadLocalFilePreview(dest, path, localPreviewText)
+			lines := localPreviewLineWindow(entry.lines, start)
 			if len(lines) == 0 {
 				return
 			}
@@ -166,6 +161,65 @@ func localPreviewPathText(c *ui.Context, card ui.Element, path string) {
 	})
 }
 
+// localFilePreviewCacheEntry 缓存最近 1 个路径的悬停预览结果，避免 Tooltip 显示期间每帧碰磁盘。
+type localFilePreviewCacheEntry struct {
+	valid bool
+	dest  string
+	path  string
+	kind  localPreviewKind
+	info  os.FileInfo
+	src   ui.ImageSource
+	lines []string
+	err   error
+}
+
+var (
+	localFilePreviewMu    sync.Mutex
+	localFilePreviewCache localFilePreviewCacheEntry
+)
+
+// loadLocalFilePreview 读取悬停卡片的图片或文本预览并只缓存最近 1 个 path；
+// 同一个 path 第二次渲染时直接返回缓存结果，不再调用 os.Stat 或读盘。
+func loadLocalFilePreview(dest, fallbackPath string, kind localPreviewKind) localFilePreviewCacheEntry {
+	localFilePreviewMu.Lock()
+	if localFilePreviewCache.valid && localFilePreviewCache.kind == kind &&
+		(localFilePreviewCache.dest == dest || (fallbackPath != "" && localFilePreviewCache.path == fallbackPath)) {
+		entry := localFilePreviewCache
+		localFilePreviewMu.Unlock()
+		return entry
+	}
+	localFilePreviewMu.Unlock()
+
+	path := fallbackPath
+	if resolved, ok := localFileLinkPath(dest); ok {
+		path = resolved
+	}
+	info, err := os.Stat(path)
+	entry := localFilePreviewCacheEntry{
+		valid: true,
+		dest:  dest,
+		path:  path,
+		kind:  kind,
+		info:  info,
+		err:   err,
+	}
+	switch kind {
+	case localPreviewImage:
+		if err == nil {
+			entry.src, entry.err = loadLocalImage(path)
+		}
+	case localPreviewText:
+		if err == nil && info.Mode().IsRegular() {
+			entry.lines = localTextPreviewLinesWithInfo(path, info)
+		}
+	}
+
+	localFilePreviewMu.Lock()
+	localFilePreviewCache = entry
+	localFilePreviewMu.Unlock()
+	return entry
+}
+
 // localTextPreviewEntry 是按「修改时间、大小」失效的文本预览缓存。
 type localTextPreviewEntry struct {
 	modTime time.Time
@@ -179,12 +233,31 @@ var (
 )
 
 // localTextPreviewLines 读文件的全部预览行；目录、过大、读不了或含 NUL 的文件返回 nil。
-// 结果按路径、修改时间与大小缓存在进程内，重复悬停不再读盘。
+// 命中最近 1 个 path 缓存时不再访问文件系统。
 func localTextPreviewLines(path string) []string {
+	localFilePreviewMu.Lock()
+	if localFilePreviewCache.valid && localFilePreviewCache.kind == localPreviewText && localFilePreviewCache.path == path {
+		lines := localFilePreviewCache.lines
+		localFilePreviewMu.Unlock()
+		return lines
+	}
+	localFilePreviewMu.Unlock()
+
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
+		localFilePreviewMu.Lock()
+		localFilePreviewCache = localFilePreviewCacheEntry{valid: true, path: path, kind: localPreviewText, info: info, err: err}
+		localFilePreviewMu.Unlock()
 		return nil
 	}
+	lines := localTextPreviewLinesWithInfo(path, info)
+	localFilePreviewMu.Lock()
+	localFilePreviewCache = localFilePreviewCacheEntry{valid: true, path: path, kind: localPreviewText, info: info, lines: lines}
+	localFilePreviewMu.Unlock()
+	return lines
+}
+
+func localTextPreviewLinesWithInfo(path string, info os.FileInfo) []string {
 	localTextPreviewMu.Lock()
 	entry, cached := localTextPreviewCache[path]
 	localTextPreviewMu.Unlock()

@@ -530,7 +530,7 @@ func renderImagePreviewActions(c *ui.Context, s *chatState, pv *imagePreviewStat
 		previewActionButton(c, "image-preview-save", "另存为", "另存为…", func() {
 			savePreviewImage(s, pv)
 		})
-		previewActionButton(c, "image-preview-send", "发送到对话", "把这张图片加入输入框附件", func() {
+		previewActionButton(c, "image-preview-send", "发送到对话", "", func() {
 			sendPreviewToComposer(s, pv)
 		})
 	})

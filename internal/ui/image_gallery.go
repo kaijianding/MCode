@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -359,6 +360,9 @@ func previewImageExtForMime(mimeType string) string {
 	}
 }
 
+// previewMediaReadTimeout 是读取消息附件原图的超时上限，避免后端无响应时永久挂起。
+var previewMediaReadTimeout = 30 * time.Second
+
 // previewImageData 取出图片的原始字节：本地图片直接读盘，消息附件按 full 变体读原图。
 func previewImageData(s *chatState, pv *imagePreviewState) (string, []byte, error) {
 	if path := previewLocalPath(pv); path != "" {
@@ -371,11 +375,19 @@ func previewImageData(s *chatState, pv *imagePreviewState) (string, []byte, erro
 	if pv == nil || pv.full == nil {
 		return "", nil, errors.New("没有可读取的原图")
 	}
-	reader, ok := s.client.(messageMediaReader)
+	if s == nil {
+		return "", nil, errors.New("当前客户端不支持读取附件原图")
+	}
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	reader, ok := client.(messageMediaReader)
 	if !ok {
 		return "", nil, errors.New("当前客户端不支持读取附件原图")
 	}
-	mimeType, data, err := reader.ReadMessageMedia(context.Background(), pv.full.threadID, pv.full.messageID, pv.full.mediaID, "full")
+	ctx, cancel := context.WithTimeout(context.Background(), previewMediaReadTimeout)
+	defer cancel()
+	mimeType, data, err := reader.ReadMessageMedia(ctx, pv.full.threadID, pv.full.messageID, pv.full.mediaID, "full")
 	if err != nil {
 		return "", nil, err
 	}
@@ -402,34 +414,41 @@ func defaultPreviewSaveDialog(defaultPath string) (string, error) {
 	return path, nil
 }
 
-// savePreviewImage 把当前图片另存到用户选择的路径：本地图片复制文件，
-// 消息附件写入原图字节；取消或失败时给出提示。
+// savePreviewImage 把当前图片另存到用户选择的路径：读盘与拉取原图放到后台 goroutine，
+// 避免阻塞 UI 线程；mygo.Dialog.Save 内部会自动切回主线程弹框。
 func savePreviewImage(s *chatState, pv *imagePreviewState) {
 	if s == nil || pv == nil {
 		return
 	}
-	mimeType, data, err := previewImageData(s, pv)
-	if err != nil {
-		s.setToast("读取原图失败：" + shortMediaError(err))
-		return
+	snap := *pv
+	dialog := previewSaveDialog
+	if dialog == nil {
+		dialog = defaultPreviewSaveDialog
 	}
-	defaultPath := previewSaveName(pv, mimeType)
-	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
-		defaultPath = filepath.Join(home, "Downloads", defaultPath)
-	}
-	target, err := previewSaveDialog(defaultPath)
-	if err != nil {
-		s.setToast("打开保存对话框失败：" + shortMediaError(err))
-		return
-	}
-	if strings.TrimSpace(target) == "" {
-		return
-	}
-	if err := os.WriteFile(target, data, 0o644); err != nil {
-		s.setToast("保存失败：" + shortMediaError(err))
-		return
-	}
-	s.setToast("已保存到 " + filepath.Base(target))
+	go func() {
+		mimeType, data, err := previewImageData(s, &snap)
+		if err != nil {
+			s.setToast("读取原图失败：" + shortMediaError(err))
+			return
+		}
+		defaultPath := previewSaveName(&snap, mimeType)
+		if home, herr := os.UserHomeDir(); herr == nil && home != "" {
+			defaultPath = filepath.Join(home, "Downloads", defaultPath)
+		}
+		target, err := dialog(defaultPath)
+		if err != nil {
+			s.setToast("打开保存对话框失败：" + shortMediaError(err))
+			return
+		}
+		if strings.TrimSpace(target) == "" {
+			return
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			s.setToast("保存失败：" + shortMediaError(err))
+			return
+		}
+		s.setToast("已保存到 " + filepath.Base(target))
+	}()
 }
 
 // sendPreviewToComposer 把当前图片加入输入框附件：本地图片交给 addAttachmentFiles
@@ -446,7 +465,10 @@ func sendPreviewToComposer(s *chatState, pv *imagePreviewState) {
 	if ref == nil {
 		return
 	}
-	reader, ok := s.client.(messageMediaReader)
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	reader, ok := client.(messageMediaReader)
 	if !ok {
 		s.setToast("当前客户端不支持读取附件原图")
 		return
@@ -454,7 +476,9 @@ func sendPreviewToComposer(s *chatState, pv *imagePreviewState) {
 	alt := strings.TrimSpace(pv.alt)
 	// 读原图与解码可能很慢，放到后台，完成后由 addAttachment 自己加锁写入附件列表。
 	go func() {
-		mimeType, data, err := reader.ReadMessageMedia(context.Background(), ref.threadID, ref.messageID, ref.mediaID, "full")
+		ctx, cancel := context.WithTimeout(context.Background(), previewMediaReadTimeout)
+		defer cancel()
+		mimeType, data, err := reader.ReadMessageMedia(ctx, ref.threadID, ref.messageID, ref.mediaID, "full")
 		if err != nil || len(data) == 0 {
 			s.setToast("读取原图失败，无法加入输入框附件")
 			return
