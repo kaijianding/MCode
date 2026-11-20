@@ -2,6 +2,7 @@ package mcodeui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -304,3 +305,96 @@ func TestScrollToMessageIDExpandsTurnWorkFold(t *testing.T) {
 		t.Fatalf("视口应包含折叠项所在行 %d，got [%d,%d]", foldRow, first, last)
 	}
 }
+
+// TestUIReview3JumpExpandsLongUserMessage 验证跳转命中被折叠的长用户消息时会展开正文，
+// 且已展开的消息再次跳转仍保持展开而不会反手收起。
+func TestUIReview3JumpExpandsLongUserMessage(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	longID := "u-review3-long"
+	shortID := "u-review3-short"
+	t.Cleanup(func() {
+		userMsgExpandedMu.Lock()
+		delete(userMsgExpanded, longID)
+		delete(userMsgExpanded, shortID)
+		userMsgExpandedMu.Unlock()
+	})
+
+	longText := strings.Repeat("长用户消息内容\n", userCollapseLines+3)
+	msgs := []Message{
+		{ID: shortID, Role: "user", Text: "短消息", TurnIndex: 1},
+		{ID: longID, Role: "user", Text: longText, TurnIndex: 2},
+	}
+	items := buildTimelineItems(msgs)
+
+	if isUserMessageExpanded(longID) {
+		t.Fatal("长用户消息跳转前应处于未展开状态")
+	}
+	if !scrollToMessageID(s, items, longID) {
+		t.Fatal("跳转到长用户消息应成功")
+	}
+	if !isUserMessageExpanded(longID) {
+		t.Fatal("跳转到长用户消息后 isUserMessageExpanded 应为 true")
+	}
+
+	if !scrollToMessageID(s, items, longID) {
+		t.Fatal("再次跳转到已展开的长用户消息应成功")
+	}
+	if !isUserMessageExpanded(longID) {
+		t.Fatal("已展开的长用户消息再次跳转后仍应为 true")
+	}
+
+	if !scrollToMessageID(s, items, shortID) {
+		t.Fatal("跳转到短用户消息应成功")
+	}
+	if isUserMessageExpanded(shortID) {
+		t.Fatal("未达到折叠阈值的短用户消息不应写入展开表")
+	}
+}
+
+// TestUIReview3OpenChatFindKeepsCursorWhenOpen 验证查找条已打开时再次调用 openChatFind
+// 只重新请求焦点，不会把游标重置回第 1 条命中。
+func TestUIReview3OpenChatFindKeepsCursorWhenOpen(t *testing.T) {
+	msgs := []Message{
+		{ID: "m1", Role: "user", Text: "第一条 keyword 消息", TurnIndex: 1},
+		{ID: "m2", Role: "assistant", Kind: "text", Text: "第二条 keyword 回复", TurnIndex: 1, IsFinal: true},
+		{ID: "m3", Role: "assistant", Kind: "text", Text: "第三条 keyword 回复", TurnIndex: 2, IsFinal: true},
+	}
+	items := buildTimelineItems(msgs)
+	s := newChatState(NewFakeClient())
+	f := getChatFindState(s)
+	f.query = "keyword"
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c.Key("host")).Fill().Children(func() {
+			renderChatFindBar(c, s, "t1", 1, msgs, items)
+		})
+	}, 600, 200)
+
+	s.openChatFind()
+	tt.Frame()
+	if f.cursor != 0 || len(f.matches) != 3 {
+		t.Fatalf("首次打开后 cursor=%d matches=%v，期望 cursor=0 且 3 条命中", f.cursor, f.matches)
+	}
+
+	stepChatFind(s, f, items, 1)
+	tt.Frame()
+	if f.cursor != 1 {
+		t.Fatalf("步进后 cursor=%d，期望 1", f.cursor)
+	}
+
+	s.openChatFind()
+	if !f.focusPending {
+		t.Fatal("查找条已打开时再次调用 openChatFind 应置 focusPending")
+	}
+	if f.dirty {
+		t.Fatal("查找条已打开时再次调用 openChatFind 不应置 dirty")
+	}
+	tt.Frame()
+	if f.cursor != 1 {
+		t.Fatalf("已打开时再次调用 openChatFind 后 cursor=%d，期望保持 1", f.cursor)
+	}
+	if !tt.HasText("2/3") {
+		t.Fatalf("计数文案应保持 2/3，实际 Texts=%v", tt.Texts())
+	}
+}
+

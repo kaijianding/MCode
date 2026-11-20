@@ -325,15 +325,18 @@ func (f *chatFindState) moveCursor(delta int) bool {
 	return true
 }
 
-// openChatFind 打开查找条：保留上次的查询串，重算命中并给输入框要一次焦点。
+// openChatFind 打开查找条：原本未打开时保留上次的查询串并重算命中；已打开时只重新请求焦点、保留当前游标。
 func (s *chatState) openChatFind() {
 	f := getChatFindState(s)
 	if f == nil {
 		return
 	}
+	wasOpen := f.open
 	f.open = true
 	f.focusPending = true
-	f.dirty = true
+	if !wasOpen {
+		f.dirty = true
+	}
 	s.invalidate()
 }
 
@@ -403,8 +406,30 @@ func toolGroupItemOpen(s *chatState, item timelineItem) bool {
 	return v
 }
 
+// expandUserMessageForJump 在跳转命中被折叠的长用户消息时将其展开；已展开时保持不变。
+func expandUserMessageForJump(s *chatState, m Message) {
+	if m.ID == "" || m.Role != "user" || m.Kind == hostEventKind {
+		return
+	}
+	maxLines, maxRunes := userCollapseLimits(s)
+	if !shouldCollapseUserText(m.Text, maxLines, maxRunes) {
+		return
+	}
+	changed := false
+	userMsgExpandedMu.Lock()
+	if !userMsgExpanded[m.ID] {
+		userMsgExpanded[m.ID] = true
+		changed = true
+	}
+	userMsgExpandedMu.Unlock()
+	if changed && s != nil {
+		s.invalidate()
+	}
+}
+
 // expandTimelineItemForJump 把包含跳转目标的条目按需展开：回合折叠项与工具组都用
-// 同包的 setToolGroupOpen 打开（折叠项把开合状态也存在同一张表里，键是 item.id）。
+// 同包的 setToolGroupOpen 打开（折叠项把开合状态也存在同一张表里，键是 item.id），
+// 被折叠的长用户消息也会在此行内展开。
 // 只展开"包含目标"的这一串条目——展开它不改变 items 的行数（折叠区是行内展开体），
 // 所以不会让刚算出的行下标失效；顺带展开落点上方的工具组会新增行，反而会错位，故不做。
 func expandTimelineItemForJump(s *chatState, item timelineItem) {
@@ -421,6 +446,8 @@ func expandTimelineItemForJump(s *chatState, item timelineItem) {
 		if !toolGroupItemOpen(s, item) {
 			s.setToolGroupOpen(item.groupID, true)
 		}
+	case item.kind == timelineItemSingle && item.msg.Role == "user":
+		expandUserMessageForJump(s, item.msg)
 	}
 	for _, inner := range item.workItems {
 		expandTimelineItemForJump(s, inner)

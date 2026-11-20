@@ -133,13 +133,18 @@ func renderTimelineItem(c *ui.Context, s *chatState, item timelineItem, liveID, 
 }
 
 // flashTimelineRow 给跳转落点所在行加上淡出高亮：背景用强调色的 14% 透明度、2pt 描边用 50%，
-// 1.4s 内淡到透明；动画 key 带跳转序号，连续两次跳转时从头重播。未命中目标时原样返回。
+// 1.4s 内淡到透明；动画 key 带跳转序号，连续两次跳转时从头重播。减少动效时直接给静态高亮，
+// 直到 flashMessageID 被清除后自然消失。未命中目标时原样返回。
 func flashTimelineRow(c *ui.Context, s *chatState, item timelineItem, row ui.Element) ui.Element {
 	s.mu.Lock()
 	flashID, flashSeq := s.flashMessageID, s.flashSeq
 	s.mu.Unlock()
-	if reduceMotion(c) || flashID == "" || !timelineItemContainsMessageID(item, flashID) {
+	if flashID == "" || !timelineItemContainsMessageID(item, flashID) {
 		return row
+	}
+	if reduceMotion(c) {
+		return row.Background(ThemeAccent(c).Alpha(0.14)).
+			Border(2, ThemeAccent(c).Alpha(0.5))
 	}
 	k := row.Keyframes(fmt.Sprintf("jump-flash-%d", flashSeq), []ui.Keyframe{
 		{Value: 1},
