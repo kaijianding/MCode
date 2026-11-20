@@ -543,6 +543,7 @@ type chatState struct {
 	creatingThread       bool // 创建请求进行中，防止重复点击；受 s.mu 保护
 	provisionalWorktrees map[string]bool
 	provisionalRetains   map[string]*provisionalRetain
+	provisionalDemotes   map[string]bool // 降级回临时态进行中的会话，防止并发重复降级；受 s.mu 保护
 	releasedProvisional  map[string]bool
 	selectedProviderIdx  int
 	composerPrefsSaving  map[string]bool

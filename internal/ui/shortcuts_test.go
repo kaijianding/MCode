@@ -111,6 +111,8 @@ func TestRootThreadShortcutDispatch(t *testing.T) {
 	})
 	state.mu.Lock()
 	id := state.selectedThreadID
+	state.pendingDraftFill = nil
+	state.draft = "你好"
 	state.mu.Unlock()
 	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool { return fake.CreateThreadCalls() == 1 })

@@ -216,6 +216,10 @@ func TestChatsWorktreeShortcutSkipsWorktree(t *testing.T) {
 	}
 
 	// 输入首个字符触发转正，确认不会调用 MoveToWorktree。
+	state.mu.Lock()
+	state.pendingDraftFill = nil
+	state.draft = "你好"
+	state.mu.Unlock()
 	state.noteComposerDraft(newID, "你好")
 	waitFor(t, tt, func() bool {
 		state.mu.Lock()

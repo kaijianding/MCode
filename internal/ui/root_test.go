@@ -388,6 +388,8 @@ func TestRootCreateThreadForProject(t *testing.T) {
 	// 3. 输入触发转正，创建请求的项目 ID 保持正确。
 	state.mu.Lock()
 	id := state.selectedThreadID
+	state.pendingDraftFill = nil
+	state.draft = "你好"
 	state.mu.Unlock()
 	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool {
@@ -498,6 +500,8 @@ func TestRootMultiProvidersSelectionAndDisplay(t *testing.T) {
 	})
 	state.mu.Lock()
 	id := state.selectedThreadID
+	state.pendingDraftFill = nil
+	state.draft = "你好"
 	state.mu.Unlock()
 	state.noteComposerDraft(id, "你好")
 	waitFor(t, tt, func() bool {
