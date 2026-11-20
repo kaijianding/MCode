@@ -3,9 +3,11 @@ package mcodeui
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/plugins/terminal"
@@ -40,10 +42,12 @@ const (
 	terminalSnapshotMarker = "- 已恢复上次会话输出 -"
 )
 
-// terminalRestoring 表示正在按持久化记录重建标签。恢复期间 createTerminalTab 不落盘，
-// 否则会用「只重建了一半」的标签列表覆盖原快照，还会把刚写入的灰显历史当成输出再存一遍。
-// 恢复与新标签都只在主线程触发，普通 bool 足够。
-var terminalRestoring bool
+var (
+	// terminalPersistMu 串行化快照文件的写盘与删盘，避免退出监听与主动关闭标签并发写同一文件时顺序错乱。
+	terminalPersistMu sync.Mutex
+	// loadTerminalSnapshotForRestore 供测试替换恢复读盘入口，验证异步恢复不在渲染栈中同步执行。
+	loadTerminalSnapshotForRestore = loadTerminalThreadSnapshot
+)
 
 // terminalTabSnapshot 是单个终端标签的磁盘格式。
 type terminalTabSnapshot struct {
@@ -191,10 +195,19 @@ func filterRestorableTerminalTabs(tabs []terminalTabSnapshot, active int) ([]ter
 // terminalTabInput 是构建快照需要的标签字段：字段值都在 terminalMu 内拷贝出来，
 // 之后只用这份局部值，不再读 tab 结构体本身（退出监听会持锁给 tab.term 置 nil）。
 type terminalTabInput struct {
-	dir  string
-	main bool
-	id   int
-	term *terminal.Terminal
+	dir        string
+	main       bool
+	id         int
+	term       *terminal.Terminal
+	lastOutput string
+}
+
+// captureTerminalOutput 从活着的终端抓取清洗后的回滚输出。
+func captureTerminalOutput(term *terminal.Terminal) string {
+	if term == nil {
+		return ""
+	}
+	return limitTerminalOutput(stripRestoredTerminalHistory(term.Text()))
 }
 
 // captureTerminalThreadSnapshot 抓取当前标签列表与各自回滚输出。
@@ -208,7 +221,9 @@ func captureTerminalThreadSnapshot(threadID string, inputs []terminalTabInput, a
 		rec := terminalTabSnapshot{Dir: in.dir, Main: in.main}
 		if in.term != nil {
 			rec.Title = in.term.Title()
-			rec.Output = limitTerminalOutput(stripRestoredTerminalHistory(in.term.Text()))
+			rec.Output = captureTerminalOutput(in.term)
+		} else {
+			rec.Output = in.lastOutput
 		}
 		if in.id == activeID {
 			snap.Active = len(snap.Tabs)
@@ -277,23 +292,35 @@ func persistTerminalState(s *chatState, threadID string) {
 	if s == nil || threadID == "" {
 		return
 	}
+	terminalPersistMu.Lock()
+	defer terminalPersistMu.Unlock()
+
 	terminalMu.Lock()
 	st, ok := terminalStates[s]
 	var inputs []terminalTabInput
 	activeID := 0
+	var hasThread bool
 	if ok {
-		inputs = make([]terminalTabInput, 0, len(st.tabs[threadID]))
-		for _, tab := range st.tabs[threadID] {
+		var tabs []*terminalTab
+		tabs, hasThread = st.tabs[threadID]
+		inputs = make([]terminalTabInput, 0, len(tabs))
+		for _, tab := range tabs {
 			if tab == nil {
 				continue
 			}
 			// 锁内只拷字段值：锁外再读 tab.term 会与退出监听写 tab.term 竞争。
-			inputs = append(inputs, terminalTabInput{dir: tab.dir, main: tab.main, id: tab.id, term: tab.term})
+			inputs = append(inputs, terminalTabInput{
+				dir:        tab.dir,
+				main:       tab.main,
+				id:         tab.id,
+				term:       tab.term,
+				lastOutput: tab.lastOutput,
+			})
 		}
 		activeID = st.active[threadID]
 	}
 	terminalMu.Unlock()
-	if !ok {
+	if !ok || !hasThread {
 		return
 	}
 	snap := captureTerminalThreadSnapshot(threadID, inputs, activeID)
@@ -344,76 +371,209 @@ func feedTerminalSnapshot(term *terminal.Terminal, output string) {
 	term.Feed([]byte(b.String()))
 }
 
-// restoreTerminalTabs 在会话第一次打开终端面板时按快照重建标签（每标签新起一个 shell）。
+type terminalRestorePlan struct {
+	fromSnapshot bool
+	tabs         []terminalTabSnapshot
+	active       int
+}
+
+type preparedTerminalTab struct {
+	term     *terminal.Terminal
+	dir      string
+	main     bool
+	fontSize int
+}
+
+// buildTerminalRestorePlan 读取磁盘快照并过滤失效目录，不操作终端状态锁。
+func buildTerminalRestorePlan(threadID, fallbackDir string) terminalRestorePlan {
+	if snap, ok := loadTerminalSnapshotForRestore(threadID); ok {
+		tabs, active := filterRestorableTerminalTabs(snap.Tabs, snap.Active)
+		if len(tabs) > 0 {
+			return terminalRestorePlan{fromSnapshot: true, tabs: tabs, active: active}
+		}
+	}
+	if fallbackDir == "" {
+		return terminalRestorePlan{}
+	}
+	return terminalRestorePlan{
+		fromSnapshot: false,
+		tabs:         []terminalTabSnapshot{{Dir: fallbackDir}},
+		active:       0,
+	}
+}
+
+// prepareTerminalRestoreTabs 根据恢复计划启动终端进程并写入灰显历史。
+func prepareTerminalRestoreTabs(s *chatState, plan terminalRestorePlan, fallbackDir string) (prepared []preparedTerminalTab, activeIdx int, usedFallback bool, lastErr string) {
+	if len(plan.tabs) == 0 {
+		return nil, 0, false, ""
+	}
+	fontSize := getTerminalFontSize(s)
+	if plan.fromSnapshot {
+		for i, rec := range plan.tabs {
+			term, err := startTerminalProcess(s, rec.Dir)
+			if err != nil {
+				continue
+			}
+			if len(prepared) == 0 {
+				activeIdx = 0
+			}
+			if i == plan.active {
+				activeIdx = len(prepared)
+			}
+			feedTerminalSnapshot(term, rec.Output)
+			prepared = append(prepared, preparedTerminalTab{
+				term:     term,
+				dir:      rec.Dir,
+				main:     rec.Main,
+				fontSize: fontSize,
+			})
+		}
+		if len(prepared) > 0 {
+			return prepared, activeIdx, false, ""
+		}
+		if fallbackDir == "" {
+			return nil, 0, false, ""
+		}
+		plan = terminalRestorePlan{tabs: []terminalTabSnapshot{{Dir: fallbackDir}}, active: 0}
+	}
+
+	usedFallback = true
+	for _, rec := range plan.tabs {
+		term, err := startTerminalProcess(s, rec.Dir)
+		if err != nil {
+			lastErr = err.Error()
+			continue
+		}
+		prepared = append(prepared, preparedTerminalTab{
+			term:     term,
+			dir:      rec.Dir,
+			main:     rec.Main,
+			fontSize: fontSize,
+		})
+	}
+	return prepared, 0, usedFallback, lastErr
+}
+
+// applyTerminalRestoreTabs 在 terminalMu 锁内原子提交恢复出的标签；若状态已变化则释放新建终端。
+func applyTerminalRestoreTabs(s *chatState, st *terminalState, threadID string, requireRestoring bool, prepared []preparedTerminalTab, activeIdx int, usedFallback bool, lastErr string) []*terminalTab {
+	terminalMu.Lock()
+	abort := st.closed || st.restored[threadID] || len(st.tabs[threadID]) > 0
+	if requireRestoring && !st.restoring[threadID] {
+		abort = true
+	}
+	if abort {
+		delete(st.restoring, threadID)
+		terminalMu.Unlock()
+		for _, p := range prepared {
+			if p.term != nil {
+				_ = closeTerminal(p.term)
+			}
+		}
+		return nil
+	}
+
+	delete(st.restoring, threadID)
+
+	var created []*terminalTab
+	if len(prepared) == 0 {
+		if lastErr != "" {
+			st.errors[threadID] = lastErr
+		}
+		terminalMu.Unlock()
+		return nil
+	}
+
+	st.restored[threadID] = true
+
+	created = make([]*terminalTab, 0, len(prepared))
+	for _, p := range prepared {
+		tabID := st.nextTabID
+		st.nextTabID++
+		created = append(created, &terminalTab{
+			id:       tabID,
+			term:     p.term,
+			dir:      p.dir,
+			main:     p.main,
+			fontSize: p.fontSize,
+		})
+	}
+	st.tabs[threadID] = created
+	if activeIdx < 0 || activeIdx >= len(created) {
+		activeIdx = 0
+	}
+	st.active[threadID] = created[activeIdx].id
+	delete(st.errors, threadID)
+	terminalMu.Unlock()
+
+	for _, tab := range created {
+		attachTerminalListener(s, threadID, tab, tab.term)
+	}
+	if usedFallback {
+		persistTerminalState(s, threadID)
+	}
+	return created
+}
+
+// startTerminalRestoreAsync 在后台 goroutine 执行读盘与目录校验，再应用到会话终端状态并触发重绘。
+func startTerminalRestoreAsync(s *chatState, st *terminalState, threadID, fallbackDir string) {
+	go func() {
+		plan := buildTerminalRestorePlan(threadID, fallbackDir)
+		prepared, activeIdx, usedFallback, lastErr := prepareTerminalRestoreTabs(s, plan, fallbackDir)
+		_ = applyTerminalRestoreTabs(s, st, threadID, true, prepared, activeIdx, usedFallback, lastErr)
+		s.invalidate()
+	}()
+}
+
+// restoreTerminalTabs 在会话需要立即可用终端时同步按快照重建标签（每标签新起一个 shell）。
 // 没有记录、记录损坏或目录都不存在时，按 fallbackDir 建一个默认标签。
 func restoreTerminalTabs(s *chatState, st *terminalState, threadID, fallbackDir string) []*terminalTab {
 	if s == nil || st == nil || threadID == "" {
 		return nil
 	}
-	snap, ok := loadTerminalThreadSnapshot(threadID)
-	var restored []*terminalTab
-	if ok {
-		snap.Tabs, snap.Active = filterRestorableTerminalTabs(snap.Tabs, snap.Active)
-	}
-	if ok && len(snap.Tabs) > 0 {
-		// 恢复期间不落盘，见 terminalRestoring 的说明。
-		terminalRestoring = true
-		activeID := 0
-		for i, rec := range snap.Tabs {
-			tab, err := createTerminalTab(s, st, rec.Dir, rec.Main)
-			if err != nil || tab == nil {
-				continue
-			}
-			if len(restored) == 0 {
-				activeID = tab.id
-			}
-			if i == snap.Active {
-				activeID = tab.id
-			}
-			feedTerminalSnapshot(tab.term, rec.Output)
-			restored = append(restored, tab)
-		}
-		terminalRestoring = false
-		if len(restored) > 0 {
-			terminalMu.Lock()
-			for _, tab := range st.tabs[threadID] {
-				if tab.id == activeID {
-					st.active[threadID] = activeID
-					break
-				}
-			}
-			terminalMu.Unlock()
-		}
-	}
-	if len(restored) == 0 {
-		tab, err := createTerminalTab(s, st, fallbackDir, false)
-		if err != nil || tab == nil {
-			return nil
-		}
-		restored = append(restored, tab)
-	}
-	return restored
+	plan := buildTerminalRestorePlan(threadID, fallbackDir)
+	prepared, activeIdx, usedFallback, lastErr := prepareTerminalRestoreTabs(s, plan, fallbackDir)
+	return applyTerminalRestoreTabs(s, st, threadID, false, prepared, activeIdx, usedFallback, lastErr)
 }
 
-// handleTerminalOpenLink 是 terminal.Options.OpenLink 的实现：URL 交回 mygo 用系统浏览器打开
-// （返回 false），文件路径在这里解析后打开（返回 true）。
+// isAllowedTerminalExternalURL 判断外部链接是否允许交给系统打开：
+// 仅放行 scheme 为 http 或 https（不区分大小写）且 Host 非空的 URL。
+func isAllowedTerminalExternalURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	return u.Host != ""
+}
+
+// handleTerminalOpenLink 是 terminal.Options.OpenLink 的实现：本地文件路径在这里解析后打开
+// （返回 true），其余链接仅当 scheme 为 http/https 且 Host 非空时交回 mygo 用系统浏览器打开
+// （返回 false），其他协议（如 file://、smb://、javascript:、自定义协议）一律吞掉（返回 true）。
 func handleTerminalOpenLink(s *chatState, dir, link string) bool {
 	raw := strings.TrimSpace(link)
-	if kind, ok := classifyTerminalLink(raw); !ok || kind == terminalLinkURL {
-		return false
+	if raw == "" {
+		return true
 	}
-	cwd := dir
-	if cwd == "" {
-		_, cwd = getSelectedThreadWorkDir(s)
-	}
-	path, line, col, ok := resolveTerminalLinkTarget(cwd, raw)
-	if !ok {
-		if s != nil {
-			s.setToast("找不到终端里的这个文件: " + raw)
+	if kind, ok := classifyTerminalLink(raw); ok && kind == terminalLinkPath {
+		cwd := dir
+		if cwd == "" {
+			_, cwd = getSelectedThreadWorkDir(s)
 		}
+		path, line, col, resolved := resolveTerminalLinkTarget(cwd, raw)
+		if !resolved {
+			if s != nil {
+				s.setToast("找不到终端里的这个文件: " + raw)
+			}
+			return true
+		}
+		openTerminalLinkTarget(s, path, line, col)
+		return true
+	}
+	if isAllowedTerminalExternalURL(raw) {
 		return false
 	}
-	openTerminalLinkTarget(s, path, line, col)
 	return true
 }
 

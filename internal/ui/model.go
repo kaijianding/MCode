@@ -3660,6 +3660,7 @@ func (s *chatState) archiveThread(id string) {
 		// 删掉了会话：待处理请求集合必须重算。
 		s.bumpThreadsRuntimeLocked()
 		s.mu.Unlock()
+		closeThreadTerminals(s, id, false)
 		s.invalidate()
 	}()
 }
@@ -3740,6 +3741,7 @@ func (s *chatState) forgetDeletedThread(id string) {
 	s.bumpThreadsRuntimeLocked()
 	s.mu.Unlock()
 	inspectorDeleteSession(s, id)
+	closeThreadTerminals(s, id, true)
 	s.invalidate()
 }
 

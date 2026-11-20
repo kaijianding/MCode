@@ -107,6 +107,8 @@ type terminalTab struct {
 	dir  string
 	main bool
 	err  string
+	// lastOutput 在进程退出置空 term 前保留最近一次回滚输出，避免快照丢失输出内容。
+	lastOutput string
 	// fontSize 记录已经应用到该终端上的字号，用于发现设置里的字号变化。
 	fontSize int
 }
@@ -176,6 +178,8 @@ type terminalState struct {
 	nextTabID  int
 	newTabOpen bool
 	errors     map[string]string
+	restoring  map[string]bool
+	restored   map[string]bool
 	closed     bool
 	// search 是终端搜索条的状态，作用于 active 标签。
 	search terminalSearchState
@@ -200,6 +204,8 @@ func getTerminalState(s *chatState) *terminalState {
 			tabs:       make(map[string][]*terminalTab),
 			active:     make(map[string]int),
 			errors:     make(map[string]string),
+			restoring:  make(map[string]bool),
+			restored:   make(map[string]bool),
 			nextTabID:  1,
 			newTabOpen: false,
 		}
@@ -579,6 +585,8 @@ func startTerminalProcess(s *chatState, dir string) (*terminal.Terminal, error) 
 		Scrollback: getTerminalScrollbackLines(s),
 		// 字体族里带上 Nerd Font 回退，否则 oh-my-zsh 等主题的图标会显示成方块。
 		Font: terminal.Font{Family: terminalFontFamily(), Size: float32(getTerminalFontSize(s))},
+		// 减少动效时禁用终端光标闪烁，避免每 600ms 触发一次重绘。
+		NoBlink: appReduceMotion.Load(),
 		// 搜索状态回报给搜索条的匹配计数；按键里处理 ⌘F 打开搜索条。
 		OnSearch: func(status terminal.SearchStatus) { handleTerminalSearchStatus(s, status) },
 		OnKey:    func(mods ui.Modifiers, key ui.Key) bool { return handleTerminalSearchKey(s, mods, key) },
@@ -608,13 +616,14 @@ func attachTerminalListener(s *chatState, threadID string, tab *terminalTab, ter
 	go func(tid string, t *terminal.Terminal, targetTab *terminalTab) {
 		defer close(finished)
 		<-doneCh
-		// 退出前先落盘：此时终端的回滚文本仍可读，清空 term 之后就只剩目录信息了。
-		persistTerminalState(s, tid)
+		// 置空 term 前先在锁外抓一次回滚输出，之后 persistTerminalState 会沿用这份 lastOutput。
+		lastOut := captureTerminalOutput(t)
 		terminalMu.Lock()
 		owned := false
 		if curSt, ok := terminalStates[s]; ok {
 			for _, tb := range curSt.tabs[tid] {
 				if tb == targetTab && tb.term == t {
+					tb.lastOutput = lastOut
 					tb.term = nil
 					tb.err = "终端已退出"
 					owned = true
@@ -624,6 +633,7 @@ func attachTerminalListener(s *chatState, threadID string, tab *terminalTab, ter
 		}
 		terminalMu.Unlock()
 		if owned {
+			persistTerminalState(s, tid)
 			_ = closeTerm(t)
 			s.invalidate()
 		}
@@ -679,13 +689,13 @@ func createTerminalTab(s *chatState, st *terminalState, dir string, main bool) (
 	}
 	st.tabs[threadID] = append(st.tabs[threadID], tab)
 	st.active[threadID] = tabID
+	st.restored[threadID] = true
+	delete(st.restoring, threadID)
 	delete(st.errors, threadID)
 	terminalMu.Unlock()
 
 	attachTerminalListener(s, threadID, tab, term)
-	if !terminalRestoring {
-		persistTerminalState(s, threadID)
-	}
+	persistTerminalState(s, threadID)
 	return tab, nil
 }
 
@@ -760,6 +770,7 @@ func closeTerminalTab(s *chatState, st *terminalState, threadID string, id int) 
 	if len(newTabs) == 0 {
 		delete(st.active, threadID)
 		delete(st.errors, threadID)
+		delete(st.restored, threadID)
 		st.visible = false
 		st.newTabOpen = false
 	} else if wasActive {
@@ -840,6 +851,7 @@ func restartTerminalTab(s *chatState, st *terminalState, threadID string, id int
 	}
 	targetTab.term = term
 	targetTab.err = ""
+	targetTab.lastOutput = ""
 	terminalMu.Unlock()
 
 	attachTerminalListener(s, threadID, targetTab, term)
@@ -1076,7 +1088,8 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 		Children(func() {
 			ui.Icon(c, IconSearch()).
 				Size(12, 12).
-				TextColor(ThemeSecondaryText(c))
+				TextColor(ThemeSecondaryText(c)).
+				Shrink(0)
 
 			in := ui.TextInput(c.Key("terminal-search-input"), &text).
 				Label("搜索终端输出").
@@ -1086,7 +1099,10 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 				BorderWidth(0).
 				Background(ui.Transparent).
 				Padding(0).
-				Width(220).
+				Grow(1).
+				MaxWidth(220).
+				MinWidth(0).
+				Shrink(1).
 				AutoFocus()
 
 			if in.Changed() && text != state.text {
@@ -1117,7 +1133,11 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 				ui.Text(c, label).
 					FontSize(uiFont(TypeFootnote)).
 					TextColor(ThemeSecondaryText(c)).
-					Width(72)
+					MaxWidth(72).
+					MinWidth(0).
+					Shrink(1).
+					SingleLine().
+					Ellipsis("…")
 			}
 
 			Button(c, ButtonOpts{
@@ -1129,7 +1149,7 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 					s.invalidate()
 				},
 				Variant: ButtonSecondary,
-			})
+			}).Shrink(0)
 			Button(c, ButtonOpts{
 				Key:   "terminal-search-next",
 				Text:  "下一个",
@@ -1139,7 +1159,7 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 					s.invalidate()
 				},
 				Variant: ButtonSecondary,
-			})
+			}).Shrink(0)
 
 			// 不提供「区分大小写」开关：mygo 终端搜索固定忽略 ASCII 大小写，上游支持后再加。
 
@@ -1153,7 +1173,7 @@ func renderTerminalSearchBar(c *ui.Context, s *chatState, st *terminalState, tab
 					closeTerminalSearch(s, st)
 				},
 				Variant: ButtonGhost,
-			})
+			}).Shrink(0)
 		})
 }
 
@@ -1166,8 +1186,7 @@ func renderTerminalDockResizer(c *ui.Context, s *chatState, st *terminalState, w
 		Height(terminalDockResizerHeight).
 		Shrink(0).
 		Cursor(ui.CursorResizeNS).
-		Label("拖动调整终端高度").
-		Tooltip("拖动调整终端高度")
+		Label("拖动调整终端高度")
 
 	_, dy, held := resizer.Dragged()
 	if held && dy != 0 {
@@ -1251,13 +1270,15 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 
 	if workDir != "" && threadID != "" {
 		terminalMu.Lock()
-		hasTabs := len(st.tabs[threadID]) > 0
-		errText := st.errors[threadID]
+		shouldRestore := !st.closed && len(st.tabs[threadID]) == 0 && st.errors[threadID] == "" && !st.restoring[threadID] && !st.restored[threadID]
+		if shouldRestore {
+			st.restoring[threadID] = true
+		}
 		terminalMu.Unlock()
 
-		if !hasTabs && errText == "" {
-			// 有持久化记录时按记录重建标签（含上次的回滚输出），否则新建一个默认标签。
-			_ = restoreTerminalTabs(s, st, threadID, workDir)
+		if shouldRestore {
+			// 读盘与目录探测放到后台 goroutine，避免在渲染调用栈里同步做 IO。
+			startTerminalRestoreAsync(s, st, threadID, workDir)
 		}
 	}
 
@@ -1272,6 +1293,7 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 		}
 	}
 	currentErrText := st.errors[threadID]
+	restoring := st.restoring[threadID]
 	newTabOpen := st.newTabOpen
 	searchState := st.search
 	terminalMu.Unlock()
@@ -1460,11 +1482,11 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 
 					ui.Spacer(c)
 
-					// 关闭按钮
+					// 收起按钮
 					IconButton(c, IconButtonProps{
 						Key:   "terminal-dock-close",
 						Icon:  IconX(),
-						Label: "关闭终端",
+						Label: "收起终端",
 						OnClick: func() {
 							toggleTerminal(s)
 						},
@@ -1557,6 +1579,10 @@ func renderTerminalDock(c *ui.Context, s *chatState) {
 					})
 			} else if actTab != nil && actTab.term != nil {
 				terminal.View(c, actTab.term).Fill()
+			} else if restoring {
+				ui.Column(c.Key("terminal-dock-restoring")).
+					Grow(1).
+					FillWidth()
 			} else {
 				ui.Column(c.Key("terminal-dock-empty-dir")).
 					Grow(1).
@@ -1635,6 +1661,57 @@ func quoteTerminalArg(arg string) string {
 		return "'" + strings.ReplaceAll(arg, "'", "''") + "'"
 	}
 	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+}
+
+// closeThreadTerminals 关闭指定会话下的全部终端标签与底层进程，并从 terminalStates 移除该会话记录。
+// removeSnapshot 为 false（如归档）时先落盘保留快照再关闭；为 true（如删除）时关闭后删除磁盘快照。
+func closeThreadTerminals(s *chatState, threadID string, removeSnapshot bool) {
+	if s == nil || threadID == "" {
+		return
+	}
+	if !removeSnapshot {
+		terminalMu.Lock()
+		hasTabs := false
+		if st, ok := terminalStates[s]; ok && len(st.tabs[threadID]) > 0 {
+			hasTabs = true
+		}
+		terminalMu.Unlock()
+		if hasTabs {
+			persistTerminalState(s, threadID)
+		}
+	}
+
+	terminalMu.Lock()
+	var terms []*terminal.Terminal
+	if st, ok := terminalStates[s]; ok {
+		for _, tab := range st.tabs[threadID] {
+			if tab == nil {
+				continue
+			}
+			if st.search.open && st.search.tabID == tab.id {
+				st.search = st.search.closed()
+			}
+			if tab.term != nil {
+				terms = append(terms, tab.term)
+				tab.term = nil
+			}
+		}
+		delete(st.tabs, threadID)
+		delete(st.active, threadID)
+		delete(st.errors, threadID)
+		delete(st.restoring, threadID)
+		delete(st.restored, threadID)
+	}
+	terminalMu.Unlock()
+
+	for _, term := range terms {
+		_ = closeTerminal(term)
+	}
+	if removeSnapshot {
+		terminalPersistMu.Lock()
+		_ = removeTerminalSnapshot(threadID)
+		terminalPersistMu.Unlock()
+	}
 }
 
 // closeTerminals Close 掉该 chatState 的全部终端，并从 map 里删掉这条记录。

@@ -161,8 +161,8 @@ func looksLikeTerminalPath(body string, line int) bool {
 	if body == "" || body == "." || body == ".." {
 		return false
 	}
-	// "//host/path" 是 URL 片段，不是文件路径。
-	if strings.HasPrefix(body, "//") || strings.HasPrefix(body, `\\`) {
+	// "//host/path" 与带 "scheme://" 的 URI 都不是本地文件路径。
+	if strings.HasPrefix(body, "//") || strings.HasPrefix(body, `\\`) || strings.Contains(body, "://") {
 		return false
 	}
 	hasLetter := false
@@ -186,9 +186,10 @@ func classifyTerminalLink(raw string) (terminalLinkKind, bool) {
 	if trimmed == "" {
 		return terminalLinkPath, false
 	}
-	if m := terminalURLPattern.FindString(trimmed); m != "" {
+	if loc := terminalURLPattern.FindStringIndex(trimmed); loc != nil && loc[0] == 0 {
+		m := trimmed[loc[0]:loc[1]]
 		// 调用方传来的文本可能带尾部标点（正则把标点一起吞了），两种形式都当 URL。
-		if trimmedURL := trimTerminalLinkTail(trimmed); trimmedURL == trimmed || trimmedURL == trimTerminalLinkTail(m) {
+		if trimmedURL := trimTerminalLinkTail(trimmed); trimmedURL == trimTerminalLinkTail(m) {
 			return terminalLinkURL, true
 		}
 	}

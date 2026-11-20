@@ -862,6 +862,16 @@ func TestTerminal_DockTabControls(t *testing.T) {
 		}
 		renderTerminalDock(c, s)
 	}, 800, 600)
+	waitFor(t, tt, func() bool {
+		terminalMu.Lock()
+		n := len(st.tabs["t1"])
+		terminalMu.Unlock()
+		if n == 0 {
+			return false
+		}
+		r, ok := tt.Find("1 worktree")
+		return ok && r.W > 0 && r.H > 0
+	})
 	for _, label := range []string{"新建终端", "主项目目录", "新建终端", "Worktree 目录"} {
 		if err := tt.Click(label); err != nil {
 			t.Fatal(err)
@@ -896,7 +906,19 @@ func TestTerminal_NewTabFailureKeepsActiveTerminalVisible(t *testing.T) {
 	st := getTerminalState(s)
 	st.visible = true
 	tt := ui.NewTester(func(c *ui.Context) { renderTerminalDock(c, s) }, 800, 600)
+	waitFor(t, tt, func() bool {
+		terminalMu.Lock()
+		n := len(st.tabs["t1"])
+		terminalMu.Unlock()
+		if n == 0 {
+			return false
+		}
+		r, ok := tt.Find("1 project")
+		return ok && r.W > 0 && r.H > 0
+	})
+	terminalMu.Lock()
 	first := st.tabs["t1"][0]
+	terminalMu.Unlock()
 	newTerminal = func(terminal.Options) (*terminal.Terminal, error) {
 		return nil, errors.New("start failed")
 	}
