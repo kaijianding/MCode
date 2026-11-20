@@ -120,11 +120,25 @@ func (r *Runner) PRResolveWorktree(ctx context.Context, root, path string, numbe
 	return r.mergePRBase(ctx, path, base)
 }
 
-// PRCheckoutWorktree 在 path 检出 PR/MR 的 worktree：只抓取 head、检出本地分支
-// mcode/pr-<N> 并设置上游，不合并 base。worktree 已存在时直接返回 nil，
-// 保留进行中的合并与已有改动。
-func (r *Runner) PRCheckoutWorktree(ctx context.Context, root, path string, number int, head string) error {
-	_, err := r.preparePRWorktree(ctx, root, path, number, head, "")
+// PRCheckoutWorktree 在 path 检出 PR/MR 的 worktree：不合并 base。
+// crossRepo 为 false 时只抓取 head、检出本地分支 mcode/pr-<N> 并设置上游；
+// crossRepo 为 true 时改为抓取只读 PR ref（不校验 head 分支名，也不设置上游）。
+// worktree 已存在时直接返回 nil，保留进行中的合并与已有改动。
+func (r *Runner) PRCheckoutWorktree(ctx context.Context, root, path string, forge Forge, number int, head string, crossRepo bool) error {
+	if !crossRepo {
+		_, err := r.preparePRWorktree(ctx, root, path, number, head, "")
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("无效的 PR 编号: %d", number)
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("worktree path must be absolute: %s", path)
+	}
+	if _, err := r.FetchPRHead(ctx, root, forge, number); err != nil {
+		return err
+	}
+	_, _, err := r.ensurePRWorktree(ctx, root, path, number, PRHeadRef(number))
 	return err
 }
 
@@ -154,35 +168,44 @@ func (r *Runner) preparePRWorktree(ctx context.Context, root, path string, numbe
 		}
 	}
 
-	worktrees, err := r.WorktreeList(ctx, root)
-	if err != nil {
-		return false, err
-	}
-	for _, wt := range worktrees {
-		if resolvePath(wt.Path) == resolvePath(path) {
-			return true, nil
-		}
-	}
-
-	branch := fmt.Sprintf("mcode/pr-%d", number)
-	_, existsErr := r.run(ctx, root, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if existsErr == nil {
-		if _, err := r.run(ctx, root, nil, "worktree", "add", "--", path, branch); err != nil {
-			return false, fmt.Errorf("git worktree add failed: %w", err)
-		}
-	} else {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return false, err
-		}
-		if err := r.WorktreeAdd(ctx, root, path, branch, "origin/"+head); err != nil {
-			return false, err
-		}
+	reused, branch, err := r.ensurePRWorktree(ctx, root, path, number, "origin/"+head)
+	if err != nil || reused {
+		return reused, err
 	}
 
 	if err := r.SetUpstream(ctx, path, branch, "origin/"+head); err != nil {
 		return false, fmt.Errorf("设置上游分支失败: %w", err)
 	}
 	return false, nil
+}
+
+// ensurePRWorktree 复用已存在的 PR worktree，或基于 startPoint 检出本地分支 mcode/pr-<N> 到 path。
+func (r *Runner) ensurePRWorktree(ctx context.Context, root, path string, number int, startPoint string) (reused bool, branch string, err error) {
+	worktrees, err := r.WorktreeList(ctx, root)
+	if err != nil {
+		return false, "", err
+	}
+	for _, wt := range worktrees {
+		if resolvePath(wt.Path) == resolvePath(path) {
+			return true, "", nil
+		}
+	}
+
+	branch = fmt.Sprintf("mcode/pr-%d", number)
+	_, existsErr := r.run(ctx, root, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if existsErr == nil {
+		if _, err := r.run(ctx, root, nil, "worktree", "add", "--", path, branch); err != nil {
+			return false, "", fmt.Errorf("git worktree add failed: %w", err)
+		}
+	} else {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return false, "", err
+		}
+		if err := r.WorktreeAdd(ctx, root, path, branch, startPoint); err != nil {
+			return false, "", err
+		}
+	}
+	return false, branch, nil
 }
 
 func (r *Runner) mergePRBase(ctx context.Context, path, base string) error {

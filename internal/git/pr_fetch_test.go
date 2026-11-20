@@ -275,7 +275,7 @@ func TestPRCheckoutWorktree(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pr-1")
 
-	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, ForgeGitHub, 1, "pr-head", false); err != nil {
 		t.Fatalf("PRCheckoutWorktree 失败: %v", err)
 	}
 	if branch := runTestGit(t, path, "symbolic-ref", "--short", "HEAD"); branch != "mcode/pr-1" {
@@ -301,7 +301,7 @@ func TestPRCheckoutWorktree(t *testing.T) {
 	}
 
 	// 再次检出直接返回 nil，不修改已有 worktree。
-	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, ForgeGitHub, 1, "pr-head", false); err != nil {
 		t.Fatalf("重复检出应返回 nil: %v", err)
 	}
 
@@ -309,12 +309,39 @@ func TestPRCheckoutWorktree(t *testing.T) {
 	if err := runner.PRResolveWorktree(ctx, dir, path, 1, "pr-head", "main"); err != nil {
 		t.Fatalf("PRResolveWorktree 失败: %v", err)
 	}
-	if err := runner.PRCheckoutWorktree(ctx, dir, path, 1, "pr-head"); err != nil {
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, ForgeGitHub, 1, "pr-head", false); err != nil {
 		t.Fatalf("已有 worktree 时应返回 nil: %v", err)
 	}
 	state, err = runner.OpState(ctx, path)
 	if err != nil || state.Kind != OpMerge || len(state.Conflicts) != 1 {
 		t.Fatalf("进行中的合并被改动: 状态 = %+v，错误 = %v", state, err)
+	}
+}
+
+// TestPRCheckoutWorktreeCrossRepo 覆盖 fork PR（origin 只有 refs/pull/N/head）的检出、无上游及 worktree 复用。
+func TestPRCheckoutWorktreeCrossRepo(t *testing.T) {
+	t.Parallel()
+	runner, dir, bare := setupPRConflict(t)
+	ctx := context.Background()
+	want := runTestGit(t, bare, "rev-parse", "refs/pull/1/head")
+	runTestGit(t, bare, "update-ref", "-d", "refs/heads/pr-head")
+	runTestGit(t, bare, "update-ref", "refs/pull/1/head", want)
+	path := filepath.Join(t.TempDir(), "pr-1")
+
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, ForgeGitHub, 1, "main", true); err != nil {
+		t.Fatalf("PRCheckoutWorktree(crossRepo) 失败: %v", err)
+	}
+	if head := runTestGit(t, path, "rev-parse", "HEAD"); head != want {
+		t.Fatalf("HEAD = %s, 期望 %s", head, want)
+	}
+	if branch := runTestGit(t, path, "symbolic-ref", "--short", "HEAD"); branch != "mcode/pr-1" {
+		t.Fatalf("当前分支 = %q, 期望 mcode/pr-1", branch)
+	}
+	if out, err := runner.run(ctx, path, nil, "rev-parse", "--abbrev-ref", "@{u}"); err == nil {
+		t.Fatalf("fork PR 不应配置上游，得到 %q", strings.TrimSpace(string(out)))
+	}
+	if err := runner.PRCheckoutWorktree(ctx, dir, path, ForgeGitHub, 1, "main", true); err != nil {
+		t.Fatalf("重复检出应返回 nil: %v", err)
 	}
 }
 

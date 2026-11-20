@@ -51,7 +51,7 @@ type gitPRConflictClient interface {
 
 // gitPRCheckoutClient 检出 PR 分支到独立 worktree。
 type gitPRCheckoutClient interface {
-	GitPRCheckoutWorktree(ctx context.Context, threadID string, number int, head string) (string, error)
+	GitPRCheckoutWorktree(ctx context.Context, threadID string, number int, head string, crossRepo bool) (string, error)
 }
 
 // gitPRDialogState 是 PR 弹窗的状态，按 chatState 附加（与 chatFindStates 的做法一致）。
@@ -395,7 +395,7 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 	}
 	st := getGitPRDialogState(s)
 	st.mu.Lock()
-	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) || st.detail.CrossRepo {
+	if !st.open || st.selected == 0 || st.detail == nil || st.actionBusy != "" || !gitPRActionsVisible(*st.detail) {
 		st.mu.Unlock()
 		return
 	}
@@ -405,7 +405,7 @@ func (s *chatState) runGitPRCheckoutThread(kind string) {
 	st.mu.Unlock()
 	s.invalidate()
 	go func() {
-		path, err := client.GitPRCheckoutWorktree(context.Background(), threadID, number, detail.HeadBranch)
+		path, err := client.GitPRCheckoutWorktree(context.Background(), threadID, number, detail.HeadBranch, detail.CrossRepo)
 		newID := ""
 		if err == nil {
 			title, prompt := fmt.Sprintf("PR #%d", number), ""
@@ -1079,10 +1079,6 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 	area := ui.TextArea(c.Key("modal-git-pr-review-body"), &body).Placeholder("评论").Lines(4, 10).FontSize(uiFont(TypeBody)).TextColor(ThemePrimaryText(c)).Background(ThemeHover(c)).Border(Hairline, ThemeBorder(c)).Radius(RadiusSM).Padding(Space2, Space3).FillWidth()
 	area.OnChange(func() { st.mu.Lock(); st.reviewBody = body; st.mu.Unlock() })
 	_, canCheckout := s.client.(gitPRCheckoutClient)
-	checkoutTip := ""
-	if detail.CrossRepo {
-		checkoutTip = "来自 fork 的 PR 无法检出"
-	}
 	commentEmpty := strings.TrimSpace(body) == ""
 	commentTip := ""
 	if commentEmpty {
@@ -1097,13 +1093,13 @@ func renderGitPRActions(c *ui.Context, s *chatState, detail git.PRDetail) {
 			return
 		}
 		if canCheckout {
-			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Loading: busy == "ai-review", Disabled: (busy != "" && busy != "ai-review") || detail.CrossRepo, Tooltip: gitPRActionTip(busy, "ai-review", checkoutTip), OnClick: func() { s.runGitPRAIReview() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-ai-review", Text: "AI 审查", Variant: ButtonSecondary, Loading: busy == "ai-review", Disabled: busy != "" && busy != "ai-review", Tooltip: gitPRActionTip(busy, "ai-review", ""), OnClick: func() { s.runGitPRAIReview() }})
 		}
 		Button(c, ButtonOpts{Key: "modal-git-pr-approve", Text: "批准", Variant: ButtonSecondary, Loading: busy == "approve", Disabled: busy != "" && busy != "approve", Tooltip: gitPRActionTip(busy, "approve", ""), OnClick: func() { s.runGitPRAction("approve", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-comment", Text: "评论", Variant: ButtonSecondary, Loading: busy == "comment", Disabled: (busy != "" && busy != "comment") || commentEmpty, Tooltip: gitPRActionTip(busy, "comment", commentTip), OnClick: func() { s.runGitPRAction("comment", "") }})
 		Button(c, ButtonOpts{Key: "modal-git-pr-request-changes", Text: "要求修改", Variant: ButtonSecondary, Loading: busy == "request-changes", Disabled: (busy != "" && busy != "request-changes") || commentEmpty, Tooltip: gitPRActionTip(busy, "request-changes", commentTip), OnClick: func() { s.runGitPRAction("request-changes", "") }})
 		if canCheckout {
-			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: (busy != "" && busy != "checkout") || detail.CrossRepo, Tooltip: gitPRActionTip(busy, "checkout", checkoutTip), OnClick: func() { s.runGitPRCheckout() }})
+			Button(c, ButtonOpts{Key: "modal-git-pr-checkout", Text: "检出", Variant: ButtonSecondary, Loading: busy == "checkout", Disabled: busy != "" && busy != "checkout", Tooltip: gitPRActionTip(busy, "checkout", ""), OnClick: func() { s.runGitPRCheckout() }})
 		}
 		ui.Spacer(c)
 		if gitPRMergeBlocked(detail) {

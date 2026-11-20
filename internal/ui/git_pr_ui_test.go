@@ -63,7 +63,7 @@ func (f *gitPRActionFake) GitPRMerge(_ context.Context, threadID string, number 
 func (f *gitPRActionFake) GitPRAIReview(context.Context, string, int) ([]git.PRReviewComment, error) {
 	return nil, f.err
 }
-func (f *gitPRActionFake) GitPRCheckoutWorktree(context.Context, string, int, string) (string, error) {
+func (f *gitPRActionFake) GitPRCheckoutWorktree(context.Context, string, int, string, bool) (string, error) {
 	return "", f.err
 }
 
@@ -266,8 +266,9 @@ type gitPRSwitchCall struct {
 }
 
 type gitPRCheckoutCall struct {
-	number int
-	head   string
+	number    int
+	head      string
+	crossRepo bool
 }
 
 func (f *gitPRDialogFake) GitPRList(context.Context, string, int) ([]git.PRSummary, error) {
@@ -339,10 +340,10 @@ func (f *gitPRDialogFake) GitPRSubmitReview(context.Context, string, int, string
 	return nil
 }
 
-func (f *gitPRDialogFake) GitPRCheckoutWorktree(_ context.Context, _ string, number int, head string) (string, error) {
+func (f *gitPRDialogFake) GitPRCheckoutWorktree(_ context.Context, _ string, number int, head string, crossRepo bool) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.checkoutCalls = append(f.checkoutCalls, gitPRCheckoutCall{number: number, head: head})
+	f.checkoutCalls = append(f.checkoutCalls, gitPRCheckoutCall{number: number, head: head, crossRepo: crossRepo})
 	return f.checkoutPath, f.checkoutErr
 }
 
@@ -714,42 +715,50 @@ func TestGitPRAIReviewThread(t *testing.T) {
 	}
 }
 
-// TestGitPRAIReviewCrossRepoDisabled 覆盖 fork 来的 PR 不能发起 AI 审查。
-func TestGitPRAIReviewCrossRepoDisabled(t *testing.T) {
-	f := &gitPRDialogFake{
-		FakeClient: NewFakeClient(),
-		prs:        []git.PRSummary{{Number: 42, Title: "审查", State: "open"}},
-		detail: git.PRDetail{
-			PRSummary: git.PRSummary{Number: 42, Title: "审查", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
-			CrossRepo: true,
-		},
-		checkoutPath: "/tmp/mcode-pr-42-review",
-	}
-	s := newGitPRDialogTestState(t, f)
-	s.openGitPRDialog()
-	waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
-		return st.selected == 42 && st.detail != nil && !st.detailLoading
-	})
+// TestGitPRAIReviewCrossRepo 覆盖 fork 来的 PR 也能发起 AI 审查与检出，并把 crossRepo=true 传给后端。
+func TestGitPRAIReviewCrossRepo(t *testing.T) {
+	for _, tc := range []struct {
+		button    string
+		wantTitle string
+	}{
+		{"AI 审查", "审查 PR #42"},
+		{"检出", "PR #42"},
+	} {
+		t.Run(tc.button, func(t *testing.T) {
+			f := &gitPRDialogFake{
+				FakeClient: NewFakeClient(),
+				prs:        []git.PRSummary{{Number: 42, Title: "审查", State: "open"}},
+				detail: git.PRDetail{
+					PRSummary: git.PRSummary{Number: 42, Title: "审查", State: "open", HeadBranch: "feat/x", BaseBranch: "main"},
+					CrossRepo: true,
+				},
+				checkoutPath: "/tmp/mcode-pr-42-review",
+			}
+			s := newGitPRDialogTestState(t, f)
+			s.openGitPRDialog()
+			waitGitPRDialog(t, s, func(st *gitPRDialogState) bool {
+				return st.selected == 42 && st.detail != nil && !st.detailLoading
+			})
 
-	tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
-	tt.Advance(DurSheet)
-	if !tt.HasText("AI 审查") {
-		t.Fatal("缺少 AI 审查按钮")
-	}
-	_ = tt.Click("AI 审查")
-	time.Sleep(50 * time.Millisecond)
-	if calls := f.checkoutCallsSnapshot(); len(calls) != 0 {
-		t.Fatalf("fork PR 不应检出，调用 = %+v", calls)
-	}
-	if renames := f.renameCallsSnapshot(); len(renames) != 0 {
-		t.Fatalf("fork PR 不应新建会话，调用 = %+v", renames)
-	}
-	st := getGitPRDialogState(s)
-	st.mu.Lock()
-	open, busy := st.open, st.actionBusy
-	st.mu.Unlock()
-	if !open || busy != "" {
-		t.Errorf("弹窗状态 open=%v busy=%q", open, busy)
+			tt := ui.NewTester(func(c *ui.Context) { renderGitPRDialog(c, s) }, 1000, 800)
+			tt.Advance(DurSheet)
+			if !tt.HasText(tc.button) {
+				t.Fatalf("缺少 %s 按钮", tc.button)
+			}
+			if err := tt.Click(tc.button); err != nil {
+				t.Fatalf("点击 %s: %v", tc.button, err)
+			}
+			waitGitPRDialog(t, s, func(st *gitPRDialogState) bool { return !st.open })
+
+			calls := f.checkoutCallsSnapshot()
+			if len(calls) != 1 || calls[0] != (gitPRCheckoutCall{number: 42, head: "feat/x", crossRepo: true}) {
+				t.Fatalf("检出调用 = %+v", calls)
+			}
+			renames := f.renameCallsSnapshot()
+			if len(renames) != 1 || renames[0].Title != tc.wantTitle {
+				t.Fatalf("重命名调用 = %+v", renames)
+			}
+		})
 	}
 }
 

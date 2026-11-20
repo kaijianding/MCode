@@ -128,7 +128,7 @@ func prWorktreePath(dataDir, mainRoot string, number int) string {
 }
 
 // GitPRCheckoutWorktree 为 PR/MR 检出 worktree（不合并 base），返回 worktree 路径。
-func (c *Client) GitPRCheckoutWorktree(ctx context.Context, threadID string, number int, head string) (string, error) {
+func (c *Client) GitPRCheckoutWorktree(ctx context.Context, threadID string, number int, head string, crossRepo bool) (string, error) {
 	if number <= 0 {
 		return "", fmt.Errorf("无效的 PR 编号: %d", number)
 	}
@@ -147,7 +147,11 @@ func (c *Client) GitPRCheckoutWorktree(ctx context.Context, threadID string, num
 		return "", err
 	}
 	path := prWorktreePath(dataDir, mainRoot, number)
-	if err := runner.PRCheckoutWorktree(callCtx, mainRoot, path, number, head); err != nil {
+	remoteURL, err := runner.RemoteURL(callCtx, mainRoot)
+	if err != nil {
+		return "", err
+	}
+	if err := runner.PRCheckoutWorktree(callCtx, mainRoot, path, git.DetectForge(remoteURL), number, head, crossRepo); err != nil {
 		return "", err
 	}
 	return path, nil
