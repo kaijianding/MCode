@@ -157,6 +157,9 @@ export interface ThreadComposerProps {
   selectedProjectID?: string;
   onSelectProject?: (projectID: string) => void;
   threadID?: string;
+  /** 草稿阶段本地保存的人设 ID；有 threadID 时忽略，仍以会话摘要为准。 */
+  draftPersona?: string;
+  onDraftPersonaChange?: (persona: string) => void;
   /**
    * `/` 命令清单的取数范围：已有会话传 `{ threadID }`，草稿页传 `{ projectID, provider }`。
    * 不传则没有 `/` 补全；`#模型` 委派只在已有会话范围里提供。
@@ -391,15 +394,44 @@ const useThreadPersonaValue = (threadID?: string): string => {
   }, [threadID, currentThread, threads]);
 };
 
+export interface ApplyPersonaSelectionOptions {
+  threadID?: string;
+  persona: string;
+  personaSupported: boolean;
+  onDraftPersonaChange?: (persona: string) => void;
+  setThreadPersona: (persona: string) => Promise<void>;
+}
+
+/**
+ * 切换人设：草稿阶段（无 threadID）只更新本地 draftPersona，不调用 threads.setPersona；
+ * 已有会话则下发 RPC。
+ */
+export async function applyPersonaSelection({
+  threadID,
+  persona,
+  personaSupported,
+  onDraftPersonaChange,
+  setThreadPersona
+}: ApplyPersonaSelectionOptions): Promise<void> {
+  if (!personaSupported) return;
+  if (!threadID) {
+    onDraftPersonaChange?.(persona);
+    return;
+  }
+  await setThreadPersona(persona);
+}
+
 /**
  * 人设标签：与桌面端同口径，人设已被删或列表还没拉回来时退回显示 id。
  * 单独做成小组件，免得整个输入区为了摘要里的 persona 去订阅 useRemote。
  */
-const PersonaBadge: React.FC<{ threadID?: string; personas: RemotePersona[] }> = ({
-  threadID,
-  personas
-}) => {
-  const persona = useThreadPersonaValue(threadID);
+export const PersonaBadge: React.FC<{
+  threadID?: string;
+  draftPersona?: string;
+  personas: RemotePersona[];
+}> = ({ threadID, draftPersona, personas }) => {
+  const threadPersona = useThreadPersonaValue(threadID);
+  const persona = threadID ? threadPersona : (draftPersona ?? '');
   const label = useMemo(() => {
     if (!persona || persona === PERSONA_NONE_VALUE) return '';
     return personas.find((item) => item.id === persona)?.name || persona;
@@ -420,14 +452,16 @@ const PersonaBadge: React.FC<{ threadID?: string; personas: RemotePersona[] }> =
  * 写法照同一弹窗里的「子代理档位」行：左侧标题与说明，右侧当前值加下拉箭头（原生 select）。
  * 当前人设已不在列表里时选中「默认」（与桌面端 personaMenuChecked 一致），列表为空时整块不渲染。
  */
-const PersonaSection: React.FC<{
+export const PersonaSection: React.FC<{
   threadID?: string;
+  draftPersona?: string;
   personas: RemotePersona[];
   saving: boolean;
   message: string | null;
   onSelect: (persona: string) => void;
-}> = ({ threadID, personas, saving, message, onSelect }) => {
-  const persona = useThreadPersonaValue(threadID);
+}> = ({ threadID, draftPersona, personas, saving, message, onSelect }) => {
+  const threadPersona = useThreadPersonaValue(threadID);
+  const persona = threadID ? threadPersona : (draftPersona ?? '');
   // 当前人设已不在列表里时选中「默认」，与原平铺列表的勾选口径一致。
   const current = persona === PERSONA_NONE_VALUE ? '' : persona;
   const selected = current !== '' && personas.some((item) => item.id === current) ? current : '';
@@ -502,6 +536,8 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   selectedProjectID,
   onSelectProject,
   threadID,
+  draftPersona,
+  onDraftPersonaChange,
   commandScope,
   swarmEnabled,
   swarmToggleDisabled = false,
@@ -973,18 +1009,44 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   // 人设：宿主同时声明 providers.personas 与 threads.setPersona 才有入口，旧宿主整块隐藏。
   const {
     personas: personaOptions,
+    loading: personaLoading,
     setPersona: setThreadPersona,
     supported: personaSupported
   } = useThreadPersonas(threadID, composerOptions?.provider, composerOptions?.model);
   const [personaMessage, setPersonaMessage] = useState<string | null>(null);
   // 切换中禁用下拉，避免连点重复下发写入
   const [personaSwitching, setPersonaSwitching] = useState(false);
+
+  // 草稿阶段换模型后，若原先选中的人设不在新模型列表里则清空，避免带无效人设去创建会话
+  useEffect(() => {
+    if (threadID || !draftPersona || personaLoading || !onDraftPersonaChange) return;
+    if (personaOptions.some((item) => item.id === draftPersona)) return;
+    onDraftPersonaChange('');
+  }, [draftPersona, onDraftPersonaChange, personaLoading, personaOptions, threadID]);
+
   const selectPersona = async (persona: string) => {
     if (!personaSupported) return;
     setPersonaMessage(null);
+    if (!threadID) {
+      if (composerOptionsDisabled) return;
+      await applyPersonaSelection({
+        threadID,
+        persona,
+        personaSupported,
+        onDraftPersonaChange,
+        setThreadPersona
+      });
+      return;
+    }
     setPersonaSwitching(true);
     try {
-      await setThreadPersona(persona);
+      await applyPersonaSelection({
+        threadID,
+        persona,
+        personaSupported,
+        onDraftPersonaChange,
+        setThreadPersona
+      });
       // 人设入口就在模型弹窗里，切换后不关闭弹窗，让下拉里的当前值留在原地可见。
     } catch (err) {
       // 失败时留在菜单里提示，别让用户以为已经切好了。
@@ -1440,7 +1502,7 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
             )}
 
             {personaSupported && (
-              <PersonaBadge threadID={threadID} personas={personaOptions} />
+              <PersonaBadge threadID={threadID} draftPersona={draftPersona} personas={personaOptions} />
             )}
           </div>
 
@@ -1685,8 +1747,9 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
                           <div className="border-t border-[var(--border)]">
                             <PersonaSection
                               threadID={threadID}
+                              draftPersona={draftPersona}
                               personas={personaOptions}
-                              saving={personaSwitching}
+                              saving={personaSwitching || (!threadID && (!onDraftPersonaChange || composerOptionsDisabled))}
                               message={personaMessage}
                               onSelect={selectPersona}
                             />

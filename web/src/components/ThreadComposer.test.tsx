@@ -2,16 +2,21 @@
 // 覆盖三件事：iOS 空 MIME 的图片识别、附件缩略图与大图预览、附件按钮只留加号。
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { RemoteAttachmentUploadResult } from '../types/contract';
+import type { RemotePersona, RemoteThreadsSetPersonaParams } from '../types/generated';
 import { isPreviewableImageFile } from '../context/remoteImages';
 import { RemoteProvider } from '../context/RemoteContext';
 import {
   AttachmentPreviewOverlay,
   ComposerAttachButton,
   ComposerAttachmentStrip,
+  PersonaBadge,
+  PersonaSection,
+  applyPersonaSelection,
   fileDragIntent,
   ThreadComposer,
   modelSheetPageOnEscape
 } from './ThreadComposer';
+import { executeDraftSubmit } from './ThreadDraftView';
 
 function assertIncludes(haystack: string, needle: string): void {
   if (!haystack.includes(needle)) {
@@ -156,3 +161,200 @@ const availableDrag = fileDragIntent(['Files'], true);
 assertEqual(availableDrag.preventDefault, true, '附件可用时拦截文件拖拽的默认行为');
 assertEqual(availableDrag.acceptsFiles, true, '附件可用时接收文件');
 assertEqual(fileDragIntent(['text/plain'], true).preventDefault, false, '纯文本拖拽不拦截默认行为');
+
+// ---- 草稿人设：无 threadID 时渲染与选择都走 draftPersona，不触发 threads.setPersona ----
+const testPersonas: RemotePersona[] = [
+  { id: 'concise', name: '简洁风格' },
+  { id: 'strict', name: '严谨审查' }
+];
+const draftBadgeHtml = renderToStaticMarkup(
+  <RemoteProvider>
+    <PersonaBadge draftPersona="concise" personas={testPersonas} />
+  </RemoteProvider>
+);
+assertIncludes(draftBadgeHtml, '简洁风格');
+assertIncludes(draftBadgeHtml, '当前人设：简洁风格');
+
+const emptyDraftBadgeHtml = renderToStaticMarkup(
+  <RemoteProvider>
+    <PersonaBadge draftPersona="" personas={testPersonas} />
+  </RemoteProvider>
+);
+assertEqual(emptyDraftBadgeHtml, '', '草稿未选人设时不渲染人设徽标');
+
+const draftPersonaSectionHtml = renderToStaticMarkup(
+  <RemoteProvider>
+    <PersonaSection
+      draftPersona="strict"
+      personas={testPersonas}
+      saving={false}
+      message={null}
+      onSelect={() => {}}
+    />
+  </RemoteProvider>
+);
+if (!/<option\b(?=[^>]*\bvalue="strict")(?=[^>]*\bselected(?:="")?)[^>]*>严谨审查<\/option>/.test(draftPersonaSectionHtml)) {
+  throw new Error(`期望严谨审查选项处于选中状态，实际为：${draftPersonaSectionHtml}`);
+}
+
+async function runPersonaChecks(): Promise<void> {
+  // (a) 无 threadID 且传了 onDraftPersonaChange：只更新草稿人设，不调 setThreadPersona，也不报错
+  const draftUpdates: string[] = [];
+  let threadSetCalls = 0;
+  await applyPersonaSelection({
+    threadID: undefined,
+    persona: 'concise',
+    personaSupported: true,
+    onDraftPersonaChange: (next) => draftUpdates.push(next),
+    setThreadPersona: async () => {
+      threadSetCalls += 1;
+      throw new Error('当前会话不支持切换人设');
+    }
+  });
+  assertEqual(draftUpdates.length, 1, '草稿人设回调次数');
+  assertEqual(draftUpdates[0], 'concise', '草稿人设回传值');
+  assertEqual(threadSetCalls, 0, '草稿阶段不应调用 threads.setPersona');
+
+  // 已有 threadID 时仍走 setThreadPersona
+  const threadUpdates: string[] = [];
+  await applyPersonaSelection({
+    threadID: 'thread-1',
+    persona: 'strict',
+    personaSupported: true,
+    onDraftPersonaChange: () => {
+      throw new Error('已有会话不应触发 onDraftPersonaChange');
+    },
+    setThreadPersona: async (next) => {
+      threadUpdates.push(next);
+    }
+  });
+  assertEqual(threadUpdates.length, 1, '已有会话调用 setThreadPersona 次数');
+  assertEqual(threadUpdates[0], 'strict', '已有会话写入的人设值');
+
+  // (b) 草稿提交顺序：threads.create -> threads.setPersona -> 发送首条消息
+  const sequence: string[] = [];
+  let recordedPersonaParams: RemoteThreadsSetPersonaParams | null = null;
+  let personaApplied = false;
+  let createdID: string | null = null;
+
+  await executeDraftSubmit({
+    existingThreadID: createdID,
+    draftPersona: 'concise',
+    personaApplied,
+    provider: 'magpie',
+    model: 'magpie-default',
+    create: async () => {
+      sequence.push('threads.create');
+      return { actionID: 'act-create-1', state: 'accepted', threadID: 'thread-new' };
+    },
+    onCreateActionID: () => {},
+    onCreatedThreadID: (id) => {
+      createdID = id;
+    },
+    onCreateFailed: (msg) => {
+      throw new Error(msg);
+    },
+    callRemote: async (method, params) => {
+      sequence.push(method);
+      if (method === 'threads.setPersona') {
+        recordedPersonaParams = params as RemoteThreadsSetPersonaParams;
+      }
+      return {} as never;
+    },
+    onPersonaApplied: () => {
+      personaApplied = true;
+    },
+    send: async (id) => {
+      sequence.push(`send:${id}`);
+    }
+  });
+  assertEqual(
+    sequence.join(' -> '),
+    'threads.create -> threads.setPersona -> send:thread-new',
+    '草稿提交顺序'
+  );
+  assertEqual(
+    JSON.stringify(recordedPersonaParams),
+    JSON.stringify({
+      threadID: 'thread-new',
+      persona: 'concise',
+      provider: 'magpie',
+      model: 'magpie-default'
+    }),
+    'threads.setPersona 参数'
+  );
+  assertEqual(personaApplied, true, '成功后标记人设已应用');
+
+  // threads.setPersona 失败时抛出「切换人设失败：<原因>」且不发消息；重试时不再重复创建会话
+  const retrySeq: string[] = [];
+  let retryCreatedID: string | null = null;
+  let retryPersonaApplied = false;
+  let personaFailedMessage = '';
+  try {
+    await executeDraftSubmit({
+      existingThreadID: retryCreatedID,
+      draftPersona: 'concise',
+      personaApplied: retryPersonaApplied,
+      provider: 'magpie',
+      model: 'magpie-default',
+      create: async () => {
+        retrySeq.push('threads.create');
+        return { actionID: 'act-create-2', state: 'accepted', threadID: 'thread-retry' };
+      },
+      onCreateActionID: () => {},
+      onCreatedThreadID: (id) => {
+        retryCreatedID = id;
+      },
+      onCreateFailed: () => {},
+      callRemote: async (method) => {
+        retrySeq.push(method);
+        throw new Error('人设不存在');
+      },
+      onPersonaApplied: () => {
+        retryPersonaApplied = true;
+      },
+      send: async () => {
+        retrySeq.push('send');
+      }
+    });
+  } catch (err) {
+    personaFailedMessage = err instanceof Error ? err.message : String(err);
+  }
+  assertEqual(personaFailedMessage, '切换人设失败：人设不存在', '失败时错误消息');
+  assertEqual(retryCreatedID, 'thread-retry', '失败后保留已创建的 threadID');
+  assertEqual(retryPersonaApplied, false, '失败后不标记人设已应用');
+  assertEqual(retrySeq.join(' -> '), 'threads.create -> threads.setPersona', '失败时未发送消息');
+
+  await executeDraftSubmit({
+    existingThreadID: retryCreatedID,
+    draftPersona: 'concise',
+    personaApplied: retryPersonaApplied,
+    provider: 'magpie',
+    model: 'magpie-default',
+    create: async () => {
+      retrySeq.push('threads.create-unexpected');
+      return { actionID: 'act-create-3', state: 'accepted', threadID: 'thread-other' };
+    },
+    onCreateActionID: () => {},
+    onCreatedThreadID: () => {},
+    onCreateFailed: () => {},
+    callRemote: async (method) => {
+      retrySeq.push(`retry:${method}`);
+      return {} as never;
+    },
+    onPersonaApplied: () => {
+      retryPersonaApplied = true;
+    },
+    send: async (id) => {
+      retrySeq.push(`retry:send:${id}`);
+    }
+  });
+  assertEqual(retryPersonaApplied, true, '重试成功后标记人设已应用');
+  assertEqual(
+    retrySeq.join(' -> '),
+    'threads.create -> threads.setPersona -> retry:threads.setPersona -> retry:send:thread-retry',
+    '重试不重复创建会话并补上人设后发送'
+  );
+}
+
+await runPersonaChecks();

@@ -6,6 +6,7 @@ import type {
   RemoteComposerOptions,
   RemoteProjectSummary
 } from '../types/contract';
+import type { RemoteThreadsSetPersonaParams, RemoteThreadSummary } from '../types/generated';
 import {
   mergeComposerDefaults,
   mergeTouchedGroups,
@@ -14,6 +15,8 @@ import {
 } from '../utils/composerOptions';
 import type { ComposerSelectionMemoryParams, ComposerTouchedGroups } from '../utils/composerOptions';
 import { useRemoteStatic } from '../context/RemoteContext';
+import { useRemoteCall } from '../context/useRemoteCall';
+import type { UseRemoteCallResult } from '../context/useRemoteCall';
 import { isPreviewableImageFile } from '../context/remoteImages';
 import type { RemoteThreadAction } from '../context/RemoteContext';
 import { ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from './Icons';
@@ -89,6 +92,55 @@ function isUnresolved(action?: RemoteThreadAction): boolean {
   return Boolean(action && (action.state === 'submitting' || action.state === 'pending' || action.state === 'unknown'));
 }
 
+export interface DraftSubmitSteps {
+  existingThreadID: string | null;
+  draftPersona: string;
+  personaApplied: boolean;
+  provider?: string;
+  model?: string;
+  create: () => Promise<Pick<RemoteThreadAction, 'actionID' | 'state' | 'threadID' | 'error'>>;
+  onCreateActionID: (actionID: string) => void;
+  onCreatedThreadID: (threadID: string) => void;
+  onCreateFailed: (message: string) => void;
+  callRemote: UseRemoteCallResult['call'];
+  onPersonaApplied: () => void;
+  send: (threadID: string) => Promise<void>;
+}
+
+/**
+ * 草稿提交顺序：先创建会话拿到 threadID，再在发送首条消息前应用草稿人设。
+ * 失败时抛出「切换人设失败：<原因>」，由外层保留草稿；重试时跳过已成功的步骤。
+ */
+export async function executeDraftSubmit(steps: DraftSubmitSteps): Promise<void> {
+  let threadID = steps.existingThreadID;
+  if (!threadID) {
+    const action = await steps.create();
+    steps.onCreateActionID(action.actionID);
+    if (action.state !== 'accepted' || !action.threadID) {
+      if (action.state === 'failed') steps.onCreateFailed(action.error || '创建会话失败，草稿已保留');
+      return;
+    }
+    threadID = action.threadID;
+    steps.onCreatedThreadID(threadID);
+  }
+  if (steps.draftPersona && !steps.personaApplied) {
+    const params: RemoteThreadsSetPersonaParams = {
+      threadID,
+      persona: steps.draftPersona,
+      provider: steps.provider,
+      model: steps.model
+    };
+    try {
+      await steps.callRemote<RemoteThreadSummary>('threads.setPersona', params);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error ?? '');
+      throw new Error(reason ? `切换人设失败：${reason}` : '切换人设失败');
+    }
+    steps.onPersonaApplied();
+  }
+  await steps.send(threadID);
+}
+
 export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBack, onOpenThread }) => {
   const {
     connectionState,
@@ -108,6 +160,7 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
     openThread,
     uploadAttachment
   } = useRemoteStatic();
+  const { call } = useRemoteCall();
   const isConnected = connectionState === 'connected';
   const [currentProject, setCurrentProject] = useState<RemoteProjectSummary>(project);
   const chatsProjectID = chatsProject(projects)?.id;
@@ -191,6 +244,11 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
   const [sendActionID, setSendActionID] = useState<string | null>(null);
   const [checkingActionID, setCheckingActionID] = useState<string | null>(null);
   const [workspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
+  // 草稿阶段人设只存本地，会话创建后再补调 threads.setPersona；ref 防止失败重试重复建会话或漏/重设人设
+  const [draftPersona, setDraftPersona] = useState('');
+  const draftPersonaRef = useRef(draftPersona);
+  draftPersonaRef.current = draftPersona;
+  const personaAppliedRef = useRef(false);
 
   const attachmentsRef = useRef(attachments);
   const draftRef = useRef(draft);
@@ -347,30 +405,36 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
     setIsSubmitting(true);
     setActionError(null);
     try {
-      let threadID = createdThreadID;
-      if (!threadID) {
-        // 只发用户动过的记忆组（整组下发）；没动过的组省略，交给服务端按最新记忆补齐
-        const options = touchedComposerOptions(composerOptionsRef.current, touchedGroupsRef.current, draftBase);
-        const action = await createThread(
-          currentProject.id,
-          composerOptionsSupported && Object.keys(options).length > 0 ? options : undefined
-        );
-        setCreateActionID(action.actionID);
-        if (action.state !== 'accepted' || !action.threadID) {
-          if (action.state === 'failed') setActionError(action.error || '创建会话失败，草稿已保留');
-          return;
-        }
-        threadID = action.threadID;
-        setCreatedThreadID(threadID);
-      }
-      await sendCreatedThread(threadID, text, uploadedAttachments);
+      await executeDraftSubmit({
+        existingThreadID: createdThreadID,
+        draftPersona: draftPersonaRef.current,
+        personaApplied: personaAppliedRef.current,
+        provider: composerOptionsRef.current.provider,
+        model: composerOptionsRef.current.model,
+        create: () => {
+          // 只发用户动过的记忆组（整组下发）；没动过的组省略，交给服务端按最新记忆补齐
+          const options = touchedComposerOptions(composerOptionsRef.current, touchedGroupsRef.current, draftBase);
+          return createThread(
+            currentProject.id,
+            composerOptionsSupported && Object.keys(options).length > 0 ? options : undefined
+          );
+        },
+        onCreateActionID: setCreateActionID,
+        onCreatedThreadID: setCreatedThreadID,
+        onCreateFailed: (message) => setActionError(message),
+        callRemote: call,
+        onPersonaApplied: () => {
+          personaAppliedRef.current = true;
+        },
+        send: (threadID) => sendCreatedThread(threadID, text, uploadedAttachments)
+      });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '无法创建或发送会话，草稿已保留');
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
-  }, [canCreate, canSend, composerOptionsSupported, createAction, createThread, draftBase, createdThreadID, currentProject.id, isConnected, isSyncing, isUploadingAttachment, sendAction, sendCreatedThread]);
+  }, [call, canCreate, canSend, composerOptionsSupported, createAction, createThread, draftBase, createdThreadID, currentProject.id, isConnected, isSyncing, isUploadingAttachment, sendAction, sendCreatedThread]);
 
   const handleCheckAction = useCallback(async (action: RemoteThreadAction) => {
     if (!isConnected || checkingActionID) return;
@@ -515,6 +579,8 @@ export const ThreadDraftView: React.FC<ThreadDraftViewProps> = ({ project, onBac
           : undefined}
         composerOptionsDisabled={isSubmitting || Boolean(createdThreadID)}
         composerOptionsMessage={!composerOptionsSupported ? '当前宿主未声明 composer options，将使用 Mac 默认设置。' : null}
+        draftPersona={draftPersona}
+        onDraftPersonaChange={createdThreadID ? undefined : setDraftPersona}
         attachmentsSupported={attachmentsSupported}
         attachmentLimit={attachmentLimit}
         onComposerOptionsChange={composerOptionsSupported ? updateComposerOptions : undefined}
