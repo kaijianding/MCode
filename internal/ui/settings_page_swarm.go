@@ -242,7 +242,7 @@ func renderSwarmPairGroupCard(c *ui.Context, key string, children func()) {
 func renderSwarmPairGroupDivider(c *ui.Context, key string) {
 	ui.Box(c.Key(key)).
 		FillWidth().
-		Padding(0, Space3).
+		PaddingX(Space3).
 		Children(func() {
 			ui.Box(c.Key(key + "-line")).
 				Height(Hairline).
