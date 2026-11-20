@@ -811,7 +811,7 @@ func renderSwarmBeeFloats(c *ui.Context, s *chatState) {
 	}
 	sweepEmbeddedBees(s)
 
-	// 若用户手动点击 SwarmHeaderButton 打开了汇总面板，在浮窗之外同时展示汇总面板
+	// 若用户从子代理菜单打开了汇总面板，在浮窗之外同时展示汇总面板
 	if panelOpen {
 		renderSwarmPanel(c, s)
 	}
@@ -1239,11 +1239,11 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 	card := popoverCard(c, ui.Column(c.Key("swarm-bees-menu-col")).FillWidth().MaxHeight(360).Padding(Space2).Gap(Space1))
 	card.Children(func() {
 		// 仅让子代理列表本身滚动，保留底部操作与布局切换在滚动区外；
-		// 260pt 预留上下内边距、两条分隔线与底部两行操作，保证卡片总高不超过 360pt。
+		// 228pt 预留上下内边距、两条分隔线与底部三行操作，保证卡片总高不超过 360pt。
 		ui.Scroll(c.Key("swarm-bees-menu-scroll")).
 			Label("swarm-bees-menu-scroll").
 			FillWidth().
-			MaxHeight(260).
+			MaxHeight(228).
 			Children(func() {
 				ui.Column(c.Key("swarm-bees-menu-list")).FillWidth().Gap(Space1).Children(func() {
 					for _, h := range bees {
@@ -1389,6 +1389,20 @@ func renderBeesMenu(c *ui.Context, s *chatState, leadID string, bees []SwarmBee,
 		}
 		layoutToggle.Children(func() {
 			ui.Text(c, scatterLabel).FontSize(uiFont(TypeCaption)).TextColor(ThemePrimaryText(c))
+		})
+		panelToggle := ui.ButtonBase(c.Key("swarm-menu-toggle-panel")).FillWidth().Radius(RadiusSM).Padding(Space1, Space3).
+			Label("汇总面板").
+			Role(ui.RoleButton)
+		if panelToggle.Hovered() {
+			panelToggle.Background(ThemeHover(c))
+		}
+		if panelToggle.Clicked() {
+			s.toggleSwarmPanel()
+			*open = false
+			s.invalidate()
+		}
+		panelToggle.Children(func() {
+			ui.Text(c, "汇总面板").FontSize(uiFont(TypeCaption)).TextColor(ThemePrimaryText(c))
 		})
 	})
 }

@@ -147,9 +147,8 @@ func renderBeeWindow(c *ui.Context, parent *chatState, beeID string, child *chat
 	child.mu.Unlock()
 
 	// 状态和时长不是本窗口的事件驱动，但只有还在变化时才需要按秒取下一帧：
-	// 未找到 bee 时保留每秒一次的重试（等它出现在 Swarm 状态里跟上），bee 未结束（运行中、在等用户
-	// 回答/审批、待人工合并）或它的子会话仍在运行时继续跟随；进入终态且子会话空闲后不再排定时器，
-	// 窗口不再无谓地每秒整窗重建。
+	// 未找到 bee 时保留每秒一次的重试（等它出现在 Swarm 状态里跟上），bee 仍在运行或它的子会话仍在运行时
+	// 继续跟随；离开运行态（含待合并审查）且子会话空闲后不再排定时器，窗口不再无谓地每秒整窗重建。
 	bee, found := findBeeForWindow(parent, beeID)
 	if found {
 		syncEmbeddedBeeState(parent, child, bee)
@@ -160,7 +159,7 @@ func renderBeeWindow(c *ui.Context, parent *chatState, beeID string, child *chat
 		background = beeBackgroundTaskCount(child, bee.ThreadID)
 	}
 	// bee 已经结束但子会话里的后台任务还在跑时也要继续跟随，否则窗口会停在旧状态上。
-	if !found || !swarmBeeDormant(bee, swarmBeeWaiting(parent, bee)) || childRunning || background > 0 {
+	if beeWindowNeedsTick(found, bee, childRunning, background) {
 		afterNextSecond(c)
 	}
 
@@ -281,6 +280,13 @@ func beeBackgroundTaskCount(child *chatState, threadID string) int {
 	messages := child.messages
 	child.mu.Unlock()
 	return len(backgroundProviderTasks(messages)) + len(backgroundRunningCommands(messages, threadRunning, runningTurn))
+}
+
+// beeWindowNeedsTick 报告子代理独立窗口是否需要按秒定时重绘。
+// 未找到 bee、bee 仍在运行、子会话仍在运行或存在后台任务时继续跟随；
+// 离开运行态（含待审查）且子会话空闲后不再排定时器。
+func beeWindowNeedsTick(found bool, bee SwarmBee, childRunning bool, background int) bool {
+	return !found || bee.Status == "running" || childRunning || background > 0
 }
 
 // beeWaitingBackground 报告 bee 是否已经结束、子会话也空闲，但子会话里还有后台任务在跑。

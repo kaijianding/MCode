@@ -118,6 +118,7 @@ func renderSwarmQuestionBannerRow(c *ui.Context, s *chatState, leadID string, h 
 							Selectable()
 					} else {
 						if hint := swarmQuestionAutoForwardHint(h.PendingQuestion, time.Now()); hint != "" {
+							afterNextSecond(c)
 							ui.Text(c, hint).
 								FontSize(uiFont(TypeFootnote)).
 								TextColor(ThemeSecondaryText(c)).
@@ -230,7 +231,9 @@ func forwardSwarmQuestion(s *chatState, leadID string, h SwarmBee) {
 	s.invalidate()
 
 	go func() {
-		err := s.client.ForwardBeeQuestion(context.Background(), leadID, h.ThreadID, requestID)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := s.client.ForwardBeeQuestion(ctx, leadID, h.ThreadID, requestID)
 		swarmQuestionBannerMu.Lock()
 		delete(swarmQuestionForwarding, rec)
 		if err != nil {
