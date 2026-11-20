@@ -223,15 +223,16 @@ func TestTasksAcceptanceMatrix(t *testing.T) {
 					if !ok {
 						t.Fatal("找不到待办列")
 					}
-					card, ok := tt.Find("kanban-task-card-long")
+					card, ok := tt.Find(title)
 					if !ok || card.X+card.W > column.X+column.W {
 						t.Fatalf("任务卡越过列: card=%+v column=%+v", card, column)
 					}
+					// Tester.Find 仅返回首个同名元素（卡片容器），无法单独定位内层标题 Text；对两者均保留不越过卡片及列边界的断言。
 					titleBounds, ok := tt.Find(title)
-					if !ok || titleBounds.X+titleBounds.W > card.X+card.W {
-						t.Fatalf("任务标题越过卡片: title=%+v card=%+v", titleBounds, card)
+					if !ok || titleBounds.X+titleBounds.W > card.X+card.W || titleBounds.X+titleBounds.W > column.X+column.W {
+						t.Fatalf("任务标题越过内容区: title=%+v card=%+v column=%+v", titleBounds, card, column)
 					}
-					if err := tt.Click("kanban-task-card-long"); err != nil {
+					if err := tt.Click(title); err != nil {
 						t.Fatal(err)
 					}
 					detail, ok := tt.Find("kanban-task-detail")
@@ -271,7 +272,7 @@ func TestTasksAcceptanceMatrix(t *testing.T) {
 						for _, method := range []string{"Escape", "遮罩"} {
 							t.Run(method, func(t *testing.T) {
 								if _, ok := tt.Find("kanban-task-detail"); !ok {
-									if err := tt.Click("kanban-task-card-long"); err != nil {
+									if err := tt.Click(title); err != nil {
 										t.Fatal(err)
 									}
 									if _, ok := tt.Find("kanban-task-detail"); !ok {

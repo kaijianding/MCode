@@ -400,7 +400,7 @@ func TestKanbanWorkspace_DragRejectsInvalidTransition(t *testing.T) {
 	}
 }
 
-// (a) TestKanbanWorkspace_OpenTaskDetail：带 ThreadID 的任务点击 kanban-task-card-<id> 后出现 kanban-task-detail，
+// (a) TestKanbanWorkspace_OpenTaskDetail：带 ThreadID 的任务点击任务卡片（Label 为任务标题）后出现 kanban-task-detail，
 // fake 的 History 和 Diff 收到该 threadID，日志文本和 diff 文件名能渲染出来；关闭按钮能关掉浮窗。
 func TestKanbanWorkspace_OpenTaskDetail(t *testing.T) {
 	fake := NewFakeClient()
