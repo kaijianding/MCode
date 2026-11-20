@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+const fileManagerReadTimeout = 30 * time.Second
 
 // fileManagerTab 是文件管理面板里的一个预览标签页。
 // path 是相对工作目录的路径；temporary 为 true 表示它是单击文件列表打开的
@@ -175,6 +178,9 @@ func (s *chatState) openFileManagerFileAt(threadID, filePath string, pin bool, f
 		st.splitSide = filePath
 	}
 	if !fresh {
+		if threadID != "" && !tab.fileLoading && !fileManagerTabUsesCodePreviewLocked(tab) {
+			tab.reveal = false
+		}
 		fileManagerMu.Unlock()
 		inspectorRemember(s)
 		s.invalidate()
@@ -214,10 +220,29 @@ func (st *fileManagerState) openFileManagerTabLocked(filePath string, pin bool) 
 	return tab, true
 }
 
+func fileManagerTabUsesCodePreviewLocked(tab *fileManagerTab) bool {
+	if tab == nil || tab.fileErr != "" || tab.kind == "image" || tab.kind == "binary" || tab.content == "" {
+		return false
+	}
+	if tab.mdPreview && isMarkdownPath(tab.path) {
+		return false
+	}
+	if tab.svgPreview && isInspectorSVGPath(tab.path) && tab.svg != nil {
+		return false
+	}
+	return true
+}
+
+func (s *chatState) readFileManagerChunk(threadID, filePath string, offset, limit int64) (FileContent, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), fileManagerReadTimeout)
+	defer cancel()
+	return s.client.FilesRead(ctx, threadID, filePath, offset, limit)
+}
+
 // readFileManagerTab 异步读取某个 tab 的首块内容；图片再按更大分块拼接后解码。
 func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab, threadID, filePath string, gen int) {
 	go func() {
-		content, err := s.client.FilesRead(context.Background(), threadID, filePath, 0, fileManagerTextChunkSize)
+		content, err := s.readFileManagerChunk(threadID, filePath, 0, fileManagerTextChunkSize)
 
 		fileManagerMu.Lock()
 		if !st.tabLiveLocked(tab, gen) {
@@ -227,6 +252,7 @@ func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab
 		tab.fileLoading = false
 		if err != nil {
 			tab.fileErr = err.Error()
+			tab.reveal = false
 			fileManagerMu.Unlock()
 			s.invalidate()
 			return
@@ -244,6 +270,9 @@ func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab
 				// 解析失败/超限/外链时没有可预览的内容，默认停在源码。
 				tab.svgPreview = svg != nil
 			}
+			if !fileManagerTabUsesCodePreviewLocked(tab) {
+				tab.reveal = false
+			}
 			fileManagerMu.Unlock()
 			s.invalidate()
 			return
@@ -253,19 +282,21 @@ func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab
 		tab.totalSize = content.TotalSize
 		tab.imageData = nil
 		tab.fileLoading = true
+		tab.reveal = false
 		fileManagerMu.Unlock()
 		s.invalidate()
 
 		var data []byte
 		var offset int64
 		for {
-			chunk, readErr := s.client.FilesRead(context.Background(), threadID, filePath, offset, fileManagerImageChunkSize)
+			chunk, readErr := s.readFileManagerChunk(threadID, filePath, offset, fileManagerImageChunkSize)
 			if readErr != nil {
 				fileManagerMu.Lock()
 				if st.tabLiveLocked(tab, gen) {
 					tab.fileLoading = false
 					tab.fileErr = readErr.Error()
 					tab.imageData = nil
+					tab.reveal = false
 				}
 				fileManagerMu.Unlock()
 				s.invalidate()
@@ -282,6 +313,7 @@ func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab
 					tab.totalSize = chunk.TotalSize
 					tab.fileErr = ""
 					tab.content = ""
+					tab.reveal = false
 				}
 				fileManagerMu.Unlock()
 				s.invalidate()
@@ -314,6 +346,7 @@ func (s *chatState) readFileManagerTab(st *fileManagerState, tab *fileManagerTab
 			return
 		}
 		tab.fileLoading = false
+		tab.reveal = false
 		tab.imageData = data
 		if decodeErr != nil || bmp == nil {
 			tab.fileErr = "图片解码失败：" + fmt.Sprint(decodeErr)
@@ -348,7 +381,7 @@ func (s *chatState) loadMoreFileManagerTab(path string) {
 	s.invalidate()
 
 	go func() {
-		content, err := s.client.FilesRead(context.Background(), threadID, path, offset, fileManagerTextChunkSize)
+		content, err := s.readFileManagerChunk(threadID, path, offset, fileManagerTextChunkSize)
 
 		fileManagerMu.Lock()
 		if !st.tabLiveLocked(tab, gen) {
@@ -363,6 +396,7 @@ func (s *chatState) loadMoreFileManagerTab(path string) {
 				tab.hasMore = false
 			} else {
 				tab.fileErr = err.Error()
+				tab.reveal = false
 			}
 			fileManagerMu.Unlock()
 			if fallback {
@@ -395,6 +429,7 @@ func (s *chatState) loadMoreFileManagerTab(path string) {
 				if tab.svg == nil && svg != nil {
 					// 首次完整读入后才具备预览条件；此前没有切换按钮，不存在用户选择被覆盖。
 					tab.svgPreview = true
+					tab.reveal = false
 				}
 				tab.svg = svg
 			}

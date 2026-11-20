@@ -11,10 +11,13 @@ func toggleInspector(s *chatState) {
 	if st == nil {
 		return
 	}
-	if st.Open {
+	s.mu.Lock()
+	open, active := st.Open, st.Active
+	s.mu.Unlock()
+	if open {
 		inspectorClose(s)
 	} else {
-		inspectorSelect(s, st.Active, false)
+		inspectorSelect(s, active, false)
 	}
 }
 
@@ -31,11 +34,14 @@ func renderInspectorHeader(c *ui.Context, s *chatState, st *inspectorSessionStat
 		index  int
 		active string
 	}
+	s.mu.Lock()
+	active := st.Active
+	s.mu.Unlock()
 	selectionState := ui.Local(header, "inspector-selection", func() selection { return selection{} })
-	if selectionState.active != st.Active {
-		selectionState.active = st.Active
+	if selectionState.active != active {
+		selectionState.active = active
 		for i := range sidePanes {
-			if sidePanes[i].id == st.Active {
+			if sidePanes[i].id == active {
 				selectionState.index = i
 				break
 			}
@@ -43,9 +49,10 @@ func renderInspectorHeader(c *ui.Context, s *chatState, st *inspectorSessionStat
 	}
 	header.Children(func() {
 		tabs := ui.TabsBase(c.Key("inspector-tabs"), &selectionState.index, len(sidePanes))
-		tabs.List.Grow(1).Children(func() {
+		tabs.List.Grow(1).Shrink(1).MinWidth(0).ClipX().Children(func() {
 			for i, pane := range sidePanes {
-				tab := tabs.Tab(i).Height(height).Padding(0, Space4).Gap(Space2).AlignItems(ui.Center).Label(pane.title)
+				tab := tabs.Tab(i).Height(height).Padding(0, Space4).Gap(Space2).AlignItems(ui.Center).Label(pane.title).MinWidth(0).Shrink(1)
+				focusRing(c, tab)
 				s.mu.Lock()
 				count := 0
 				if st.follow != nil {
@@ -66,20 +73,31 @@ func renderInspectorHeader(c *ui.Context, s *chatState, st *inspectorSessionStat
 				}
 				ink := tab.AnimateTo("indicator", target, springSnappy)
 				tab.Children(func() {
-					ui.Text(c, pane.title).FontSize(uiFont(TypeBody))
+					ui.Text(c, pane.title).FontSize(uiFont(TypeBody)).SingleLine().MinWidth(0).Shrink(1)
 					if count > 0 {
 						rollingNumber(c, fmt.Sprintf("inspector-follow-%p-%p-%s", s, st, pane.id), count).
-							Padding(0, Space1).Radius(RadiusSM).Background(ThemeAccentSubtle(c)).TextColor(ThemeAccent(c))
+							Padding(0, Space1).Radius(RadiusSM).Background(ThemeAccentSubtle(c)).TextColor(ThemeAccent(c)).Shrink(0)
 					}
 					ui.Box(c).Absolute().Left(Space4).Right(Space4).Bottom(0).Height(Space0).Background(ThemeAccent(c).Alpha(ink))
 				})
 			}
 		})
-		if selectionState.index >= 0 && selectionState.index < len(sidePanes) && sidePanes[selectionState.index].id != st.Active {
-			selectionState.active = sidePanes[selectionState.index].id
-			inspectorSelect(s, selectionState.active, false)
+		s.mu.Lock()
+		curActive := st.Active
+		s.mu.Unlock()
+		if selectionState.index >= 0 && selectionState.index < len(sidePanes) && sidePanes[selectionState.index].id != curActive {
+			nextID := sidePanes[selectionState.index].id
+			selectionState.active = nextID
+			s.mu.Lock()
+			hasBadge := st.follow != nil && st.follow.badges[nextID] > 0
+			s.mu.Unlock()
+			if hasBadge {
+				inspectorFollowResume(s, st, nextID)
+			} else {
+				inspectorSelect(s, nextID, false)
+			}
 		}
-		IconButton(c, IconButtonProps{Key: "inspector-close", Icon: IconX(), Label: "关闭右栏", Tooltip: shortcutTitleWithKey("toggle-inspector", "关闭"), Size: ControlXS, Variant: ButtonGhost, OnClick: func() { inspectorClose(s) }})
+		IconButton(c, IconButtonProps{Key: "inspector-close", Icon: IconX(), Label: "关闭右栏", Tooltip: shortcutTitleWithKey("toggle-inspector", "关闭"), Size: ControlXS, Variant: ButtonGhost, OnClick: func() { inspectorClose(s) }}).Shrink(0)
 		ui.Box(c.Key("inspector-header-border")).Absolute().Left(0).Right(0).Bottom(0).Height(Hairline).Background(ThemeBorder(c))
 	})
 }

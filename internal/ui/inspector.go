@@ -23,6 +23,7 @@ type inspectorState struct {
 }
 
 type inspectorSessionState struct {
+	owner          *chatState
 	Open           bool
 	Active         string
 	generation     uint64
@@ -61,6 +62,7 @@ func inspectorSessionLocked(s *chatState, threadID string) *inspectorSessionStat
 		}
 	}
 	st := &inspectorSessionState{
+		owner:  s,
 		Active: sidePaneFileID, generation: 1, Width: inspectorInitialWidth(s),
 		Files:   &fileManagerState{},
 		Review:  &diffPanelState{owner: s, collapsed: make(map[string]bool)},
@@ -166,16 +168,33 @@ func inspectorClose(s *chatState) {
 
 // 旧聊天头部仍读取 visible；它只作容器可见性的兼容镜像。
 func inspectorSyncVisibility(st *inspectorSessionState) {
+	if st == nil {
+		return
+	}
+	var open bool
+	var active string
+	var browser *previewState
+	var gitPane *gitPaneState
+	if st.owner != nil {
+		st.owner.mu.Lock()
+		open, active, browser, gitPane = st.Open, st.Active, st.Browser, st.Git
+		st.owner.mu.Unlock()
+	} else {
+		open, active, browser, gitPane = st.Open, st.Active, st.Browser, st.Git
+	}
 	previewMu.Lock()
-	st.Browser.visible = st.Open && st.Active == sidePanePreviewID
-	browserActiveTabLocked(st.Browser).visible = st.Browser.visible
+	browser.visible = open && active == sidePanePreviewID
+	browserActiveTabLocked(browser).visible = browser.visible
 	previewMu.Unlock()
-	fileTreeWatchSetVisible(st.Files, st.Open && st.Active == sidePaneFileID)
-	if st.Git != nil {
+	fileManagerMu.Lock()
+	files := st.Files
+	fileManagerMu.Unlock()
+	fileTreeWatchSetVisible(files, open && active == sidePaneFileID)
+	if gitPane != nil {
 		diffPanelMu.Lock()
-		uncommitted := reviewScope(st.Review.scope) == "uncommitted"
+		uncommitted := st.Review != nil && reviewScope(st.Review.scope) == "uncommitted"
 		diffPanelMu.Unlock()
-		st.Git.setVisible(st.Open && (st.Active == sidePaneGitID || st.Active == sidePaneDiffID && uncommitted))
+		gitPane.setVisible(open && (active == sidePaneGitID || active == sidePaneDiffID && uncommitted))
 	}
 }
 
@@ -339,9 +358,12 @@ func inspectorValidateWorkspace(s *chatState) {
 	changed := st.workspaceKnown && st.workspace != identity
 	s.mu.Unlock()
 	if changed {
-		if st.Git != nil {
-			st.Git.dispose()
-			st.Git = nil
+		s.mu.Lock()
+		oldGit := st.Git
+		st.Git = nil
+		s.mu.Unlock()
+		if oldGit != nil {
+			oldGit.dispose()
 		}
 		inspectorFollowReset(s, st)
 		fileManagerMu.Lock()
@@ -372,12 +394,14 @@ func inspectorDisposeSession(s *chatState, st *inspectorSessionState) {
 	if st == nil {
 		return
 	}
-	if st.Git != nil {
-		st.Git.dispose()
-	}
 	s.mu.Lock()
+	oldGit := st.Git
+	st.Git = nil
 	st.generation++
 	s.mu.Unlock()
+	if oldGit != nil {
+		oldGit.dispose()
+	}
 	inspectorFollowReset(s, st)
 	browserServerDiscoveryDispose(s)
 	fileTreeWatchDispose(st.Files)

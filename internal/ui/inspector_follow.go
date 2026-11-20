@@ -378,7 +378,9 @@ func inspectorFollowCodePreview(c *ui.Context, s *chatState, tab fileManagerTabS
 		motion.from = min(max(state.ScrollY(), motion.to-span), motion.to+span)
 		motion.active = true
 		e.Jump("follow-scroll", 0)
-		e.Jump("line-highlight", 0)
+		if !reduceMotion(c) {
+			e.Jump("line-highlight", 0)
+		}
 		fileManagerMu.Lock()
 		if live := manager.findTabLocked(tab.path); live != nil && live.revealSeq == tab.revealSeq {
 			live.reveal = false
@@ -396,7 +398,9 @@ func inspectorFollowCodePreview(c *ui.Context, s *chatState, tab fileManagerTabS
 		motion.at = state.ScrollY()
 		motion.active = progress < 1
 		s.mu.Lock()
-		slot.follow.ignoreScroll = true
+		if slot != nil && slot.follow != nil {
+			slot.follow.ignoreScroll = true
+		}
 		s.mu.Unlock()
 	}
 	return e

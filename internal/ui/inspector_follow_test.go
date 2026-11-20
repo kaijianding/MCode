@@ -308,6 +308,8 @@ func TestInspectorFollowConcurrentUpdatesAndDispose(t *testing.T) {
 }
 
 func TestInspectorFollowReduceMotionJumpsToLine(t *testing.T) {
+	previous := appReduceMotion.Swap(true)
+	t.Cleanup(func() { appReduceMotion.Store(previous) })
 	_, s, tt := inspectorFollowTestState(t)
 	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
 	inspectorFollowUpdate(s, "t1", "read-1", "read", `{"path":"a.txt","start_line":150}`, "completed")

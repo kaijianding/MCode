@@ -685,7 +685,8 @@ func renderFileManagerFileHeader(c *ui.Context, s *chatState, tab fileManagerTab
 						ui.Text(c, detail).
 							FontSize(uiFont(TypeCaption)).
 							TextColor(ThemeSecondaryText(c)).
-							SingleLine()
+							SingleLine().
+							Tooltip(detail)
 					}
 				})
 

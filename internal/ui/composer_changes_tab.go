@@ -70,7 +70,9 @@ func (s *chatState) ensureThreadChangeStats(threadID string, isRunning bool) {
 	threadChangeStatsMu.Unlock()
 
 	go func(tid string) {
-		data, err := s.client.Diff(context.Background(), tid, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		data, err := s.client.Diff(ctx, tid, "")
 		add, del, files := 0, 0, 0
 		if err == nil && data.Diff != "" {
 			if parsed, parseErr := git.ParseUnifiedDiff([]byte(data.Diff)); parseErr == nil {

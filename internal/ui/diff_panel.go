@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"mcode/internal/git"
@@ -192,7 +193,8 @@ func (s *chatState) loadDiff(threadID, turnID string) {
 	s.invalidate()
 
 	go func(tid, turn string) {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		data, err := s.client.Diff(ctx, tid, turn)
 		// 会话实际在 AI 自建的 worktree 里干活时，整个会话的改动改从那个 worktree 的根目录取。
 		worktreePath := s.aiWorktreeFor(ctx, tid).Path

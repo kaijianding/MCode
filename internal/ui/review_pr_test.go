@@ -331,8 +331,15 @@ func TestReviewPRIdentityAndReopen(t *testing.T) {
 		defer diffPanelMu.Unlock()
 		return !dp.loading
 	})
-	if snap, ok := inspectorSnapshotFor(s); !ok || snap.ReviewScope != "pr" {
-		t.Fatal("快照未识别 PR 作用域")
+	st := inspectorSession(s)
+	diffPanelMu.Lock()
+	gotScope := ""
+	if st != nil && st.Review != nil {
+		gotScope = reviewScope(st.Review.scope)
+	}
+	diffPanelMu.Unlock()
+	if gotScope != "pr" {
+		t.Fatal("审查面板未识别 PR 作用域")
 	}
 	list, _ := reviewFixture()
 	list.Scope, list.Number = "pr", 7
