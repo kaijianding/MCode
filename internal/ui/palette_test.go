@@ -597,8 +597,8 @@ func TestPaletteForwardThreadEntry(t *testing.T) {
 	if item.title != "转发到新会话" {
 		t.Errorf("条目标题应为「转发到新会话」，实际 %q", item.title)
 	}
-	if item.subtitle != "把当前会话的上下文带入新会话" {
-		t.Errorf("条目副标题应为「把当前会话的上下文带入新会话」，实际 %q", item.subtitle)
+	if item.subtitle != "" {
+		t.Errorf("条目副标题应为空，实际 %q", item.subtitle)
 	}
 	if item.run == nil {
 		t.Fatal("条目应带执行函数")

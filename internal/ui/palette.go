@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -15,6 +16,9 @@ import (
 var (
 	paletteMu     sync.Mutex
 	paletteStates = make(map[*chatState]*paletteState)
+
+	// paletteVisibleBuildCount 记录 paletteVisibleItems 实际重算次数，供缓存回归测试观测。
+	paletteVisibleBuildCount atomic.Int64
 )
 
 const (
@@ -33,13 +37,20 @@ type paletteState struct {
 	scrollSelection bool
 
 	// 消息正文搜索结果：msgHits 是 msgQuery 的命中，msgPending 是已经排上防抖的查询串，
-	// msgSeq 是请求序号（只有最新一次的异步结果会被采纳），msgTimer 是防抖定时器。
-	msgErr     string
-	msgHits    []MessageSearchHit
-	msgQuery   string
-	msgPending string
-	msgSeq     uint64
-	msgTimer   *time.Timer
+	// msgSeq 是请求序号（只有最新一次的异步结果会被采纳），msgTimer 是防抖定时器，
+	// msgSearching 表示防抖或搜索请求仍在途。
+	msgErr       string
+	msgHits      []MessageSearchHit
+	msgQuery     string
+	msgPending   string
+	msgSeq       uint64
+	msgTimer     *time.Timer
+	msgSearching bool
+
+	// 候选列表缓存：只在面板打开、query 变化或消息搜索结果到达时重算。
+	cachedItems []paletteItem
+	cachedQuery string
+	cacheValid  bool
 }
 
 // getPaletteState 获取或初始化当前 chatState 的命令面板状态。
@@ -386,7 +397,6 @@ func buildPaletteItems(s *chatState) []paletteItem {
 			shortcutID: "forward-thread",
 			kind:       "command",
 			title:      "转发到新会话",
-			subtitle:   "把当前会话的上下文带入新会话",
 			keywords:   "转发 继续 新会话 forward continue",
 			run: func(cs *chatState) {
 				cs.forwardSelectedThread()
@@ -547,6 +557,7 @@ func filterPaletteItems(items []paletteItem, query string) []paletteItem {
 // paletteVisibleItems 把过滤后的候选条目与消息正文搜索结果合成一份列表。
 // 渲染与键盘上下键/Enter 都基于这份列表，保证选中下标与画面一致。
 func paletteVisibleItems(s *chatState, p *paletteState, query string) []paletteItem {
+	paletteVisibleBuildCount.Add(1)
 	items := filterPaletteItems(buildPaletteItems(s), query)
 	msgItems := paletteMessageItems(p, query)
 	if len(msgItems) == 0 {
@@ -556,6 +567,19 @@ func paletteVisibleItems(s *chatState, p *paletteState, query string) []paletteI
 	merged = append(merged, items...)
 	merged = append(merged, msgItems...)
 	return merged
+}
+
+// paletteCachedVisibleItems 返回缓存的可见条目，仅在缓存失效或 query 变化时重算。
+func paletteCachedVisibleItems(s *chatState, p *paletteState, query string) []paletteItem {
+	if p == nil {
+		return nil
+	}
+	if !p.cacheValid || p.cachedQuery != query {
+		p.cachedItems = paletteVisibleItems(s, p, query)
+		p.cachedQuery = query
+		p.cacheValid = true
+	}
+	return p.cachedItems
 }
 
 // move 移动选中的条目索引，并在 [0, n-1] 范围内 clamp。
@@ -584,6 +608,9 @@ func openPalette(s *chatState) {
 	p.prevQuery = ""
 	p.selected = 0
 	p.scrollSelection = true
+	p.cachedItems = nil
+	p.cachedQuery = ""
+	p.cacheValid = false
 	clearMessageSearch(p)
 	if s != nil {
 		s.invalidate()
@@ -597,6 +624,9 @@ func closePalette(s *chatState) {
 		return
 	}
 	p.open = false
+	p.cachedItems = nil
+	p.cachedQuery = ""
+	p.cacheValid = false
 	clearMessageSearch(p)
 	if s != nil {
 		s.invalidate()
@@ -642,7 +672,7 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 		return
 	}
 
-	filtered := paletteVisibleItems(s, p, p.query)
+	filtered := paletteCachedVisibleItems(s, p, p.query)
 
 	if len(filtered) > 0 {
 		if p.selected < 0 {
@@ -711,7 +741,7 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 								p.selected = 0
 								scheduleMessageSearch(s, p, k.Text())
 							}
-							current := paletteVisibleItems(s, p, k.Text())
+							current := paletteCachedVisibleItems(s, p, k.Text())
 							if k.Key == ui.KeyUp {
 								p.move(-1, len(current))
 								s.invalidate()
@@ -742,12 +772,20 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 						Justify(ui.Center).
 						Children(func() {
 							title := "没有匹配项"
-							if p.msgErr != "" {
-								title = "搜索失败"
+							color := ThemeSecondaryText(c)
+							if p.msgSearching {
+								title = "搜索中…"
+							} else if p.msgErr != "" {
+								title = "搜索失败：" + p.msgErr
+								color = ThemeDanger(c)
 							}
 							ui.Text(c, title).
+								SingleLine().
+								MinWidth(0).
+								Shrink(1).
+								Ellipsis("…").
 								FontSize(uiFont(TypeFootnote)).
-								TextColor(ThemeSecondaryText(c))
+								TextColor(color)
 						})
 				} else {
 					ui.Scroll(c.Key("palette-scroll")).
@@ -773,6 +811,11 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 											Gap(Space3).
 											Cursor(ui.CursorPointer)
 
+										if row.Hovered() && p.selected != idx {
+											p.selected = idx
+											isSelected = true
+											s.invalidate()
+										}
 										if isSelected {
 											row.Background(ThemeSelected(c))
 											if p.scrollSelection {
@@ -809,21 +852,32 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 												})
 
 											ui.Text(c, item.title).
-												SingleLine().
 												FontSize(uiFont(TypeFootnote)).
 												TextColor(ThemePrimaryText(c)).
-												Grow(1)
+												Grow(1).
+												Shrink(1).
+												MinWidth(0).
+												SingleLine().
+												Ellipsis("…")
 
 											if item.subtitle != "" {
 												ui.Text(c, item.subtitle).
-													SingleLine().
 													FontSize(uiFont(TypeCaption)).
-													TextColor(ThemeSecondaryText(c))
+													TextColor(ThemeSecondaryText(c)).
+													Shrink(1).
+													MinWidth(0).
+													SingleLine().
+													Ellipsis("…")
 											}
 											if mods, key, ok := shortcutBindingFor(item.shortcutID); ok {
 												Kbd(c, "palette-kbd-"+item.id, formatShortcutKeys(mods, key))
 											}
 										})
+									}
+									if p.msgSearching {
+										renderPaletteStatusRow(c, "palette-msg-searching", "搜索中…", ThemeSecondaryText(c))
+									} else if p.msgErr != "" {
+										renderPaletteStatusRow(c, "palette-msg-error", "搜索失败："+p.msgErr, ThemeDanger(c))
 									}
 								})
 						})
@@ -850,6 +904,26 @@ func renderCommandPalette(c *ui.Context, s *chatState) {
 			})
 	})
 	p.scrollSelection = false
+}
+
+// renderPaletteStatusRow 在命令面板列表末尾渲染非交互的状态/错误提示行。
+func renderPaletteStatusRow(c *ui.Context, key, text string, color ui.Color) {
+	ui.Row(c.Key(key)).
+		FillWidth().
+		Padding(Space3, Space3).
+		Radius(RadiusSM).
+		AlignItems(ui.Center).
+		Justify(ui.Start).
+		Gap(Space3).
+		Children(func() {
+			ui.Text(c, text).
+				SingleLine().
+				MinWidth(0).
+				Shrink(1).
+				Ellipsis("…").
+				FontSize(uiFont(TypeFootnote)).
+				TextColor(color)
+		})
 }
 
 // renderPaletteFooterHint 渲染页脚的一组键帽加说明文字，整组带无障碍标签便于测试与读屏。

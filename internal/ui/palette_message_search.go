@@ -31,6 +31,8 @@ type messageSearchClient interface {
 const (
 	// paletteMessageSearchDebounce 是输入停止后到真正发起搜索的等待时间。
 	paletteMessageSearchDebounce = 200 * time.Millisecond
+	// paletteMessageSearchTimeout 是单次后台消息搜索的超时上限。
+	paletteMessageSearchTimeout = 10 * time.Second
 	// paletteMessageSearchLimit 是命令面板一次展示的消息结果条数。
 	paletteMessageSearchLimit = 20
 	// paletteMessageSearchMinRunes 是触发消息搜索的最短查询长度（按 rune 计）。
@@ -66,13 +68,20 @@ func scheduleMessageSearch(s *chatState, p *paletteState, query string) {
 	q := strings.TrimSpace(query)
 	client, supported := s.client.(messageSearchClient)
 	if !supported || q == "" || !shouldSearchMessages(query) {
+		if p.msgQuery != "" && p.msgQuery == strings.TrimSpace(p.cachedQuery) && len(p.msgHits) > 0 {
+			p.cacheValid = false
+		}
 		p.msgHits = nil
 		p.msgQuery = ""
+		p.msgSearching = false
 		return
 	}
 
+	p.msgSearching = true
 	p.msgTimer = time.AfterFunc(paletteMessageSearchDebounce, func() {
-		hits, err := client.SearchMessages(context.Background(), q, paletteMessageSearchLimit)
+		ctx, cancel := context.WithTimeout(context.Background(), paletteMessageSearchTimeout)
+		defer cancel()
+		hits, err := client.SearchMessages(ctx, q, paletteMessageSearchLimit)
 		if err != nil {
 			hits = nil
 		}
@@ -81,12 +90,17 @@ func scheduleMessageSearch(s *chatState, p *paletteState, query string) {
 			if p.msgSeq != seq {
 				return
 			}
+			hadHits := len(p.msgHits) > 0
 			p.msgTimer = nil
+			p.msgSearching = false
 			p.msgQuery = q
 			p.msgHits = hits
 			p.msgErr = ""
 			if err != nil {
 				p.msgErr = err.Error()
+			}
+			if hadHits || len(hits) > 0 {
+				p.cacheValid = false
 			}
 		})
 	})
@@ -106,6 +120,8 @@ func clearMessageSearch(p *paletteState) {
 	p.msgSeq++
 	p.msgQuery = ""
 	p.msgHits = nil
+	p.msgSearching = false
+	p.cacheValid = false
 }
 
 // paletteMessageItems 把已到位的消息搜索结果转成面板条目。

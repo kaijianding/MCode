@@ -215,6 +215,15 @@ func onboardingMagpieStatus(st *SettingsState) (string, bool) {
 	if st == nil {
 		return "检查中", false
 	}
+	st.mu.Lock()
+	endpointsLoading := st.endpoints.loading
+	endpointsErr := st.endpoints.err
+	piLoading := st.piMagpie.loading
+	piErr := st.piMagpie.err
+	st.mu.Unlock()
+	if (!endpointsLoading && endpointsErr != "") || (!piLoading && piErr != "") {
+		return "连接失败", false
+	}
 	connected, known := magpieConnected(st)
 	if connected {
 		return "已连接", true
@@ -238,7 +247,15 @@ func onboardingProviderStatus(st *SettingsState, id string) providerRowStatus {
 	}
 	st.mu.Lock()
 	loaded := st.providerRows.loaded
+	loading := st.providerRows.loading
+	loadErr := st.providerRows.loadErr
 	st.mu.Unlock()
+	if loading {
+		return providerRowStatus{Summary: "检查中"}
+	}
+	if loadErr != "" {
+		return providerRowStatus{Summary: "检测失败"}
+	}
 	if !loaded {
 		return providerRowStatus{Summary: "检查中"}
 	}
@@ -280,6 +297,9 @@ func onboardingStatusTone(status providerRowStatus, missing bool) Tone {
 	if status.Ready {
 		return ToneSuccess
 	}
+	if status.Summary == "检测失败" {
+		return ToneDanger
+	}
 	if missing {
 		return ToneWarning
 	}
@@ -289,7 +309,7 @@ func onboardingStatusTone(status providerRowStatus, missing bool) Tone {
 // onboardingProviderRow 处理新手引导中的对应流程。
 func onboardingProviderRow(c *ui.Context, s *chatState, st *SettingsState, id string, index int) {
 	status := onboardingProviderStatus(st, id)
-	missing := st != nil && providerRowNotInstalled(st, id)
+	missing := status.Summary != "检查中" && status.Summary != "检测失败" && st != nil && providerRowNotInstalled(st, id)
 	u := onboardingState(s)
 	u.mu.Lock()
 	node, npm, probing := u.nodeOK, u.npmOK, u.probing
@@ -310,7 +330,7 @@ func onboardingProviderRow(c *ui.Context, s *chatState, st *SettingsState, id st
 			action, label := "settings", "设置"
 			if missing {
 				action, label = "install", "安装"
-			} else if id == "agy" && !status.Ready && status.Summary != "检查中" {
+			} else if id == "agy" && !status.Ready && status.Summary != "检查中" && status.Summary != "检测失败" {
 				action, label = "login", "登录"
 			}
 			Button(c, ButtonOpts{Key: "onboarding-action-" + id, Text: label, Variant: ButtonSecondary, Size: ControlSM, Disabled: st == nil || (action == "install" && onboardingInstallDisabled(id, node, npm, probing)), OnClick: func() {
@@ -326,9 +346,6 @@ func onboardingProviderRow(c *ui.Context, s *chatState, st *SettingsState, id st
 		}
 		if missing && onboardingNeedsNode(id) && !probing && (!node || !npm) {
 			ui.Text(c, "需要先安装 Node.js：https://nodejs.org/").FontSize(uiFont(TypeCaption)).TextColor(ThemeWarning(c))
-		}
-		if id == "agy" {
-			ui.Text(c, "安装后在终端运行 agy，选择 Google 登录").FontSize(uiFont(TypeCaption)).TextColor(ThemeSecondaryText(c))
 		}
 	})
 }
@@ -489,19 +506,17 @@ func renderOnboardingStep(c *ui.Context, s *chatState, st *SettingsState, step o
 				})
 			}
 		})
-		ui.Text(c, "mcode 与 Magpie 网关深度整合。推荐连接 Magpie：一个网关统一调用多个模型，菜单栏显示 Magpie 额度，可以切换人设。").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
-		ui.Text(c, "也可以只用 Claude、Codex 或 agy 直连。跳过后，Magpie 人设、Magpie 额度和网关模型路由不可用，以后可以随时在设置里补上。").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
 	case onboardingAgents:
-		ui.Text(c, "装好任意一个就能开始。安装会在系统终端里进行，完成后回来点「重新检测」。").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
 		for i, id := range []string{"claude", "codex", "agy"} {
 			onboardingProviderRow(c, s, st, id, i)
 		}
 	case onboardingMagpie:
-		ui.Text(c, "填写网关地址和 API Key。本机网关默认地址是 http://127.0.0.1:3425/v1。").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
 		status, connected := onboardingMagpieStatus(st)
 		tone := ToneNeutral
 		if connected {
 			tone = ToneSuccess
+		} else if status == "连接失败" {
+			tone = ToneDanger
 		}
 		ui.Row(c).FillWidth().Gap(Space3).AlignItems(ui.Center).Children(func() {
 			onboardingBadge(c, "onboarding-magpie-status", status, tone)

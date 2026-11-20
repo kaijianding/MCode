@@ -2,9 +2,16 @@ package mcodeui
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// commandActivityFillWidth 计算进程 CPU 占用条的目标宽度，并按整像素量化，避免动画目标随浮点抖动触发重绘。
+func commandActivityFillWidth(rowWidth float32, cpu float64) float32 {
+	width := rowWidth * float32(min(max(cpu, 0), 100)/100)
+	return float32(math.Round(float64(width)))
+}
 
 func renderCommandActivityView(c *ui.Context, s *chatState, m Message) {
 	st := commandActivitySnapshot(s, m.ID)
@@ -44,7 +51,7 @@ func renderCommandActivityView(c *ui.Context, s *chatState, m Message) {
 			row.Opacity(opacity)
 			row.Children(func() {
 				fill := ui.Box(c.Key(fmt.Sprintf("command-fill-%s-%d", m.ID, i))).Absolute().Left(0).Top(0).Bottom(0).Radius(RadiusXS).Background(ThemeAccent(c).Alpha(0.08)).PassThrough()
-				width := row.LayoutBounds().W * float32(min(max(p.cpu, 0), 100)/100)
+				width := commandActivityFillWidth(row.LayoutBounds().W, p.cpu)
 				fill.Width(fill.AnimateTo("width", width, ui.Animation{Duration: animateDuration(c, DurBase), Ease: ui.EaseOut}))
 				ui.Text(c, p.name).FontSize(scaledFont(TypeCaption)).FontWeight(500).TextColor(ThemePrimaryText(c)).SingleLine()
 				ui.Text(c, p.object).FontSize(scaledFont(TypeCaption)).TextColor(ThemeSecondaryText(c)).Grow(1).Shrink(1).MinWidth(0).SingleLine().Ellipsis("…")

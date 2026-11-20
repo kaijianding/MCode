@@ -339,3 +339,56 @@ func TestOnboardingHeroNoTreeRebuild(t *testing.T) {
 		}
 	}
 }
+
+func TestOnboardingProviderLoadErrorAndRecheck(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	t.Cleanup(s.close)
+	st := NewSettingsState(settingsTestDir(t), nil, s)
+	st.mu.Lock()
+	st.providerRows.loaded = true
+	st.providerRows.loadErr = "探测失败"
+	st.mu.Unlock()
+
+	if got := onboardingProviderStatus(st, "claude"); got.Summary != "检测失败" {
+		t.Fatalf("loadErr 非空时状态 = %q，期望 检测失败", got.Summary)
+	}
+	tt := ui.NewTester(func(c *ui.Context) { onboardingProviderRow(c, s, st, "claude", 0) }, 800, 700)
+	if !tt.HasText("检测失败") || tt.HasText("未安装") {
+		t.Fatalf("应显示检测失败而非未安装：%v", tt.Texts())
+	}
+
+	st.mu.Lock()
+	st.providerRows.loading = true
+	st.mu.Unlock()
+	if got := onboardingProviderStatus(st, "claude"); got.Summary != "检查中" {
+		t.Fatalf("重新加载期间状态 = %q，期望 检查中", got.Summary)
+	}
+}
+
+func TestOnboardingRemovedCopyAbsent(t *testing.T) {
+	s := newChatState(NewFakeClient())
+	t.Cleanup(s.close)
+	st := NewSettingsState(settingsTestDir(t), nil, s)
+	setChatSettings(s, st)
+	st.mu.Lock()
+	st.endpoints.loaded = true
+	st.providerRows.loaded = true
+	st.mu.Unlock()
+
+	u := onboardingState(s)
+	u.open = true
+	removed := map[onboardingStep][]string{
+		onboardingWelcome: {"深度整合", "也可以只用 Claude"},
+		onboardingAgents:  {"装好任意一个就能开始", "选择 Google 登录"},
+		onboardingMagpie:  {"填写网关地址和 API Key", "127.0.0.1:3425"},
+	}
+	for step, banned := range removed {
+		u.step = step
+		tt := ui.NewTester(func(c *ui.Context) { renderOnboardingDialog(c, s) }, 800, 700)
+		for _, text := range banned {
+			if tt.HasText(text) {
+				t.Errorf("步骤 %d 不应再包含 %q：%v", step, text, tt.Texts())
+			}
+		}
+	}
+}
