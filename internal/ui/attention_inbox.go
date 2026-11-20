@@ -471,13 +471,16 @@ func renderAttentionInboxEntry(c *ui.Context, s *chatState) {
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
-		Label("待你处理")
+		Label("待你处理").
+		Focusable().
+		KeepFocus()
 
 	if st.open {
 		row.Background(ThemeSelected(c))
 	} else if row.Hovered() {
 		row.Background(ThemeHover(c))
 	}
+	focusRing(c, row)
 
 	if row.Clicked() {
 		st.open = !st.open

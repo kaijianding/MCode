@@ -49,11 +49,14 @@ func renderSidebarStewardDisabledRow(c *ui.Context, s *chatState) {
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
-		Label(label)
+		Label(label).
+		Focusable().
+		KeepFocus()
 
 	if row.Hovered() {
 		row.Background(ThemeHover(c))
 	}
+	focusRing(c, row)
 
 	if row.Clicked() {
 		openStewardSettings(s)
@@ -142,13 +145,16 @@ func renderSidebarStewardRow(c *ui.Context, s *chatState, threadID string) {
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
-		Label(label)
+		Label(label).
+		Focusable().
+		KeepFocus()
 
 	if isSelected || popoverOpen {
 		row.Background(ThemeSelected(c))
 	} else if row.Hovered() {
 		row.Background(ThemeHover(c))
 	}
+	focusRing(c, row)
 
 	if row.Clicked() {
 		s.openStewardThread()

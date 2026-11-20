@@ -909,7 +909,10 @@ func renderSidebar(c *ui.Context, s *chatState) {
 						Grow(1).
 						Gap(Space3).
 						Radius(RadiusXS).
-						Label(projToggleLabel)
+						Label(projToggleLabel).
+						Focusable().
+						KeepFocus()
+					focusRing(c, titleArea)
 
 					// 标题区悬停显示项目绝对路径
 					if missingPaths[pVal.ID] {
@@ -1204,11 +1207,14 @@ func renderSidebar(c *ui.Context, s *chatState) {
 								Gap(Space2).
 								AlignItems(ui.Center).
 								Radius(RowCornerRadius).
-								Label(dormantGroupLabel)
+								Label(dormantGroupLabel).
+								Focusable().
+								KeepFocus()
 
 							if dormantGroupRow.Hovered() {
 								dormantGroupRow.Background(hoverBg)
 							}
+							focusRing(c, dormantGroupRow)
 
 							if dormantGroupRow.Clicked() && lowerQuery == "" {
 								s.mu.Lock()
@@ -1309,7 +1315,9 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 		Gap(Space3).
 		AlignItems(ui.Center).
 		Radius(RowCornerRadius).
-		Label(rowLabel)
+		Label(rowLabel).
+		Focusable().
+		KeepFocus()
 
 	if !o.dormant && !thVal.Dormant {
 		sidebarMu.Lock()
@@ -1339,6 +1347,7 @@ func renderSidebarThreadRow(c *ui.Context, s *chatState, o sidebarThreadRowOptio
 	} else if o.highlighted || rowHovered {
 		row.Background(hoverBg)
 	}
+	focusRing(c, row)
 
 	row.ContextMenu(threadContextMenu(c, s, o.projectID, thVal))
 
