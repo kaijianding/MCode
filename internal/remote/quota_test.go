@@ -66,15 +66,25 @@ func TestComposerQuota_AgyBoundAccountAndWindows(t *testing.T) {
 	if err := json.Unmarshal(raw, &reply); err != nil || reply.Error != nil {
 		t.Fatalf("quota request failed: %v, %+v", err, reply.Error)
 	}
-	if len(reply.Result.Budgets) != 1 {
-		t.Fatalf("missing agy budget: %s", raw)
+	if len(reply.Result.Budgets) != 2 {
+		t.Fatalf("expected 2 agy budgets, got %d: %s", len(reply.Result.Budgets), raw)
 	}
-	budget := reply.Result.Budgets[0]
+	inactive := reply.Result.Budgets[0]
+	if inactive.AccountID == nil || *inactive.AccountID != accounts.SystemAccountID || inactive.Active != nil {
+		t.Fatalf("unexpected first (inactive) account: %+v", inactive)
+	}
+	budget := reply.Result.Budgets[1]
+	if budget.AccountID == nil || *budget.AccountID != "isolated" || budget.Active == nil || !*budget.Active {
+		t.Fatalf("expected isolated account active with accountID: %+v", budget)
+	}
 	if budget.Profile == nil || *budget.Profile != "bound@example.com" || budget.State != "stale" {
 		t.Fatalf("wrong bound account: %+v", budget)
 	}
 	if len(budget.Windows) != 2 || budget.Windows[0].UsedPercent != 0 || budget.Windows[1].UsedPercent != 30 {
 		t.Fatalf("incorrect windows: %+v", budget.Windows)
+	}
+	if budget.Windows[0].AccountID != "isolated" || !budget.Windows[0].Active || budget.Windows[1].AccountID != "isolated" || !budget.Windows[1].Active {
+		t.Fatalf("incorrect window accountID/active: %+v", budget.Windows)
 	}
 	if budget.Windows[0].Title != "Gemini Models 5h" || budget.Windows[1].Title != "Gemini Models 7d" {
 		t.Fatalf("incorrect window titles: %+v", budget.Windows)
@@ -992,5 +1002,193 @@ func TestComposerQuota_IgnoresTrayHiddenList(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected claude account card to stay visible, got %+v", result.Budgets)
+	}
+}
+
+func setupTwoAgyAccountsManager(t *testing.T, defaultID string) *accounts.Manager {
+	t.Helper()
+	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	readAt := now.Add(-5 * time.Minute).Format(time.RFC3339)
+	reset5h := now.Add(3 * time.Hour).Format(time.RFC3339)
+	reset7d := now.Add(48 * time.Hour).Format(time.RFC3339)
+	index := accounts.Index{
+		Version:          1,
+		DefaultAccountID: defaultID,
+		Accounts: []accounts.Account{
+			{
+				ID:          accounts.SystemAccountID,
+				Label:       "主力号",
+				Email:       "lead@example.com",
+				On:          true,
+				Status:      accounts.StatusActive,
+				QuotaReadAt: readAt,
+				Quota: map[string]accounts.QuotaGroup{
+					quota.GroupGemini:         {UsedPercent: 15, ResetAt: reset5h},
+					quota.GroupGemini + " 7d": {UsedPercent: 25, ResetAt: reset7d},
+				},
+			},
+			{
+				ID:          "acc-second",
+				Email:       "second@example.com",
+				On:          true,
+				Status:      accounts.StatusActive,
+				QuotaReadAt: readAt,
+				Quota: map[string]accounts.QuotaGroup{
+					quota.GroupGemini:         {UsedPercent: 40, ResetAt: reset5h},
+					quota.GroupGemini + " 7d": {UsedPercent: 55, ResetAt: reset7d},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agy-accounts.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := accounts.NewManager(accounts.Options{DataDir: dir, HostHome: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr
+}
+
+// TestComposerQuotaAgyListsAllAccounts 验证主会话为 agy 时列出全部账号（role=lead），
+// budget 和窗口都带 accountID，且只有当前绑定的账号标记为 active。
+func TestComposerQuotaAgyListsAllAccounts(t *testing.T) {
+	mgr := setupTwoAgyAccountsManager(t, accounts.SystemAccountID)
+	mgr.Bind("conv-lead", "acc-second")
+
+	b, d, _, _, threadID := setupWorkspaceTestEnv(t)
+	b.SetAgyAccounts(mgr)
+	b.mu.Lock()
+	b.threads[threadID].summary.Provider = "agy"
+	b.threads[threadID].sessionID = "conv-lead"
+	b.mu.Unlock()
+
+	result := quotaRequest(t, d, threadID, 501)
+	if len(result.Budgets) != 2 {
+		t.Fatalf("expected 2 agy budgets, got %d: %+v", len(result.Budgets), result.Budgets)
+	}
+
+	first, second := result.Budgets[0], result.Budgets[1]
+	if first.Role != "lead" || second.Role != "lead" {
+		t.Fatalf("expected role=lead for both budgets, got %q and %q", first.Role, second.Role)
+	}
+	if first.AccountID == nil || *first.AccountID != accounts.SystemAccountID {
+		t.Fatalf("first budget accountID mismatch: %+v", first.AccountID)
+	}
+	if first.Active != nil {
+		t.Fatalf("expected first budget not active, got %v", *first.Active)
+	}
+	if len(first.Windows) != 2 {
+		t.Fatalf("expected 2 windows for first budget, got %d", len(first.Windows))
+	}
+	for _, w := range first.Windows {
+		if w.AccountID != accounts.SystemAccountID || w.Active {
+			t.Fatalf("first window accountID/active mismatch: %+v", w)
+		}
+	}
+
+	if second.AccountID == nil || *second.AccountID != "acc-second" {
+		t.Fatalf("second budget accountID mismatch: %+v", second.AccountID)
+	}
+	if second.Active == nil || !*second.Active {
+		t.Fatalf("expected second budget active=true, got %v", second.Active)
+	}
+	if len(second.Windows) != 2 {
+		t.Fatalf("expected 2 windows for second budget, got %d", len(second.Windows))
+	}
+	for _, w := range second.Windows {
+		if w.AccountID != "acc-second" || !w.Active {
+			t.Fatalf("second window accountID/active mismatch: %+v", w)
+		}
+	}
+}
+
+// TestComposerQuotaAgyBeesBudgets 验证主会话为非 agy 且启用了 agy 子代理时，
+// 返回 role=bees 的全部 agy 账号且仅选中的账号 active；关闭 swarmEnabled 后不再返回 bees budget。
+func TestComposerQuotaAgyBeesBudgets(t *testing.T) {
+	orig := readClaudePlanLimits
+	t.Cleanup(func() { readClaudePlanLimits = orig })
+	readClaudePlanLimits = func(ctx context.Context) (claude.PlanLimits, error) {
+		return claude.PlanLimits{
+			PlanType: "Max",
+			Windows:  []claude.PlanLimitWindow{{ID: "five_hour", Label: "5-hour limit", UsedPercent: 12}},
+		}, nil
+	}
+
+	mgr := setupTwoAgyAccountsManager(t, accounts.SystemAccountID)
+	b, d, _, _, threadID := setupWorkspaceTestEnv(t)
+	b.SetAgyAccounts(mgr)
+
+	beesProv := "agy"
+	beesAcc := "acc-second"
+	b.mu.Lock()
+	b.threads[threadID].summary.Provider = "claude"
+	b.threads[threadID].summary.SwarmEnabled = true
+	b.threads[threadID].summary.SwarmBeesProvider = &beesProv
+	b.threads[threadID].summary.SwarmBeesAccount = &beesAcc
+	b.mu.Unlock()
+
+	result := quotaRequest(t, d, threadID, 502)
+	var leadBudgets, beesBudgets []wire.RemoteQuotaBudget
+	for _, budget := range result.Budgets {
+		switch budget.Role {
+		case "lead":
+			leadBudgets = append(leadBudgets, budget)
+		case "bees":
+			beesBudgets = append(beesBudgets, budget)
+		}
+	}
+	if len(leadBudgets) != 1 || leadBudgets[0].Provider != "claude" {
+		t.Fatalf("expected 1 claude lead budget, got %+v", leadBudgets)
+	}
+	if len(beesBudgets) != 2 {
+		t.Fatalf("expected 2 agy bees budgets, got %d: %+v", len(beesBudgets), beesBudgets)
+	}
+	if beesBudgets[0].AccountID == nil || *beesBudgets[0].AccountID != accounts.SystemAccountID || beesBudgets[0].Active != nil {
+		t.Fatalf("first bees budget should be inactive system account: %+v", beesBudgets[0])
+	}
+	for _, w := range beesBudgets[0].Windows {
+		if w.AccountID != accounts.SystemAccountID || w.Active {
+			t.Fatalf("first bees window mismatch: %+v", w)
+		}
+	}
+	if beesBudgets[1].AccountID == nil || *beesBudgets[1].AccountID != "acc-second" || beesBudgets[1].Active == nil || !*beesBudgets[1].Active {
+		t.Fatalf("second bees budget should be active acc-second: %+v", beesBudgets[1])
+	}
+	for _, w := range beesBudgets[1].Windows {
+		if w.AccountID != "acc-second" || !w.Active {
+			t.Fatalf("second bees window mismatch: %+v", w)
+		}
+	}
+
+	// SwarmBeesAccount 为空（自动路由）时列出全部 bees 账号，且均不标 active。
+	emptyAcc := ""
+	b.mu.Lock()
+	b.threads[threadID].summary.SwarmBeesAccount = &emptyAcc
+	b.mu.Unlock()
+	autoResult := quotaRequest(t, d, threadID, 503)
+	for _, budget := range autoResult.Budgets {
+		if budget.Role != "bees" {
+			continue
+		}
+		if budget.Active != nil && *budget.Active {
+			t.Fatalf("auto bees account must not mark any budget active: %+v", budget)
+		}
+	}
+
+	// SwarmEnabled=false 时不返回任何 bees budget。
+	b.mu.Lock()
+	b.threads[threadID].summary.SwarmEnabled = false
+	b.mu.Unlock()
+	disabledResult := quotaRequest(t, d, threadID, 504)
+	for _, budget := range disabledResult.Budgets {
+		if budget.Role == "bees" {
+			t.Fatalf("expected no bees budget when SwarmEnabled=false, got %+v", budget)
+		}
 	}
 }

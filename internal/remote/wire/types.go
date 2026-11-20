@@ -382,8 +382,9 @@ type ThreadUpdateParams struct {
 	RuntimeMode *string `json:"runtimeMode,omitempty"`
 	Provider    *string `json:"provider,omitempty"`
 	Model       *string `json:"model,omitempty"`
-	Effort      *string `json:"effort,omitempty"`
-	Account     *string `json:"account,omitempty"`
+	Effort           *string `json:"effort,omitempty"`
+	Account          *string `json:"account,omitempty"`
+	SwarmBeesAccount *string `json:"swarmBeesAccount,omitempty"`
 }
 
 // ThreadUpdateResult 对应 threads.update 成功结果

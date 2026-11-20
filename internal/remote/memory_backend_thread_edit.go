@@ -487,6 +487,16 @@ func (b *MemoryBackend) UpdateThread(ctx context.Context, params wire.ThreadUpda
 		accountChanged = true
 	}
 
+	beesAccountChanged := false
+	if params.SwarmBeesAccount != nil {
+		prevBeesAccount := derefString(td.summary.SwarmBeesAccount)
+		if err := b.setThreadBeesAccountLocked(ctx, td, params.ThreadID, *params.SwarmBeesAccount); err != nil {
+			b.mu.Unlock()
+			return wire.ThreadUpdateResult{}, err
+		}
+		beesAccountChanged = *params.SwarmBeesAccount != prevBeesAccount
+	}
+
 	effortChanged := params.Effort != nil && *params.Effort != derefString(td.summary.Effort)
 	if effortChanged && b.store != nil {
 		if err := b.store.UpdateThreadComposerPrefs(ctx, params.ThreadID, td.summary.InteractionMode, *params.Effort, derefString(td.summary.SwarmBeesProvider), derefString(td.summary.SwarmBeesModel), derefString(td.summary.SwarmBeesEffort), td.summary.Persona); err != nil {
@@ -667,7 +677,7 @@ func (b *MemoryBackend) UpdateThread(ctx context.Context, params wire.ThreadUpda
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if titleChanged || runtimeModeChanged || providerChanged || modelChanged || effortChanged || accountChanged || pinnedChanged || archivedChanged || dormantChanged || unreadChanged {
+	if titleChanged || runtimeModeChanged || providerChanged || modelChanged || effortChanged || accountChanged || beesAccountChanged || pinnedChanged || archivedChanged || dormantChanged || unreadChanged {
 		td.summary.UpdatedAt = now
 	}
 
@@ -795,8 +805,25 @@ func (b *MemoryBackend) SetThreadComposerPrefs(ctx context.Context, threadID str
 	return currentSummary, nil
 }
 
+// setThreadBeesAccountLocked 在持有 b.mu 时校验并更新会话的 SwarmBeesAccount；先写穿 store 再改内存。
+func (b *MemoryBackend) setThreadBeesAccountLocked(ctx context.Context, td *memoryThread, threadID, accountID string) error {
+	if accountID != "" {
+		if rpcErr := b.validateExplicitAccountLocked("agy", accountID); rpcErr != nil {
+			return rpcErr
+		}
+	}
+	// 先落盘再更新内存，保存失败不得向界面报告成功；锁内写入保证并发更新顺序一致。
+	if b.store != nil {
+		if err := b.store.UpdateThreadBeesAccount(ctx, threadID, accountID); err != nil {
+			return err
+		}
+	}
+	td.summary.SwarmBeesAccount = optionalString(accountID)
+	return nil
+}
+
 // SetThreadBeesAccount 更新会话为子代理显式指定的 agy 账号 ID 并写穿到 store；空串表示沿用自动路由。
-// 主会话在运行中也允许设置，仅影响此后新建的 agy 子代理。仅供桌面端直接调用，不注册为 RPC。
+// 主会话在运行中也允许设置，仅影响此后新建的 agy 子代理。桌面端直接调用，远程端也可通过 threads.update 更新。
 func (b *MemoryBackend) SetThreadBeesAccount(ctx context.Context, threadID, accountID string) (wire.ThreadSummary, error) {
 	b.mu.Lock()
 	td, ok := b.threads[threadID]
@@ -807,20 +834,10 @@ func (b *MemoryBackend) SetThreadBeesAccount(ctx context.Context, threadID, acco
 			Message: fmt.Sprintf("thread %s not found", threadID),
 		}
 	}
-	if accountID != "" {
-		if rpcErr := b.validateExplicitAccountLocked("agy", accountID); rpcErr != nil {
-			b.mu.Unlock()
-			return wire.ThreadSummary{}, rpcErr
-		}
+	if err := b.setThreadBeesAccountLocked(ctx, td, threadID, accountID); err != nil {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, err
 	}
-	// 先落盘再更新内存，保存失败不得向界面报告成功；锁内写入保证并发更新顺序一致。
-	if b.store != nil {
-		if err := b.store.UpdateThreadBeesAccount(ctx, threadID, accountID); err != nil {
-			b.mu.Unlock()
-			return wire.ThreadSummary{}, err
-		}
-	}
-	td.summary.SwarmBeesAccount = optionalString(accountID)
 	currentSummary := b.summaryForPublishLocked(td)
 	b.mu.Unlock()
 

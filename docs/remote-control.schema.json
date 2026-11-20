@@ -3615,6 +3615,10 @@
         "account": {
           "type": "string",
           "description": "显式指定的 agy 账号 ID；空串表示恢复自动路由"
+        },
+        "swarmBeesAccount": {
+          "type": "string",
+          "description": "显式指定的 agy 子代理账号 ID；空串表示恢复自动路由"
         }
       },
       "required": [
@@ -5173,6 +5177,10 @@
           "type": "string",
           "description": "该窗口所属账号；缺省表示不分账号"
         },
+        "accountID": {
+          "type": "string",
+          "description": "该窗口所属账号的唯一标识"
+        },
         "active": {
           "type": "boolean",
           "description": "为 true 表示这是当前在用的账号"
@@ -5276,6 +5284,9 @@
           "format": "date-time"
         },
         "account": {
+          "type": "string"
+        },
+        "accountID": {
           "type": "string"
         },
         "active": {

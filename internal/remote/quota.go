@@ -280,7 +280,8 @@ func (b *MemoryBackend) markActiveQuotaAccounts(budgets []wire.RemoteQuotaBudget
 	marked := make(map[string]bool)
 	for i := range budgets {
 		budget := &budgets[i]
-		if budget.Account == nil || *budget.Account == "" {
+		// agy 由账号绑定或 SwarmBeesAccount 明确指定在用账号，codex 的 Magpie 卡片无法证明在用，都不按额度变动推断。
+		if budget.Provider == "agy" || budget.Provider == "codex" || budget.Account == nil || *budget.Account == "" {
 			continue
 		}
 		provider := budget.Provider
@@ -413,6 +414,9 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 	conversationID := ""
 	// model 是会话当前模型，pi 线程要靠它认出额度属于哪个 Magpie 端点。
 	model := ""
+	swarmEnabled := false
+	beesProvider := ""
+	beesAccount := ""
 
 	if p.ThreadID != "" {
 		td, ok := b.threads[p.ThreadID]
@@ -431,6 +435,9 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 		if td.summary.Model != nil {
 			model = *td.summary.Model
 		}
+		swarmEnabled = td.summary.SwarmEnabled
+		beesProvider = derefString(td.summary.SwarmBeesProvider)
+		beesAccount = derefString(td.summary.SwarmBeesAccount)
 	} else if p.ProjectID != "" {
 		if _, ok := b.projects[p.ProjectID]; !ok {
 			b.mu.Unlock()
@@ -445,12 +452,12 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 	result := wire.RemoteComposerQuotaResult{
 		Budgets: make([]wire.RemoteQuotaBudget, 0),
 	}
-	if provider == "codex" {
+	switch provider {
+	case "codex":
 		limits, err := readCodexQuotaForThread(ctx, p.ThreadID)
 		if err != nil {
-			return unknownQuotaResult("codex", "Codex"), nil
-		}
-		if limits.Source == codex.QuotaSourceMagpie {
+			result.Budgets = append(result.Budgets, unknownQuotaResult("codex", "Codex").Budgets...)
+		} else if limits.Source == codex.QuotaSourceMagpie {
 			// Magpie 每张卡片一个账号：账号、套餐与卡片读取时间各自保留，不用本机登录信息补。
 			for _, acct := range limits.Accounts {
 				budget := wire.RemoteQuotaBudget{
@@ -478,84 +485,75 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 				result.Budgets = append(result.Budgets, budget)
 			}
 			if len(result.Budgets) == 0 {
-				return unknownQuotaResult("codex", "Codex"), nil
+				result.Budgets = append(result.Budgets, unknownQuotaResult("codex", "Codex").Budgets...)
 			}
-			return result, nil
+		} else if len(limits.Windows) == 0 {
+			result.Budgets = append(result.Budgets, unknownQuotaResult("codex", "Codex").Budgets...)
+		} else {
+			budget := wire.RemoteQuotaBudget{
+				Provider:     "codex",
+				ProviderName: "Codex",
+				Role:         "lead",
+				State:        "used",
+				Windows:      make([]wire.RemoteQuotaWindow, 0, len(limits.Windows)),
+			}
+			if limits.PlanType != "" {
+				plan := limits.PlanType
+				budget.Profile = &plan
+			}
+			// 直连的读取时间由 codex 包给出，缺失时不伪造为当前时间。
+			if !limits.ReadAt.IsZero() {
+				readAt := limits.ReadAt.UTC().Format(time.RFC3339)
+				budget.ReadAt = &readAt
+			}
+			for _, w := range limits.Windows {
+				budget.Windows = append(budget.Windows, remoteQuotaWindow(w, "", limits.PlanType, codex.QuotaSourceOpenAI, limits.ReadAt))
+			}
+			result.Budgets = append(result.Budgets, budget)
 		}
-		if len(limits.Windows) == 0 {
-			return unknownQuotaResult("codex", "Codex"), nil
-		}
-		budget := wire.RemoteQuotaBudget{
-			Provider:     "codex",
-			ProviderName: "Codex",
-			Role:         "lead",
-			State:        "used",
-			Windows:      make([]wire.RemoteQuotaWindow, 0, len(limits.Windows)),
-		}
-		if limits.PlanType != "" {
-			plan := limits.PlanType
-			budget.Profile = &plan
-		}
-		// 直连的读取时间由 codex 包给出，缺失时不伪造为当前时间。
-		if !limits.ReadAt.IsZero() {
-			readAt := limits.ReadAt.UTC().Format(time.RFC3339)
-			budget.ReadAt = &readAt
-		}
-		for _, w := range limits.Windows {
-			budget.Windows = append(budget.Windows, remoteQuotaWindow(w, "", limits.PlanType, codex.QuotaSourceOpenAI, limits.ReadAt))
-		}
-		result.Budgets = append(result.Budgets, budget)
-		return result, nil
-	}
-	if provider == "claude" {
+	case "claude":
 		limits, err := readClaudePlanLimits(ctx)
-		if err != nil || len(limits.Windows) == 0 {
-			return result, nil
-		}
-		budget := wire.RemoteQuotaBudget{
-			Provider:     "claude",
-			ProviderName: "Claude",
-			Role:         "lead",
-			State:        "used",
-		}
-		if limits.PlanType != "" {
-			budget.Profile = stringPtr(limits.PlanType)
-		}
-		readAt := time.Now().UTC().Format(time.RFC3339)
-		budget.ReadAt = &readAt
-		// Claude 网关多卡片时同一个响应里会有多个账号的窗口：按账号拆成多条 budget，
-		// 窗口标题去掉「账号 · 」前缀，周期按 ID 或标题推断（PlanLimitWindow 没有在用标记，
-		// Active 交给 ComposerQuota 按额度变动推断）。
-		entries := make([]quotaWindowInput, 0, len(limits.Windows))
-		for _, w := range limits.Windows {
-			var reset *string
-			if w.ResetsAt != nil {
-				reset = stringPtr(w.ResetsAt.UTC().Format(time.RFC3339))
+		if err == nil && len(limits.Windows) > 0 {
+			budget := wire.RemoteQuotaBudget{
+				Provider:     "claude",
+				ProviderName: "Claude",
+				Role:         "lead",
+				State:        "used",
 			}
-			entries = append(entries, quotaWindowInput{
-				Account:     w.Account,
-				ID:          w.ID,
-				Label:       w.Label,
-				Period:      quotaPeriodFromWindow(w.ID, w.Label),
-				UsedPercent: w.UsedPercent,
-				ResetsAt:    reset,
-			})
+			if limits.PlanType != "" {
+				budget.Profile = stringPtr(limits.PlanType)
+			}
+			readAt := time.Now().UTC().Format(time.RFC3339)
+			budget.ReadAt = &readAt
+			// Claude 网关多卡片时同一个响应里会有多个账号的窗口：按账号拆成多条 budget，
+			// 窗口标题去掉「账号 · 」前缀，周期按 ID 或标题推断（PlanLimitWindow 没有在用标记，
+			// Active 交给 ComposerQuota 按额度变动推断）。
+			entries := make([]quotaWindowInput, 0, len(limits.Windows))
+			for _, w := range limits.Windows {
+				var reset *string
+				if w.ResetsAt != nil {
+					reset = stringPtr(w.ResetsAt.UTC().Format(time.RFC3339))
+				}
+				entries = append(entries, quotaWindowInput{
+					Account:     w.Account,
+					ID:          w.ID,
+					Label:       w.Label,
+					Period:      quotaPeriodFromWindow(w.ID, w.Label),
+					UsedPercent: w.UsedPercent,
+					ResetsAt:    reset,
+				})
+			}
+			result.Budgets = append(result.Budgets, quotaBudgetsByAccount(budget, entries)...)
 		}
-		result.Budgets = append(result.Budgets, quotaBudgetsByAccount(budget, entries)...)
-		return result, nil
-	}
-	// pi 线程的额度来自 Magpie 端点：模型 ID 的第一段是 pi provider id，端点地址与 key
-	// 只有 app 层读得到，通过注入的读取器取（见 quota_pi.go）。
-	if provider == "pi" {
+	case "pi":
+		// pi 线程的额度来自 Magpie 端点：模型 ID 的第一段是 pi provider id，端点地址与 key
+		// 只有 app 层读得到，通过注入的读取器取（见 quota_pi.go）。
 		if budgets, ok := piQuotaBudgets(ctx, model); ok {
 			result.Budgets = append(result.Budgets, budgets...)
 		}
-		return result, nil
-	}
-	// zai / cline / droid 通过 credits 包读取方案额度窗口；读取失败时只标 unknown，
-	// 不返回错误，与文件开头「不让上游网络故障阻塞会话」的约定一致。
-	switch provider {
 	case "zai", "cline", "droid":
+		// zai / cline / droid 通过 credits 包读取方案额度窗口；读取失败时只标 unknown，
+		// 不返回错误，与文件开头「不让上游网络故障阻塞会话」的约定一致。
 		windows, err := readProviderPlanWindows(ctx, provider, providerCreditsOptions(provider))
 		readAt := time.Now().UTC().Format(time.RFC3339)
 		budget := wire.RemoteQuotaBudget{
@@ -590,6 +588,14 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 				})
 			}
 			result.Budgets = append(result.Budgets, quotaBudgetsByAccount(budget, entries)...)
+		}
+	case "agy":
+		if mgr != nil {
+			activeID := ""
+			if acc, ok := mgr.AccountForConversation(conversationID); ok {
+				activeID = acc.ID
+			}
+			result.Budgets = append(result.Budgets, agyQuotaBudgets(mgr, "lead", activeID)...)
 		}
 	}
 	// deepseek / cline / commandcode 报预付费余额：若上面已为同一 provider 追加过
@@ -626,65 +632,92 @@ func (b *MemoryBackend) readComposerQuota(ctx context.Context, p wire.RemoteComp
 			}
 		}
 	}
-	if provider != "agy" || mgr == nil {
-		return result, nil
+	if swarmEnabled && beesProvider == "agy" && mgr != nil {
+		result.Budgets = append(result.Budgets, agyQuotaBudgets(mgr, "bees", beesAccount)...)
 	}
-	acc, ok := mgr.AccountForConversation(conversationID)
-	if !ok {
-		return result, nil
-	}
-	budget := wire.RemoteQuotaBudget{
-		Provider: "agy", ProviderName: "Antigravity", Role: "lead",
-		State: "unknown", Windows: make([]wire.RemoteQuotaWindow, 0),
-	}
-	profile := acc.Label
-	if profile == "" {
-		profile = acc.Email
-	}
-	if profile != "" {
-		budget.Profile = &profile
-		// 对话已绑定到该账户，即它是当前在用账户。
-		active := true
-		budget.Account = &profile
-		budget.Active = &active
-	}
-	if acc.QuotaReadAt != "" {
-		budget.ReadAt = &acc.QuotaReadAt
-		budget.State = "used"
-	}
-	if acc.QuotaStale {
-		budget.State = "stale"
-	}
-	if acc.Status != accounts.StatusActive {
-		budget.State = "attention"
-	}
-	// 额度条默认只展示 Gemini 系列，Claude/GPT 等三方分组只在原生浮窗中展示
-	group := quota.GroupGemini
-	for _, period := range []string{"5h", "7d"} {
-		key := group
-		if period == "7d" {
-			key += " 7d"
-		}
-		q, exists := acc.Quota[key]
-		if !exists {
-			continue
-		}
-		q = accounts.EffectiveQuota(q, acc.QuotaReadAt, time.Now())
-		window := wire.RemoteQuotaWindow{
-			ID: stringPtr(key), Period: &period, Title: group + " " + period, Label: group + " " + period,
-			UsedPercent: q.UsedPercent, Account: profile, Disabled: !acc.On,
-		}
-		if budget.Active != nil {
-			window.Active = *budget.Active
-		}
-		if q.ResetAt != "" {
-			reset := q.ResetAt
-			window.ResetsAt = &reset
-		}
-		budget.Windows = append(budget.Windows, window)
-	}
-	result.Budgets = append(result.Budgets, budget)
 	return result, nil
+}
+
+// agyQuotaBudgets 按 mgr.List() 顺序为全部 agy 账号生成指定角色的额度预算；
+// 仅当账号 ID 与 activeID 匹配时标记 Active。
+func agyQuotaBudgets(mgr *accounts.Manager, role, activeID string) []wire.RemoteQuotaBudget {
+	if mgr == nil {
+		return nil
+	}
+	accs := mgr.List()
+	budgets := make([]wire.RemoteQuotaBudget, 0, len(accs))
+	now := time.Now()
+	group := quota.GroupGemini
+	for _, acc := range accs {
+		budget := wire.RemoteQuotaBudget{
+			Provider:     "agy",
+			ProviderName: "Antigravity",
+			Role:         role,
+			State:        "unknown",
+			Windows:      make([]wire.RemoteQuotaWindow, 0),
+		}
+		profile := acc.Label
+		if profile == "" {
+			profile = acc.Email
+		}
+		if profile != "" {
+			p := profile
+			budget.Profile = &p
+			budget.Account = &p
+		}
+		if acc.ID != "" {
+			id := acc.ID
+			budget.AccountID = &id
+		}
+		if activeID != "" && acc.ID == activeID {
+			active := true
+			budget.Active = &active
+		}
+		if acc.QuotaReadAt != "" {
+			readAt := acc.QuotaReadAt
+			budget.ReadAt = &readAt
+			budget.State = "used"
+		}
+		if acc.QuotaStale {
+			budget.State = "stale"
+		}
+		if acc.Status != accounts.StatusActive {
+			budget.State = "attention"
+		}
+		// 额度条默认只展示 Gemini 系列，Claude/GPT 等三方分组只在原生浮窗中展示
+		for _, period := range []string{"5h", "7d"} {
+			key := group
+			if period == "7d" {
+				key += " 7d"
+			}
+			q, exists := acc.Quota[key]
+			if !exists {
+				continue
+			}
+			q = accounts.EffectiveQuota(q, acc.QuotaReadAt, now)
+			p := period
+			window := wire.RemoteQuotaWindow{
+				ID:          stringPtr(key),
+				Period:      &p,
+				Title:       group + " " + period,
+				Label:       group + " " + period,
+				UsedPercent: q.UsedPercent,
+				Account:     profile,
+				AccountID:   acc.ID,
+				Disabled:    !acc.On,
+			}
+			if budget.Active != nil {
+				window.Active = *budget.Active
+			}
+			if q.ResetAt != "" {
+				reset := q.ResetAt
+				window.ResetsAt = &reset
+			}
+			budget.Windows = append(budget.Windows, window)
+		}
+		budgets = append(budgets, budget)
+	}
+	return budgets
 }
 
 // handleComposerQuota 校验参数并分发 composer.quota 请求。

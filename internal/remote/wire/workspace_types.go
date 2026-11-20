@@ -231,6 +231,8 @@ type RemoteQuotaWindow struct {
 	Label string `json:"label,omitempty"`
 	// Account 是该窗口所属账号，与 budget.account 一致；为空表示不分账号。
 	Account string `json:"account,omitempty"`
+	// AccountID 是该窗口所属账号的唯一标识，与 budget.accountID 一致。
+	AccountID string `json:"accountID,omitempty"`
 	// Active 表示这是当前在用的账号（与 budget.active 同义）。
 	Active bool `json:"active,omitempty"`
 	// Disabled 表示账号已停用（路由覆盖关了它），界面显示「已停止」。
@@ -264,6 +266,7 @@ type RemoteQuotaBudget struct {
 	Amount       *string             `json:"amount"`
 	ReadAt       *string             `json:"readAt"`
 	Account      *string             `json:"account,omitempty"`
+	AccountID    *string             `json:"accountID,omitempty"`
 	Active       *bool               `json:"active,omitempty"`
 }
 

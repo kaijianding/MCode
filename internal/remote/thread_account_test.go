@@ -437,3 +437,182 @@ func TestSetThreadBeesAccountPersists(t *testing.T) {
 		t.Fatalf("清空后 store 期望 BeesAccount 为空，实际 %q", storedCleared.BeesAccount)
 	}
 }
+
+func assertObjectMatchesSchemaDef(t *testing.T, defs map[string]json.RawMessage, defName string, obj map[string]any) {
+	t.Helper()
+	raw, ok := defs[defName]
+	if !ok {
+		t.Fatalf("schema 缺少 %s", defName)
+	}
+	var def struct {
+		Properties           map[string]json.RawMessage `json:"properties"`
+		Required             []string                   `json:"required"`
+		AdditionalProperties *bool                      `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(raw, &def); err != nil {
+		t.Fatalf("解析 %s 失败: %v", defName, err)
+	}
+	for _, req := range def.Required {
+		if _, exists := obj[req]; !exists {
+			t.Fatalf("%s 缺少必填字段 %q: %+v", defName, req, obj)
+		}
+	}
+	if def.AdditionalProperties != nil && !*def.AdditionalProperties {
+		for k := range obj {
+			if _, exists := def.Properties[k]; !exists {
+				t.Fatalf("%s 不允许未知字段 %q: %+v", defName, k, obj)
+			}
+		}
+	}
+}
+
+func TestThreadsUpdateSwarmBeesAccount(t *testing.T) {
+	data, err := os.ReadFile("../../docs/remote-control.schema.json")
+	if err != nil {
+		t.Fatalf("读取 schema 失败: %v", err)
+	}
+	var doc struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("解析 schema 失败: %v", err)
+	}
+	for _, defName := range []string{"RemoteThreadsUpdateParams", "RemoteThreadSummary"} {
+		raw, ok := doc.Defs[defName]
+		if !ok {
+			t.Fatalf("schema 缺少 %s", defName)
+		}
+		var def struct {
+			Properties           map[string]json.RawMessage `json:"properties"`
+			AdditionalProperties *bool                      `json:"additionalProperties"`
+		}
+		if err := json.Unmarshal(raw, &def); err != nil {
+			t.Fatalf("解析 %s 失败: %v", defName, err)
+		}
+		if _, has := def.Properties["swarmBeesAccount"]; !has {
+			t.Fatalf("%s 缺少 swarmBeesAccount 属性", defName)
+		}
+		if def.AdditionalProperties == nil || *def.AdditionalProperties {
+			t.Fatalf("%s 必须保持 additionalProperties=false", defName)
+		}
+	}
+
+	ctx := context.Background()
+	b, s, projID, accID := setupThreadAccountBackend(t)
+	b.RegisterHarness(&mockHarness{kind: "claude"})
+	d := NewDispatcher(&fakeAuth{}, b)
+	conn := &fakeConn{info: ClientInfo{Authenticated: true}}
+
+	claudeProv := "claude"
+	cRes, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID: projID,
+		ActionID:  newUUID(),
+		Options:   &wire.ComposerOptions{Provider: &claudeProv},
+	})
+	if err != nil {
+		t.Fatalf("CreateThread 失败: %v", err)
+	}
+
+	// 1. 经 dispatcher 设置 swarmBeesAccount 成功并落库，且请求/响应均符合 schema。
+	paramsMap := map[string]any{
+		"threadID":         cRes.ThreadID,
+		"swarmBeesAccount": accID,
+	}
+	assertObjectMatchesSchemaDef(t, doc.Defs, "RemoteThreadsUpdateParams", paramsMap)
+
+	reqBytes, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "threads.update",
+		"params":  paramsMap,
+		"id":      1,
+	})
+	respRaw := d.Handle(ctx, conn, reqBytes)
+	var rpcEnv struct {
+		Result json.RawMessage `json:"result"`
+		Error  *wire.RPCError  `json:"error"`
+	}
+	if err := json.Unmarshal(respRaw, &rpcEnv); err != nil || rpcEnv.Error != nil {
+		t.Fatalf("threads.update RPC 失败: err=%v rpc=%+v", err, rpcEnv.Error)
+	}
+	var resultMap map[string]any
+	if err := json.Unmarshal(rpcEnv.Result, &resultMap); err != nil {
+		t.Fatalf("解析 result map 失败: %v", err)
+	}
+	assertObjectMatchesSchemaDef(t, doc.Defs, "RemoteThreadsUpdateResult", resultMap)
+	threadMap, ok := resultMap["thread"].(map[string]any)
+	if !ok {
+		t.Fatalf("result.thread 类型错误: %T", resultMap["thread"])
+	}
+	assertObjectMatchesSchemaDef(t, doc.Defs, "RemoteThreadSummary", threadMap)
+
+	var updateRes wire.ThreadUpdateResult
+	if err := json.Unmarshal(rpcEnv.Result, &updateRes); err != nil {
+		t.Fatalf("解析 ThreadUpdateResult 失败: %v", err)
+	}
+	if derefString(updateRes.Thread.SwarmBeesAccount) != accID {
+		t.Fatalf("返回 SwarmBeesAccount 期望 %q，实际 %q", accID, derefString(updateRes.Thread.SwarmBeesAccount))
+	}
+	stored, err := s.GetThread(ctx, cRes.ThreadID)
+	if err != nil {
+		t.Fatalf("store.GetThread 失败: %v", err)
+	}
+	if stored.BeesAccount != accID {
+		t.Fatalf("store 期望 BeesAccount=%q，实际 %q", accID, stored.BeesAccount)
+	}
+
+	// 2. 会话 IsRunning 时也允许经 threads.update 修改（例如清空为自动路由）。
+	b.mu.Lock()
+	b.threads[cRes.ThreadID].summary.IsRunning = true
+	b.mu.Unlock()
+
+	clearParams := map[string]any{
+		"threadID":         cRes.ThreadID,
+		"swarmBeesAccount": "",
+	}
+	assertObjectMatchesSchemaDef(t, doc.Defs, "RemoteThreadsUpdateParams", clearParams)
+	clearReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "threads.update",
+		"params":  clearParams,
+		"id":      2,
+	})
+	clearRaw := d.Handle(ctx, conn, clearReq)
+	var clearResp struct {
+		Result wire.ThreadUpdateResult `json:"result"`
+		Error  *wire.RPCError          `json:"error"`
+	}
+	if err := json.Unmarshal(clearRaw, &clearResp); err != nil || clearResp.Error != nil {
+		t.Fatalf("运行中 threads.update 清空 swarmBeesAccount 失败: err=%v rpc=%+v", err, clearResp.Error)
+	}
+	if derefString(clearResp.Result.Thread.SwarmBeesAccount) != "" {
+		t.Fatalf("清空后期望 SwarmBeesAccount 为空，实际 %q", derefString(clearResp.Result.Thread.SwarmBeesAccount))
+	}
+	storedCleared, err := s.GetThread(ctx, cRes.ThreadID)
+	if err != nil {
+		t.Fatalf("清空后 store.GetThread 失败: %v", err)
+	}
+	if storedCleared.BeesAccount != "" {
+		t.Fatalf("清空后 store 期望 BeesAccount 为空，实际 %q", storedCleared.BeesAccount)
+	}
+
+	// 3. 不存在的账号返回 InvalidParams。
+	badReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "threads.update",
+		"params": map[string]any{
+			"threadID":         cRes.ThreadID,
+			"swarmBeesAccount": "acc-nonexistent",
+		},
+		"id": 3,
+	})
+	badRaw := d.Handle(ctx, conn, badReq)
+	var badResp struct {
+		Error *wire.RPCError `json:"error"`
+	}
+	if err := json.Unmarshal(badRaw, &badResp); err != nil {
+		t.Fatalf("解析错误响应失败: %v", err)
+	}
+	if badResp.Error == nil || badResp.Error.Code != wire.InvalidParams {
+		t.Fatalf("不存在账号应返回 InvalidParams，实际 %+v", badResp.Error)
+	}
+}
