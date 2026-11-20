@@ -28,7 +28,9 @@ func tasksRootView(s *chatState) func(*ui.Context) {
 			s.setUIServices(c.Services())
 			if s.client != nil {
 				go func() {
-					projects, err := s.client.Projects(context.Background())
+					ctx, cancel := context.WithTimeout(context.Background(), settingsRPCTimeout)
+					projects, err := s.client.Projects(ctx)
+					cancel()
 					s.updateWorkspace(func() {
 						if err != nil {
 							s.setToast("获取项目失败: " + err.Error())

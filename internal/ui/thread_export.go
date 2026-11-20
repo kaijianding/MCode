@@ -19,6 +19,9 @@ import (
 // 会话导出（/export 命令）：把会话元数据与消息写成 Markdown、HTML 或 JSON 文件。
 // 文件名清洗、正文构建、写盘彼此独立；exportThread 负责取历史与弹保存对话框。
 
+// threadExportHistoryTimeout 是导出与复制会话时拉取历史记录的 RPC 超时上限；包级变量便于测试缩短验证。
+var threadExportHistoryTimeout = 30 * time.Second
+
 // threadExportFileName 把会话标题清洗成文件名：
 // 去掉 / \ : * ? " < > | 与换行等非法字符、去掉首尾空白，最长 80 个字符，
 // 清洗后为空时回退为 "mcode-会话"，最后拼上扩展名（".md"、".html" 或 ".json"）。
@@ -575,7 +578,9 @@ func (s *chatState) exportThread(threadID string) {
 			s.setToast("导出失败: 会话客户端未初始化")
 			return
 		}
-		msgs, err := client.History(context.Background(), id)
+		ctx, cancel := context.WithTimeout(context.Background(), threadExportHistoryTimeout)
+		msgs, err := client.History(ctx, id)
+		cancel()
 		if err != nil {
 			s.setToast("导出失败: " + err.Error())
 			return
@@ -656,7 +661,9 @@ func (s *chatState) copyThreadMarkdown(c *ui.Context, threadID string) {
 			s.setToast("复制失败：会话客户端未初始化")
 			return
 		}
-		msgs, err := client.History(context.Background(), id)
+		ctx, cancel := context.WithTimeout(context.Background(), threadExportHistoryTimeout)
+		msgs, err := client.History(ctx, id)
+		cancel()
 		if err != nil {
 			s.setToast("复制失败：" + err.Error())
 			return

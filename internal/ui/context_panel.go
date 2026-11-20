@@ -875,7 +875,7 @@ func (s *chatState) requestCreateContextDoc() {
 		return
 	}
 	contextPanelMu.Lock()
-	cp.creating, cp.newName = true, ""
+	cp.creating, cp.newName, cp.err = true, "", ""
 	contextPanelMu.Unlock()
 	s.invalidate()
 }
@@ -887,7 +887,7 @@ func (s *chatState) cancelCreateContextDoc() {
 		return
 	}
 	contextPanelMu.Lock()
-	cp.creating, cp.newName = false, ""
+	cp.creating, cp.newName, cp.err = false, "", ""
 	contextPanelMu.Unlock()
 	s.invalidate()
 }
@@ -914,7 +914,7 @@ func (s *chatState) createContextDoc() {
 			if err != nil {
 				cp.err = err.Error()
 			} else {
-				cp.creating, cp.newName = false, ""
+				cp.creating, cp.newName, cp.err = false, "", ""
 			}
 		}
 		contextPanelMu.Unlock()

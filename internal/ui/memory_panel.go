@@ -289,6 +289,12 @@ func (s *chatState) toggleMemoryProposalExpand(id string) {
 		s.invalidate()
 		return
 	}
+	path := st.projectPath
+	memoryPanelMu.Unlock()
+	if path == "" {
+		path = s.getSelectedProjectPath()
+	}
+	memoryPanelMu.Lock()
 	st.expanded = id
 	title := ""
 	for _, p := range st.proposals {
@@ -305,15 +311,11 @@ func (s *chatState) toggleMemoryProposalExpand(id string) {
 	st.similarFor = id
 	st.similarItems = nil
 	st.similarErr = ""
-	st.similarLoading = s.client != nil && title != ""
+	st.similarLoading = s.client != nil && title != "" && path != ""
 	st.condensing = false
 	st.condenseErr = ""
-	path := st.projectPath
 	memoryPanelMu.Unlock()
 	s.invalidate()
-	if path == "" {
-		path = s.getSelectedProjectPath()
-	}
 	s.loadSimilarMemories(id, path, title)
 }
 
@@ -680,7 +682,7 @@ func (s *chatState) requestCreateMemoryProposal() {
 	}
 	memoryPanelMu.Lock()
 	st.creating = true
-	st.newTitle, st.newContent, st.newUnitType = "", "", memoryDefaultUnitType
+	st.newTitle, st.newContent, st.newUnitType, st.err = "", "", memoryDefaultUnitType, ""
 	memoryPanelMu.Unlock()
 	s.invalidate()
 }
@@ -693,6 +695,7 @@ func (s *chatState) cancelCreateMemoryProposal() {
 	}
 	memoryPanelMu.Lock()
 	st.creating = false
+	st.err = ""
 	memoryPanelMu.Unlock()
 	s.invalidate()
 }
@@ -740,6 +743,8 @@ func (s *chatState) createMemoryProposal() {
 				s.invalidate()
 				return
 			}
+		} else {
+			st.err = ""
 		}
 		if p.ID != "" {
 			st.proposals = append([]MemoryProposal{p}, st.proposals...)
@@ -754,7 +759,7 @@ func (s *chatState) createMemoryProposal() {
 			st.similarFor = p.ID
 			st.similarItems = nil
 			st.similarErr = ""
-			st.similarLoading = strings.TrimSpace(p.Title) != ""
+			st.similarLoading = s.client != nil && strings.TrimSpace(p.Title) != "" && path != ""
 			st.condensing = false
 			st.condenseErr = ""
 		}

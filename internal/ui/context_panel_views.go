@@ -48,9 +48,10 @@ func renderContextModal(c *ui.Context, s *chatState) {
 		contextPanelMu.Lock()
 		conflict := cp.conflict
 		errMsg := cp.err
+		creating := cp.creating
 		contextPanelMu.Unlock()
 		renderContextConflictBanner(c, s, conflict)
-		if errMsg != "" && !conflict {
+		if errMsg != "" && !conflict && !creating {
 			renderContextErrorBanner(c, s, errMsg)
 		}
 		renderContextDocView(c, s)
@@ -191,7 +192,6 @@ func renderContextHeader(c *ui.Context, s *chatState) {
 				})
 
 			ui.Column(c.Key("context-header-titles")).
-				Gap(Space0).
 				Justify(ui.Center).
 				Children(func() {
 					title := "项目文档"
@@ -202,14 +202,6 @@ func renderContextHeader(c *ui.Context, s *chatState) {
 						FontSize(uiFont(TypeProse)).
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c))
-					subtitle := ".mcode/context/ • CAS 并发保护"
-					if snap.global {
-						subtitle = "全局记忆与规则，位于 ~/.mcode/context"
-					}
-					ui.Text(c, subtitle).
-						FontSize(uiFont(TypeCaption)).
-						Font("monospace").
-						TextColor(ThemeSecondaryText(c))
 				})
 
 			ui.Spacer(c)
@@ -358,19 +350,19 @@ func renderContextConflictBanner(c *ui.Context, s *chatState, conflict bool) {
 		AlignItems(ui.Center).
 		Background(ThemeDanger(c).Alpha(0.12)).
 		Children(func() {
-			ui.Icon(c, IconOctagonAlert()).Size(IconSM, IconSM).TextColor(ThemeDanger(c))
-			ui.Text(c, msg).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
+			ui.Icon(c, IconOctagonAlert()).Size(IconSM, IconSM).Shrink(0).TextColor(ThemeDanger(c))
+			ui.Text(c, msg).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c)).MinWidth(0).Shrink(1)
 			ui.Spacer(c)
 			Button(c.Key("context-reload-btn"), ButtonOpts{
 				Text:    "从磁盘重新加载",
 				OnClick: func() { s.reloadContextDoc() },
 				Variant: ButtonSecondary,
-			})
+			}).Shrink(0)
 			Button(c.Key("context-overwrite-btn"), ButtonOpts{
 				Text:    "覆盖磁盘",
 				OnClick: func() { s.overwriteContextDoc() },
 				Variant: ButtonDanger,
-			})
+			}).Shrink(0)
 		})
 }
 
@@ -553,6 +545,7 @@ const contextCreateDialogHeight float32 = 240
 // renderContextCreateDialog 渲染「新建自定义文档」的输入对话框。
 func renderContextCreateDialog(c *ui.Context, s *chatState, initial string) {
 	name := initial
+	errMsg := snapshotContextPanel(s).err
 	open := true
 	winW, winH := c.Size()
 	width, height := modalResizeSize(modalDragContextCreate, 360, contextCreateDialogHeight, 360, 160, winW, winH)
@@ -566,9 +559,6 @@ func renderContextCreateDialog(c *ui.Context, s *chatState, initial string) {
 				modalDragHandle(c, modalDragContextCreate, ui.Row(c.Key("context-create-title-row")).FillWidth().Children(func() {
 					ui.Text(c, "新建自定义文档").FontSize(uiFont(TypeTitle)).FontWeight(600).TextColor(ThemePrimaryText(c))
 				}))
-				ui.Text(c, "保存在 .mcode/context/docs/ 下，并作为独立标签显示。").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
 				TextField(c, TextFieldProps{Key: "context-new-name", Value: &name, Label: "文档名称", Placeholder: "api-spec.md", FillWidth: true, AutoFocus: true, OnChange: func(value string) {
 					cp := getContextPanelState(s)
 					if cp == nil {
@@ -578,6 +568,9 @@ func renderContextCreateDialog(c *ui.Context, s *chatState, initial string) {
 					cp.newName = value
 					contextPanelMu.Unlock()
 				}})
+				if errMsg != "" {
+					ui.Text(c, errMsg).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c)).FillWidth()
+				}
 				FormActions(c, "context-create-actions", func() {
 					Button(c.Key("context-create-cancel-btn"), ButtonOpts{
 						Text: "取消",

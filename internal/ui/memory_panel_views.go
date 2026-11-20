@@ -190,21 +190,12 @@ func renderMemoryHeader(c *ui.Context, s *chatState) {
 				})
 
 			ui.Column(c.Key("memory-header-titles")).
-				Gap(Space0).
 				Justify(ui.Center).
 				Children(func() {
 					ui.Text(c, "记忆").
 						FontSize(uiFont(TypeProse)).
 						FontWeight(600).
 						TextColor(ThemePrimaryText(c))
-					subtitle := "Nowledge Mem • 写入前必须由你确认"
-					if snap.backend == "local" {
-						subtitle = "本地文档 • 写入前必须由你确认"
-					}
-					ui.Text(c, subtitle).
-						FontSize(uiFont(TypeCaption)).
-						Font("monospace").
-						TextColor(ThemeSecondaryText(c))
 				})
 
 			ui.Spacer(c)
@@ -298,23 +289,7 @@ func renderMemoryErrorBanner(c *ui.Context, s *chatState, key, msg string) {
 // renderMemoryPendingTab 渲染待审页：提议列表与底部「新建记忆」。
 func renderMemoryPendingTab(c *ui.Context, s *chatState, snap memoryPanelSnapshot) {
 	ui.Column(c.Key("memory-pending-view")).Grow(1).FillWidth().Children(func() {
-		ui.Row(c.Key("memory-pending-hint")).
-			FillWidth().
-			Padding(Space3, memoryModalPadding).
-			Gap(Space3).
-			AlignItems(ui.Center).
-			Children(func() {
-				ui.Icon(c, IconSparkles()).Size(IconSM, IconSM).TextColor(ThemeAccent(c))
-				hint := "Agent 提议的记忆，只有你接受后才会写入 Nowledge Mem；你在对话里明确要求记住的会直接写入；也可以点「提炼本会话」从当前会话提炼候选记忆"
-				if snap.backend == "local" {
-					hint = "Agent 提议的记忆，只有你接受后才会写入本地文档；你在对话里明确要求记住的会直接写入"
-				}
-				ui.Text(c, hint).
-					FontSize(uiFont(TypeCaption)).
-					TextColor(ThemeSecondaryText(c))
-			})
-
-		if snap.err != "" {
+		if snap.err != "" && !snap.creating {
 			renderMemoryErrorBanner(c, s, "panel", snap.err)
 		}
 
@@ -862,13 +837,10 @@ func renderMemoryCreateDialog(c *ui.Context, s *chatState, snap memoryPanelSnaps
 				modalDragHandle(c, modalDragMemoryCreate, ui.Row(c.Key("memory-create-title-row")).FillWidth().Children(func() {
 					ui.Text(c, "新建记忆").FontSize(uiFont(TypeTitle)).FontWeight(600).TextColor(ThemePrimaryText(c))
 				}))
-				ui.Text(c, "手动记录一条记忆，来源记为「我」，加入待审列表后再确认写入。").
-					FontSize(uiFont(TypeFootnote)).
-					TextColor(ThemeSecondaryText(c))
 				TextField(c, TextFieldProps{Key: "memory-new-title", Value: &title, Label: "标题", Placeholder: "部署只用 make deploy", FillWidth: true, AutoFocus: true, OnChange: func(value string) { s.setMemoryNewField("title", value) }})
 				ui.TextArea(c.Key("memory-new-content"), &content).
 					Label("内容").
-					Height(max(40, height-300)).
+					Height(max(40, height-330)).
 					FillWidth().
 					FontSize(uiFont(TypeFootnote)).
 					Font("monospace").
@@ -876,6 +848,9 @@ func renderMemoryCreateDialog(c *ui.Context, s *chatState, snap memoryPanelSnaps
 					TextColor(ThemePrimaryText(c)).
 					OnChange(func() { s.setMemoryNewField("content", content) })
 				TextField(c, TextFieldProps{Key: "memory-new-unit", Value: &unit, Label: "类型", Placeholder: "fact / insight / preference", FillWidth: true, OnChange: func(value string) { s.setMemoryNewField("unit", value) }})
+				if snap.err != "" {
+					ui.Text(c, snap.err).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c)).FillWidth()
+				}
 				FormActions(c, "memory-create-actions", func() {
 					Button(c.Key("memory-create-cancel-btn"), ButtonOpts{
 						Text: "取消",

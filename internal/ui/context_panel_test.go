@@ -386,13 +386,14 @@ func TestContextPanel_UIIntegration(t *testing.T) {
 	tt := ui.NewTester(view, 1000, 700)
 
 	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
-	if tt.HasText(".mcode/context/ • CAS 并发保护") {
+	if _, ok := tt.Find("context-modal-card"); ok {
 		t.Fatal("context panel should be initially closed")
 	}
 
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyK)
 	waitFor(t, tt, func() bool {
-		return tt.HasText("项目文档") && tt.HasText(".mcode/context/ • CAS 并发保护") &&
+		_, open := tt.Find("context-modal-card")
+		return open && tt.HasText("项目文档") &&
 			tt.HasText("Instructions") && tt.HasText("Decisions") && tt.HasText("在"+openInFileManagerName()+"中打开")
 	})
 
@@ -400,7 +401,10 @@ func TestContextPanel_UIIntegration(t *testing.T) {
 		t.Fatal("收件箱不应出现")
 	}
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyK)
-	waitFor(t, tt, func() bool { return !tt.HasText(".mcode/context/ • CAS 并发保护") })
+	waitFor(t, tt, func() bool {
+		_, open := tt.Find("context-modal-card")
+		return !open
+	})
 }
 
 // 文档视图：编辑框、详情行、冲突横幅（从磁盘重新加载 / 覆盖磁盘）。
@@ -730,8 +734,7 @@ func TestContextPanel_GlobalLayerHeader(t *testing.T) {
 
 	tt := ui.NewTester(view, 1000, 700)
 	waitFor(t, tt, func() bool {
-		return hasExactContextText(tt, "全局记忆") &&
-			hasExactContextText(tt, "全局记忆与规则，位于 ~/.mcode/context")
+		return hasExactContextText(tt, "全局记忆")
 	})
 	if hasExactContextText(tt, "项目文档") {
 		t.Fatalf("全局层不应显示项目文档标题：%v", tt.Texts())

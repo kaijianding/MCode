@@ -182,7 +182,6 @@ func renderShortcutHelp(c *ui.Context, s *chatState) {
 			FillWidth().
 			Height(shortcutHelpHeaderHeight).
 			Padding(0, Space5).
-			Gap(Space3).
 			AlignItems(ui.Center).
 			BorderWidth(0, 0, Hairline, 0).
 			BorderColor(ThemeBorder(c)).
@@ -191,10 +190,6 @@ func renderShortcutHelp(c *ui.Context, s *chatState) {
 					FontSize(uiFont(TypeTitle)).
 					FontWeight(600).
 					TextColor(ThemePrimaryText(c))
-				ui.Box(c.Key("shortcut-help-header-spacer")).Grow(1)
-				ui.Text(c, "Esc 关闭").
-					FontSize(uiFont(TypeCaption)).
-					TextColor(ThemeSecondaryText(c))
 			}))
 
 		ui.Column(c.Key("shortcut-help-body")).
@@ -299,7 +294,10 @@ func renderShortcutHelpRow(c *ui.Context, sc appShortcut, conflicts []string) {
 				FontSize(uiFont(TypeBody)).
 				TextColor(ThemePrimaryText(c)).
 				Grow(1).
-				SingleLine()
+				MinWidth(0).
+				Shrink(1).
+				SingleLine().
+				Ellipsis("…")
 			if len(conflicts) > 0 {
 				ui.Row(c.Key("shortcut-help-conflict-"+sc.id)).
 					Padding(Space0, Space2).

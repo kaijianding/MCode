@@ -127,8 +127,11 @@ func renderUpdatePopover(c *ui.Context, s *chatState, st *SettingsState, title, 
 				return
 			}
 			globalAboutState.mu.Lock()
-			installing, progress := globalAboutState.installing, globalAboutState.progress
+			installing, progress, errMsg := globalAboutState.installing, globalAboutState.progress, globalAboutState.errMsg
 			globalAboutState.mu.Unlock()
+			if errMsg != "" {
+				ui.Text(c, errMsg).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
+			}
 			text := updateButtonText(status.Installable)
 			if installing {
 				text = fmt.Sprintf("%.0f%%", progress*100)
