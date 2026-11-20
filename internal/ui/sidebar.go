@@ -1646,9 +1646,7 @@ func agentResumeTarget(s *chatState, th Thread) (provider, sessionID string) {
 		if s.threads[i].Provider != "" {
 			provider = s.threads[i].Provider
 		}
-		if s.threads[i].SessionID != "" {
-			sessionID = s.threads[i].SessionID
-		}
+		sessionID = s.threads[i].SessionID
 		break
 	}
 	return provider, sessionID
@@ -1671,7 +1669,8 @@ func (s *chatState) providerBinaryFor(provider string) string {
 	return provider
 }
 
-// prepareProviderBinary 异步解析一次并缓存，解析失败也缓存空串以免每次开菜单重复走 PATH。
+// prepareProviderBinary 异步解析一次并缓存；解析失败或结果为空时缓存裸名（与 providerBinaryFor 未备好时的回退一致），
+// 以免每次开菜单重复走 PATH，也不会在失败后永久禁用 Resume 菜单项。
 func (s *chatState) prepareProviderBinary(provider string) {
 	if provider == "" {
 		return
@@ -1693,8 +1692,8 @@ func (s *chatState) prepareProviderBinary(provider string) {
 		binary, err := s.client.ProviderBinary(context.Background(), provider)
 		s.mu.Lock()
 		delete(s.providerBinaryBusy, provider)
-		if err != nil {
-			binary = ""
+		if err != nil || binary == "" {
+			binary = provider
 		}
 		s.providerBinaries[provider] = binary
 		s.mu.Unlock()
@@ -1779,7 +1778,7 @@ func threadContextMenu(c *ui.Context, s *chatState, projectID string, thVal Thre
 		// is known, because mygo matches the chosen item by position.
 		resumeProvider, resumeSessionID := agentResumeTarget(s, thVal)
 		if harness.ResumeTemplate(resumeProvider) != "" {
-			resume := harness.FormatResumeCommandIn(s.projectPathByID(projectID), resumeProvider, s.providerBinaryFor(resumeProvider), resumeSessionID)
+			resume := harness.FormatResumeCommandIn(threadDir, resumeProvider, s.providerBinaryFor(resumeProvider), resumeSessionID)
 			if m.Item("复制 Resume 命令").Disabled(resume == "").Chosen() {
 				c.WriteClipboard(resume)
 				s.setToast("已复制 Resume 命令")

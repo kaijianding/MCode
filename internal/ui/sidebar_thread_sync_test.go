@@ -41,6 +41,35 @@ func TestApplyThreadSummaryClearsStaleRunning(t *testing.T) {
 	}
 }
 
+// TestApplyThreadSummaryClearsSessionID 验证后端推送的摘要将 SessionID 清空时，
+// s.threads 与 s.threadsByProj 中的 SessionID 都会同步清空。
+func TestApplyThreadSummaryClearsSessionID(t *testing.T) {
+	s := &chatState{
+		threads: []Thread{
+			{ID: "t1", Title: "主会话", Provider: "claude", SessionID: "sess-old"},
+			{ID: "t2", Title: "其他会话", Provider: "omp", SessionID: "sess-other"},
+		},
+		threadsByProj: map[string][]Thread{
+			"p1": {{ID: "t1", Title: "主会话", Provider: "claude", SessionID: "sess-old"}},
+		},
+	}
+
+	s.applyThreadSummary(Thread{ID: "t1", Provider: "", SessionID: ""})
+
+	if s.threads[0].SessionID != "" {
+		t.Fatalf("s.threads[0].SessionID 应被清空，实际 %q", s.threads[0].SessionID)
+	}
+	if s.threadsByProj["p1"][0].SessionID != "" {
+		t.Fatalf("s.threadsByProj[p1][0].SessionID 应被清空，实际 %q", s.threadsByProj["p1"][0].SessionID)
+	}
+	if s.threads[0].Provider != "claude" {
+		t.Fatalf("空 Provider 摘要不应清空现有 Provider，实际 %q", s.threads[0].Provider)
+	}
+	if s.threads[1].SessionID != "sess-other" {
+		t.Fatalf("其他会话的 SessionID 不应受影响，实际 %q", s.threads[1].SessionID)
+	}
+}
+
 // TestApplyThreadSummarySwarmBee 验证子代理结束时，即使不在顶层 s.threads 中，
 // 也能及时同步 Swarm 面板中的 bee 状态并使派生视图失效。
 func TestApplyThreadSummarySwarmBee(t *testing.T) {

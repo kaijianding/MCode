@@ -1,6 +1,7 @@
 package mcodeui
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -702,7 +703,7 @@ func TestSidebarCopyResumeCommand(t *testing.T) {
 	}
 	tt.CloseMenu()
 
-	// 会话摘要只走 Watch 增量（列表快照不带 Agent 会话 ID），可执行文件路径由后端异步解析。
+	// 增量摘要与可执行文件路径都会同步到热会话与缓存。
 	fake.UpdateThreadSummary(Thread{ID: "t1", ProjectID: "p1", Provider: "omp", SessionID: "/Users/me/sessions/agent-sess 42.jsonl"})
 	state.prepareProviderBinary("omp")
 	waitFor(t, tt, func() bool {
@@ -722,6 +723,100 @@ func TestSidebarCopyResumeCommand(t *testing.T) {
 	want := "cd /path/to/test && /usr/local/bin/omp --resume '/Users/me/sessions/agent-sess 42.jsonl'"
 	if got := tt.Clipboard(); got != want {
 		t.Fatalf("剪贴板 = %q，应为 %q", got, want)
+	}
+}
+
+// TestSidebarCopyResumeCommandAIWorktree 验证会话存在 AI worktree 时，复制的 Resume 命令会 cd 到 worktree 路径。
+func TestSidebarCopyResumeCommandAIWorktree(t *testing.T) {
+	fake := NewFakeClient()
+	fake.providerBinary = map[string]string{"claude": "/usr/local/bin/claude"}
+	fake.threads["p1"][0].Provider = "claude"
+	fake.threads["p1"][0].SessionID = "sess-wt"
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
+
+	aw := getAIWorktreeState(state)
+	state.mu.Lock()
+	rev := state.messagesRev
+	state.mu.Unlock()
+	aw.mu.Lock()
+	aw.gens["t1"]++
+	aw.found["t1"] = aiWorktreeInfo{Path: "/path/to/worktree", Branch: "feat/wt"}
+	aw.revs["t1"] = rev
+	aw.mu.Unlock()
+	state.invalidate()
+
+	state.prepareProviderBinary("claude")
+	waitFor(t, tt, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return state.providerBinaries["claude"] == "/usr/local/bin/claude"
+	})
+
+	if err := tt.RightClick("测试会话1"); err != nil {
+		t.Fatalf("right click '测试会话1' failed: %v", err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("复制 Resume 命令"); err != nil {
+		t.Fatalf("choose copy resume command failed: %v", err)
+	}
+	want := "cd /path/to/worktree && /usr/local/bin/claude --resume sess-wt"
+	if got := tt.Clipboard(); got != want {
+		t.Fatalf("剪贴板 = %q，应为 %q", got, want)
+	}
+}
+
+// TestSidebarCopyResumeCommandBinaryFallbackAndClearSession 验证可执行文件解析失败时回退裸名且不永久禁用菜单，
+// 以及摘要清空 SessionID 后 agentResumeTarget 与菜单项同步禁用，不回退到旧快照。
+func TestSidebarCopyResumeCommandBinaryFallbackAndClearSession(t *testing.T) {
+	fake := NewFakeClient()
+	fake.providerBinaryErr = errors.New("lookup failed")
+	fake.threads["p1"][0].Provider = "claude"
+	fake.threads["p1"][0].SessionID = "sess-1"
+	state, view := buildRoot(fake)
+	t.Cleanup(state.close)
+	tt := ui.NewTester(view, 1000, 700)
+	waitFor(t, tt, func() bool { return tt.HasText("测试会话1") })
+
+	state.prepareProviderBinary("claude")
+	waitFor(t, tt, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return state.providerBinaries["claude"] == "claude"
+	})
+
+	if err := tt.RightClick("测试会话1"); err != nil {
+		t.Fatalf("right click '测试会话1' failed: %v", err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("复制 Resume 命令"); err != nil {
+		t.Fatalf("解析失败缓存裸名后菜单项仍应可用: %v", err)
+	}
+	want := "cd /path/to/test && claude --resume sess-1"
+	if got := tt.Clipboard(); got != want {
+		t.Fatalf("剪贴板 = %q，应为 %q", got, want)
+	}
+	tt.CloseMenu()
+
+	fake.UpdateThreadSummary(Thread{ID: "t1", ProjectID: "p1", Provider: "claude", SessionID: ""})
+	waitFor(t, tt, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return state.threadsByProj["p1"][0].SessionID == "" && state.threads[0].SessionID == ""
+	})
+
+	if p, sid := agentResumeTarget(state, Thread{ID: "t1", Provider: "claude", SessionID: "stale-snap"}); p != "claude" || sid != "" {
+		t.Fatalf("agentResumeTarget = (%q, %q), want (\"claude\", \"\")", p, sid)
+	}
+
+	if err := tt.RightClick("测试会话1"); err != nil {
+		t.Fatalf("right click '测试会话1' failed: %v", err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("复制 Resume 命令"); err == nil {
+		t.Fatalf("清空 SessionID 后菜单项应禁用: %v", tt.Menu())
 	}
 }
 

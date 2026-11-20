@@ -68,3 +68,17 @@ func TestFormatResumeCommandIn(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatResumeCommandQuotesBinary(t *testing.T) {
+	cases := []struct{ provider, binary, session, want string }{
+		{"claude", "/Users/me/Application Support/bin/claude", "sess-1", "'/Users/me/Application Support/bin/claude' --resume sess-1"},
+		{"omp", "/Users/me/My Tools/omp", "a b.jsonl", "'/Users/me/My Tools/omp' --resume 'a b.jsonl'"},
+		{"claude", "/usr/local/bin/claude", "sess-1", "/usr/local/bin/claude --resume sess-1"},
+		{"claude", "claude", "sess-1", "claude --resume sess-1"},
+	}
+	for _, c := range cases {
+		if got := FormatResumeCommand(c.provider, c.binary, c.session); got != c.want {
+			t.Errorf("FormatResumeCommand(%q, %q, %q) = %q, want %q", c.provider, c.binary, c.session, got, c.want)
+		}
+	}
+}

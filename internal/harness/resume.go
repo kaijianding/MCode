@@ -96,7 +96,7 @@ func FormatResumeCommand(provider, binary, sessionID string) string {
 	if !ok {
 		return ""
 	}
-	return binary + " " + before + shellQuote(sessionID) + after
+	return shellQuote(binary) + " " + before + shellQuote(sessionID) + after
 }
 
 // ompSessionID returns the id omp --resume accepts. mcode stores the session
