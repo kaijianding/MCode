@@ -16,6 +16,13 @@ type menuRowProps struct {
 	OnClick     func()
 }
 
+const (
+	// menuRowTitleMinWidth 保证空间受限时标题不被右侧长说明压到 0。
+	menuRowTitleMinWidth float32 = 64
+	// menuRowTrailingMaxWidth 限制右侧说明最大宽度，避免长命令挤占标题。
+	menuRowTrailingMaxWidth float32 = 140
+)
+
 // menuRow 渲染浮层菜单中的单行选项，返回 ButtonBase 元素供调用方继续链式配置或读取交互状态。
 func menuRow(c *ui.Context, p menuRowProps) ui.Element {
 	label := p.Label
@@ -60,13 +67,18 @@ func menuRow(c *ui.Context, p menuRowProps) ui.Element {
 					FontSize(uiFont(TypeBody)).
 					TextColor(titleColor).
 					Grow(1).
-					SingleLine()
+					Shrink(1).
+					MinWidth(menuRowTitleMinWidth).
+					SingleLine().
+					Ellipsis("…")
 				if p.Trailing != "" {
 					ui.Text(c, p.Trailing).
 						FontSize(uiFont(TypeCaption)).
 						TextColor(ThemeSecondaryText(c)).
-						Shrink(0).
-						SingleLine()
+						Shrink(1).
+						MaxWidth(menuRowTrailingMaxWidth).
+						SingleLine().
+						Ellipsis("…")
 				}
 				if p.Checked {
 					ui.Icon(c, IconCheck()).Size(14, 14).TextColor(ThemeAccent(c))

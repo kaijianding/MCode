@@ -145,3 +145,67 @@ func TestUIReview5MenuRowFocusRing(t *testing.T) {
 		t.Fatal("按 Tab 聚焦后菜单行外缘 1-2px 未检测到焦点环阴影像素")
 	}
 }
+
+func TestMenuRowLongTrailingKeepsTitle(t *testing.T) {
+	const (
+		title   = "打包发布"
+		longCmd = "./scripts/package_personal.sh --no-relaunch --window-size 1200x800 --verbose --skip-notarize"
+	)
+
+	assertRow := func(t *testing.T, wrap func(c *ui.Context, child func())) {
+		t.Helper()
+		var naturalTitleW float32
+		tt := ui.NewTester(func(c *ui.Context) {
+			naturalTitleW, _ = c.MeasureText(0, ui.Span{Text: title, Size: uiFont(TypeBody)})
+			wrap(c, func() {
+				menuRow(c, menuRowProps{
+					Key:      "row-long-trailing",
+					Label:    "脚本：打包发布",
+					Icon:     IconTerminal(),
+					Title:    title,
+					Trailing: longCmd,
+				})
+			})
+		}, 400, 240)
+		tt.Frame()
+
+		if !tt.HasText(title) {
+			t.Fatalf("标题文字 %q 应可见，实际 Texts=%v", title, tt.Texts())
+		}
+		if naturalTitleW <= 0 {
+			t.Fatalf("标题自然宽度应大于 0，实际=%v", naturalTitleW)
+		}
+		titleRect, ok := tt.Find(title)
+		if !ok {
+			t.Fatalf("未找到标题文本节点 %q", title)
+		}
+		if titleRect.W < naturalTitleW {
+			t.Fatalf("标题布局宽度不足以完整显示: got %.2f, want >= %.2f", titleRect.W, naturalTitleW)
+		}
+		trailingRect, ok := tt.Find(longCmd)
+		if !ok {
+			t.Fatalf("未找到 Trailing 文本节点")
+		}
+		if trailingRect.W <= 0 || trailingRect.W > menuRowTrailingMaxWidth {
+			t.Fatalf("Trailing 宽度应大于 0 且不超过上限 %.2f，实际=%.2f", menuRowTrailingMaxWidth, trailingRect.W)
+		}
+	}
+
+	t.Run("MaxWidth320", func(t *testing.T) {
+		assertRow(t, func(c *ui.Context, child func()) {
+			ui.Column(c.Key("menu-row-long-trailing-wrap")).
+				MaxWidth(320).
+				Padding(Space1).
+				Children(child)
+		})
+	})
+
+	t.Run("NarrowWidth180", func(t *testing.T) {
+		assertRow(t, func(c *ui.Context, child func()) {
+			ui.Column(c.Key("menu-row-long-trailing-narrow")).
+				Width(180).
+				Padding(Space1).
+				Children(child)
+		})
+	})
+}
