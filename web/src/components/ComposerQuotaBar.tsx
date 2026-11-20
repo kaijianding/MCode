@@ -8,6 +8,13 @@ import { ComposerQuotaSheet, formatQuotaPercent, quotaWindowContent, usageColor,
 export interface ComposerQuotaBarProps {
   scope: ComposerQuotaScope;
   isRunning?: boolean;
+  hasMessages?: boolean;
+  /** 线程摘要里的主代理显式 agy 账号 ID */
+  account?: string | null;
+  /** 线程摘要里的子代理显式 agy 账号 ID */
+  swarmBeesAccount?: string | null;
+  /** 切换账号失败时的错误提示回调 */
+  onAccountError?: (message: string | null) => void;
   /** 收到容器 relative、贴下边缘悬浮时不占文档流（默认仍留在文档流里） */
   floating?: boolean;
 }
@@ -158,11 +165,12 @@ export function stripReadouts(budget: RemoteQuotaBudget): QuotaReadout[] {
   });
 }
 
-interface ProviderQuotaGroup {
-  /** 分组键就是 provider：一个供应商在额度条上只占一组，也用它标识打开的是哪个弹层 */
+export interface ProviderQuotaGroup {
+  /** 分组键为 `${role}:${provider}`：主代理与子代理各占一组，也用它标识打开的是哪个弹层 */
   key: string;
+  role: 'lead' | 'bees';
   provider: string;
-  /** 该组展示的账号；空表示宿主没细分账号。同 provider 的其他账号在额度弹层里列出 */
+  /** 该组展示的账号；空表示宿主没细分账号。同组其他账号在额度弹层里列出 */
   account?: string;
   providerName: string;
   /** 额度条实际展示的那一个 budget */
@@ -172,17 +180,20 @@ interface ProviderQuotaGroup {
 /** 切换线程/项目时用的空额度列表：没有该来源的数据就不展示旧来源的数据。 */
 const EMPTY_BUDGETS: RemoteQuotaBudget[] = [];
 
+function budgetRole(budget: RemoteQuotaBudget): 'lead' | 'bees' {
+  return budget.role === 'bees' ? 'bees' : 'lead';
+}
+
 /**
- * 按 provider 分组（保持首次出现顺序），每组展示 active 优先、其次有窗口的那一个 budget。
- * 同一 provider 可能有多条 budget：Magpie 多卡片时按账号拆开，编排里主代理与子代理用同一个
- * 供应商时也会落到同一个 provider。额度条上一个供应商只占一组，避免并排出现两个同图标、
- * 数值还不同的读数（竖线是组间分隔，多出一组就多一条竖线）；账号明细仍留在额度弹层里。
+ * 按 `${role}:${provider}` 分组（保持首次出现顺序），每组展示 active 优先、其次有窗口的那一个 budget。
+ * lead 组排在 bees 组之前；同一角色内在用的账号排到前面，其余保持原有顺序。
  */
-function groupByProvider(renderable: RemoteQuotaBudget[]): ProviderQuotaGroup[] {
+export function groupByProvider(renderable: RemoteQuotaBudget[]): ProviderQuotaGroup[] {
   const order: string[] = [];
   const grouped = new Map<string, RemoteQuotaBudget[]>();
   for (const budget of renderable) {
-    const key = budget.provider;
+    const role = budgetRole(budget);
+    const key = `${role}:${budget.provider}`;
     const existing = grouped.get(key);
     if (existing) {
       existing.push(budget);
@@ -198,21 +209,29 @@ function groupByProvider(renderable: RemoteQuotaBudget[]): ProviderQuotaGroup[] 
       ?? providerBudgets[0];
     return {
       key,
+      role: budgetRole(selected),
       provider: selected.provider,
       account: selected.account ?? undefined,
       providerName: selected.providerName,
       budget: selected
     };
   });
-  // 在用的账号排到前面，其余保持原有顺序
-  return [
-    ...groups.filter((group) => group.budget.active === true),
-    ...groups.filter((group) => group.budget.active !== true)
-  ];
+  // lead 组在前、bees 组在后；同一角色内在用的账号排到前面，其余保持原有顺序
+  const rank = (group: ProviderQuotaGroup): number =>
+    (group.role === 'bees' ? 2 : 0) + (group.budget.active === true ? 0 : 1);
+  return [...groups].sort((a, b) => rank(a) - rank(b));
 }
 
-export const ComposerQuotaBar: React.FC<ComposerQuotaBarProps> = ({ scope, isRunning = false, floating = false }) => {
-  const { connectionState, capabilities, getComposerQuota } = useRemoteStatic();
+export const ComposerQuotaBar: React.FC<ComposerQuotaBarProps> = ({
+  scope,
+  isRunning = false,
+  hasMessages = false,
+  account = null,
+  swarmBeesAccount = null,
+  onAccountError,
+  floating = false
+}) => {
+  const { connectionState, capabilities, getComposerQuota, updateThread } = useRemoteStatic();
   const threadID = scope.threadID;
   const projectID = scope.projectID;
   // capabilities 取失败会被置为 null，此时按宽松口径视为支持 composer.quota，避免额度条被永久隐藏。
@@ -294,15 +313,42 @@ export const ComposerQuotaBar: React.FC<ComposerQuotaBarProps> = ({ scope, isRun
   const groups = useMemo(() => groupByProvider(budgets.filter(isRenderableBudget)), [budgets]);
   const sheetGroup = sheetGroupKey ? groups.find((group) => group.key === sheetGroupKey) ?? null : null;
   const sheetProvider = sheetGroup?.provider ?? null;
-  // 弹层里仍按账号分块展示同一 provider 的全部额度，所以按 provider 取整张表
+  const sheetRole = sheetGroup?.role ?? null;
+  // 弹层里按 `${role}:${provider}` 展示该组全部账号的额度
   const sheetBudgets = useMemo(
-    () => (sheetProvider ? budgets.filter((budget) => budget.provider === sheetProvider) : []),
-    [budgets, sheetProvider]
+    () =>
+      sheetGroupKey
+        ? budgets.filter((budget) => `${budgetRole(budget)}:${budget.provider}` === sheetGroupKey)
+        : [],
+    [budgets, sheetGroupKey]
   );
   // 只有后端明确标记 active 的 budget 才能标「在用」：Magpie 多账号时默认展示的第一张卡不能当在用。
   const activeAccount = useMemo(
     () => sheetBudgets.find((budget) => budget.active === true)?.account ?? null,
     [sheetBudgets]
+  );
+  const selectedAccountID = sheetRole === 'bees' ? (swarmBeesAccount ?? '') : sheetRole === 'lead' ? (account ?? '') : '';
+
+  const handleSelectAccount = useCallback(
+    async (targetAccountID: string) => {
+      const targetThreadID = scope.threadID;
+      const targetRole = sheetRole;
+      setSheetGroupKey(null);
+      if (!targetThreadID || !targetRole) return;
+      onAccountError?.(null);
+      try {
+        const changes =
+          targetRole === 'bees'
+            ? { swarmBeesAccount: targetAccountID }
+            : { account: targetAccountID };
+        await updateThread(targetThreadID, changes);
+        loadQuota();
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        onAccountError?.(detail ? `切换账号失败: ${detail}` : '切换账号失败');
+      }
+    },
+    [loadQuota, onAccountError, scope.threadID, sheetRole, updateThread]
   );
 
   if (groups.length === 0 && !sheetGroup) return null;
@@ -385,8 +431,14 @@ export const ComposerQuotaBar: React.FC<ComposerQuotaBarProps> = ({ scope, isRun
         isOpen={Boolean(sheetGroup)}
         onClose={closeSheet}
         provider={sheetProvider}
+        role={sheetRole}
         budgets={sheetBudgets}
         activeAccount={activeAccount}
+        hasThread={Boolean(threadID)}
+        selectedAccountID={selectedAccountID}
+        isRunning={isRunning}
+        hasMessages={hasMessages}
+        onSelectAccount={handleSelectAccount}
         refreshing={refreshing}
         onRefresh={handleRefresh}
       />

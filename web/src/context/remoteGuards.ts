@@ -77,9 +77,22 @@ export function mergeThreadSummary(
   summary: RemoteThreadSummary,
   keepListOrder: boolean
 ): RemoteThreadSummary {
+  // account / swarmBeesAccount 在后端用 omitempty 序列化，切回「自动」时会省略字段，不能保留旧值。
   const merged: RemoteThreadSummary = keepListOrder
-    ? { ...existing, ...summary, section: existing.section, orderKey: existing.orderKey }
-    : { ...existing, ...summary };
+    ? {
+        ...existing,
+        ...summary,
+        account: summary.account,
+        swarmBeesAccount: summary.swarmBeesAccount,
+        section: existing.section,
+        orderKey: existing.orderKey
+      }
+    : {
+        ...existing,
+        ...summary,
+        account: summary.account,
+        swarmBeesAccount: summary.swarmBeesAccount
+      };
   const keys = Object.keys(merged) as Array<keyof RemoteThreadSummary>;
   return keys.every((key) => existing[key] === merged[key]) ? existing : merged;
 }

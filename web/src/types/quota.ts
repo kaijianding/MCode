@@ -4,7 +4,7 @@ import type { RemoteQuotaWindow } from './generated';
 
 /**
  * 额度窗口：直接用生成类型，字段与宿主一一对应
- * （label / account / active / disabled / source / plan / display / text / unlimited / balance / unit / readAt）。
+ * （label / account / accountID / active / disabled / source / plan / display / text / unlimited / balance / unit / readAt）。
  */
 export type { RemoteQuotaWindow };
 
@@ -19,6 +19,8 @@ export interface RemoteQuotaBudget {
   readAt: string | null;
   /** 该额度所属账号；同一 provider 多账号时每个账号一条 budget */
   account?: string | null;
+  /** 该额度所属账号的唯一标识 */
+  accountID?: string | null;
   /** 是否该 provider 当前在用的账号 */
   active?: boolean | null;
 }

@@ -173,6 +173,12 @@ export interface ThreadComposerProps {
   swarmPairsAllowed?: boolean;
   /** 输入框下方的账户额度条范围；不传则不显示。 */
   quotaScope?: ComposerQuotaScope;
+  /** 会话摘要里的主代理显式 agy 账号 ID */
+  account?: string | null;
+  /** 会话摘要里的子代理显式 agy 账号 ID */
+  swarmBeesAccount?: string | null;
+  /** 切换额度账号失败时的错误提示回调 */
+  onQuotaAccountError?: (message: string | null) => void;
   /** 会话摘要里的子代理档位覆盖（JSON 字符串）：整表覆盖保存，所以需要显式传入基线 */
   swarmBeeTiers?: string;
   /**
@@ -544,6 +550,9 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
   onToggleSwarm,
   swarmPairsAllowed = true,
   quotaScope,
+  account,
+  swarmBeesAccount,
+  onQuotaAccountError,
   swarmBeeTiers,
   hasMessages = true,
   historyEntries
@@ -1574,7 +1583,17 @@ const ThreadComposerInner = React.forwardRef<ThreadComposerHandle, ThreadCompose
         </div>
       )}
       {/* 额度条悬浮在输入区底部留白里，提示行悬浮在输入卡片上方，均不占文档流。 */}
-      {quotaScope && <ComposerQuotaBar scope={quotaScope} isRunning={isRunning} floating />}
+      {quotaScope && (
+        <ComposerQuotaBar
+          scope={quotaScope}
+          isRunning={isRunning}
+          hasMessages={hasMessages}
+          account={account}
+          swarmBeesAccount={swarmBeesAccount}
+          onAccountError={onQuotaAccountError}
+          floating
+        />
+      )}
       </div>
 
       {/* Pill selection bottom sheets */}

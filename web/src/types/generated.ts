@@ -575,6 +575,7 @@ export type RemoteThreadSummary = {
   swarmBeesProvider: string | null;
   swarmBeesModel: string | null;
   swarmBeesEffort: string | null;
+  swarmBeesAccount?: string | null;
   isProvisional?: boolean;
   parentThreadID?: string | null;
   forkedFromThreadID?: string | null;
@@ -731,6 +732,7 @@ export type RemoteThreadsUpdateParams = {
   model?: string;
   effort?: string;
   account?: string;
+  swarmBeesAccount?: string;
 };
 
 export type RemoteThreadsUpdateResult = {
@@ -1161,6 +1163,7 @@ export type RemoteQuotaWindow = {
   resetsAt: string | null;
   label?: string;
   account?: string;
+  accountID?: string;
   active?: boolean;
   disabled?: boolean;
   source?: string;
@@ -1183,6 +1186,7 @@ export type RemoteQuotaBudget = {
   amount: string | null;
   readAt: string | null;
   account?: string;
+  accountID?: string;
   active?: boolean;
 };
 

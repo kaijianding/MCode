@@ -5,17 +5,35 @@ import React, { useEffect, useState } from 'react';
 import type { RemoteQuotaBudget, RemoteQuotaWindow } from '../types/quota';
 import { periodMinutes, quotaBarLayout, quotaElapsedRatio, quotaPaceKnown } from '../utils/quotaPace';
 import { ProviderIcon } from './ProviderIcon';
-import { ArrowPathIcon, XMarkIcon } from './Icons';
+import { ArrowPathIcon, CheckCircleIcon, XMarkIcon } from './Icons';
+
+export interface AgyAccountChoice {
+  accountID: string;
+  account: string;
+  disabled: boolean;
+}
 
 export interface ComposerQuotaSheetProps {
   isOpen: boolean;
   onClose: () => void;
   /** 当前查看的 provider；为空时弹层关闭 */
   provider: string | null;
+  /** 当前查看的角色：主代理或子代理 */
+  role?: 'lead' | 'bees' | null;
   /** 该 provider 的全部 budget（含 loading / attention 等不可渲染状态） */
   budgets: RemoteQuotaBudget[];
   /** 额度条当前选中的账号，命中时组标题追加「 · 在用」 */
   activeAccount?: string | null;
+  /** 是否处于已有会话（草稿页无 threadID 时为 false，保持只读） */
+  hasThread?: boolean;
+  /** 当前线程显式选中的 agy 账号 ID（lead 取 account，bees 取 swarmBeesAccount；空表示自动） */
+  selectedAccountID?: string;
+  /** 主会话是否运行中（lead 锁定判定用） */
+  isRunning?: boolean;
+  /** 主会话是否已有消息（lead 锁定判定用） */
+  hasMessages?: boolean;
+  /** 选中某个账号（空串表示自动） */
+  onSelectAccount?: (accountID: string) => void;
   /** 刷新请求进行中 */
   refreshing?: boolean;
   onRefresh: () => void;
@@ -190,12 +208,113 @@ export function accountGroupTitle(
   return title;
 }
 
+function is5hWindow(quotaWindow: RemoteQuotaWindow): boolean {
+  const period = (quotaWindow.period ?? '').trim().toLowerCase();
+  if (period === '5h') return true;
+  const id = (quotaWindow.id ?? '').trim().toLowerCase();
+  if (!id) return false;
+  return id === '5h' || /(?:^|[^0-9])5h(?:$|[^a-z0-9])/.test(id);
+}
+
+interface AgyAccountEntry {
+  accountID: string;
+  account: string;
+  allWindowsDisabled: boolean;
+  fiveHourFull: boolean;
+}
+
+function collectAgyAccounts(budgets: RemoteQuotaBudget[]): AgyAccountEntry[] {
+  const order: string[] = [];
+  const grouped = new Map<string, RemoteQuotaBudget[]>();
+  for (const budget of budgets) {
+    if (budget.provider !== 'agy') continue;
+    const accountID = (budget.accountID ?? '').trim();
+    if (!accountID) continue;
+    const existing = grouped.get(accountID);
+    if (existing) {
+      existing.push(budget);
+      continue;
+    }
+    grouped.set(accountID, [budget]);
+    order.push(accountID);
+  }
+  return order.map((accountID) => {
+    const accountBudgets = grouped.get(accountID) ?? [];
+    const windows = accountBudgets.flatMap((budget) => budget.windows);
+    let account = '';
+    for (const budget of accountBudgets) {
+      const name = (budget.account ?? '').trim();
+      if (name) {
+        account = name;
+        break;
+      }
+    }
+    if (!account) {
+      for (const quotaWindow of windows) {
+        const name = (quotaWindow.account ?? '').trim();
+        if (name) {
+          account = name;
+          break;
+        }
+      }
+    }
+    const allWindowsDisabled = !windows.some((quotaWindow) => quotaWindow.disabled !== true);
+    const fiveHourFull = windows.some((quotaWindow) => is5hWindow(quotaWindow) && quotaWindow.usedPercent >= 100);
+    return {
+      accountID,
+      account: account || accountID,
+      allWindowsDisabled,
+      fiveHourFull
+    };
+  });
+}
+
+/** 提取 agy 可选账号列表（按 accountID 去重保序）：窗口全停用或任一 5h 窗口已满则禁用。 */
+export function agyAccountChoices(budgets: RemoteQuotaBudget[]): AgyAccountChoice[] {
+  return collectAgyAccounts(budgets).map((entry) => ({
+    accountID: entry.accountID,
+    account: entry.account,
+    disabled: entry.allWindowsDisabled || entry.fiveHourFull
+  }));
+}
+
+/** 仅在已有会话且存在至少 2 个窗口未全部停用的不同 agy 账号时允许切换账号。 */
+export function agyAccountSelectable(budgets: RemoteQuotaBudget[], hasThread: boolean): boolean {
+  if (!hasThread) return false;
+  return collectAgyAccounts(budgets).filter((entry) => !entry.allWindowsDisabled).length >= 2;
+}
+
+/**
+ * 判断主代理 agy 账号选择器是否锁定：
+ * 运行中锁定；无消息解锁；有消息时默认锁定，但 currentAccountID 为空、不在 choices 里或对应项 disabled 时解锁。
+ */
+export function agyLeadAccountLocked(opts: {
+  isRunning: boolean;
+  hasMessages: boolean;
+  currentAccountID: string;
+  choices: readonly Pick<AgyAccountChoice, 'accountID' | 'disabled'>[];
+}): boolean {
+  if (opts.isRunning) return true;
+  if (!opts.hasMessages) return false;
+  const currentID = opts.currentAccountID.trim();
+  if (!currentID) return false;
+  const matched = opts.choices.find((choice) => choice.accountID === currentID);
+  if (!matched || matched.disabled) return false;
+  return true;
+}
+
 export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
   isOpen,
   onClose,
   provider,
+  role = null,
   budgets,
   activeAccount = null,
+  hasThread = false,
+  selectedAccountID = '',
+  isRunning = false,
+  hasMessages = false,
+  onSelectAccount,
   refreshing = false,
   onRefresh
 }) => {
@@ -208,33 +327,204 @@ export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
 
   if (!isOpen || !provider) return null;
 
-  const providerBudgets = budgets.filter((budget) => budget.provider === provider);
+  const providerBudgets = budgets.filter(
+    (budget) => budget.provider === provider && (!role || budget.role === role)
+  );
   const providerName = providerBudgets[0]?.providerName || provider;
   const credits = providerBudgets.find((budget) => budget.amount !== null) ?? null;
   const anyWindows = providerBudgets.some((budget) => budget.windows.length > 0);
   const loading = providerBudgets.some((budget) => budget.state === 'loading');
   const unavailable = providerBudgets.some((budget) => budget.state === 'attention' || budget.state === 'unknown');
 
-  // 按账号分组，保持接口返回顺序；无账号的组不渲染标题
-  const accountOrder: string[] = [];
+  const canSelectAccount = provider === 'agy' && agyAccountSelectable(providerBudgets, hasThread);
+  const choices = canSelectAccount ? agyAccountChoices(providerBudgets) : [];
+  const choiceMap = new Map(choices.map((choice) => [choice.accountID, choice]));
+  const currentAccountID = selectedAccountID.trim();
+  const locked = canSelectAccount
+    ? role === 'bees'
+      ? false
+      : agyLeadAccountLocked({ isRunning, hasMessages, currentAccountID, choices })
+    : false;
+
+  const handleSelectAccount = (accountID: string) => {
+    onClose();
+    onSelectAccount?.(accountID);
+  };
+
+  // 按账号分组（有 accountID 时以它为键避免同名合并），保持接口返回顺序；无账号的组不渲染标题
+  const groupOrder: string[] = [];
   const accountGroups = new Map<string, RemoteQuotaBudget[]>();
   for (const budget of providerBudgets) {
-    const account = (budget.account ?? '').trim();
-    const existing = accountGroups.get(account);
+    const groupKey = (budget.accountID ?? '').trim() || (budget.account ?? '').trim();
+    const existing = accountGroups.get(groupKey);
     if (existing) {
       existing.push(budget);
       continue;
     }
-    accountGroups.set(account, [budget]);
-    accountOrder.push(account);
+    accountGroups.set(groupKey, [budget]);
+    groupOrder.push(groupKey);
   }
 
   const now = Date.now();
   const plan = quotaGroupPlan(providerBudgets);
   // 没有任何账号组标题时，重置倒计时挪到供应商头部右侧显示一次
-  const providerCountdown = accountOrder.some((account) => account !== '')
+  const providerCountdown = groupOrder.some((key) => key !== '')
     ? ''
     : quotaGroupCountdown(providerBudgets, now);
+
+  const renderWindowRows = (
+    groupBudgets: RemoteQuotaBudget[],
+    groupCountdown: string,
+    interactiveParent: boolean,
+    suppressRowDimming: boolean
+  ) =>
+    groupBudgets.map((budget, budgetIdx) => {
+      // 整组都已停用时置灰（单窗口带 disabled 也置灰），与托盘里「已停止」账号同口径。
+      const budgetDisabled = quotaGroupDisabled([budget]);
+      return budget.windows.map((quotaWindow, winIdx) => {
+        const content = quotaWindowContent(quotaWindow);
+        const used = content.kind === 'percent' ? content.usedPercent : 0;
+        const remaining = 100 - used;
+        const color = usageColor(used);
+        const countdown = formatQuotaResetCountdown(quotaWindow.resetsAt, now);
+        // 组标题已展示同一个倒计时时不再重复到行内
+        const inlineCountdown = countdown && countdown !== groupCountdown ? countdown : '';
+        const percentText = showRemaining
+          ? `剩余 ${formatQuotaPercent(remaining)}%`
+          : `已用 ${formatQuotaPercent(used)}%`;
+        const rowDisabled = !suppressRowDimming && (budgetDisabled || quotaWindow.disabled === true);
+        // 有时刻与周期可用时按「时间已过比例」画出重置进度竖线，否则不画。
+        const paceElapsed =
+          content.kind === 'percent'
+            ? quotaElapsedRatio(quotaWindow.resetsAt, periodMinutes(quotaWindow.period))
+            : null;
+        const paceLayout =
+          paceElapsed === null
+            ? null
+            : quotaBarLayout(used, paceElapsed, quotaPaceKnown(used, paceElapsed));
+        return (
+          <div
+            key={`${budgetIdx}-${winIdx}`}
+            className={`flex w-full min-w-0 items-center gap-3${rowDisabled ? ' opacity-50' : ''}`}
+          >
+            <span className="min-w-0 flex-1 truncate text-mc-footnote text-[var(--foreground-muted)]" title={quotaWindow.title}>
+              {quotaWindow.title}
+            </span>
+            {inlineCountdown && (
+              <span className="shrink-0 whitespace-nowrap text-mc-caption text-[var(--foreground-muted)]">
+                {inlineCountdown}
+              </span>
+            )}
+            {content.kind === 'percent' ? (
+              <>
+                <div aria-hidden="true" className="relative h-1 w-24 shrink-0 sm:w-[120px]">
+                  <div className="absolute inset-0 rounded-full bg-[var(--border)]" />
+                  <div
+                    className="absolute left-0 top-0 h-1 rounded-full"
+                    style={{ width: `${used}%`, backgroundColor: color }}
+                  />
+                  {paceLayout !== null && (
+                    <div
+                      data-testid="quota-pace-marker"
+                      title={`时间已过 ${Math.round(paceLayout.markerPercent)}%`}
+                      className="absolute top-1/2 h-[10px] w-[1.5px] -translate-y-1/2 bg-[var(--foreground)]"
+                      style={{
+                        left: `calc(min(max(${paceLayout.markerPercent}% - 0.75px, 0px), 100% - 1.5px))`
+                      }}
+                    />
+                  )}
+                </div>
+                {interactiveParent ? (
+                  <span
+                    className="w-[52px] shrink-0 whitespace-nowrap text-right text-mc-body font-medium tabular-nums"
+                    style={{ color: usagePercentColor(used) }}
+                  >
+                    {percentText}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowRemaining((prev) => !prev)}
+                    title="点击切换已用/剩余"
+                    aria-label={`${quotaWindow.title} ${percentText}，点击切换已用/剩余`}
+                    className="w-[52px] shrink-0 whitespace-nowrap rounded text-right text-mc-body font-medium tabular-nums hover:underline"
+                    style={{ color: usagePercentColor(used) }}
+                  >
+                    {percentText}
+                  </button>
+                )}
+              </>
+            ) : (
+              <span
+                className="min-w-0 max-w-[55%] shrink-0 truncate whitespace-nowrap text-mc-footnote font-medium text-[var(--foreground)]"
+                title={content.text}
+              >
+                {content.text}
+              </span>
+            )}
+          </div>
+        );
+      });
+    });
+
+  const accountBlocks = groupOrder.map((groupKey) => {
+    const groupBudgets = accountGroups.get(groupKey) ?? [];
+    const groupAccountID = (groupBudgets.find((b) => (b.accountID ?? '').trim())?.accountID ?? '').trim();
+    const accountName =
+      (groupBudgets.find((b) => (b.account ?? '').trim())?.account ?? '').trim() || groupAccountID;
+    const isActive = accountName !== '' && accountName === activeAccount;
+    const groupCountdown = accountName === '' ? '' : quotaGroupCountdown(groupBudgets, now);
+    const isRadio = canSelectAccount && groupAccountID !== '';
+    const isSelected = isRadio && currentAccountID === groupAccountID;
+    const choice = isRadio ? choiceMap.get(groupAccountID) : undefined;
+    const optionDisabled = isRadio && (locked || (choice ? choice.disabled : quotaGroupDisabled(groupBudgets)));
+
+    const headerRow = accountName !== '' && (
+      <div className="flex w-full min-w-0 items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-mc-caption text-[var(--foreground-muted)]">
+          {accountGroupTitle(accountName, groupBudgets, isActive, now)}
+        </p>
+        {(groupCountdown || isSelected) && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            {groupCountdown && (
+              <span className="whitespace-nowrap text-xs text-[var(--foreground-muted)]">
+                {groupCountdown}
+              </span>
+            )}
+            {isSelected && (
+              <CheckCircleIcon className="h-4 w-4 shrink-0 text-[var(--primary)]" />
+            )}
+          </span>
+        )}
+      </div>
+    );
+
+    if (isRadio) {
+      return (
+        <button
+          key={groupKey}
+          type="button"
+          role="radio"
+          aria-checked={isSelected}
+          disabled={optionDisabled}
+          onClick={() => handleSelectAccount(groupAccountID)}
+          className={`flex w-full flex-col gap-2 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 motion-reduce:transition-none enabled:hover:bg-[var(--mc-overlay-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)] disabled:opacity-45 disabled:cursor-not-allowed ${
+            isSelected ? 'bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]' : ''
+          }`}
+        >
+          {headerRow}
+          {renderWindowRows(groupBudgets, groupCountdown, true, optionDisabled)}
+        </button>
+      );
+    }
+
+    return (
+      <div key={groupKey || '__no_account__'} className="space-y-2">
+        {headerRow}
+        {renderWindowRows(groupBudgets, groupCountdown, false, false)}
+      </div>
+    );
+  });
 
   return (
     <SheetFrame onRequestClose={onClose} size="bare" cardClassName="settings-sheet flex flex-col max-h-[92dvh] outline-none w-full max-w-full min-w-0 overflow-x-hidden" ariaLabel={`${providerName} 额度`}>
@@ -293,106 +583,33 @@ export const ComposerQuotaSheet: React.FC<ComposerQuotaSheetProps> = ({
                 {unavailable && (
                   <p className="text-xs text-[var(--warning-foreground)]">部分账号额度不可用</p>
                 )}
-                {accountOrder.map((account) => {
-                  const groupBudgets = accountGroups.get(account) ?? [];
-                  const isActive = account !== '' && account === activeAccount;
-                  const groupCountdown = account === '' ? '' : quotaGroupCountdown(groupBudgets, now);
-                  return (
-                    <div key={account || '__no_account__'} className="space-y-2">
-                      {account !== '' && (
-                        <div className="flex min-w-0 items-center justify-between gap-2">
-                          <p className="min-w-0 truncate text-mc-caption text-[var(--foreground-muted)]">
-                            {accountGroupTitle(account, groupBudgets, isActive, now)}
-                          </p>
-                          {groupCountdown && (
-                            <span className="shrink-0 whitespace-nowrap text-xs text-[var(--foreground-muted)]">
-                              {groupCountdown}
-                            </span>
-                          )}
-                        </div>
+                {canSelectAccount ? (
+                  <div
+                    role="radiogroup"
+                    aria-label={role === 'bees' ? '子代理账号' : '账号'}
+                    className="space-y-2"
+                  >
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={currentAccountID === ''}
+                      disabled={locked}
+                      onClick={() => handleSelectAccount('')}
+                      className={`flex w-full min-h-[44px] items-center justify-between gap-2 rounded-xl px-3 py-2 text-left transition-colors duration-150 motion-reduce:transition-none enabled:hover:bg-[var(--mc-overlay-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)] disabled:opacity-45 disabled:cursor-not-allowed ${
+                        currentAccountID === '' ? 'bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]' : ''
+                      }`}
+                    >
+                      <span className="text-sm font-medium text-[var(--foreground)]">自动</span>
+                      {currentAccountID === '' && (
+                        <CheckCircleIcon className="h-4 w-4 shrink-0 text-[var(--primary)]" />
                       )}
-                      {groupBudgets.map((budget, budgetIdx) => {
-                        // 整组都已停用时置灰（单窗口带 disabled 也置灰），与托盘里「已停止」账号同口径。
-                        const budgetDisabled = quotaGroupDisabled([budget]);
-                        return budget.windows.map((quotaWindow, winIdx) => {
-                          const content = quotaWindowContent(quotaWindow);
-                          const used = content.kind === 'percent' ? content.usedPercent : 0;
-                          const remaining = 100 - used;
-                          const color = usageColor(used);
-                          const countdown = formatQuotaResetCountdown(quotaWindow.resetsAt, now);
-                          // 组标题已展示同一个倒计时时不再重复到行内
-                          const inlineCountdown = countdown && countdown !== groupCountdown ? countdown : '';
-                          const percentText = showRemaining
-                            ? `剩余 ${formatQuotaPercent(remaining)}%`
-                            : `已用 ${formatQuotaPercent(used)}%`;
-                          const disabled = budgetDisabled || quotaWindow.disabled === true;
-                          // 有时刻与周期可用时按「时间已过比例」画出重置进度竖线，否则不画。
-                          const paceElapsed =
-                            content.kind === 'percent'
-                              ? quotaElapsedRatio(quotaWindow.resetsAt, periodMinutes(quotaWindow.period))
-                              : null;
-                          const paceLayout =
-                            paceElapsed === null
-                              ? null
-                              : quotaBarLayout(used, paceElapsed, quotaPaceKnown(used, paceElapsed));
-                          return (
-                            <div
-                              key={`${budgetIdx}-${winIdx}`}
-                              className={`flex min-w-0 items-center gap-3${disabled ? ' opacity-50' : ''}`}
-                            >
-                              <span className="min-w-0 flex-1 truncate text-mc-footnote text-[var(--foreground-muted)]" title={quotaWindow.title}>
-                                {quotaWindow.title}
-                              </span>
-                              {inlineCountdown && (
-                                <span className="shrink-0 whitespace-nowrap text-mc-caption text-[var(--foreground-muted)]">
-                                  {inlineCountdown}
-                                </span>
-                              )}
-                              {content.kind === 'percent' ? (
-                                <>
-                                  <div aria-hidden="true" className="relative h-1 w-24 shrink-0 sm:w-[120px]">
-                                    <div className="absolute inset-0 rounded-full bg-[var(--border)]" />
-                                    <div
-                                      className="absolute left-0 top-0 h-1 rounded-full"
-                                      style={{ width: `${used}%`, backgroundColor: color }}
-                                    />
-                                    {paceLayout !== null && (
-                                      <div
-                                        data-testid="quota-pace-marker"
-                                        title={`时间已过 ${Math.round(paceLayout.markerPercent)}%`}
-                                        className="absolute top-1/2 h-[10px] w-[1.5px] -translate-y-1/2 bg-[var(--foreground)]"
-                                        style={{
-                                          left: `calc(min(max(${paceLayout.markerPercent}% - 0.75px, 0px), 100% - 1.5px))`
-                                        }}
-                                      />
-                                    )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowRemaining((prev) => !prev)}
-                                    title="点击切换已用/剩余"
-                                    aria-label={`${quotaWindow.title} ${percentText}，点击切换已用/剩余`}
-                                    className="w-[52px] shrink-0 whitespace-nowrap rounded text-right text-mc-body font-medium tabular-nums hover:underline"
-                                    style={{ color: usagePercentColor(used) }}
-                                  >
-                                    {percentText}
-                                  </button>
-                                </>
-                              ) : (
-                                <span
-                                  className="min-w-0 max-w-[55%] shrink-0 truncate whitespace-nowrap text-mc-footnote font-medium text-[var(--foreground)]"
-                                  title={content.text}
-                                >
-                                  {content.text}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        });
-                      })}
-                    </div>
-                  );
-                })}
+                    </button>
+                    <div aria-hidden="true" className="h-px w-full bg-[var(--border)]" />
+                    {accountBlocks}
+                  </div>
+                ) : (
+                  accountBlocks
+                )}
               </>
             ) : loading ? (
               <div className="flex items-center gap-1.5 text-xs text-[var(--foreground-muted)]">

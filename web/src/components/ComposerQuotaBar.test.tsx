@@ -1,9 +1,11 @@
 // 同 LazyFallback.test.tsx：web/ 没有测试运行器，顶层直接断言，失败时 throw。
 // 这里只校验额度条的 class 字符串：真实排版（是否占文档流、是否被裁切）由浏览器负责。
 // 额度数据来自远端，组件本体依赖 RemoteContext，因此不渲染，直接断言导出的常量。
+import type { RemoteQuotaBudget } from '../types/quota';
 import {
   QUOTA_STRIP_CLASS,
   QUOTA_STRIP_FLOATING_CLASS,
+  groupByProvider,
   quotaStripClass,
 } from './ComposerQuotaBar';
 
@@ -47,4 +49,41 @@ if (quotaStripClass(true) !== QUOTA_STRIP_FLOATING_CLASS) {
 }
 if (quotaStripClass(false) !== QUOTA_STRIP_CLASS) {
   throw new Error(`quotaStripClass(false) 应等于 QUOTA_STRIP_CLASS，实际为：${quotaStripClass(false)}`);
+}
+
+// 同为 agy 的 lead 与 bees budget 必须分成两组，且 lead 组排在前面（即便 bees 先出现且为 active）。
+const mixedRoleBudgets: RemoteQuotaBudget[] = [
+  {
+    provider: 'agy',
+    providerName: 'Antigravity',
+    role: 'bees',
+    profile: null,
+    state: 'used',
+    windows: [{ period: '5h', title: 'Gemini', usedPercent: 12, resetsAt: null }],
+    amount: null,
+    readAt: null,
+    account: '子代理账号',
+    accountID: 'acc-bee',
+    active: true
+  },
+  {
+    provider: 'agy',
+    providerName: 'Antigravity',
+    role: 'lead',
+    profile: null,
+    state: 'used',
+    windows: [{ period: '5h', title: 'Gemini', usedPercent: 40, resetsAt: null }],
+    amount: null,
+    readAt: null,
+    account: '主代理账号',
+    accountID: 'acc-lead',
+    active: false
+  }
+];
+const grouped = groupByProvider(mixedRoleBudgets);
+if (grouped.length !== 2) {
+  throw new Error(`期望 lead 与 bees agy 分成 2 组，实际为 ${grouped.length} 组`);
+}
+if (grouped[0].key !== 'lead:agy' || grouped[1].key !== 'bees:agy') {
+  throw new Error(`期望分组顺序为 ['lead:agy', 'bees:agy']，实际为 [${grouped.map((g) => g.key).join(', ')}]`);
 }
