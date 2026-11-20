@@ -547,33 +547,22 @@ func renderAgyAccountsSection(c *ui.Context, st *SettingsState) {
 		}
 
 		if len(accs) == 0 {
-			ui.Column(c.Key("agy-accounts-empty")).
-				Padding(settingsRowPadY, settingsRowPadX).
-				Gap(Space4).
-				AlignItems(ui.Center).
-				Children(func() {
-					ui.Text(c, "还没有 agy 账号").
-						FontSize(uiFont(TypeProse)).
-						TextColor(ThemeSecondaryText(c))
-
-					loginShortcutBtn := ui.ButtonBase(c.Key("agy-empty-login-btn")).
-						Label("添加账号").
-						Radius(RadiusSM).
-						Padding(Space2, Space4).
-						Background(ThemeAccent(c).Alpha(0.12))
-					if loginShortcutBtn.Hovered() {
-						loginShortcutBtn.Background(ThemeAccent(c).Alpha(0.20))
-					}
-					if loginShortcutBtn.Clicked() && client != nil {
-						st.startBrowserLogin("")
-					}
-					loginShortcutBtn.Children(func() {
-						ui.Text(c, "登录 agy 账号").
-							FontSize(uiFont(TypeBody)).
-							FontWeight(500).
-							TextColor(ThemeAccent(c))
+			EmptyState(c, EmptyStateProps{
+				Key:   "agy-accounts-empty",
+				Title: "还没有 agy 账号",
+				Action: func() {
+					Button(c.Key("agy-empty-login-btn"), ButtonOpts{
+						Text:    "登录 agy 账号",
+						Label:   "添加账号",
+						Variant: ButtonSecondary,
+						OnClick: func() {
+							if client != nil {
+								st.startBrowserLogin("")
+							}
+						},
 					})
-				})
+				},
+			}).Padding(settingsRowPadY, settingsRowPadX)
 			return
 		}
 

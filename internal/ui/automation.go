@@ -22,10 +22,8 @@ type automationEnableClient interface {
 }
 
 const (
-	// automationEmptyIconSize 是空态插图的图标边长。
-	automationEmptyIconSize float32 = 44
-	automationListWidth     float32 = 320
-	automationNarrowWidth   float32 = 1000
+	automationListWidth   float32 = 320
+	automationNarrowWidth float32 = 1000
 	// automationPromptMinHeight 是任务指令输入框的最小高度。
 	automationPromptMinHeight float32 = 90
 )

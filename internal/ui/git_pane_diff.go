@@ -337,18 +337,16 @@ func renderGitPaneDiff(c *ui.Context, s *chatState, threadID string, ps *gitPane
 			}
 			ui.Text(c, fmt.Sprintf("+%d", adds)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeSuccess(c))
 			ui.Text(c, fmt.Sprintf("−%d", dels)).FontSize(uiFont(TypeFootnote)).TextColor(ThemeDanger(c))
-			unified := Button(c, ButtonOpts{Key: "git-diff-unified", Text: "统一", Variant: ButtonGhost, Size: ControlSM, OnClick: func() { st.split = false }}).Selected(!st.split)
-			if !st.split {
-				unified.Background(ThemeSelected(c))
-			}
-			tip := ""
-			if width < gitDiffSplitWidth {
-				tip = "宽度不足 560"
-			}
-			split := Button(c, ButtonOpts{Key: "git-diff-split", Text: "并排", Variant: ButtonGhost, Size: ControlSM, Disabled: width < gitDiffSplitWidth, Tooltip: tip, OnClick: func() { st.split = true }}).Selected(st.split && width >= gitDiffSplitWidth)
+			modeIdx := 0
 			if st.split && width >= gitDiffSplitWidth {
-				split.Background(ThemeSelected(c))
+				modeIdx = 1
 			}
+			Segmented(c, "git-diff-unified", &modeIdx, []Segment{
+				{Label: "统一"},
+				{Label: "并排", Disabled: width < gitDiffSplitWidth},
+			}, func(idx int) {
+				st.split = idx == 1
+			}).Shrink(0)
 			renderGitDiffMenu(c, s, ps, st, client, key, nil, loading || pending)
 			if result != nil && loading && showLoading {
 				LoadingIndicator(c, "git-diff-refresh", "", IconSM)

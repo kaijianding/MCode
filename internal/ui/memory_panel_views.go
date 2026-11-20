@@ -13,10 +13,6 @@ const (
 	memoryModalPadding float32 = Space5
 	// panelHeaderHeight 是记忆与上下文面板标题行共用的高度。
 	panelHeaderHeight float32 = 56
-	// memoryEmptyIconSize 是空态插图的图标边长。
-	memoryEmptyIconSize float32 = 28
-	// memoryEmptyHintMaxWidth 是空态说明文字的最大宽度，超出换行。
-	memoryEmptyHintMaxWidth float32 = 420
 	// memoryEditTextAreaHeight 是编辑记忆正文输入框的高度。
 	memoryEditTextAreaHeight float32 = 240
 	// memoryNewTextAreaHeight 是新建记忆正文输入框的高度。
@@ -1114,24 +1110,11 @@ func renderMemoryWorkingTab(c *ui.Context, s *chatState, snap memoryPanelSnapsho
 		}
 
 		if strings.TrimSpace(snap.wmText) == "" {
-			ui.Column(c.Key("memory-working-empty")).
-				Grow(1).
-				FillWidth().
-				Justify(ui.Center).
-				AlignItems(ui.Center).
-				Gap(Space3).
-				Children(func() {
-					ui.Icon(c, IconNotebook()).Size(memoryEmptyIconSize, memoryEmptyIconSize).TextColor(ThemeSecondaryText(c).Alpha(0.6))
-					ui.Text(c, "今天还没有 Working Memory").
-						FontSize(uiFont(TypeProse)).
-						FontWeight(600).
-						TextColor(ThemePrimaryText(c))
-					ui.Text(c, "Nowledge Mem 会在整理当天记忆后生成 Working Memory。").
-						FontSize(uiFont(TypeFootnote)).
-						MaxWidth(memoryEmptyHintMaxWidth).
-						TextAlign(ui.Center).
-						TextColor(ThemeSecondaryText(c))
-				})
+			EmptyState(c, EmptyStateProps{
+				Key:   "memory-working-empty",
+				Icon:  IconNotebook(),
+				Title: "今天还没有 Working Memory",
+			}).Grow(1).FillWidth().Justify(ui.Center)
 			return
 		}
 

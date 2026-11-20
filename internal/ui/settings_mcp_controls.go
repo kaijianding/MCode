@@ -165,49 +165,23 @@ func renderMCPCustomForm(c *ui.Context, st *SettingsState, uiSt *mcpPageUIState)
 						TextColor(ThemeSecondaryText(c)).
 						Width(80)
 
-					stdioBtn := ui.ButtonBase(c.Key("btn-form-trans-stdio")).
-						Radius(RadiusXS).
-						Padding(Space1, Space4)
-					{
-						scale := motionPressScale(c, stdioBtn, "button-press-scale", stdioBtn.Pressed())
-						stdioBtn.Scale(scale, scale)
-					}
-					if strings.EqualFold(trans, "stdio") {
-						stdioBtn.Background(ThemeOverlay(c, 0.15))
-					} else {
-						stdioBtn.Background(ThemeOverlay(c, 0.04))
-					}
-					if stdioBtn.Clicked() {
-						uiSt.mu.Lock()
-						uiSt.transportInput = "stdio"
-						uiSt.mu.Unlock()
-						st.invalidate()
-					}
-					stdioBtn.Children(func() {
-						ui.Text(c, "本地命令 (stdio)").FontSize(uiFont(TypeFootnote))
-					})
-
-					httpBtn := ui.ButtonBase(c.Key("btn-form-trans-http")).
-						Radius(RadiusXS).
-						Padding(Space1, Space4)
-					{
-						scale := motionPressScale(c, httpBtn, "button-press-scale", httpBtn.Pressed())
-						httpBtn.Scale(scale, scale)
-					}
+					transIdx := 0
 					if strings.EqualFold(trans, "http") || strings.EqualFold(trans, "sse") {
-						httpBtn.Background(ThemeOverlay(c, 0.15))
-					} else {
-						httpBtn.Background(ThemeOverlay(c, 0.04))
+						transIdx = 1
 					}
-					if httpBtn.Clicked() {
+					Segmented(c, "btn-form-trans", &transIdx, []Segment{
+						{Label: "本地命令 (stdio)"},
+						{Label: "远程地址 (http/sse)"},
+					}, func(idx int) {
 						uiSt.mu.Lock()
-						uiSt.transportInput = "http"
+						if idx == 1 {
+							uiSt.transportInput = "http"
+						} else {
+							uiSt.transportInput = "stdio"
+						}
 						uiSt.mu.Unlock()
 						st.invalidate()
-					}
-					httpBtn.Children(func() {
-						ui.Text(c, "远程地址 (http/sse)").FontSize(uiFont(TypeFootnote))
-					})
+					}).Label("传输方式")
 				})
 
 			// 3. 模式对应输入项

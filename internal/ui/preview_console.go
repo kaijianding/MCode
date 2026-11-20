@@ -206,27 +206,33 @@ func renderPreviewConsoleDrawer(c *ui.Context, s *chatState, st *browserTab, sna
 	if snap.consoleOpen {
 		ui.Column(c.Key("preview-console-drawer")).Transition(motionCollapse(c)).Height(previewConsoleDrawerHeight).FillWidth().Shrink(0).
 			Background(ThemeWindowBg(c)).BorderWidth(Hairline, 0, 0, 0).BorderColor(ThemeBorder(c)).Children(func() {
-			ui.Row(c.Key("preview-console-header")).Height(ControlMD).Gap(Space1).AlignItems(ui.Center).Children(func() {
-				for _, level := range []string{"", "log", "info", "debug", "warn", "error"} {
-					label := level
-					if label == "" {
-						label = "全部"
-					}
-					btn := ui.ButtonBase(c.Key("preview-console-filter-"+level)).Label(label).Padding(Space0, Space1)
-					btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-					btn.Scale(btnScale, btnScale)
-					if snap.consoleFilter == level {
-						btn.Background(ThemeSelected(c))
-					}
-					if btn.Clicked() {
-						previewMu.Lock()
-						if tab := previewStateForTokenLocked(s, snap.token); tab != nil {
-							tab.consoleFilter = level
-						}
-						previewMu.Unlock()
-					}
-					btn.Children(func() { ui.Text(c, label).FontSize(uiFont(TypeCaption)) })
+			ui.Row(c.Key("preview-console-header")).Height(ControlMD).AlignItems(ui.Center).Children(func() {
+				levels := []string{"", "log", "info", "debug", "warn", "error"}
+				segments := []Segment{
+					{Label: "全部"},
+					{Label: "log"},
+					{Label: "info"},
+					{Label: "debug"},
+					{Label: "warn"},
+					{Label: "error"},
 				}
+				filterIdx := 0
+				for i, level := range levels {
+					if snap.consoleFilter == level {
+						filterIdx = i
+						break
+					}
+				}
+				Segmented(c, "preview-console-filter-", &filterIdx, segments, func(idx int) {
+					if idx < 0 || idx >= len(levels) {
+						return
+					}
+					previewMu.Lock()
+					if tab := previewStateForTokenLocked(s, snap.token); tab != nil {
+						tab.consoleFilter = levels[idx]
+					}
+					previewMu.Unlock()
+				})
 			})
 			ui.Row(c.Key("preview-console-actions")).Height(ControlMD).Gap(Space2).Padding(0, Space2).AlignItems(ui.Center).Children(func() {
 				ui.Spacer(c)

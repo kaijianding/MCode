@@ -227,37 +227,7 @@ func renderFileManagerSVGPreview(c *ui.Context, tab fileManagerTabSnapshot, keyP
 
 // renderFileManagerSVGToggle 渲染 SVG 的「预览/源码」切换，与 Markdown 的切换同构。
 func renderFileManagerSVGToggle(c *ui.Context, s *chatState, tab fileManagerTabSnapshot, keyPrefix string) {
-	ui.Row(c.Key(keyPrefix+"file-manager-svg-toggle")).
-		Radius(RadiusXS).
-		Background(ThemeHover(c)).
-		Padding(Hairline, Hairline).
-		Shrink(0).
-		Children(func() {
-			renderFileManagerSVGTab(c, s, tab, keyPrefix, "预览", true, tab.svgPreview)
-			renderFileManagerSVGTab(c, s, tab, keyPrefix, "源码", false, tab.svgPreview)
-		})
-}
-
-func renderFileManagerSVGTab(c *ui.Context, s *chatState, tab fileManagerTabSnapshot, keyPrefix, label string, previewMode, current bool) {
-	btn := ui.ButtonBase(c.Key(keyPrefix+"file-manager-svg-tab-"+label)).
-		Label(label).
-		Radius(RadiusXS).
-		Padding(Space0, Space2)
-	btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-	btn.Scale(btnScale, btnScale)
-	if previewMode == current {
-		btn.Background(ThemeSurface(c))
-	} else if btn.Hovered() {
-		btn.Background(ThemeHover(c))
-	}
-	if btn.Clicked() {
-		s.setFileManagerTabSVGPreview(tab.path, previewMode)
-	}
-	btn.Children(func() {
-		color := ThemeSecondaryText(c)
-		if previewMode == current {
-			color = ThemePrimaryText(c)
-		}
-		ui.Text(c, label).FontSize(uiFont(TypeCaption)).TextColor(color)
+	renderFileManagerPreviewToggle(c, keyPrefix+"file-manager-svg-toggle", tab.svgPreview, func(preview bool) {
+		s.setFileManagerTabSVGPreview(tab.path, preview)
 	})
 }

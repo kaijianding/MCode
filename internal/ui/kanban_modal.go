@@ -388,57 +388,12 @@ func kanbanNewGoalAction(s *chatState) {
 	openKanbanNewGoalSheet(s)
 }
 
-// kanbanViewSwitchCount 是看板视图分段控件的段数：看板、列表、自动化。
-const kanbanViewSwitchCount = 2
-
-// kanbanViewSwitchSegment 返回第 i 段的文案与无障碍名（kanban-view-switch-<段>）。
-func kanbanViewSwitchSegment(i int) (label, name string) {
-	switch i {
-	case 1:
-		return "列表", "kanban-view-switch-list"
-	case 2:
-		return "自动化", "kanban-view-switch-automations"
-	default:
-		return "看板", "kanban-view-switch-kanban"
-	}
-}
-
-// kanbanViewSwitch 渲染「看板 / 列表 / 自动化」三段切换。
-// 分段按文案宽度排布，每段都带自己的 Label：
-// 切换只需按 Label 点具体分段，不必按控件宽度比例猜坐标。
+// kanbanViewSwitch 渲染「看板 / 列表」两段切换。
 func kanbanViewSwitch(c *ui.Context, viewIdx *int) ui.Element {
-	parts := ui.SegmentedBase(c.Key("kanban-view-switch"), viewIdx, kanbanViewSwitchCount)
-	track := parts.Track.
-		Label("看板视图").
-		AlignItems(ui.Stretch).
-		Padding(Space0).
-		Gap(Space0).
-		Radius(RadiusSM).
-		Background(ThemeSurface(c)).
-		BorderWidth(Hairline).
-		BorderColor(ThemeBorder(c))
-	track.Children(func() {
-		for i := 0; i < kanbanViewSwitchCount; i++ {
-			label, name := kanbanViewSwitchSegment(i)
-			seg := parts.Segment(i).
-				Label(name).
-				Padding(Space1, Space4).
-				Radius(RadiusSM).
-				Center()
-			if i == *viewIdx {
-				seg.Background(ThemeWindowBg(c))
-				applyElevation(c, seg, ElevPopover)
-			} else if seg.Hovered() {
-				seg.Background(ThemeHover(c))
-			}
-			seg.Children(func() {
-				ui.Text(c, label).
-					SingleLine().
-					TextColor(ThemePrimaryText(c))
-			})
-		}
-	})
-	return track
+	return Segmented(c, "kanban-view-switch", viewIdx, []Segment{
+		{Label: "看板"},
+		{Label: "列表"},
+	}, nil).Label("看板视图").Shrink(0)
 }
 
 // kanbanSearchRow 渲染看板自有的小号搜索行：高 24、宽 140、1pt 细边框。
@@ -670,47 +625,42 @@ func renderKanbanModalBody(c *ui.Context, s *chatState, ks *kanbanState, p kanba
 				return
 			}
 			if !p.loading && len(p.board.Tasks) == 0 && len(p.board.Goals) == 0 && !p.searching && p.goalID == "" {
-				ui.Column(c.Key("kanban-empty-box")).
-					Fill().
-					Center().
-					Gap(Space3).
-					Children(func() {
-						ui.Icon(c, IconColumns3()).
-							Size(ControlLG, ControlLG).
-							TextColor(ThemeSecondaryText(c).Alpha(0.40))
-						ui.Text(c, "还没有任务").
-							FontSize(uiFont(TypeTitle)).
-							FontWeight(500).
-							TextColor(ThemePrimaryText(c))
-						ui.Row(c.Key("kanban-empty-actions")).AlignItems(ui.Center).Gap(Space3).Children(func() {
-							Button(c.Key("kanban-empty-new-task"), ButtonOpts{
-								Icon:     IconPlus(),
-								Text:     "新建任务",
-								Label:    "空态新建任务",
-								Disabled: p.projectID == "",
-								OnClick: func() {
-									kanbanNewTaskAction(s)
-								},
-								Variant: ButtonPrimary,
-							})
+				EmptyState(c, EmptyStateProps{
+					Key:   "kanban-empty-box",
+					Icon:  IconColumns3(),
+					Title: "还没有任务",
+					Action: func() {
+						Button(c.Key("kanban-empty-new-task"), ButtonOpts{
+							Icon:     IconPlus(),
+							Text:     "新建任务",
+							Label:    "空态新建任务",
+							Disabled: p.projectID == "",
+							OnClick: func() {
+								kanbanNewTaskAction(s)
+							},
+							Variant: ButtonPrimary,
 						})
-					})
+					},
+				}).Fill().Center()
 				return
 			}
 
 			if (p.searching || p.goalID != "" || p.viewFilter == "attention") && len(p.visibleBoard.Tasks) == 0 && attentionGoals == 0 {
-				ui.Column(c.Key("kanban-search-empty")).Fill().Center().Gap(Space2).Children(func() {
-					ui.Icon(c, IconSearch()).Size(ControlSM, ControlSM).TextColor(ThemeSecondaryText(c).Alpha(0.50))
-					ui.Text(c, "未找到任务").FontSize(uiFont(TypeBody)).TextColor(ThemeSecondaryText(c))
-					Button(c.Key("kanban-clear-filters"), ButtonOpts{Text: "清除筛选", Label: "清除筛选", Variant: ButtonSecondary, OnClick: func() {
-						kanbanMu.Lock()
-						ks.searchText = ""
-						ks.goalID = ""
-						ks.viewFilter = ""
-						kanbanMu.Unlock()
-						s.invalidate()
-					}})
-				})
+				EmptyState(c, EmptyStateProps{
+					Key:   "kanban-search-empty",
+					Icon:  IconSearch(),
+					Title: "未找到任务",
+					Action: func() {
+						Button(c.Key("kanban-clear-filters"), ButtonOpts{Text: "清除筛选", Label: "清除筛选", Variant: ButtonSecondary, OnClick: func() {
+							kanbanMu.Lock()
+							ks.searchText = ""
+							ks.goalID = ""
+							ks.viewFilter = ""
+							kanbanMu.Unlock()
+							s.invalidate()
+						}})
+					},
+				}).Fill().Center()
 				return
 			}
 			if p.viewMode == config.KanbanViewList {

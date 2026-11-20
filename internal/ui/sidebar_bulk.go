@@ -107,49 +107,23 @@ func renderBulkPopover(c *ui.Context, s *chatState, projectID string) {
 				{"全部", 0},
 			}
 
-			ui.Row(c.Key("bulk-range-segmented")).
-				FillWidth().
-				Radius(RadiusSM).
-				Background(ThemeHover(c).Alpha(0.25)).
-				Padding(Space0).
-				Gap(Space0).
-				Children(func() {
-					for _, r := range ranges {
-						rVal := r
-						isSelected := (days == rVal.days)
-						btn := ui.ButtonBase(c.Key("bulk-range-" + rVal.label)).
-							Grow(1).
-							Height(ControlSM).
-							Radius(RadiusXS).
-							Center().
-							Label(rVal.label).
-							OnClick(func() {
-								s.mu.Lock()
-								s.bulkRangeDays = rVal.days
-								s.mu.Unlock()
-								s.invalidate()
-							})
-						btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-						btn.Scale(btnScale, btnScale)
-						if isSelected {
-							btn.Background(ThemeSelected(c))
-						} else if btn.Hovered() {
-							btn.Background(ThemeHover(c))
-						}
-						btn.Children(func() {
-							textColor := primaryText
-							if isSelected {
-								textColor = ThemeAccent(c)
-							}
-							t := ui.Text(c, rVal.label).
-								FontSize(sidebarFont(TypeFootnote)).
-								TextColor(textColor)
-							if isSelected {
-								t.FontWeight(600)
-							}
-						})
-					}
-				})
+			rangeIdx := -1
+			segments := make([]Segment, len(ranges))
+			for i, r := range ranges {
+				segments[i] = Segment{Label: r.label}
+				if days == r.days {
+					rangeIdx = i
+				}
+			}
+			SegmentedFill(c, "bulk-range-", &rangeIdx, segments, func(idx int) {
+				if idx < 0 || idx >= len(ranges) {
+					return
+				}
+				s.mu.Lock()
+				s.bulkRangeDays = ranges[idx].days
+				s.mu.Unlock()
+				s.invalidate()
+			}).Label("最后活跃于")
 
 			// 包含置顶与包含已休眠复选项
 			ui.Column(c.Key("bulk-checkboxes")).

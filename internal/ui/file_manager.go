@@ -721,41 +721,24 @@ func fileManagerPreviewFontSize(s *chatState) float32 {
 	return editorFontSize()
 }
 
-// renderFileManagerMarkdownToggle 渲染 Markdown 文件的「预览/源码」切换。
-func renderFileManagerMarkdownToggle(c *ui.Context, s *chatState, tab fileManagerTabSnapshot, keyPrefix string) {
-	ui.Row(c.Key(keyPrefix+"file-manager-md-toggle")).
-		Radius(RadiusXS).
-		Background(ThemeHover(c)).
-		Padding(Hairline, Hairline).
-		Shrink(0).
-		Children(func() {
-			renderFileManagerMdTab(c, s, tab, keyPrefix, "预览", true, tab.mdPreview)
-			renderFileManagerMdTab(c, s, tab, keyPrefix, "源码", false, tab.mdPreview)
-		})
+// renderFileManagerPreviewToggle 渲染文件预览区的「预览/源码」分段切换。
+func renderFileManagerPreviewToggle(c *ui.Context, key string, preview bool, onToggle func(bool)) {
+	selected := 1
+	if preview {
+		selected = 0
+	}
+	Segmented(c, key, &selected, []Segment{
+		{Label: "预览"},
+		{Label: "源码"},
+	}, func(idx int) {
+		onToggle(idx == 0)
+	}).Shrink(0)
 }
 
-// renderFileManagerMdTab 渲染 Markdown 预览/源码切换的单个页签；切换只写到本栏对应的 tab。
-func renderFileManagerMdTab(c *ui.Context, s *chatState, tab fileManagerTabSnapshot, keyPrefix, label string, previewMode, current bool) {
-	btn := ui.ButtonBase(c.Key(keyPrefix+"file-manager-md-tab-"+label)).
-		Label(label).
-		Radius(RadiusXS).
-		Padding(Space0, Space2)
-	btnScale := motionPressScale(c, btn, "button-press-scale", btn.Pressed())
-	btn.Scale(btnScale, btnScale)
-	if previewMode == current {
-		btn.Background(ThemeSurface(c))
-	} else if btn.Hovered() {
-		btn.Background(ThemeHover(c))
-	}
-	if btn.Clicked() {
-		s.setFileManagerTabMarkdownPreview(tab.path, previewMode)
-	}
-	btn.Children(func() {
-		color := ThemeSecondaryText(c)
-		if previewMode == current {
-			color = ThemePrimaryText(c)
-		}
-		ui.Text(c, label).FontSize(uiFont(TypeCaption)).TextColor(color)
+// renderFileManagerMarkdownToggle 渲染 Markdown 文件的「预览/源码」切换。
+func renderFileManagerMarkdownToggle(c *ui.Context, s *chatState, tab fileManagerTabSnapshot, keyPrefix string) {
+	renderFileManagerPreviewToggle(c, keyPrefix+"file-manager-md-toggle", tab.mdPreview, func(preview bool) {
+		s.setFileManagerTabMarkdownPreview(tab.path, preview)
 	})
 }
 

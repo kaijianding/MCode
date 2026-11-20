@@ -840,9 +840,8 @@ func TestKanbanWorkspace_DefaultListViewFromConfig(t *testing.T) {
 		return ok && tt.HasText("默认列表任务")
 	})
 
-	// 侧边栏与页头也有名为“看板”的按钮，按文本点击会命中它们；
 	// 分段控件每段都有独立 Label，直接点「看板」分段。
-	if err := tt.Click("kanban-view-switch-kanban"); err != nil {
+	if err := tt.Click("看板"); err != nil {
 		t.Fatalf("click kanban view segment failed: %v", err)
 	}
 	waitFor(t, tt, func() bool {

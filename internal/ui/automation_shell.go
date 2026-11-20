@@ -197,78 +197,86 @@ func renderAutomationScopedBody(c *ui.Context, s *chatState, p automationWorkspa
 		}
 		if len(visible) == 0 {
 			filtered := strings.TrimSpace(p.SearchText) != "" || as.filter != 0 || as.unreadOnly
-			ui.Column(c.Key("automation-empty-full")).Fill().Center().Gap(Space5).Children(func() {
-				if filtered {
-					ui.Icon(c, IconSearch()).Size(IconLG, IconLG).TextColor(ThemeSecondaryText(c))
-					ui.Text(c, "无匹配结果").TextColor(ThemePrimaryText(c))
-					Button(c.Key("automation-clear-filter"), ButtonOpts{Text: "清除筛选", Variant: ButtonSecondary, OnClick: func() {
-						as.filter = 0
-						as.unreadOnly = false
-						if p.ClearSearch != nil {
-							p.ClearSearch()
-						}
-						s.invalidate()
-					}})
-				} else {
-					ui.Icon(c, IconCalendarClock()).Size(automationEmptyIconSize, automationEmptyIconSize).TextColor(ThemeAccent(c))
-					label := "还没有自动化"
-					if p.ScopeID != "" {
-						label = "此项目没有自动化"
-					}
-					ui.Text(c, label).TextColor(ThemePrimaryText(c))
-					button := Button(c.Key("automation-empty-create"), ButtonOpts{Text: "新建自动化", Disabled: !automationCanCreate(s), Variant: ButtonPrimary, OnClick: func() {
-						requestNewAutomation(s, p.ScopeID, func(onChosen func(string)) {
-							as.pendingProjectChoice = onChosen
-							as.chooseProjectOpen = true
-							as.projectListState().reset()
-						})
-					}})
-					background := ThemeSurfacePopover(c)
-					native := flyoutHostWindow(c.Services()) != nil
-					host := c.Services()
-					appFlyoutPopover(c, "automation-choose-project", button, &as.chooseProjectOpen, nil, appFlyoutProps{Width: 320, Background: &background}, func(c *ui.Context) {
-						items := make([]searchListItem, 0, len(s.projects))
-						for _, project := range s.projects {
-							items = append(items, searchListItem{ID: project.ID, Title: project.Name})
-						}
-						card := ui.Column(c.Key("automation-project-menu"))
-						if !native {
-							card = popoverCard(c, card)
-						}
-						card.
-							Width(320).
-							Padding(Space2).
-							Gap(Space1).
-							Children(func() {
-								searchList(c, searchListProps{
-									Key:         "automation-choose-project",
-									Label:       "搜索项目",
-									Placeholder: "选择项目…",
-									Empty:       "无匹配项目",
-									Items:       items,
-									State:       as.projectListState(),
-									OnSelect: func(id string) {
-										choose := as.pendingProjectChoice
-										as.pendingProjectChoice = nil
-										as.chooseProjectOpen = false
-										closeAppFlyoutPopover(host, "automation-choose-project")
-										host.Invalidate()
-										if choose != nil {
-											choose(id)
-										}
-									},
-									OnDismiss: func() {
-										as.chooseProjectOpen = false
-										as.pendingProjectChoice = nil
-										closeAppFlyoutPopover(host, "automation-choose-project")
-										host.Invalidate()
-									},
-									Invalidate: host.Invalidate,
-								})
-							})
-					})
+			if filtered {
+				EmptyState(c, EmptyStateProps{
+					Key:   "automation-empty-full",
+					Icon:  IconSearch(),
+					Title: "无匹配结果",
+					Action: func() {
+						Button(c.Key("automation-clear-filter"), ButtonOpts{Text: "清除筛选", Variant: ButtonSecondary, OnClick: func() {
+							as.filter = 0
+							as.unreadOnly = false
+							if p.ClearSearch != nil {
+								p.ClearSearch()
+							}
+							s.invalidate()
+						}})
+					},
+				}).Fill().Center()
+			} else {
+				label := "还没有自动化"
+				if p.ScopeID != "" {
+					label = "此项目没有自动化"
 				}
-			})
+				EmptyState(c, EmptyStateProps{
+					Key:   "automation-empty-full",
+					Icon:  IconCalendarClock(),
+					Title: label,
+					Action: func() {
+						button := Button(c.Key("automation-empty-create"), ButtonOpts{Text: "新建自动化", Disabled: !automationCanCreate(s), Variant: ButtonPrimary, OnClick: func() {
+							requestNewAutomation(s, p.ScopeID, func(onChosen func(string)) {
+								as.pendingProjectChoice = onChosen
+								as.chooseProjectOpen = true
+								as.projectListState().reset()
+							})
+						}})
+						background := ThemeSurfacePopover(c)
+						native := flyoutHostWindow(c.Services()) != nil
+						host := c.Services()
+						appFlyoutPopover(c, "automation-choose-project", button, &as.chooseProjectOpen, nil, appFlyoutProps{Width: 320, Background: &background}, func(c *ui.Context) {
+							items := make([]searchListItem, 0, len(s.projects))
+							for _, project := range s.projects {
+								items = append(items, searchListItem{ID: project.ID, Title: project.Name})
+							}
+							card := ui.Column(c.Key("automation-project-menu"))
+							if !native {
+								card = popoverCard(c, card)
+							}
+							card.
+								Width(320).
+								Padding(Space2).
+								Gap(Space1).
+								Children(func() {
+									searchList(c, searchListProps{
+										Key:         "automation-choose-project",
+										Label:       "搜索项目",
+										Placeholder: "选择项目…",
+										Empty:       "无匹配项目",
+										Items:       items,
+										State:       as.projectListState(),
+										OnSelect: func(id string) {
+											choose := as.pendingProjectChoice
+											as.pendingProjectChoice = nil
+											as.chooseProjectOpen = false
+											closeAppFlyoutPopover(host, "automation-choose-project")
+											host.Invalidate()
+											if choose != nil {
+												choose(id)
+											}
+										},
+										OnDismiss: func() {
+											as.chooseProjectOpen = false
+											as.pendingProjectChoice = nil
+											closeAppFlyoutPopover(host, "automation-choose-project")
+											host.Invalidate()
+										},
+										Invalidate: host.Invalidate,
+									})
+								})
+						})
+					},
+				}).Fill().Center()
+			}
 			return
 		}
 		ui.Row(c.Key("automation-main-row")).Fill().Children(func() {

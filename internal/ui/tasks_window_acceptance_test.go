@@ -34,7 +34,7 @@ func TestTasksAcceptanceToolbarGeometry(t *testing.T) {
 			if _, ok := tt.Find("kanban-modal-header"); ok {
 				t.Fatal("出现旧顶栏")
 			}
-			for _, label := range []string{"筛选任务", "kanban-view-switch-kanban", "kanban-view-switch-list", "新建任务", "新建菜单"} {
+			for _, label := range []string{"筛选任务", "看板", "列表", "新建任务", "新建菜单"} {
 				r, ok := tt.Find(label)
 				if !ok || r.X < bar.X || r.X+r.W > bar.X+bar.W || r.Y < bar.Y || r.Y+r.H > bar.Y+bar.H {
 					t.Errorf("%s: %+v", label, r)

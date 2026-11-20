@@ -35,7 +35,7 @@ func TestKanbanHeaderButtonsStayWithinWindow(t *testing.T) {
 				}
 				labels := []string{"kanban-destination-tasks", "kanban-destination-automations", "筛选任务"}
 				if view != kanbanViewAutomations {
-					labels = append(labels, "kanban-view-switch-kanban", "kanban-view-switch-list", "新建任务", "新建菜单")
+					labels = append(labels, "看板", "列表", "新建任务", "新建菜单")
 				}
 				sidebar, found := tt.Find("tasks-sidebar")
 				if !found || sidebar.W != TasksSidebarWidth {

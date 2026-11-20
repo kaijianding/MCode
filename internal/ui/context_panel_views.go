@@ -219,11 +219,12 @@ func renderContextHeader(c *ui.Context, s *chatState) {
 				if snap.global {
 					index = 1
 				}
-				seg := ui.Segmented(c.Key("context-layer-switch"), &index, "项目", "全局")
-				seg.Label("文档层级").Width(100).Shrink(0)
-				if seg.Changed() {
-					s.switchContextLayer(index == 1)
-				}
+				Segmented(c, "context-layer-switch", &index, []Segment{
+					{Label: "项目"},
+					{Label: "全局"},
+				}, func(idx int) {
+					s.switchContextLayer(idx == 1)
+				}).Label("文档层级").Shrink(0)
 			}
 
 			Button(c.Key("context-open-finder-btn"), ButtonOpts{
@@ -321,23 +322,24 @@ func renderContextDocChip(c *ui.Context, s *chatState, doc projctx.DocInfo, sele
 	})
 }
 
-// renderContextModeSwitch 渲染 120 宽的「编辑 / 预览」分段控件。
+// renderContextModeSwitch 渲染「编辑 / 预览」分段控件。
 func renderContextModeSwitch(c *ui.Context, s *chatState, editing bool) {
 	index := 1
 	if editing {
 		index = 0
 	}
-	seg := ui.Segmented(c.Key("context-mode-switch"), &index, "编辑", "预览")
-	seg.Label("编辑或预览").Width(120).Shrink(0)
-	if seg.Changed() {
+	Segmented(c, "context-mode-switch", &index, []Segment{
+		{Label: "编辑"},
+		{Label: "预览"},
+	}, func(idx int) {
 		cp := getContextPanelState(s)
 		if cp != nil {
 			contextPanelMu.Lock()
-			cp.editing = index == 0
+			cp.editing = idx == 0
 			contextPanelMu.Unlock()
 		}
 		s.invalidate()
-	}
+	}).Label("编辑或预览").Shrink(0)
 }
 
 // renderContextConflictBanner 渲染并发冲突横幅（danger 12% 背景）。
