@@ -669,6 +669,7 @@ func (b *MemoryBackend) BranchThread(ctx context.Context, p wire.ThreadsBranchPa
 		SwarmBeesProvider: orig.summary.SwarmBeesProvider,
 		SwarmBeesModel:    orig.summary.SwarmBeesModel,
 		SwarmBeesEffort:   orig.summary.SwarmBeesEffort,
+		SwarmBeesAccount:  orig.summary.SwarmBeesAccount,
 		// 记录分叉来源（源会话与分叉点消息）：源会话之后被删除也保留，会话时间线据此显示来源条。
 		ForkedFromThreadID:  optionalString(p.ThreadID),
 		ForkedFromMessageID: optionalString(p.MessageID),
@@ -921,6 +922,7 @@ func (b *MemoryBackend) ForwardThread(ctx context.Context, p wire.ThreadsContinu
 		SwarmBeesProvider: orig.summary.SwarmBeesProvider,
 		SwarmBeesModel:    orig.summary.SwarmBeesModel,
 		SwarmBeesEffort:   orig.summary.SwarmBeesEffort,
+		SwarmBeesAccount:  orig.summary.SwarmBeesAccount,
 		// 记录转发来源：ForkedFromThreadID 非空且 ForkedFromMessageID 为空表示转发会话。
 		ForkedFromThreadID: optionalString(p.ThreadID),
 	}

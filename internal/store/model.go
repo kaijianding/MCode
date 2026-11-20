@@ -34,6 +34,7 @@ type Thread struct {
 	BeesProvider      string     `json:"heads_provider"`
 	BeesModel         string     `json:"heads_model"`
 	BeesEffort        string     `json:"heads_effort"`
+	BeesAccount       string     `json:"bees_account"` // 子代理显式指定的 agy 账号 ID；空串表示沿用自动路由
 	FastMode          bool       `json:"fast_mode"`
 	SpeedTier         string     `json:"speed_tier"`
 	IsDormant         bool       `json:"is_settled"`

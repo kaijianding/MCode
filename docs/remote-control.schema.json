@@ -2997,6 +2997,12 @@
             "null"
           ]
         },
+        "swarmBeesAccount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "isProvisional": {
           "type": "boolean"
         },

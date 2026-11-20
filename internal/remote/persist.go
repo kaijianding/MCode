@@ -115,6 +115,7 @@ func threadToStore(t wire.ThreadSummary, sessionID string, sortOrder int64, cont
 		BeesProvider:    derefString(t.SwarmBeesProvider),
 		BeesModel:       derefString(t.SwarmBeesModel),
 		BeesEffort:      derefString(t.SwarmBeesEffort),
+		BeesAccount:     derefString(t.SwarmBeesAccount),
 
 		FastMode:  t.FastMode,
 		SpeedTier: derefString(t.SpeedTier),
@@ -217,6 +218,7 @@ func threadFromStore(t store.Thread) wire.ThreadSummary {
 		SwarmBeesProvider: optionalString(t.BeesProvider),
 		SwarmBeesModel:    optionalString(t.BeesModel),
 		SwarmBeesEffort:   optionalString(t.BeesEffort),
+		SwarmBeesAccount:  optionalString(t.BeesAccount),
 		FastMode:          t.FastMode,
 		SpeedTier:         optionalString(t.SpeedTier),
 		MCPDisabled:       t.MCPDisabled,

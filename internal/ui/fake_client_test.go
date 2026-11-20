@@ -295,8 +295,10 @@ type FakeClient struct {
 	addProjectCalls     []string
 	setRuntimeModeCalls   []setRuntimeModeCall
 	SetAgentCalls         []SetAgentCall
-	setThreadAccountCalls []setThreadAccountCall
-	setThreadAccountErr   error
+	setThreadAccountCalls     []setThreadAccountCall
+	setThreadAccountErr       error
+	setThreadBeesAccountCalls []setThreadAccountCall
+	setThreadBeesAccountErr   error
 	composerPrefsCalls    []composerPrefsCall
 	composerPrefsHook   func(string, ComposerPrefs) error
 	fastModeCalls       []FastModeCall
@@ -1468,6 +1470,32 @@ func (f *FakeClient) SetThreadAccountCalls() []setThreadAccountCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]setThreadAccountCall(nil), f.setThreadAccountCalls...)
+}
+
+func (f *FakeClient) SetThreadBeesAccount(threadID, accountID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setThreadBeesAccountCalls = append(f.setThreadBeesAccountCalls, setThreadAccountCall{
+		ThreadID:  threadID,
+		AccountID: accountID,
+	})
+	if f.setThreadBeesAccountErr != nil {
+		return f.setThreadBeesAccountErr
+	}
+	for _, list := range f.threads {
+		for i := range list {
+			if list[i].ID == threadID {
+				list[i].BeesAccount = accountID
+			}
+		}
+	}
+	return nil
+}
+
+func (f *FakeClient) SetThreadBeesAccountCalls() []setThreadAccountCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]setThreadAccountCall(nil), f.setThreadBeesAccountCalls...)
 }
 
 func (f *FakeClient) RenameThread(threadID, title string) error {

@@ -655,6 +655,13 @@ func (c *Client) SetThreadAccount(threadID, accountID string) error {
 	return err
 }
 
+// SetThreadBeesAccount 调用 backend.SetThreadBeesAccount 设置指定主会话为子代理显式绑定的账号 ID；
+// accountID 为空串表示恢复自动路由。
+func (c *Client) SetThreadBeesAccount(threadID, accountID string) error {
+	_, err := c.backend.SetThreadBeesAccount(context.Background(), threadID, accountID)
+	return err
+}
+
 // RenameThread 调用 backend.UpdateThread 更新会话标题。
 func (c *Client) RenameThread(threadID, title string) error {
 	ctx := context.Background()

@@ -120,6 +120,7 @@ type Thread struct {
 	BeesProvider                 string // Swarm bee 使用的供应商，空为跟随 Lead
 	BeesModel                    string // Swarm bee 使用的模型，空为默认
 	BeesEffort                   string // Swarm bee 推理强度，空为默认
+	BeesAccount                  string // Swarm bee 显式指定的 agy 账号 ID，空表示沿用自动路由
 	Persona                      string // 线程人设 id：空表示从未设置，"none" 表示用户选了无人设
 	BeeTiers                     string // 档位模型覆盖 JSON（map[string]SwarmTierOverride，空表示无覆盖）
 	PairID                       string // 会话选中的 Swarm 配对 ID，空表示未显式选择（按模型推断）
@@ -1117,6 +1118,8 @@ type Client interface {
 	SetThreadAgent(threadID, provider, model string) error
 	// SetThreadAccount 设置指定会话显式使用的账号 ID，空串表示恢复自动路由。
 	SetThreadAccount(threadID, accountID string) error
+	// SetThreadBeesAccount 设置指定主会话为子代理显式使用的账号 ID，空串表示恢复自动路由。
+	SetThreadBeesAccount(threadID, accountID string) error
 	// RenameThread 重命名指定会话。
 	RenameThread(threadID, title string) error
 	// SetThreadPinned 设置指定会话的置顶状态。

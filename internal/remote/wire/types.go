@@ -308,6 +308,7 @@ type ThreadSummary struct {
 	SwarmBeesProvider *string `json:"swarmBeesProvider"`
 	SwarmBeesModel    *string `json:"swarmBeesModel"`
 	SwarmBeesEffort   *string `json:"swarmBeesEffort"`
+	SwarmBeesAccount  *string `json:"swarmBeesAccount,omitempty"`
 	IsProvisional     bool    `json:"isProvisional,omitempty"`
 	ParentThreadID    *string `json:"parentThreadID,omitempty"`
 	IsHelper          bool    `json:"isHelper,omitempty"`

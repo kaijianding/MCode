@@ -1240,12 +1240,8 @@ func quotaStripGroupTooltip(name string, plan quotaStripPlan) string {
 	return tooltip
 }
 
-// agyAccountSelectable 判断当前会话与额度窗口是否满足 agy 账号选择条件：
-// 仅当当前线程 Provider == "agy"、点击的是 agy 组，且存在至少 2 个未停用且 AccountID 非空的不同账号时为真。
-func agyAccountSelectable(th *Thread, provider string, windows []ProviderQuotaWindow) bool {
-	if th == nil || th.Provider != "agy" || provider != "agy" {
-		return false
-	}
+// agyQuotaWindowsHaveMultipleAccounts 判断额度窗口里是否存在至少 2 个未停用且 AccountID 非空的不同账号。
+func agyQuotaWindowsHaveMultipleAccounts(windows []ProviderQuotaWindow) bool {
 	seen := make(map[string]struct{}, 4)
 	for _, w := range windows {
 		id := strings.TrimSpace(w.AccountID)
@@ -1258,6 +1254,15 @@ func agyAccountSelectable(th *Thread, provider string, windows []ProviderQuotaWi
 		}
 	}
 	return false
+}
+
+// agyAccountSelectable 判断当前会话与额度窗口是否满足 agy 账号选择条件：
+// 仅当当前线程 Provider == "agy"、点击的是 agy 组，且存在至少 2 个未停用且 AccountID 非空的不同账号时为真。
+func agyAccountSelectable(th *Thread, provider string, windows []ProviderQuotaWindow) bool {
+	if th == nil || th.Provider != "agy" || provider != "agy" {
+		return false
+	}
+	return agyQuotaWindowsHaveMultipleAccounts(windows)
 }
 
 // agyAccountLocked 判断 agy 账号选择器是否锁定：
@@ -1457,6 +1462,84 @@ func selectComposerAgyAccount(s *chatState, th *Thread, provider, targetThreadID
 			return
 		}
 		s.loadComposerQuotaForProvider(provider, quotaThreadID, quotaModel, true)
+	}()
+}
+
+// selectComposerBeesAccount 乐观更新当前主会话的 BeesAccount，收起额度弹层，并在后台下发 SetThreadBeesAccount；
+// 失败时回滚 BeesAccount 并弹提示。
+func selectComposerBeesAccount(s *chatState, th *Thread, targetAccountID string) {
+	if s == nil {
+		return
+	}
+	s.composerView.quotaOpen = false
+	s.composerView.quotaPopoverProvider = ""
+
+	leadID := ""
+	if th != nil {
+		leadID = th.ID
+	}
+	if leadID == "" {
+		leadID = s.selectedThreadID
+	}
+
+	prevAccount := ""
+	if th != nil {
+		prevAccount = th.BeesAccount
+		th.BeesAccount = targetAccountID
+	}
+	if leadID == "" {
+		s.invalidate()
+		return
+	}
+
+	s.mu.Lock()
+	foundPrev := false
+	for i := range s.threads {
+		if s.threads[i].ID == leadID {
+			prevAccount = s.threads[i].BeesAccount
+			foundPrev = true
+			s.threads[i].BeesAccount = targetAccountID
+			break
+		}
+	}
+	for _, list := range s.threadsByProj {
+		for i := range list {
+			if list[i].ID == leadID {
+				if !foundPrev {
+					prevAccount = list[i].BeesAccount
+					foundPrev = true
+				}
+				list[i].BeesAccount = targetAccountID
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	s.invalidate()
+
+	if s.client == nil {
+		return
+	}
+	go func() {
+		if err := s.client.SetThreadBeesAccount(leadID, targetAccountID); err != nil {
+			s.mu.Lock()
+			for i := range s.threads {
+				if s.threads[i].ID == leadID && s.threads[i].BeesAccount == targetAccountID {
+					s.threads[i].BeesAccount = prevAccount
+				}
+			}
+			for _, list := range s.threadsByProj {
+				for i := range list {
+					if list[i].ID == leadID && list[i].BeesAccount == targetAccountID {
+						list[i].BeesAccount = prevAccount
+					}
+				}
+			}
+			s.mu.Unlock()
+			s.setToast("切换账号失败: " + err.Error())
+			s.invalidate()
+			return
+		}
 	}()
 }
 
@@ -2207,20 +2290,41 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 			}
 			var accountSectionHeight float32
 			listOpts := quotaGroupListOptions{HideSingleGroupTitle: true}
-			if agyAccountSelectable(th, provider, windows) {
+			isBeeGroup := s != nil && !s.embeddedBee && th != nil && (g.model != "" || (g.threadID != "" && g.threadID != th.ID))
+			var accountSelectable bool
+			if isBeeGroup {
+				accountSelectable = provider == "agy" && agyQuotaWindowsHaveMultipleAccounts(windows)
+			} else {
+				accountSelectable = agyAccountSelectable(th, provider, windows)
+			}
+			if accountSelectable {
 				options := agyAccountOptions(provider, windows)
-				hasMessages, isRunning := composerAgyAccountLockInputs(s, th)
-				locked := agyAccountLocked(th, hasMessages, isRunning, windows)
-				currentAccountID := ""
-				if th != nil {
-					currentAccountID = strings.TrimSpace(th.Account)
-				}
-				targetThreadID := g.threadID
-				if targetThreadID == "" && th != nil {
-					targetThreadID = th.ID
-				}
-				if targetThreadID == "" && s != nil {
-					targetThreadID = s.selectedThreadID
+				var (
+					locked           bool
+					currentAccountID string
+					onSelect         func(accountID string)
+				)
+				if isBeeGroup {
+					currentAccountID = strings.TrimSpace(th.BeesAccount)
+					onSelect = func(accountID string) {
+						selectComposerBeesAccount(s, th, accountID)
+					}
+				} else {
+					hasMessages, isRunning := composerAgyAccountLockInputs(s, th)
+					locked = agyAccountLocked(th, hasMessages, isRunning, windows)
+					if th != nil {
+						currentAccountID = strings.TrimSpace(th.Account)
+					}
+					targetThreadID := g.threadID
+					if targetThreadID == "" && th != nil {
+						targetThreadID = th.ID
+					}
+					if targetThreadID == "" && s != nil {
+						targetThreadID = s.selectedThreadID
+					}
+					onSelect = func(accountID string) {
+						selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, accountID)
+					}
 				}
 				accountIDByName := make(map[string]string, len(options))
 				selectedAccountName := ""
@@ -2263,7 +2367,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 					if id == "" {
 						return
 					}
-					selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, id)
+					onSelect(id)
 				}
 				ui.Column(c.Key("composer-quota-account-section")).
 					FillWidth().
@@ -2281,7 +2385,7 @@ func renderComposerQuotaPopover(c *ui.Context, s *chatState, th *Thread, provide
 									Checked:  currentAccountID == "",
 									Disabled: locked,
 									OnClick: func() {
-										selectComposerAgyAccount(s, th, provider, targetThreadID, g.threadID, g.model, "")
+										onSelect("")
 									},
 								})
 							})

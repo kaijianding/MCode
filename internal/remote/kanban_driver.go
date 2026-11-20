@@ -37,7 +37,7 @@ func (b *MemoryBackend) ProjectRoot(ctx context.Context, projectID string) (stri
 // StartSession 实现 kanban.SessionDriver 接口，为指定项目新建会话、绑定独立工作目录、更新标题，
 // 并在 Prompt 非空时发送首条指令；Prompt 为空（如总管会话）时只建会话不发消息，由调用方另行写开场白。
 func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequest) (string, error) {
-	var provider, model, runtimeMode string
+	var provider, model, runtimeMode, beesAccount string
 	var prefs ThreadComposerPrefs
 	if req.LeadThreadID != "" {
 		lead, err := b.GetThread(ctx, req.LeadThreadID)
@@ -52,6 +52,7 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 				model = derefString(lead.Model)
 			}
 		}
+		beesAccount = derefString(lead.SwarmBeesAccount)
 		runtimeMode = lead.RuntimeMode
 		prefs.InteractionMode = normalizeInteractionMode(lead.InteractionMode)
 		prefs.Effort = derefString(lead.SwarmBeesEffort)
@@ -89,10 +90,14 @@ func (b *MemoryBackend) StartSession(ctx context.Context, req kanban.SessionRequ
 	}
 	// 系统发起的会话（编排子代理、看板任务、自动化）不是用户主动新建的：
 	// 不读也不写模型记忆，它们带的子代理/档位模型不能顶替用户的新会话选择。
+	composerOpts := &wire.ComposerOptions{Provider: optionalString(provider)}
+	if provider == "agy" && beesAccount != "" {
+		composerOpts.Account = optionalString(beesAccount)
+	}
 	res, err := b.createThread(ctx, wire.ThreadCreateParams{
 		ProjectID:   req.ProjectID,
 		ActionID:    createActionID,
-		Options:     &wire.ComposerOptions{Provider: optionalString(provider)},
+		Options:     composerOpts,
 		Model:       optionalString(model),
 		RuntimeMode: optionalString(runtimeMode),
 	}, false, init)

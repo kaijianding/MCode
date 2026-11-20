@@ -795,6 +795,40 @@ func (b *MemoryBackend) SetThreadComposerPrefs(ctx context.Context, threadID str
 	return currentSummary, nil
 }
 
+// SetThreadBeesAccount 更新会话为子代理显式指定的 agy 账号 ID 并写穿到 store；空串表示沿用自动路由。
+// 主会话在运行中也允许设置，仅影响此后新建的 agy 子代理。仅供桌面端直接调用，不注册为 RPC。
+func (b *MemoryBackend) SetThreadBeesAccount(ctx context.Context, threadID, accountID string) (wire.ThreadSummary, error) {
+	b.mu.Lock()
+	td, ok := b.threads[threadID]
+	if !ok {
+		b.mu.Unlock()
+		return wire.ThreadSummary{}, &wire.RPCError{
+			Code:    wire.ErrCodeResourceNotFound,
+			Message: fmt.Sprintf("thread %s not found", threadID),
+		}
+	}
+	if accountID != "" {
+		if rpcErr := b.validateExplicitAccountLocked("agy", accountID); rpcErr != nil {
+			b.mu.Unlock()
+			return wire.ThreadSummary{}, rpcErr
+		}
+	}
+	// 先落盘再更新内存，保存失败不得向界面报告成功；锁内写入保证并发更新顺序一致。
+	if b.store != nil {
+		if err := b.store.UpdateThreadBeesAccount(ctx, threadID, accountID); err != nil {
+			b.mu.Unlock()
+			return wire.ThreadSummary{}, err
+		}
+	}
+	td.summary.SwarmBeesAccount = optionalString(accountID)
+	currentSummary := b.summaryForPublishLocked(td)
+	b.mu.Unlock()
+
+	b.hub.Publish(threadID, nil, nil, currentSummary)
+
+	return currentSummary, nil
+}
+
 // SetThreadMCPDisabled 更新会话级外部 MCP 禁用名单（agent:scope:name 键）并广播会话摘要。
 // 空名单表示恢复为「沿用全局设置」。名单写穿到 store，重启后由 AttachStore 还原。
 func (b *MemoryBackend) SetThreadMCPDisabled(ctx context.Context, threadID string, keys []string) (wire.ThreadSummary, error) {

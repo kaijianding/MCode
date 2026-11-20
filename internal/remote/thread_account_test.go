@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mcode/internal/harness"
+	"mcode/internal/kanban"
 	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/remote/wire"
 	"mcode/internal/store"
@@ -296,5 +297,143 @@ func TestThreadAccount_SchemaAndDispatcherValidation(t *testing.T) {
 	}
 	if updateResp.Result.Thread.Account != "" {
 		t.Fatalf("threads.update 清空后期望空串，实际 %q", updateResp.Result.Thread.Account)
+	}
+}
+
+func TestStartSessionInheritsLeadBeesAccount(t *testing.T) {
+	ctx := context.Background()
+	b, _, projID, accID := setupThreadAccountBackend(t)
+	b.RegisterHarness(&mockHarness{kind: "claude"})
+
+	claudeProv := "claude"
+	leadRes, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID: projID,
+		ActionID:  newUUID(),
+		Options:   &wire.ComposerOptions{Provider: &claudeProv},
+	})
+	if err != nil {
+		t.Fatalf("CreateThread 失败: %v", err)
+	}
+	if _, err := b.SetThreadComposerPrefs(ctx, leadRes.ThreadID, ThreadComposerPrefs{
+		InteractionMode: "build",
+		BeesProvider:    "agy",
+	}); err != nil {
+		t.Fatalf("SetThreadComposerPrefs 失败: %v", err)
+	}
+	if _, err := b.SetThreadBeesAccount(ctx, leadRes.ThreadID, accID); err != nil {
+		t.Fatalf("SetThreadBeesAccount 失败: %v", err)
+	}
+
+	agyBeeID, err := b.StartSession(ctx, kanban.SessionRequest{
+		LeadThreadID: leadRes.ThreadID,
+		ProjectID:    projID,
+		WorkDir:      t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("StartSession(agy) 失败: %v", err)
+	}
+	agyBee, err := b.GetThread(ctx, agyBeeID)
+	if err != nil {
+		t.Fatalf("GetThread(agyBee) 失败: %v", err)
+	}
+	if agyBee.Provider != "agy" || agyBee.Account != accID {
+		t.Fatalf("agy bee 期望 Provider=agy Account=%q，实际 Provider=%q Account=%q", accID, agyBee.Provider, agyBee.Account)
+	}
+
+	codexBeeID, err := b.StartSession(ctx, kanban.SessionRequest{
+		LeadThreadID: leadRes.ThreadID,
+		ProjectID:    projID,
+		WorkDir:      t.TempDir(),
+		Provider:     "codex",
+	})
+	if err != nil {
+		t.Fatalf("StartSession(codex) 失败: %v", err)
+	}
+	codexBee, err := b.GetThread(ctx, codexBeeID)
+	if err != nil {
+		t.Fatalf("GetThread(codexBee) 失败: %v", err)
+	}
+	if codexBee.Provider != "codex" || codexBee.Account != "" {
+		t.Fatalf("非 agy bee 期望 Provider=codex Account 为空，实际 Provider=%q Account=%q", codexBee.Provider, codexBee.Account)
+	}
+}
+
+func TestSetThreadBeesAccountPersists(t *testing.T) {
+	ctx := context.Background()
+	b, s, projID, accID := setupThreadAccountBackend(t)
+	b.RegisterHarness(&mockHarness{kind: "claude"})
+
+	claudeProv := "claude"
+	leadRes, err := b.CreateThread(ctx, wire.ThreadCreateParams{
+		ProjectID: projID,
+		ActionID:  newUUID(),
+		Options:   &wire.ComposerOptions{Provider: &claudeProv},
+	})
+	if err != nil {
+		t.Fatalf("CreateThread 失败: %v", err)
+	}
+
+	// 主会话运行中也允许设置 BeesAccount。
+	b.mu.Lock()
+	b.threads[leadRes.ThreadID].summary.IsRunning = true
+	b.mu.Unlock()
+
+	updated, err := b.SetThreadBeesAccount(ctx, leadRes.ThreadID, accID)
+	if err != nil {
+		t.Fatalf("SetThreadBeesAccount 失败: %v", err)
+	}
+	if derefString(updated.SwarmBeesAccount) != accID {
+		t.Fatalf("返回值期望 SwarmBeesAccount=%q，实际 %q", accID, derefString(updated.SwarmBeesAccount))
+	}
+
+	got, err := b.GetThread(ctx, leadRes.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThread 失败: %v", err)
+	}
+	if derefString(got.SwarmBeesAccount) != accID {
+		t.Fatalf("GetThread 期望 SwarmBeesAccount=%q，实际 %q", accID, derefString(got.SwarmBeesAccount))
+	}
+
+	stored, err := s.GetThread(ctx, leadRes.ThreadID)
+	if err != nil {
+		t.Fatalf("store.GetThread 失败: %v", err)
+	}
+	if stored.BeesAccount != accID {
+		t.Fatalf("store 期望 BeesAccount=%q，实际 %q", accID, stored.BeesAccount)
+	}
+
+	// 重建 backend 从同一 store 恢复后仍能读到 SwarmBeesAccount。
+	hub2 := NewStreamHub(StreamHubOptions{Interval: 5 * time.Millisecond})
+	defer hub2.Close()
+	b2 := NewMemoryBackend(hub2)
+	defer b2.Close()
+	if err := b2.AttachStore(ctx, s); err != nil {
+		t.Fatalf("重建 AttachStore 失败: %v", err)
+	}
+	reloaded, err := b2.GetThread(ctx, leadRes.ThreadID)
+	if err != nil {
+		t.Fatalf("重建后 GetThread 失败: %v", err)
+	}
+	if derefString(reloaded.SwarmBeesAccount) != accID {
+		t.Fatalf("重建后期望 SwarmBeesAccount=%q，实际 %q", accID, derefString(reloaded.SwarmBeesAccount))
+	}
+
+	// 清空后同样落盘并可从 GetThread 与 store 读回空串。
+	if _, err := b.SetThreadBeesAccount(ctx, leadRes.ThreadID, ""); err != nil {
+		t.Fatalf("SetThreadBeesAccount 清空失败: %v", err)
+	}
+	cleared, err := b.GetThread(ctx, leadRes.ThreadID)
+	if err != nil {
+		t.Fatalf("清空后 GetThread 失败: %v", err)
+	}
+	if derefString(cleared.SwarmBeesAccount) != "" {
+		t.Fatalf("清空后期望 SwarmBeesAccount 为空，实际 %q", derefString(cleared.SwarmBeesAccount))
+	}
+	storedCleared, err := s.GetThread(ctx, leadRes.ThreadID)
+	if err != nil {
+		t.Fatalf("清空后 store.GetThread 失败: %v", err)
+	}
+	if storedCleared.BeesAccount != "" {
+		t.Fatalf("清空后 store 期望 BeesAccount 为空，实际 %q", storedCleared.BeesAccount)
 	}
 }

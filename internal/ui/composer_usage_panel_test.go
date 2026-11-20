@@ -813,3 +813,91 @@ func TestComposerQuotaPopoverAccountsMergedIntoList(t *testing.T) {
 		t.Fatalf("locked 时点击不应发起新的 SetThreadAccount 请求，calls=%+v", calls)
 	}
 }
+
+func TestComposerQuotaPopoverBeesAccountSelect(t *testing.T) {
+	th := Thread{
+		ID:           "lead-1",
+		ProjectID:    "p1",
+		Provider:     "claude",
+		BeesProvider: "agy",
+		BeesModel:    "gemini-2.5-pro",
+		IsRunning:    true,
+	}
+	fake, s := newAgyAccountTestState(t, th, agyAccountTestWindows(32))
+	SetChatQuotaWindowsForProvider(s, "agy#gemini-2.5-pro", agyAccountTestWindows(32))
+	t.Cleanup(func() { SetChatQuotaWindowsForProvider(s, "agy#gemini-2.5-pro", nil) })
+
+	// 即使主会话已有消息且正在运行，子代理组账号选择器仍可点选。
+	s.mu.Lock()
+	s.messages = []Message{{ID: "m1", Role: "user", Text: "hello"}}
+	s.mu.Unlock()
+	s.composerView.quotaOpen = true
+	s.composerView.quotaPopoverProvider = "agy"
+
+	beeGroup := quotaStripGroup{provider: "agy", model: "gemini-2.5-pro"}
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderComposerQuotaPopover(c, s, currentTestThreadSnapshot(s, th.ID, th), "agy", 0, beeGroup)
+	}, 480, 480)
+
+	autoBtn, ok := tt.AccessByRole(ui.RoleButton, "自动")
+	if !ok || autoBtn.Disabled {
+		t.Fatalf("初始状态下「自动」应可用: ok=%v node=%+v", ok, autoBtn)
+	}
+	if got := countRightSlotInk(tt.Image(), autoBtn.Bounds); got == 0 {
+		t.Fatalf("初始状态下 BeesAccount 为空应勾选「自动」，右侧像素=%d", got)
+	}
+	personalBtn, ok := tt.AccessByRole(ui.RoleButton, "个人账号")
+	if !ok || personalBtn.Disabled || personalBtn.Checked {
+		t.Fatalf("初始状态下「个人账号」应可用且未选中: ok=%v node=%+v", ok, personalBtn)
+	}
+	workBtn, ok := tt.AccessByRole(ui.RoleButton, "工作账号")
+	if !ok || workBtn.Disabled || workBtn.Checked {
+		t.Fatalf("初始状态下「工作账号」应可用且未选中: ok=%v node=%+v", ok, workBtn)
+	}
+
+	if err := tt.Click("工作账号"); err != nil {
+		t.Fatalf("点击「工作账号」失败: %v", err)
+	}
+	if s.composerView.quotaOpen || s.composerView.quotaPopoverProvider != "" {
+		t.Fatalf("切换子代理账号后应关闭弹层，open=%v provider=%q", s.composerView.quotaOpen, s.composerView.quotaPopoverProvider)
+	}
+	if got := currentTestThreadSnapshot(s, th.ID, th).BeesAccount; got != "acc-2" {
+		t.Fatalf("点击「工作账号」后线程 BeesAccount = %q, want %q", got, "acc-2")
+	}
+	waitFor(t, tt, func() bool {
+		calls := fake.SetThreadBeesAccountCalls()
+		return len(calls) == 1 && calls[0].ThreadID == "lead-1" && calls[0].AccountID == "acc-2"
+	})
+
+	// 重新打开并渲染弹层，验证选中态跟随 BeesAccount。
+	s.composerView.quotaOpen = true
+	s.composerView.quotaPopoverProvider = "agy"
+	tt.Frame()
+	workBtn, ok = tt.AccessByRole(ui.RoleButton, "工作账号")
+	if !ok || !workBtn.Checked {
+		t.Fatalf("选中 acc-2 后「工作账号」应为 Checked: ok=%v node=%+v", ok, workBtn)
+	}
+	if autoBtn, ok = tt.AccessByRole(ui.RoleButton, "自动"); !ok {
+		t.Fatalf("选中 acc-2 后找不到「自动」按钮")
+	} else if got := countRightSlotInk(tt.Image(), autoBtn.Bounds); got != 0 {
+		t.Fatalf("选中 acc-2 后「自动」不应显示勾选，右侧像素=%d", got)
+	}
+
+	// 再点「自动」可切回空串。
+	if err := tt.Click("自动"); err != nil {
+		t.Fatalf("点击「自动」失败: %v", err)
+	}
+	if got := currentTestThreadSnapshot(s, th.ID, th).BeesAccount; got != "" {
+		t.Fatalf("点击「自动」后线程 BeesAccount 应为空，实际=%q", got)
+	}
+	waitFor(t, tt, func() bool {
+		calls := fake.SetThreadBeesAccountCalls()
+		return len(calls) == 2 && calls[1].ThreadID == "lead-1" && calls[1].AccountID == ""
+	})
+	tt.Frame()
+	if autoBtn, ok = tt.AccessByRole(ui.RoleButton, "自动"); !ok {
+		t.Fatalf("切回自动后找不到「自动」按钮")
+	} else if got := countRightSlotInk(tt.Image(), autoBtn.Bounds); got == 0 {
+		t.Fatalf("切回自动后「自动」应显示勾选，右侧像素=%d", got)
+	}
+}
