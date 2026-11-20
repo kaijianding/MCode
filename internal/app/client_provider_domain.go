@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"mcode/internal/config"
 	"mcode/internal/providers/acp"
 	"mcode/internal/providers/agy/accounts"
 	"mcode/internal/providers/agy/quota"
@@ -244,7 +245,7 @@ func (c *Client) codexMagpieEndpoint(ctx context.Context, threadID string) (base
 		return "", "", false, codex.RateLimits{}, err
 	}
 	if limits.Source == codex.QuotaSourceMagpie && strings.TrimSpace(limits.GatewayBaseURL) != "" {
-		return limits.GatewayBaseURL, limits.GatewayToken, true, limits, nil
+		return magpieV1BaseURL(limits.GatewayBaseURL), limits.GatewayToken, true, limits, nil
 	}
 	return "", "", false, limits, nil
 }
@@ -299,17 +300,23 @@ func (c *Client) ProviderQuota(ctx context.Context, provider string) ([]mcodeui.
 		return c.engineQuotaWindows(ctx, provider)
 	}
 	if provider == "codex" {
-		threadID := mcodeui.QuotaThread(ctx)
+		threadID := strings.TrimSpace(mcodeui.QuotaThread(ctx))
 		baseURL, token, magpie, limits, err := c.codexMagpieEndpoint(ctx, threadID)
 		if err != nil {
 			return nil, err
 		}
 		if magpie {
+			explicitModel := strings.TrimSpace(mcodeui.QuotaModel(ctx))
+			if threadID == "" && explicitModel == "" {
+				endpointID := c.codexQuotaEndpointID(baseURL, token)
+				models := c.magpieQuotaAssignedModels(config.ProviderCodex, endpointID)
+				return c.readMagpieQuotaWindowsForModels(ctx, baseURL, token, models, "codex")
+			}
 			sessionID := ""
 			if threadID != "" && c.agySessionForThread != nil {
 				sessionID = c.agySessionForThread(ctx, threadID)
 			}
-			model := strings.TrimSpace(mcodeui.QuotaModel(ctx))
+			model := explicitModel
 			if model == "" && threadID != "" {
 				if current, modelErr := readCodexThreadModel(ctx, c.backend, threadID); modelErr == nil {
 					model = strings.TrimSpace(current)
@@ -324,7 +331,7 @@ func (c *Client) ProviderQuota(ctx context.Context, provider string) ([]mcodeui.
 				}
 			}
 			if model == "" {
-				model = c.magpieQuotaDefaultModel("codex", c.codexQuotaEndpointID(baseURL))
+				model = c.magpieQuotaDefaultModel("codex", c.codexQuotaEndpointID(baseURL, token))
 			}
 			return c.readMagpieQuotaWindows(ctx, baseURL, token, "codex", sessionID, model)
 		}

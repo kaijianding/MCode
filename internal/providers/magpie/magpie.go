@@ -311,6 +311,43 @@ func ModelProvider(ctx context.Context, baseURL, apiKey, modelID string) (string
 	return "", false
 }
 
+// ModelProviders 从缓存的模型目录批量解析模型各自所属的上游供应商，按输入顺序去重返回。
+func ModelProviders(ctx context.Context, baseURL, apiKey string, modelIDs []string) []string {
+	ids := make([]string, 0, len(modelIDs))
+	for _, id := range modelIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	models, err := FetchModels(ctx, baseURL, apiKey)
+	if err != nil {
+		return nil
+	}
+	byID := make(map[string]string, len(models))
+	for _, model := range models {
+		if _, exists := byID[model.ID]; !exists {
+			byID[model.ID] = strings.ToLower(strings.TrimSpace(model.Provider))
+		}
+	}
+	seen := make(map[string]struct{}, len(ids))
+	var providers []string
+	for _, id := range ids {
+		provider := byID[id]
+		if provider == "" {
+			continue
+		}
+		if _, ok := seen[provider]; ok {
+			continue
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	return providers
+}
+
 // RefreshModels 绕过缓存重新读取模型目录，成功后覆盖缓存；失败时保留未过期的成功缓存，错误原样返回。
 func RefreshModels(ctx context.Context, baseURL, apiKey string) ([]Model, error) {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")

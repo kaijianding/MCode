@@ -185,3 +185,187 @@ func TestProviderQuotaClaudeOtherUpstream(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderQuotaCodexMagpieAssignedModels(t *testing.T) {
+	multiQuotaJSON := `{"data":[
+		{"provider":"claude","user":"claude-a","windows":[{"name":"5 hours","used":10}]},
+		{"provider":"codex","user":"codex-a","windows":[{"name":"5 hours","used":20}]},
+		{"provider":"codex","user":"codex-b","windows":[{"name":"5 hours","used":30}]},
+		{"provider":"workbuddy","user":"wb-a","windows":[{"name":"5 hours","used":40}]},
+		{"provider":"commandcode-plan","user":"cc-a","windows":[{"name":"5 hours","used":50}]}]}`
+
+	newGateway := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/v1/magpie/quotas":
+				io.WriteString(w, multiQuotaJSON)
+			case "/v1/models":
+				io.WriteString(w, `{"data":[
+					{"id":"auto/codex","owned_by":" CODEX "},
+					{"id":"auto/claude","owned_by":"Claude"},
+					{"id":"auto/unowned","owned_by":"  "},
+					{"id":"auto/sub2api","owned_by":"sub2api"}]}`)
+			default:
+				t.Errorf("意外请求路径: %s", r.URL.Path)
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	assertProviders := func(t *testing.T, windows []mcodeui.ProviderQuotaWindow, wantCounts map[string]int) {
+		t.Helper()
+		gotCounts := map[string]int{}
+		for _, w := range windows {
+			gotCounts[w.Provider]++
+		}
+		totalWant := 0
+		for p, n := range wantCounts {
+			totalWant += n
+			if gotCounts[p] != n {
+				t.Errorf("供应商 %q 卡片数 = %d，想要 %d（全部=%+v）", p, gotCounts[p], n, windows)
+			}
+		}
+		if len(windows) != totalWant {
+			t.Errorf("总卡片数 = %d，想要 %d（实际=%+v）", len(windows), totalWant, gotCounts)
+		}
+	}
+
+	type endpointSpec struct {
+		id     string
+		token  string
+		models []string
+	}
+
+	for _, tc := range []struct {
+		name         string
+		endpoints    []endpointSpec
+		gatewayToken string
+		defaultEp    string
+		defaultModel string
+		threadID     string
+		wantCounts   map[string]int
+	}{
+		{
+			name:         "分属codex与claude的多个模型",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/codex", "auto/claude"}}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{"codex": 2, "claude": 1},
+		},
+		{
+			name:         "仅分配claude模型",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/claude"}}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{"claude": 1},
+		},
+		{
+			name:         "codex模型加无owned_by模型",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/codex", "auto/unowned"}}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{"codex": 2},
+		},
+		{
+			name:         "仅无owned_by或不存在模型回退codex",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/unowned", "auto/missing"}}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{"codex": 2},
+		},
+		{
+			name:         "未分配任何模型回退codex",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: nil}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{"codex": 2},
+		},
+		{
+			name:         "已知上游但无对应额度卡返回空",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/sub2api"}}},
+			gatewayToken: "key",
+			wantCounts:   map[string]int{},
+		},
+		{
+			name: "同源多端点按token唯一匹配",
+			endpoints: []endpointSpec{
+				{id: "jp-1", token: "key-1", models: []string{"auto/codex"}},
+				{id: "jp-2", token: "key-2", models: []string{"auto/claude"}},
+			},
+			gatewayToken: "key-2",
+			wantCounts:   map[string]int{"claude": 1},
+		},
+		{
+			name:         "带threadID且GatewayBaseURL无v1时DefaultModel兜底",
+			endpoints:    []endpointSpec{{id: "jp", token: "key", models: []string{"auto/claude"}}},
+			gatewayToken: "key",
+			defaultEp:    "jp",
+			defaultModel: "auto/claude",
+			threadID:     "thread-1",
+			wantCounts:   map[string]int{"claude": 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newGateway(t)
+			backend := remote.NewMemoryBackend(nil)
+			defer backend.Close()
+			if tc.threadID != "" {
+				backend.AddThread(wire.ThreadSummary{ID: tc.threadID, Provider: config.ProviderCodex}, nil)
+			}
+			client := NewClient(backend)
+			client.SetAgySessionLookup(func(context.Context, string) string { return "" })
+
+			customEndpoints := make([]config.CustomEndpointConfig, 0, len(tc.endpoints))
+			selections := make([]config.MagpieSelection, 0, len(tc.endpoints))
+			keys := make(map[string]string, len(tc.endpoints))
+			for _, ep := range tc.endpoints {
+				customEndpoints = append(customEndpoints, config.CustomEndpointConfig{
+					ID:      ep.id,
+					Name:    "Magpie " + ep.id,
+					BaseURL: srv.URL + "/v1",
+					Magpie:  true,
+					Enabled: true,
+				})
+				keys[ep.id] = ep.token
+				if len(ep.models) > 0 {
+					selections = append(selections, config.MagpieSelection{EndpointID: ep.id, Models: ep.models})
+				}
+			}
+
+			dataDir := t.TempDir()
+			cfg := magpieTestConfig(customEndpoints...)
+			cfg.Providers.MagpieAgents = map[string]config.MagpieAgentConfig{
+				config.ProviderCodex: {
+					Mode:              config.MagpieModeGlobal,
+					Selections:        selections,
+					DefaultEndpointID: tc.defaultEp,
+					DefaultModel:      tc.defaultModel,
+				},
+			}
+			if err := config.Save(dataDir, cfg); err != nil {
+				t.Fatal(err)
+			}
+			client.SetProviderStore(dataDir, magpieTestSecrets(t, keys))
+			useQuotaTracker(client, newTestSessionAccountTracker(t))
+
+			previousRoutes, previousReader := codexMagpieRoutesForQuota, readCodexQuotaLimits
+			codexMagpieRoutesForQuota = func() []codex.MagpieRoute { return nil }
+			readCodexQuotaLimits = func(*Client, context.Context, string) (codex.RateLimits, error) {
+				return codex.RateLimits{
+					Source:         codex.QuotaSourceMagpie,
+					GatewayBaseURL: srv.URL,
+					GatewayToken:   tc.gatewayToken,
+				}, nil
+			}
+			t.Cleanup(func() { codexMagpieRoutesForQuota, readCodexQuotaLimits = previousRoutes, previousReader })
+
+			ctx := context.Background()
+			if tc.threadID != "" {
+				ctx = mcodeui.WithQuotaThread(ctx, tc.threadID)
+			}
+			windows, err := client.ProviderQuota(ctx, "codex")
+			if err != nil {
+				t.Fatalf("ProviderQuota 失败: %v", err)
+			}
+			assertProviders(t, windows, tc.wantCounts)
+		})
+	}
+}

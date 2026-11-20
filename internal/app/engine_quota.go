@@ -163,16 +163,41 @@ func (c *Client) readMagpieQuotaWindows(ctx context.Context, baseURL, apiKey, ag
 
 // filterQuotaUpstream 只保留已知上游的卡片；上游未知时保留全部。
 func filterQuotaUpstream(windows []mcodeui.ProviderQuotaWindow, upstream string) []mcodeui.ProviderQuotaWindow {
-	if upstream == "" {
+	return filterQuotaUpstreams(windows, []string{upstream})
+}
+
+// filterQuotaUpstreams 只保留命中给定上游集合的卡片；集合为空时保留全部。
+func filterQuotaUpstreams(windows []mcodeui.ProviderQuotaWindow, upstreams []string) []mcodeui.ProviderQuotaWindow {
+	allowed := make(map[string]struct{}, len(upstreams))
+	for _, upstream := range upstreams {
+		if key := strings.ToLower(strings.TrimSpace(upstream)); key != "" {
+			allowed[key] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
 		return windows
 	}
 	var filtered []mcodeui.ProviderQuotaWindow
 	for _, w := range windows {
-		if strings.EqualFold(w.Provider, upstream) {
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(w.Provider))]; ok {
 			filtered = append(filtered, w)
 		}
 	}
 	return filtered
+}
+
+func magpieGatewayOrigin(baseURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	trimmed = strings.TrimSuffix(trimmed, "/v1")
+	return strings.TrimRight(trimmed, "/")
+}
+
+func magpieV1BaseURL(baseURL string) string {
+	origin := magpieGatewayOrigin(baseURL)
+	if origin == "" {
+		return ""
+	}
+	return origin + "/v1"
 }
 
 // magpieQuotaModel 优先使用显式模型，否则读取线程模型，只去掉已识别的端点前缀。
@@ -206,22 +231,98 @@ func (c *Client) magpieQuotaDefaultModel(agent, endpointID string) string {
 	return ""
 }
 
-// codexQuotaEndpointID 只在地址能唯一定位配置端点时用于默认模型兜底。
-func (c *Client) codexQuotaEndpointID(baseURL string) string {
+// codexQuotaEndpointID 按同源与（多端点时的）令牌唯一定位对应的自定义 Magpie 端点。
+func (c *Client) codexQuotaEndpointID(baseURL, token string) string {
+	origin := magpieGatewayOrigin(baseURL)
+	if origin == "" {
+		return ""
+	}
 	cfg, ok := c.loadConfig()
 	if !ok {
 		return ""
 	}
-	id := ""
+	var matches []config.CustomEndpointConfig
 	for _, ep := range cfg.Providers.Custom {
-		if ep.Enabled && ep.Magpie && strings.TrimRight(strings.TrimSpace(ep.BaseURL), "/") == strings.TrimRight(strings.TrimSpace(baseURL), "/") {
-			if id != "" {
-				return ""
-			}
-			id = ep.ID
+		if ep.Enabled && ep.Magpie && magpieGatewayOrigin(ep.BaseURL) == origin {
+			matches = append(matches, ep)
 		}
 	}
-	return id
+	if len(matches) == 1 {
+		return matches[0].ID
+	}
+	token = strings.TrimSpace(token)
+	c.providersMu.Lock()
+	secrets := c.secrets
+	c.providersMu.Unlock()
+	if len(matches) > 1 && token != "" && secrets != nil {
+		matchedID := ""
+		for _, ep := range matches {
+			secret, err := secrets.Get(config.CustomEndpointSecretAccount(ep.ID))
+			if err != nil || strings.TrimSpace(secret) != token {
+				continue
+			}
+			if matchedID != "" {
+				return ""
+			}
+			matchedID = ep.ID
+		}
+		return matchedID
+	}
+	return ""
+}
+
+func (c *Client) magpieQuotaAssignedModels(agent, endpointID string) []string {
+	endpointID = strings.TrimSpace(endpointID)
+	if endpointID == "" {
+		return nil
+	}
+	cfg, ok := c.loadConfig()
+	if !ok {
+		return nil
+	}
+	setting := config.MagpieAgentSetting(cfg, agent)
+	seen := make(map[string]struct{})
+	var models []string
+	add := func(raw string) {
+		model := strings.TrimSpace(raw)
+		if model == "" {
+			return
+		}
+		if _, exists := seen[model]; exists {
+			return
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	for _, sel := range setting.Selections {
+		if strings.TrimSpace(sel.EndpointID) != endpointID {
+			continue
+		}
+		for _, model := range sel.Models {
+			add(model)
+		}
+	}
+	if strings.TrimSpace(setting.DefaultEndpointID) == endpointID {
+		add(setting.DefaultModel)
+	}
+	return models
+}
+
+func (c *Client) readMagpieQuotaWindowsForModels(ctx context.Context, baseURL, apiKey string, models []string, fallbackUpstream string) ([]mcodeui.ProviderQuotaWindow, error) {
+	quotaCtx, cancel := context.WithTimeout(ctx, piMagpieFetchTimeout)
+	defer cancel()
+	windows, err := magpie.ReadQuotas(quotaCtx, baseURL, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	out := magpieQuotaWindowsFrom(windows)
+	upstreams := magpie.ModelProviders(quotaCtx, baseURL, apiKey, models)
+	if len(upstreams) == 0 {
+		if fallback := strings.TrimSpace(fallbackUpstream); fallback != "" {
+			upstreams = []string{fallback}
+		}
+	}
+	return filterQuotaUpstreams(out, upstreams), nil
 }
 
 // engineQuotaWindows 读取引擎会话的额度窗口。key 形如 mcode:<provider id> 或 magpie 与
